@@ -1,0 +1,8 @@
+[package]
+name = "prototk"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2018"
+
+[dependencies]
+prototk_derive = { path = "../prototk_derive" }
