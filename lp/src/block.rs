@@ -119,11 +119,12 @@ impl Builder {
 
     pub fn reuse(options: BuilderOptions, mut buffer: Vec<u8>) -> Self {
         buffer.truncate(0);
+        let restarts = vec![0];
         Builder {
             options,
             buffer,
             last_key: Vec::default(),
-            restarts: Vec::default(),
+            restarts,
             bytes_since_restart: 0,
             key_value_pairs_since_restart: 0,
         }
@@ -226,4 +227,73 @@ impl<'a> Block<'a> {
         };
         Ok(block)
     }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use std::str;
+
+    use super::*;
+
+    #[test]
+    fn build_empty_block() {
+        let block = Builder::new(BuilderOptions::default());
+        let finisher = block.finish();
+        let got = finisher.as_slice();
+        let exp = &[0, 0, 0, 0, 1, 0, 0, 0];
+        assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn build_single_item_block() {
+        let mut block = Builder::new(BuilderOptions::default());
+        block.put("key".as_bytes(), 0xc0ffee, "value".as_bytes());
+        let finisher = block.finish();
+        let got = finisher.as_slice();
+        let exp = &[
+            66/*8*/, 19/*sz*/,
+            8/*1*/, 0/*zero*/,
+            18/*2*/, 3/*sz*/, 107, 101, 121,
+            24/*3*/, /*varint(0xc0ffee):*/238, 255, 131, 6,
+            34/*4*/, 5/*sz*/, 118, 97, 108, 117, 101,
+            // restarts
+            0, 0, 0, 0,
+            // num_restarts
+            1, 0, 0, 0,
+        ];
+        assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn prefix_compression() {
+        let mut block = Builder::new(BuilderOptions::default());
+        block.put("key1".as_bytes(), 0xc0ffee, "value1".as_bytes());
+        block.put("key2".as_bytes(), 0xc0ffee, "value2".as_bytes());
+        let finisher = block.finish();
+        let got = finisher.as_slice();
+        let exp = &[
+            // first record
+            66/*8*/, 21/*szXXX*/,
+            8/*1*/, 0,
+            18/*2*/, 4/*sz*/, 107, 101, 121, 49,
+            24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
+            34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 49,
+
+            // second record
+            66/*8*/, 18/*szXXX*/,
+            8/*1*/, 3,
+            18/*2*/, 1/*sz*/, 50,
+            24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
+            34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 50,
+
+            // restarts
+            0, 0, 0, 0, 1, 0, 0, 0,
+        ];
+        assert_eq!(exp, got);
+    }
+    
+    // TODO(rescrv): Test the restart points code.
+    // TODO(rescrv): Test empty tables.
 }
