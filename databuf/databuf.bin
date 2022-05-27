@@ -1,0 +1,233 @@
+#!/usr/bin/env -S python
+# -i
+
+import collections
+import pprint
+
+from databuf_parser.schema import *
+
+class DatabufStore:
+    'DatabufStore is the storage that maps databuf language to an underlying key-value store.'
+
+    def __init__(self, kvs):
+        self.kvs = kvs
+
+    def schema_key(self, name):
+        return ('schema', name)
+
+    def merge_schema(self, schema):
+        schema = parse_schema(schema)
+        # TODO(team):  This is a prototype and does not validate the schema that gets passed in.  If it parses it
+        # passes, so there's no checks on things like the same table being declared multiple times or the same etc.
+        # inefficient computer;efficient programmer
+        for new_table in schema:
+            existing = self.kvs.get(self.schema_key(new_table.name))
+            if not existing:
+                continue
+            for existing_field in existing.fields:
+                for new_field in new_table.fields:
+                    if new_field.number == existing_field.number and new_field.datatype != existing_field.datatype:
+                        raise RuntimeError('changed table={} field number={} datatype from {} to {}'.format(
+                            new_table.name, new_field.number, existing_field.datatype, new_field.datatype))
+        for new_table in schema:
+            self.kvs.put(self.schema_key(new_table.name), new_table)
+        # lots more to do here when not a prototype
+
+    def unsafe_prune_schema(self, table, schema):
+        pass # write this sometime
+
+    def object_key(self, table, key):
+        return ('objects', table) + key
+
+    def get(self, table, key):
+        schema = self.kvs.get(self.schema_key(table))
+        assert schema, 'Table does not exist.'
+        # Do a range scan to collect all objects that start with key.  By construction they will all have the same
+        # prefix, so it's just a matter of stitching them together according to schema.  Excess fields need a decision
+        # at the level of the actual implementation.  This schema is just for an interactive pitch.
+        ret = {}
+        for obj_key, obj in self.kvs.scan(self.object_key(table, key)):
+            self._stitch_object(key, ret, obj_key, obj)
+        # Work on the inlines.  They can only inline when the schema matches, but we've done none of those checks here.
+        # The biggest deal is that inlines have to have the same key, just in another table.  The second biggest issue
+        # is that they cannot clobber fields of where they're inlined.  It would be good to figure rules for that.  E.g.
+        # there's a reserved on one or a force on the other.
+        for field in schema.fields:
+            if isinstance(field, Inline):
+                for obj_key, obj in self.kvs.scan(self.object_key(Inline.name, key)):
+                    self._stitch_object(key, ret, obj_key, obj)
+        # Work on the mounts.
+        for field in schema.fields:
+            if isinstance(field, Mount):
+                for obj_key, obj in self.kvs.scan(self.object_key(Mount.name, key)):
+                    assert False, 'do not know how to stitch mounts'
+
+    def put(self, table, value):
+        pass
+
+    def _stitch_object(self, to_stich, via_key, using):
+        pass
+
+def simulate_input(what_to_exec):
+    prompt = '>>>'
+    for line in what_to_exec.split('\n'):
+        print(prompt, line)
+        prompt = '...'
+    exec(what_to_exec, globals())
+
+def comment(what):
+    for line in what.strip().split('\n'):
+        print('>>> #', line)
+
+comment('A basic key value store.')
+simulate_input('kvs = KeyValueStore()')
+simulate_input('kvs')
+simulate_input('kvs.get(("my key",))')
+simulate_input('kvs.put(("my key",), "some value")')
+simulate_input('assert kvs.get(("my key",)) == "some value"')
+simulate_input('kvs.put(("my key",), "some other value")')
+simulate_input('assert kvs.get(("my key",)) == "some other value"')
+simulate_input('kvs.put(("my key", "avatar"), "http://example.org/avatars/foo.jpg")')
+simulate_input('assert kvs.get(("my key", "avatar")) == "http://example.org/avatars/foo.jpg"')
+print('>>>')
+comment('A databuf storage---what is being proposed here')
+simulate_input('db = DatabufStore(kvs)')
+# setup schema; listen to recorder for that
+comment('''
+The databuf schema invariant is that every prefix of a key represents a valid protobuf message.
+
+Think about the implications of that with regard to relational algebra.  The key-value store key works as the primary
+key for rows in a relation.  The way schema works, only rows matching the key will be retrieved.
+''')
+print('>>>')
+simulate_input('''db.merge_schema("""
+# A basic User profile.  Everything needs it, so be sparse for efficiency.
+# It might be prudent for the system to restrict queries of the user object to a scan that must contain at least one
+# element in the tuple.  This would effectively make every scan a complete get of the user object and would restrict
+# live tier services from taking down a website with an errant scan.  Background services can rate limit themselves.
+table UserCore (username) {
+    string username = 1;
+    string name = 2;
+    # TODO UserProfile public_profile = 7;
+    # We reserve field numbers so that the avatar may be inlined here.
+    reserve 3; # in use by UserAvatar
+    reserve 4; # in use by UserAvatar
+    # We reserve field numbers so that objects can be mounted here.
+    reserve 5; # where to mount UserAuth objects
+    reserve 6; # repeated capabilities
+    reserve 256; # dog food mounts here
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# A user's avatar.  Not everyone has an avatar, and we'd like to allow the avatar service to have complete read-write
+# permissions to update the avatar.  Because username is the key, there's nothing to update except avatar.  By
+# construction the worst thing the avatar service can do is lose everyone's avatar in a way that may be roll-backable
+# (e.g., restore the table from backups of the SSTs).
+table UserAvatar(username) {
+    # Use sequence numbers
+    string username = 3;
+    bytes avatar = 4;
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# What we need to authenticate the user.  This is sensitive.  It should only have read-write access to the IAM service.
+# They can access this field via either UserAuth directly or (not shown here) the user_auth field of UserIAM.
+table UserAuth (username) {
+    string username = 1;
+    string salted_hash = 2;
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# Authorize the user.  This is a set of macaroons mapping (user, resource) to the appropriate tokens.  The user is
+# permitted to fetch any of these stored macaroons as they contain a third-party caveat and time-sensitive deprecation.
+# Imagining a new system, this whole table would be written in batch at midnight every night and swapped in atomically.
+# This allows for rapid deprecation of the macaroons while allowing the user to stay authorized in the background.
+table UserCapabilities (username, uri) {
+    string username = 1;
+    string uri = 2;
+    repeated bytes macaroon = 3;
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# A hackathon project
+table UserDogFood (username) {
+    string username = 1;
+    string dog_food_1 = 2;
+    bytes dog_food_2 = 3;
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# Create the basic user object used in most locations.  No sense hiding this behind a service.
+table User (username) {
+    inline UserAvatar;
+    mount UserDogFood dog_food = 256;
+}
+""")''')
+simulate_input('''db.merge_schema("""
+# Create the IAM user object with additional fields for capabilities and the like.  The user capabilities will turn into
+# a map on (uri,) because the shared (username,) prefix gets stripped as part of the mount.  The user_auth object is
+# just a nested protobuf message/databuf object.
+table UserIAM (username) {
+    inline User;
+    mount UserAuth user_auth = 5;
+    mount UserCapabilities user_capabilities = 6;
+}
+""")''')
+
+print('>>>')
+simulate_input('''db.put('UserCore', {'username': 'rescrv', 'name': 'Robert Escriva'})''')
+comment('''
+Only the user fields that are present get pulled through.  Pretend this dict is protobuf for rules on missing fields
+(they can be a default).
+''')
+simulate_input('''db.get('User', ('rescrv',))''')
+pprint.pprint({'username': 'rescrv', 'name': 'Robert Escriva'})
+simulate_input('''db.put('UserAuth', {'username': 'rescrv', 'salted_hash': '$1$adfqervwera'})''')
+simulate_input('''db.get('User', ('rescrv',))''')
+pprint.pprint({'username': 'rescrv', 'name': 'Robert Escriva'})
+simulate_input('''db.get('UserIAM', ('rescrv',))''')
+pprint.pprint({'username': 'rescrv', 'name': 'Robert Escriva', 'salted_hash': '$1$adfqervwera'})
+simulate_input('''db.put('UserDogFood', {'username': 'rescrv', 'dog_food_1': 'no dog food 2 for rescrv'})''')
+simulate_input('''db.get('User', ('rescrv',))''')
+pprint.pprint({'username': 'rescrv', 'name': 'Robert Escriva', 'dog_food': {'dog_food_1': 'no dog food 2 for rescrv'}})
+
+print('>>>')
+comment('''
+Full text search is provided by adapting the Succinct work out of UC Berkeley that got published in 2015.  Here's what
+it would look like to conduct a search of the user object for capabilities from accounts.example.org.  This will search
+"rescrv"'s user account for capabilities rooted in example.org.
+''')
+print('''>>> db.search('UserIAM', path='username.capabilities', key='rescrv', query=Regexp('^accounts.example.org'))
+...''')
+comment('''
+This will search all users regardless of key.  The difference between the two searches are that one is rooted under an
+object that will be searched and only the object's fields will be returned.  That's the search above with a key.  Of
+course it would be desirable (for batch jobs) to be able to search regardless of the user key.  For example to find all
+users who have not set dog_food2, a query like this could be formed:
+''')
+print('''>>> db.no_key_search('User', path='username.dogfood.dog_food2', query=MISSING)
+...''')
+
+print('>>>')
+comment('''
+There needs to be much more work done to simulate the key value store here.  Imagination can take hold because this toy
+has hit its inflection point of being too complex for a pitch (and preferrably written in rust as a real compiler).
+''')
+
+print('>>>')
+comment('''Tools to build
+- log writes
+- log reads
+- tools to stich together log writes, log reads for safe pruning of schema; terminate with prune from here
+- a statistics format for logging stats locally
+- a tool for serving a directory of SSTs
+- stats frontend becomes a service running off these SSTs and rsync and a good binary will allow for private exploration
+- same for dynamic logging; write it to log to the key-value format and then rsync to a good location for log analysis
+- default values; can tell if something has been set to default or is inheriting default
+
+Features to add
+- Parser needs to support inlined messages like proto does, so that complex nested objects are supported.
+- SQL on top?  Projection is taking a subset of proto fields.  Selection is filtering a row scan.  Make sure that SQL
+  queries must be part of `merge_schema` so that all sql queries can be pre-declared and compiled with stats.  Ad-hoc
+  should always hit the background path unless forced.
+''')
