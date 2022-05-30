@@ -7,6 +7,7 @@ use prototk::{length_free, stack_pack, Message, Packable, Unpacker};
 pub enum Error {
     BlockTooSmall{ length: usize, required: usize },
     UnpackError{ error: prototk::Error, context: String },
+    Corruption{ context: String },
 }
 
 ////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
@@ -161,6 +162,7 @@ impl Builder {
         (shared, &key[shared..])
     }
 
+    // TODO(rescrv):  Make sure to sort secondary by timestamp
     fn append<'a>(&mut self, be: BlockEntry<'a>) {
         let (shared, key_frag) = match be {
             BlockEntry::KeyValuePut(ref x) => (x.shared, x.key_frag),
@@ -220,12 +222,150 @@ impl<'a> Block<'a> {
                 .map_err(|e| Error::UnpackError{ error: e, context: "could not read restart points".to_string() })?;
             restarts.push(x);
         }
+        // TODO(rescrv):  Decide how to error if zero restarts.
         let mut block = Block {
             bytes,
             restarts_boundary,
             restarts,
         };
         Ok(block)
+    }
+}
+
+////////////////////////////////////////////// Cursor //////////////////////////////////////////////
+
+struct Cursor<'a> {
+    // The block we have a cursor over.  Will always be the same.
+    block: &'a Block<'a>,
+    // An index [0, num_restarts) that tells us which restart our cursor falls into such that
+    // restarts[restarts_idx] <= cursor < restarts[restarts_idx + 1].
+    restart_idx: usize,
+    // An offset [0, restarts_boundary] of where the cursor is in the file.
+    offset: usize,
+    // An optional (BlockEntry, next_offset) indicating that the offset has been parsed.  As a
+    // special case, can be None when running off the ends of the blocks.
+    // INVARIANT: key_value.is_some() || offset == 0 || offset == restarts_boundary.
+    key_value: Option<(BlockEntry<'a>, usize)>,
+}
+
+impl<'a> Cursor<'a> {
+    pub fn new(block: &'a Block) -> Self {
+        Cursor {
+            block,
+            restart_idx: 0,
+            offset: 0,
+            key_value: None,
+        }
+    }
+
+    pub fn seek_to_first(&mut self) -> Result<(), Error> {
+        self.seek_to_first_tombstone();
+        self.next()
+    }
+
+    pub fn seek_to_first_tombstone(&mut self) {
+        *self = Cursor {
+            block: self.block,
+            restart_idx: 0,
+            offset: 0,
+            key_value: None,
+        };
+    }
+
+    pub fn seek_to_last(&mut self) -> Result<(), Error> {
+        self.seek_to_last_tombstone();
+        self.prev()
+    }
+
+    pub fn seek_to_last_tombstone(&mut self) {
+        assert!(self.block.restarts.len() > 0);
+        let restart_idx = self.block.restarts.len() - 1;
+        let offset = self.block.restarts_boundary;
+        *self = Cursor {
+            block: self.block,
+            restart_idx,
+            offset,
+            key_value: None,
+        };
+    }
+
+    pub fn prev(&mut self) -> Result<(), Error> {
+        let next_offset = self.offset;
+        if next_offset <= 0 {
+            self.seek_to_first_tombstone();
+            return Ok(());
+        }
+        let restart_idx = if next_offset <= self.block.restarts[self.restart_idx] as usize {
+            // 0th block restart cannot happen here because next_offset == 0 check above.
+            self.restart_idx - 1
+        } else {
+            self.restart_idx
+        };
+        // We guarantee this unpacker has space because it points to a valid restart point that
+        // falls before or at next_offset.
+        let mut up = Unpacker::new(&self.block.bytes[self.block.restarts[restart_idx] as usize..next_offset]);
+        let mut offset = next_offset - up.remain().len();
+        let mut be = up.unpack()
+            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack initial".to_string() })?;
+        while !up.empty() {
+            offset = next_offset - up.remain().len();
+            be = up.unpack()
+                .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack loop".to_string() })?;
+        }
+        *self = Cursor {
+            block: self.block,
+            restart_idx,
+            offset,
+            key_value: Some((be, next_offset)),
+        };
+        Ok(())
+    }
+
+    pub fn next(&mut self) -> Result<(), Error> {
+        let offset = match (&self.key_value, self.offset >= self.block.restarts_boundary) {
+            (_, true) => { self.seek_to_last_tombstone(); self.offset }
+            (None, false) => { /* An unprimed state; keep offset */ self.offset }
+            (Some((_, off)), false) => { *off }
+        };
+        // TODO(rescrv):  It would be nice if this would just unpack the next item, but this
+        // robustness-tests seek_to_offset by shunting all code through the same paths.
+        self.seek_to_offset(offset)
+    }
+
+    fn seek_to_offset(&mut self, offset: usize) -> Result<(), Error> {
+        if offset >= self.block.restarts_boundary {
+            self.seek_to_last_tombstone();
+            return Ok(());
+        }
+        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
+        let be = up.unpack()
+            .map_err(|e| Error::UnpackError{ error: e, context: "could not seek to offset".to_string() })?;
+        let next_offset = self.block.restarts_boundary - up.remain().len();
+        let restart_idx = Self::compute_restart_idx(&self.block, self.restart_idx, offset);
+        *self = Cursor {
+            block: self.block,
+            restart_idx,
+            offset,
+            key_value: Some((be, next_offset))
+        };
+        Ok(())
+    }
+
+    fn compute_restart_idx(block: &'a Block<'a>, current_restart_index: usize, offset: usize) -> usize {
+        // if it is the case that we can probe questions about us and the next restart index.
+        if current_restart_index + 1 < block.restarts.len() {
+            // If the offset we unpacked falls within the next restart interval, advance.  Can only
+            // advance by at most one at a time because there should be no empty restart intervals.
+            if block.restarts[current_restart_index + 1] as usize <= offset {
+                current_restart_index + 1
+            // Otherwise, stay as-is.
+            } else {
+                current_restart_index
+            }
+        // Else, we top out.
+        } else {
+            block.restarts.len() - 1
+        }
     }
 }
 
@@ -293,7 +433,7 @@ mod tests {
         ];
         assert_eq!(exp, got);
     }
-    
+
     // TODO(rescrv): Test the restart points code.
     // TODO(rescrv): Test empty tables.
 }
