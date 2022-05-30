@@ -571,7 +571,7 @@ impl<'a> Unpacker<'a> {
         self.buf.len() == 0
     }
 
-    pub fn remain(self) -> &'a [u8] {
+    pub fn remain(&self) -> &'a [u8] {
         self.buf
     }
 }
