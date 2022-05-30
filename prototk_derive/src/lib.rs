@@ -159,7 +159,7 @@ trait StructVisitor: Sized {
         _ds: &syn::DataStruct,
         _fields: &syn::FieldsNamed,
     ) -> Self::Output {
-        panic!("structs with named fields are not supported");
+        panic!("{}", "structs with named fields are not supported");
     }
 
     fn visit_struct_unnamed_fields(
@@ -168,11 +168,11 @@ trait StructVisitor: Sized {
         _ds: &syn::DataStruct,
         _fields: &syn::FieldsUnnamed,
     ) -> Self::Output {
-        panic!("structs with unnamed fields are not supported");
+        panic!("{}", "structs with unnamed fields are not supported");
     }
 
     fn visit_struct_unit(&mut self, _ty_name: &syn::Ident, _ds: &syn::DataStruct) -> Self::Output {
-        panic!("unit structs are not supported");
+        panic!("{}", "unit structs are not supported");
     }
 }
 
@@ -221,7 +221,7 @@ trait EnumVisitor: Sized {
         _variant: &syn::Variant,
         _fields: &syn::FieldsNamed,
     ) -> Self::VariantOutput {
-        panic!("enum variants with named fields are not supported");
+        panic!("{}", "enum variants with named fields are not supported");
     }
 
     fn visit_enum_variant_unnamed_fields(
@@ -231,7 +231,7 @@ trait EnumVisitor: Sized {
         _variant: &syn::Variant,
         _fields: &syn::FieldsUnnamed,
     ) -> Self::VariantOutput {
-        panic!("enum variants with unnamed fields are not supported");
+        panic!("{}", "enum variants with unnamed fields are not supported");
     }
 
     fn visit_enum_variant_unit(
@@ -240,7 +240,7 @@ trait EnumVisitor: Sized {
         _de: &syn::DataEnum,
         _variant: &syn::Variant,
     ) -> Self::VariantOutput {
-        panic!("unit enum variants are not supported");
+        panic!("{}", "unit enum variants are not supported");
     }
 }
 
@@ -288,7 +288,7 @@ trait ProtoTKVisitor: StructVisitor<Output=TokenStream> + EnumVisitor<Output=Tok
             syn::Data::Struct(ref ds) => self.visit_struct(ty_name, ds),
             syn::Data::Enum(de) => self.visit_enum(ty_name, de),
             syn::Data::Union(_) => {
-                panic!("unions are not supported");
+                panic!("{}", "unions are not supported");
             },
         }
     }
@@ -341,15 +341,15 @@ fn visit_attribute<V: ProtoTKVisitor>(
     }
     let meta_list = match meta {
         syn::Meta::Path(_) => {
-            panic!(USAGE);
+            panic!("{}", USAGE);
         }
         syn::Meta::List(ref ml) => ml,
         syn::Meta::NameValue(_) => {
-            panic!(USAGE);
+            panic!("{}", USAGE);
         }
     };
     if meta_list.nested.len() != 2 {
-        panic!(USAGE);
+        panic!("{}", USAGE);
     }
     match (&meta_list.nested[0], &meta_list.nested[1]) {
         (
@@ -367,7 +367,7 @@ fn visit_attribute<V: ProtoTKVisitor>(
                 &field_type,
             ))
         }
-        _ => panic!(USAGE),
+        _ => panic!("{}", USAGE),
     }
 }
 
@@ -440,7 +440,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         fields: &syn::FieldsUnnamed,
     ) -> Self::VariantOutput {
         if fields.unnamed.len() != 1 {
-            panic!(USAGE);
+            panic!("{}", USAGE);
         }
         let field = &fields.unnamed[0];
         for ref attr in variant.attrs.iter() {
@@ -451,11 +451,11 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
             }
             let meta_list = match meta {
                 syn::Meta::Path(_) => {
-                    panic!(USAGE);
+                    panic!("{}", USAGE);
                 }
                 syn::Meta::List(ref ml) => ml,
                 syn::Meta::NameValue(_) => {
-                    panic!(USAGE);
+                    panic!("{}", USAGE);
                 }
             };
             if meta_list.nested.len() != 2 {
@@ -464,7 +464,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
                         "variant must take the form {}(T) with a single unnamed field of type T",
                         x
                     ),
-                    None => panic!(USAGE),
+                    None => panic!("{}", USAGE),
                 }
             }
             match (&meta_list.nested[0], &meta_list.nested[1]) {
@@ -483,10 +483,10 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
                         &field_type,
                     );
                 }
-                _ => panic!(USAGE),
+                _ => panic!("{}", USAGE),
             }
         }
-        panic!(USAGE);
+        panic!("{}", USAGE);
     }
 }
 
