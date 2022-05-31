@@ -1,4 +1,5 @@
 use std::cmp;
+use std::cmp::Ordering;
 
 use prototk::{length_free, stack_pack, Message, Packable, Unpacker};
 
@@ -61,6 +62,22 @@ enum BlockEntry<'a> {
     KeyValuePut(KeyValuePut<'a>),
     #[prototk(9, message)]
     KeyValueDel(KeyValueDel<'a>),
+}
+
+impl<'a> BlockEntry<'a> {
+    fn shared(&self) -> usize {
+        match self {
+            BlockEntry::KeyValuePut(x) => x.shared as usize,
+            BlockEntry::KeyValueDel(x) => x.shared as usize,
+        }
+    }
+
+    fn key_frag(&self) -> &'a [u8] {
+        match self {
+            BlockEntry::KeyValuePut(x) => x.key_frag,
+            BlockEntry::KeyValueDel(x) => x.key_frag,
+        }
+    }
 }
 
 impl<'a> Default for BlockEntry<'a> {
@@ -164,18 +181,14 @@ impl Builder {
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
     fn append<'a>(&mut self, be: BlockEntry<'a>) {
-        let (shared, key_frag) = match be {
-            BlockEntry::KeyValuePut(ref x) => (x.shared, x.key_frag),
-            BlockEntry::KeyValueDel(ref x) => (x.shared, x.key_frag),
-        };
+        // Update the last key.
+        self.last_key.truncate(be.shared());
+        self.last_key.extend_from_slice(be.key_frag());
 
+        // Append to the vector.
         let pa = stack_pack(be);
         assert!(self.buffer.len() + pa.pack_sz() <= u32::max_value() as usize);
         pa.append_to_vec(&mut self.buffer);
-
-        // Update the last key.
-        self.last_key.truncate(shared as usize);
-        self.last_key.extend_from_slice(key_frag);
 
         // Update the estimates for when we should do a restart.
         self.bytes_since_restart += pa.pack_sz() as u64;
@@ -234,6 +247,7 @@ impl<'a> Block<'a> {
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
+#[derive(Clone)]
 struct Cursor<'a> {
     // The block we have a cursor over.  Will always be the same.
     block: &'a Block<'a>,
@@ -246,6 +260,9 @@ struct Cursor<'a> {
     // special case, can be None when running off the ends of the blocks.
     // INVARIANT: key_value.is_some() || offset == 0 || offset == restarts_boundary.
     key_value: Option<(BlockEntry<'a>, usize)>,
+    // The materialized key.
+    valid: bool,
+    key: Vec<u8>,
 }
 
 impl<'a> Cursor<'a> {
@@ -255,6 +272,8 @@ impl<'a> Cursor<'a> {
             restart_idx: 0,
             offset: 0,
             key_value: None,
+            key: Vec::new(),
+            valid: false,
         }
     }
 
@@ -269,6 +288,8 @@ impl<'a> Cursor<'a> {
             restart_idx: 0,
             offset: 0,
             key_value: None,
+            key: Vec::new(),
+            valid: false,
         };
     }
 
@@ -286,88 +307,150 @@ impl<'a> Cursor<'a> {
             restart_idx,
             offset,
             key_value: None,
+            key: Vec::new(),
+            valid: false,
         };
     }
 
+    pub fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+        let mut query = self.clone();
+        let mut left: usize = 0usize;
+        let mut right: usize = self.block.restarts.len() - 1;
+
+        // Break when left == right.
+        while left < right {
+            // When left + 1 == right this will set mid == right allowing us to
+            // assign right = mid - 1 and hit the left == right condition at top of loop; else,
+            // move much closer to the top of the loop.
+            let mid = (left + right + 1) / 2;
+            query.seek_block(mid)?;
+            assert!(query.valid);
+            match compare_bytes(key, &query.key) {
+                Ordering::Less => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //       |
+                    right = mid - 1
+                },
+                Ordering::Equal => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //          |
+                    // When the keys are equal, move left.  We don't move to mid - 1 in case the
+                    // first of the key is in mid.
+                    right = mid
+                },
+                Ordering::Greater => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //           |
+                    left = mid + 1
+                },
+            };
+        }
+
+        // query has been seek_block'd to the block with the key we are seeking to.
+        while compare_bytes(key, &query.key).is_gt() {
+            query.next()?;
+        }
+
+        Ok(())
+    }
+
     pub fn prev(&mut self) -> Result<(), Error> {
+        // This is the offset of the item we will seek to with a call to `next`, so record the
+        // offset of next.
         let next_offset = self.offset;
         if next_offset <= 0 {
             self.seek_to_first_tombstone();
             return Ok(());
         }
+        // If we happen to be at the boundary of a restart, step.
         let restart_idx = if next_offset <= self.block.restarts[self.restart_idx] as usize {
             // 0th block restart cannot happen here because next_offset == 0 check above.
             self.restart_idx - 1
         } else {
             self.restart_idx
         };
-        // We guarantee this unpacker has space because it points to a valid restart point that
-        // falls before or at next_offset.
-        let mut up = Unpacker::new(&self.block.bytes[self.block.restarts[restart_idx] as usize..next_offset]);
-        let mut offset = next_offset - up.remain().len();
-        let mut be = up.unpack()
-            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack initial".to_string() })?;
-        while !up.empty() {
-            offset = next_offset - up.remain().len();
-            be = up.unpack()
-                .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack loop".to_string() })?;
+        // There's a choice here to use an unpacker or to call next().  Calling next() is not that
+        // much more expensive, and makes sure to use the correct key materialization code in both
+        // directions.  Instead, chose to seek to the restart_idx as the latest-known point where
+        // we can pick up and roll forward.  We known from the restart_idx check above that if
+        // next_offset is also a restart point, we will select restart_idx as its predecessor and
+        // the next_offset will never tangle with the first tombstone.
+        self.seek_block(restart_idx)?;
+        while let Some((_, next)) = self.key_value {
+            if next >= next_offset {
+                break;
+            }
+            self.next()?;
         }
-        *self = Cursor {
-            block: self.block,
-            restart_idx,
-            offset,
-            key_value: Some((be, next_offset)),
-        };
         Ok(())
     }
 
     pub fn next(&mut self) -> Result<(), Error> {
-        let offset = match (&self.key_value, self.offset >= self.block.restarts_boundary) {
-            (_, true) => { self.seek_to_last_tombstone(); self.offset }
-            (None, false) => { /* An unprimed state; keep offset */ self.offset }
-            (Some((_, off)), false) => { *off }
-        };
-        // TODO(rescrv):  It would be nice if this would just unpack the next item, but this
-        // robustness-tests seek_to_offset by shunting all code through the same paths.
-        self.seek_to_offset(offset)
-    }
-
-    fn seek_to_offset(&mut self, offset: usize) -> Result<(), Error> {
-        if offset >= self.block.restarts_boundary {
+        // Over-run check.
+        if self.offset >= self.block.restarts_boundary {
             self.seek_to_last_tombstone();
             return Ok(());
         }
-        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
-        let be = up.unpack()
-            .map_err(|e| Error::UnpackError{ error: e, context: "could not seek to offset".to_string() })?;
-        let next_offset = self.block.restarts_boundary - up.remain().len();
-        let restart_idx = Self::compute_restart_idx(&self.block, self.restart_idx, offset);
-        *self = Cursor {
-            block: self.block,
-            restart_idx,
-            offset,
-            key_value: Some((be, next_offset))
+        // Compute `offset`.
+        let offset = match &self.key_value {
+            Some((_, next_offset)) => {
+                *next_offset
+            },
+            None => {
+                if self.offset == 0 {
+                    0
+                } else {
+                    // There's no case where this should happen, so it shall remain unimplemented.
+                    unimplemented!();
+                }
+            },
         };
+        // Compute `restart_idx`.
+        let restart_idx = if self.restart_idx + 1 < self.block.restarts.len() && self.block.restarts[self.restart_idx + 1] as usize <= offset {
+            self.restart_idx + 1
+        } else {
+            self.restart_idx
+        };
+        // Parse `key_value`.
+        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
+        let be: BlockEntry = up.unpack()
+            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack next key-value".to_string() })?;
+        let next_offset = self.block.restarts_boundary - up.remain().len();
+        // Assemble the current cursor.
+        self.restart_idx = restart_idx;
+        self.offset = offset;
+        self.key.truncate(be.shared());
+        self.key.extend_from_slice(be.key_frag());
+        self.key_value = Some((be, next_offset));
+        self.valid = true;
         Ok(())
     }
 
-    fn compute_restart_idx(block: &'a Block<'a>, current_restart_index: usize, offset: usize) -> usize {
-        // if it is the case that we can probe questions about us and the next restart index.
-        if current_restart_index + 1 < block.restarts.len() {
-            // If the offset we unpacked falls within the next restart interval, advance.  Can only
-            // advance by at most one at a time because there should be no empty restart intervals.
-            if block.restarts[current_restart_index + 1] as usize <= offset {
-                current_restart_index + 1
-            // Otherwise, stay as-is.
-            } else {
-                current_restart_index
-            }
-        // Else, we top out.
-        } else {
-            block.restarts.len() - 1
-        }
+    fn seek_block(&mut self, idx: usize) -> Result<(), Error> {
+        unimplemented!();
+        assert!(self.valid);
     }
 }
+
+/////////////////////////////////////////// compare_bytes //////////////////////////////////////////
+
+// Content under CC By-Sa.  I just use as is, as can you.
+// https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
+fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
+    for (ai, bi) in a.iter().zip(b.iter()) {
+        match ai.cmp(&bi) {
+            Ordering::Equal => continue,
+            ord => return ord
+        }
+    }
+
+    /* if every single element was equal, compare length */
+    a.len().cmp(&b.len())
+}
+// End borrowed code
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
