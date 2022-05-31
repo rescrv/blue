@@ -429,9 +429,28 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 
-    fn seek_block(&mut self, idx: usize) -> Result<(), Error> {
-        unimplemented!();
-        assert!(self.valid);
+    fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
+        assert!(idx <= self.block.restarts.len());
+        // Comput offset.
+        offset = self.block.restarts[restart_idx];
+
+        // Parse `key_value`.
+        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
+        let be: BlockEntry = up.unpack()
+            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack next key-value".to_string() })?;
+        let next_offset = self.block.restarts_boundary - up.remain().len();
+
+        // Assemble the key.
+        self.key.truncate(0);
+        // TODO(rescrv, corruption):  This should always have a shared=0.
+        self.key.extend_from_slice(be.key_frag);
+
+        // Assemble the current cursor.
+        self.restart_idx = restart_idx;
+        self.offset = offset;
+        self.key_value = Some((be, next_offset));
+        self.valid = true;
+        Ok(())
     }
 }
 
