@@ -430,9 +430,9 @@ impl<'a> Cursor<'a> {
     }
 
     fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
-        assert!(idx <= self.block.restarts.len());
+        assert!(restart_idx <= self.block.restarts.len());
         // Comput offset.
-        offset = self.block.restarts[restart_idx];
+        let offset = self.block.restarts[restart_idx] as usize;
 
         // Parse `key_value`.
         let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
@@ -443,7 +443,7 @@ impl<'a> Cursor<'a> {
         // Assemble the key.
         self.key.truncate(0);
         // TODO(rescrv, corruption):  This should always have a shared=0.
-        self.key.extend_from_slice(be.key_frag);
+        self.key.extend_from_slice(be.key_frag());
 
         // Assemble the current cursor.
         self.restart_idx = restart_idx;
