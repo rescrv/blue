@@ -2,6 +2,8 @@ extern crate rand;
 
 use rand::RngCore;
 
+pub mod strings;
+
 /////////////////////////////////////////////// mash ///////////////////////////////////////////////
 
 /*
@@ -160,6 +162,12 @@ pub struct Guacamole {
 }
 
 impl Guacamole {
+    pub fn new(x: u64) -> Self {
+        let mut g = Guacamole::default();
+        g.seek(x);
+        g
+    }
+
     pub fn seek(&mut self, x: u64) {
         self.nonce = x;
         self.index = 0;
@@ -222,6 +230,12 @@ impl RngCore for Guacamole {
     fn try_fill_bytes(&mut self, buf: &mut [u8]) -> Result<(), rand::Error> {
         Ok(self.fill_bytes(buf))
     }
+}
+
+/////////////////////////////////////////////// Guac ///////////////////////////////////////////////
+
+trait Guac<T> {
+    fn guacamole(&self, guac: &mut Guacamole) -> T;
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
