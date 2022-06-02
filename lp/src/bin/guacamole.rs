@@ -1,5 +1,8 @@
-use rand::distributions::{Alphanumeric, Distribution, Standard};
+use std::collections::btree_map::BTreeMap;
+
 use rand::Rng;
+
+use std::ops::Bound;
 
 use guacamole::Guac;
 use guacamole::Guacamole;
@@ -7,7 +10,7 @@ use guacamole::strings;
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct Key {
     key: String,
 }
@@ -94,7 +97,7 @@ impl Guac<KeyValueDel> for KeyValueDelGuacamole {
 
 ///////////////////////////////////////// KeyValueOperation ////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum KeyValueOperation {
     Put(KeyValuePut),
     Del(KeyValueDel),
@@ -118,6 +121,30 @@ impl Guac<KeyValueOperation> for KeyValueOperationGuacamole {
             KeyValueOperation::Put(self.guacamole_put.guacamole(guac))
         } else {
             KeyValueOperation::Del(self.guacamole_del.guacamole(guac))
+        }
+    }
+}
+
+/////////////////////////////////////////// KeyValueStore //////////////////////////////////////////
+
+#[derive(Clone, Default)]
+struct KeyValueStore {
+    map: BTreeMap<Key, KeyValueOperation>,
+}
+
+impl KeyValueStore {
+    fn op(&mut self, what: KeyValueOperation) {
+        let key = match what {
+            KeyValueOperation::Put(ref x) => { x.key.clone() },
+            KeyValueOperation::Del(ref x) => { x.key.clone() },
+        };
+        self.map.insert(key, what);
+    }
+
+    fn seek(&mut self, what: Key) -> Option<KeyValueOperation> {
+        match self.map.range((Bound::Included(what.clone()), Bound::Unbounded)).next() {
+            Some((k, op)) => Some(op.clone()),
+            None => None,
         }
     }
 }
@@ -152,8 +179,21 @@ fn main() {
             timestamp:  TimestampGuacamole::default(),
         }
     };
-    loop {
-        let s: KeyValueOperation = gen.guacamole(&mut guac);
-        println!("{:?}", s);
+    let mut kvs = KeyValueStore::default();
+    for i in 0..100_000 {
+        let kvo: KeyValueOperation = gen.guacamole(&mut guac);
+        kvs.op(kvo);
+    }
+    let key_gen = KeyGuacamole {
+        key: Box::new(strings::IndependentStrings {
+            length: Box::new(strings::ConstantLength{ constant: 8 }),
+            select: Box::new(strings::RandomSelect{}),
+        }),
+    };
+    for i in 0..100_000 {
+        let key = key_gen.guacamole(&mut guac);
+        print!("{:?} => ", &key);
+        let op = kvs.seek(key);
+        println!("{:?}", &op);
     }
 }
