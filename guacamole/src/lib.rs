@@ -234,7 +234,7 @@ impl RngCore for Guacamole {
 
 /////////////////////////////////////////////// Guac ///////////////////////////////////////////////
 
-trait Guac<T> {
+pub trait Guac<T> {
     fn guacamole(&self, guac: &mut Guacamole) -> T;
 }
 

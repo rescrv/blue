@@ -5,7 +5,7 @@ use super::Guacamole;
 
 ////////////////////////////////////////// StringGuacamole /////////////////////////////////////////
 
-pub trait StringGuacamole {
+pub trait StringGuacamole: std::fmt::Debug {
     fn guacamole(&self, guac: &mut Guacamole) -> String;
 }
 
@@ -17,7 +17,7 @@ impl Guac<String> for dyn StringGuacamole {
 
 ////////////////////////////////////// IndependentStringLength /////////////////////////////////////
 
-pub trait IndependentStringLength {
+pub trait IndependentStringLength: std::fmt::Debug {
     fn guacamole(&self, guac: &mut Guacamole) -> usize;
 }
 
@@ -29,7 +29,7 @@ impl Guac<usize> for dyn IndependentStringLength {
 
 ////////////////////////////////////// IndependentStringSelect /////////////////////////////////////
 
-pub trait IndependentStringSelect {
+pub trait IndependentStringSelect: std::fmt::Debug {
     fn guacamole(&self, guac: &mut Guacamole) -> u64;
 }
 
@@ -41,9 +41,10 @@ impl Guac<u64> for dyn IndependentStringSelect {
 
 //////////////////////////////////////// IndependentStrings ////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct IndependentStrings {
-    length: Box<dyn IndependentStringLength>,
-    select: Box<dyn IndependentStringSelect>,
+    pub length: Box<dyn IndependentStringLength>,
+    pub select: Box<dyn IndependentStringSelect>,
 }
 
 impl StringGuacamole for IndependentStrings {
@@ -61,8 +62,9 @@ impl StringGuacamole for IndependentStrings {
 
 ////////////////////////////////////////// ConstantLength //////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct ConstantLength {
-    constant: usize,
+    pub constant: usize,
 }
 
 impl IndependentStringLength for ConstantLength {
@@ -73,6 +75,7 @@ impl IndependentStringLength for ConstantLength {
 
 /////////////////////////////////////////// RandomSelect ///////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct RandomSelect {}
 
 impl IndependentStringSelect for RandomSelect {
