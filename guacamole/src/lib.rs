@@ -179,14 +179,14 @@ impl Guacamole {
         let mut bytes = bytes;
         while bytes.len() >= self.remaining_len() {
             let rem = self.remaining_len();
-            &bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..]);
+            bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..]);
             bytes = &mut bytes[rem..];
             let (nonce, _) = self.nonce.overflowing_add(1);
             self.seek(nonce);
         }
         assert!(bytes.len() < self.remaining_len());
         let rem = bytes.len();
-        &bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..self.index+rem]);
+        bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..self.index+rem]);
         self.index += rem;
         assert!(self.index < 64);
     }
