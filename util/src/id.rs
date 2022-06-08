@@ -1,8 +1,25 @@
 use std::fmt::Write;
+use std::fs::File;
+use std::io::Read;
 
 pub const BYTES: usize = 16;
 
 const SLICES: [(usize, usize); 5] = [(0, 4), (4, 6), (6, 8), (8, 10), (10, 16)];
+
+/// Read a new ID from /dev/urandom
+pub fn urandom() -> Option<[u8; BYTES]> {
+    let mut f = match File::open("/dev/urandom") {
+        Ok(f) => f,
+        Err(_) => { return None; },
+    };
+    let mut id: [u8; BYTES] = [0u8; BYTES];
+    let mut amt = 0;
+    while amt < BYTES {
+        let x = f.read(&mut id).ok()?;
+        amt += x;
+    }
+    Some(id)
+}
 
 /// Encode 16B of random data in something aesthetically better.
 pub fn encode(id: &[u8; BYTES]) -> String {
@@ -53,6 +70,11 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn urandom_is_nonzero() {
+        assert_ne!(Some([0u8; BYTES]), urandom());
+    }
 
     // Test that this constant does not change and document why.
     #[test]
