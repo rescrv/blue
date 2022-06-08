@@ -1,7 +1,7 @@
 use std::cmp;
 use std::cmp::Ordering;
 
-use prototk::{length_free, stack_pack, Message, Packable, Unpacker};
+use prototk::{length_free, stack_pack, Packable, Unpacker, v64};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -129,7 +129,14 @@ impl Builder {
 
     pub fn finish(mut self) -> Vec<u8> {
         // Append each restart.
-        let pa = stack_pack(length_free(&self.restarts));
+        let restarts = length_free(&self.restarts);
+        let tag10: v64  = ((10 << 3) | 2).into();
+        let tag11: v64  = ((11 << 3) | 5).into();
+        let sz: v64 = restarts.pack_sz().into();
+        let pa = stack_pack(tag10);
+        let pa = pa.pack(sz);
+        let pa = pa.pack(restarts);
+        let pa = pa.pack(tag11);
         let pa = pa.pack(self.restarts.len() as u32);
         pa.append_to_vec(&mut self.buffer);
         self.buffer
@@ -484,7 +491,7 @@ mod tests {
         let block = Builder::new(BuilderOptions::default());
         let finisher = block.finish();
         let got = finisher.as_slice();
-        let exp = &[0, 0, 0, 0, 1, 0, 0, 0];
+        let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
         assert_eq!(exp, got);
     }
 
@@ -501,8 +508,10 @@ mod tests {
             24/*3*/, /*varint(0xc0ffee):*/238, 255, 131, 6,
             34/*4*/, 5/*sz*/, 118, 97, 108, 117, 101,
             // restarts
+            82/*10*/, 4/*sz*/,
             0, 0, 0, 0,
             // num_restarts
+            93/*11*/,
             1, 0, 0, 0,
         ];
         assert_eq!(exp, got);
@@ -517,21 +526,24 @@ mod tests {
         let got = finisher.as_slice();
         let exp = &[
             // first record
-            66/*8*/, 21/*szXXX*/,
+            66/*8*/, 21/*sz*/,
             8/*1*/, 0,
             18/*2*/, 4/*sz*/, 107, 101, 121, 49,
             24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
             34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 49,
 
             // second record
-            66/*8*/, 18/*szXXX*/,
+            66/*8*/, 18/*sz*/,
             8/*1*/, 3,
             18/*2*/, 1/*sz*/, 50,
             24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
             34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 50,
 
             // restarts
-            0, 0, 0, 0, 1, 0, 0, 0,
+            82/*10*/, 4/*sz*/,
+            0, 0, 0, 0,
+            93/*11*/,
+            1, 0, 0, 0,
         ];
         assert_eq!(exp, got);
     }
