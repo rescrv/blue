@@ -198,6 +198,7 @@ impl<'a> Unpackable<'a> for v64 {
         where
             'b: 'a,
     {
+        assert!(buf.len() > 0);
         let bytes: usize = if buf.len() < 10 { buf.len() } else { 10 };
         let mut ret = 0u64;
         let mut idx = 0;
