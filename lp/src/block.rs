@@ -5,6 +5,7 @@ use prototk::{length_free, stack_pack, Packable, Unpacker, v64};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+#[derive(Debug)]
 pub enum Error {
     BlockTooSmall{ length: usize, required: usize },
     UnpackError{ error: prototk::Error, context: String },
@@ -137,7 +138,8 @@ impl Builder {
         let pa = pa.pack(sz);
         let pa = pa.pack(restarts);
         let pa = pa.pack(tag11);
-        let pa = pa.pack(self.restarts.len() as u32);
+        let sz = pa.pack_sz();
+        let pa = pa.pack(sz as u32);
         pa.append_to_vec(&mut self.buffer);
         self.buffer
     }
@@ -223,16 +225,17 @@ impl<'a> Block<'a> {
             // there are.
             return Err(Error::BlockTooSmall { length: bytes.len(), required: 4 })
         }
-        // Number of restarts.
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
+        // Footer size.
+        // TODO(rescrv):  ERRORS
         let num_restarts: u32 = up.unpack()
             .map_err(|e| Error::UnpackError{ error: e, context: "could not read last four bytes of block".to_string() })?;
-        let num_restarts: usize = num_restarts as usize;
-        let restarts_sz = num_restarts * 4 + 4;
-        if bytes.len() < restarts_sz {
-            return Err(Error::BlockTooSmall { length: bytes.len(), required: restarts_sz })
+        let restarts_sz = num_restarts as usize * 4;
+        let footer_sz: usize = restarts_sz + 2/*tags*/ + 4/*fixed32 cap*/ + v64::from(restarts_sz).pack_sz();
+        if bytes.len() < footer_sz {
+            return Err(Error::BlockTooSmall { length: bytes.len(), required: footer_sz })
         }
-        let restarts_boundary = bytes.len() - restarts_sz;
+        let restarts_boundary = bytes.len() - footer_sz;
         let mut restarts = Vec::new();
         let mut up = Unpacker::new(&bytes[restarts_boundary..]);
         // TODO(rescrv):  It would be awesome to do something unsafe and treat this as an array
@@ -243,7 +246,7 @@ impl<'a> Block<'a> {
             restarts.push(x);
         }
         // TODO(rescrv):  Decide how to error if zero restarts.
-        let mut block = Block {
+        let block = Block {
             bytes,
             restarts_boundary,
             restarts,
@@ -491,8 +494,9 @@ mod tests {
         let block = Builder::new(BuilderOptions::default());
         let finisher = block.finish();
         let got = finisher.as_slice();
-        let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
+        let exp = &[82, 4, 0, 0, 0, 0, 93, 7, 0, 0, 0];
         assert_eq!(exp, got);
+        assert_eq!(11, got.len());
     }
 
     #[test]
@@ -512,7 +516,7 @@ mod tests {
             0, 0, 0, 0,
             // num_restarts
             93/*11*/,
-            1, 0, 0, 0,
+            7, 0, 0, 0,
         ];
         assert_eq!(exp, got);
     }
@@ -543,7 +547,7 @@ mod tests {
             82/*10*/, 4/*sz*/,
             0, 0, 0, 0,
             93/*11*/,
-            1, 0, 0, 0,
+            7, 0, 0, 0,
         ];
         assert_eq!(exp, got);
     }
