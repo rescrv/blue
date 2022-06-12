@@ -16,7 +16,7 @@ pub enum Error {
 
 ////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BuilderOptions {
     pub bytes_restart_interval: u64,
     pub key_value_pairs_restart_interval: u64,
@@ -33,7 +33,7 @@ impl Default for BuilderOptions {
 
 //////////////////////////////////////////// KeyValuePut ///////////////////////////////////////////
 
-#[derive(Clone, Default, Message)]
+#[derive(Clone, Debug, Default, Message)]
 struct KeyValuePut<'a> {
     #[prototk(1, uint64)]
     shared: u64,
@@ -47,7 +47,7 @@ struct KeyValuePut<'a> {
 
 //////////////////////////////////////////// KeyValueDel ///////////////////////////////////////////
 
-#[derive(Clone, Default, Message)]
+#[derive(Clone, Debug, Default, Message)]
 struct KeyValueDel<'a> {
     #[prototk(5, uint64)]
     shared: u64,
@@ -59,7 +59,7 @@ struct KeyValueDel<'a> {
 
 //////////////////////////////////////////// BlockEntry ////////////////////////////////////////////
 
-#[derive(Clone, Message)]
+#[derive(Clone, Debug, Message)]
 enum BlockEntry<'a> {
     #[prototk(8, message)]
     KeyValuePut(KeyValuePut<'a>),
@@ -92,7 +92,7 @@ impl<'a> BlockEntry<'a> {
     fn value(&self) -> Option<&'a [u8]> {
         match self {
             BlockEntry::KeyValuePut(x) => Some(x.value),
-            BlockEntry::KeyValueDel(x) => None,
+            BlockEntry::KeyValueDel(_) => None,
         }
     }
 }
@@ -155,8 +155,7 @@ impl Builder {
         let pa = pa.pack(sz);
         let pa = pa.pack(restarts);
         let pa = pa.pack(tag11);
-        let sz = pa.pack_sz();
-        let pa = pa.pack(sz as u32);
+        let pa = pa.pack(self.restarts.len() as u32);
         pa.append_to_vec(&mut self.buffer);
         self.buffer
     }
@@ -231,58 +230,46 @@ pub struct Block<'a> {
 
     // The restart intervals.  restarts_boundary points to the first restart point.
     restarts_boundary: usize,
-    num_restarts: u32,
-    restarts: Vec<u32>,
+    restarts_idx: usize,
+    num_restarts: usize,
 }
 
 impl<'a> Block<'a> {
     pub fn new<'b: 'a>(bytes: &'b [u8]) -> Result<Self, Error> {
-        // Load the restarts.
+        // Load num_restarts.
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
             return Err(Error::BlockTooSmall { length: bytes.len(), required: 4 })
         }
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
-        // Footer size.
         let num_restarts: u32 = up.unpack()
             .map_err(|e| Error::UnpackError{ error: e, context: "could not read last four bytes of block".to_string() })?;
-        let restarts_sz = num_restarts as usize * 4;
-        let footer_sz: usize = restarts_sz + 1/*capstone tag*/ + 4/*fixed32 capstone*/;
-        if bytes.len() < footer_sz {
-            return Err(Error::BlockTooSmall { length: bytes.len(), required: footer_sz })
-        }
-        let restarts_boundary = bytes.len() - footer_sz;
-        let mut restarts = Vec::new();
-        let mut up = Unpacker::new(&bytes[restarts_boundary..]);
-        // TODO(rescrv):  It would be awesome to do something unsafe and treat this as an array
-        // rather than something to load at startup.
-        for _ in 0..num_restarts {
-            let x: u32 = up.unpack()
-                .map_err(|e| Error::UnpackError{ error: e, context: "could not read restart points".to_string() })?;
-            restarts.push(x);
-        }
-        // TODO(rescrv):  Decide how to error if zero restarts.
+        let num_restarts: usize = num_restarts as usize;
+        // Footer size.
+        // |tag 10|v64 of num bytes|packed num_restarts u32s|tag 11|fixed32 capstone|
+        let capstone: usize = 1/*tag 11*/ + 4/*fixed32 capstone*/;
+        let footer_body: usize = num_restarts as usize * 4;
+        let footer_head: usize = 1/*tag 10*/ + v64::from(footer_body).pack_sz();
+        let restarts_idx = bytes.len() - capstone - footer_body;
+        let restarts_boundary = restarts_idx - footer_head;
+        // Block.
         let block = Block {
             bytes,
             restarts_boundary,
+            restarts_idx,
             num_restarts,
-            restarts,
         };
         Ok(block)
     }
 
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts as usize);
-        let restarts_sz = self.num_restarts as usize * 4;
-        let footer_sz: usize = restarts_sz + 1/*capstone tag*/ + 4/*fixed32 capstone*/;
         let mut restart: [u8; 4] = <[u8; 4]>::default();
         for i in 0..4 {
-            restart[i] = self.bytes[self.restarts_boundary + restart_idx * 4 + i];
+            restart[i] = self.bytes[self.restarts_idx + restart_idx * 4 + i];
         }
-        let restart = u32::from_le_bytes(restart);
-        assert_eq!(self.restarts[restart_idx], restart);
-        self.restarts[restart_idx] as usize
+        u32::from_le_bytes(restart) as usize
     }
 }
 
@@ -295,7 +282,7 @@ pub enum Cursor<'a> {
     Positioned {
         block: &'a Block<'a>,
         restart_idx: usize,
-        offset: usize, 
+        offset: usize,
         next_offset: usize,
         key: Vec<u8>,
     }
@@ -332,20 +319,26 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn key(&mut self) -> Vec<u8> {
-        unimplemented!();
-    }
-
     fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
-        if restart_idx >= self.block().restarts.len() {
-            return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().restarts.len()) });
+        if restart_idx >= self.block().num_restarts {
+            return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().num_restarts) });
         }
-        let offset = self.block().restarts[restart_idx] as usize;
+        let offset = self.block().restart_point(restart_idx) as usize;
         if offset >= self.block().restarts_boundary {
             return Err(Error::Corruption { context: format!("offset={} exceeds restarts_boundary={}", offset, self.block().restarts_boundary) });
         }
+        match self {
+            Cursor::Head { block: _ } => {},
+            Cursor::Tail { block: _ } => {},
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, key } => { key.truncate(0) },
+        };
+        // TODO(rescrv): Wasteful double-load.
+        self.load_key_value(offset)?;
+        Ok(())
+    }
+
+    fn load_key_value(&mut self, offset: usize) -> Result<KeyValuePair, Error> {
         // Parse `key_value`.
-        // TODO(rescrv):  It's the third time these 7 lines show up.  Maybe dedupe?
         let mut up = Unpacker::new(&self.block().bytes[offset..self.block().restarts_boundary]);
         let be: BlockEntry = up.unpack()
             .map_err(|e| Error::UnpackError{
@@ -353,18 +346,36 @@ impl<'a> Cursor<'a> {
                 context: format!("could not unpack key-value pair at offset={}", offset),
             })?;
         let next_offset = self.block().restarts_boundary - up.remain().len();
-        // Assemble the current cursor.
-        let mut key = self.key();
+        // Assemble the cursor for the current position.  Always positioned.
+        let mut key = match self {
+            Cursor::Head { block: _ } => Vec::new(),
+            Cursor::Tail { block: _ } => Vec::new(),
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, key } => {
+                let mut new = Vec::new();
+                std::mem::swap(key, &mut new);
+                new
+            },
+        };
         key.truncate(be.shared());
         key.extend_from_slice(be.key_frag());
         *self = Cursor::Positioned {
             block: self.block(),
             restart_idx: self.restart_idx(),
-            offset: offset,
-            next_offset: next_offset,
+            offset,
+            next_offset,
             key,
         };
-        Ok(())
+        // Assemble the return value.
+        let kv = KeyValuePair {
+            key: match self {
+                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
+                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
+                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
+            },
+            timestamp: be.timestamp(),
+            value: be.value(),
+        };
+        Ok(kv)
     }
 }
 
@@ -384,9 +395,12 @@ impl<'a> Iterator for Cursor<'a> {
     }
 
     fn seek(&mut self, key: &[u8]) -> Result<(), super::Error> {
+        if self.block().num_restarts == 0 {
+            return Err(Error::Corruption { context: "a block with 0 restarts".to_string() }.into());
+        }
         let mut query = self.clone();
         let mut left: usize = 0usize;
-        let mut right: usize = self.block().restarts.len() - 1;
+        let mut right: usize = self.block().num_restarts - 1;
 
         // Break when left == right.
         while left < right {
@@ -451,11 +465,11 @@ impl<'a> Iterator for Cursor<'a> {
         }
         // If we happen to be at the boundary of a restart, step.
         let current_restart_idx = self.restart_idx();
-        let restart_idx = if next_offset <= self.block().restarts[current_restart_idx] as usize {
+        let restart_idx = if next_offset <= self.block().restart_point(current_restart_idx) as usize {
             if current_restart_idx == 0 {
                 return Err(Error::Corruption {
                     context: format!("next_offset={} <= restarts[{}]={} on zero'th restart",
-                                     next_offset, current_restart_idx, self.block().restarts[current_restart_idx]),
+                                     next_offset, current_restart_idx, self.block().restart_point(current_restart_idx)),
                 }.into());
             }
             current_restart_idx - 1
@@ -491,50 +505,22 @@ impl<'a> Iterator for Cursor<'a> {
         if offset >= self.block().restarts_boundary {
             return Ok(None);
         }
-        if self.restart_idx() + 1 < self.block().restarts.len() && self.block().restarts[self.restart_idx() + 1] as usize <= offset {
+        if self.restart_idx() + 1 < self.block().num_restarts && self.block().restart_point(self.restart_idx() + 1) as usize <= offset {
             // We're jumping to the next block, so just seek_block to force a refresh of the key,
             // along with safety checks on key_frag.
-            self.seek_block(self.restart_idx() + 1);
+            self.seek_block(self.restart_idx() + 1)?;
             return self.same();
         };
-        // Parse `key_value`.
-        let mut up = Unpacker::new(&self.block().bytes[offset..self.block().restarts_boundary]);
-        let be: BlockEntry = up.unpack()
-            .map_err(|e| Error::UnpackError{
-                error: e,
-                context: format!("could not unpack key-value pair at offset={}", offset),
-            })?;
-        let next_offset = self.block().restarts_boundary - up.remain().len();
-        // Assemble the current cursor.
-        let mut key = self.key();
-        key.truncate(be.shared());
-        key.extend_from_slice(be.key_frag());
-        *self = Cursor::Positioned {
-            block: self.block(),
-            restart_idx: self.restart_idx(),
-            offset: offset,
-            next_offset: next_offset,
-            key,
-        };
-        // Assemble the return value.
-        let kv = KeyValuePair {
-            key: match self {
-                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
-                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
-                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
-            },
-            timestamp: be.timestamp(),
-            value: be.value(),
-        };
+        let kv = self.load_key_value(offset)?;
         Ok(Some(kv))
     }
 
     fn same(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
-        let (block, restart_idx, offset, next_offset, key) = match self {
-            Cursor::Head { block } => { return Ok(None); }
-            Cursor::Tail { block } => { return Ok(None); }
-            Cursor::Positioned { block, restart_idx, offset, next_offset, key } => {
-                (block, *restart_idx, *offset, *next_offset, key)
+        let (block, offset) = match self {
+            Cursor::Head { block: _ } => { return Ok(None); }
+            Cursor::Tail { block: _ } => { return Ok(None); }
+            Cursor::Positioned { block, restart_idx: _, offset, next_offset: _, key: _ } => {
+                (block, *offset)
             }
         };
         // Parse `key_value`.
@@ -548,8 +534,8 @@ impl<'a> Iterator for Cursor<'a> {
         let kv = KeyValuePair {
             key: match self {
                 Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
-                Cursor::Head { block: _ } => { panic!(format!("we just assigned a Cursor::Positioned to self and it is now a Head")) },
-                Cursor::Tail { block: _ } => { panic!(format!("we just assigned a Cursor::Positioned to self and it is now a Tail")) },
+                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
+                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
             },
             timestamp: be.timestamp(),
             value: be.value(),
@@ -579,8 +565,6 @@ fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
-    use std::str;
-
     use super::*;
 
     #[test]
@@ -588,7 +572,7 @@ mod tests {
         let block = Builder::new(BuilderOptions::default());
         let finisher = block.finish();
         let got = finisher.as_slice();
-        let exp = &[82, 4, 0, 0, 0, 0, 93, 7, 0, 0, 0];
+        let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
         assert_eq!(exp, got);
         assert_eq!(11, got.len());
     }
@@ -610,7 +594,7 @@ mod tests {
             0, 0, 0, 0,
             // num_restarts
             93/*11*/,
-            7, 0, 0, 0,
+            1, 0, 0, 0,
         ];
         assert_eq!(exp, got);
     }
@@ -641,7 +625,7 @@ mod tests {
             82/*10*/, 4/*sz*/,
             0, 0, 0, 0,
             93/*11*/,
-            7, 0, 0, 0,
+            1, 0, 0, 0,
         ];
         assert_eq!(exp, got);
     }
@@ -674,6 +658,38 @@ mod tests {
         assert_eq!(2, block.num_restarts);
         assert_eq!(0, block.restart_point(0));
         assert_eq!(22, block.restart_point(1));
+    }
+
+    #[test]
+    fn corruption_bug_gone() {
+        let key = &[107, 65, 118, 119, 82, 109, 53, 69];
+        let timestamp = 4092481979873166344;
+        let value = &[120, 100, 81, 80, 75, 79, 121, 90];
+        let mut block = Builder::new(BuilderOptions::default());
+        block.put(key, timestamp, value);
+        let finisher = block.finish();
+        let exp = &[
+            // record
+            66/*8*/, 32/*sz*/,
+            8/*1*/, 0,
+            18/*2*/, 8/*sz*/, 107, 65, 118, 119, 82, 109, 53, 69,
+            24/*3*/, /*varint*/136, 136, 156, 160, 216, 213, 218, 229, 56,
+            34/*4*/, 8/*sz*/, 120, 100, 81, 80, 75, 79, 121, 90,
+
+            // restarts
+            82/*10*/, 4/*sz*/,
+            0, 0, 0, 0,
+            93/*11*/,
+            1, 0, 0, 0,
+        ];
+        let got = finisher.as_slice();
+        assert_eq!(exp, got);
+
+
+
+        let block = Block::new(&got).unwrap();
+        let mut cursor = Cursor::new(&block);
+        cursor.seek(&[106, 113, 67, 73, 122, 73, 98, 85]).unwrap();
     }
 
     // TODO(rescrv): Test empty tables.
