@@ -3,6 +3,8 @@ use std::cmp::Ordering;
 
 use prototk::{length_free, stack_pack, Packable, Unpacker, v64};
 
+use super::{KeyValuePair,Iterator};
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -79,6 +81,20 @@ impl<'a> BlockEntry<'a> {
             BlockEntry::KeyValueDel(x) => x.key_frag,
         }
     }
+
+    fn timestamp(&self) -> u64 {
+        match self {
+            BlockEntry::KeyValuePut(x) => x.timestamp,
+            BlockEntry::KeyValueDel(x) => x.timestamp,
+        }
+    }
+
+    fn value(&self) -> Option<&'a [u8]> {
+        match self {
+            BlockEntry::KeyValuePut(x) => Some(x.value),
+            BlockEntry::KeyValueDel(x) => None,
+        }
+    }
 }
 
 impl<'a> Default for BlockEntry<'a> {
@@ -95,6 +111,7 @@ pub struct Builder {
     buffer: Vec<u8>,
     last_key: Vec<u8>,
     // Restart metadata.
+    // TODO(rescrv):  Lazily load this.
     restarts: Vec<u32>,
     bytes_since_restart: u64,
     key_value_pairs_since_restart: u64,
@@ -214,11 +231,12 @@ pub struct Block<'a> {
 
     // The restart intervals.  restarts_boundary points to the first restart point.
     restarts_boundary: usize,
+    num_restarts: u32,
     restarts: Vec<u32>,
 }
 
 impl<'a> Block<'a> {
-    pub fn initialize<'b: 'a>(bytes: &'b [u8]) -> Result<Self, Error> {
+    pub fn new<'b: 'a>(bytes: &'b [u8]) -> Result<Self, Error> {
         // Load the restarts.
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
@@ -227,11 +245,10 @@ impl<'a> Block<'a> {
         }
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
         // Footer size.
-        // TODO(rescrv):  ERRORS
         let num_restarts: u32 = up.unpack()
             .map_err(|e| Error::UnpackError{ error: e, context: "could not read last four bytes of block".to_string() })?;
         let restarts_sz = num_restarts as usize * 4;
-        let footer_sz: usize = restarts_sz + 2/*tags*/ + 4/*fixed32 cap*/ + v64::from(restarts_sz).pack_sz();
+        let footer_sz: usize = restarts_sz + 1/*capstone tag*/ + 4/*fixed32 capstone*/;
         if bytes.len() < footer_sz {
             return Err(Error::BlockTooSmall { length: bytes.len(), required: footer_sz })
         }
@@ -249,83 +266,127 @@ impl<'a> Block<'a> {
         let block = Block {
             bytes,
             restarts_boundary,
+            num_restarts,
             restarts,
         };
         Ok(block)
+    }
+
+    fn restart_point(&self, restart_idx: usize) -> usize {
+        assert!(restart_idx < self.num_restarts as usize);
+        let restarts_sz = self.num_restarts as usize * 4;
+        let footer_sz: usize = restarts_sz + 1/*capstone tag*/ + 4/*fixed32 capstone*/;
+        let mut restart: [u8; 4] = <[u8; 4]>::default();
+        for i in 0..4 {
+            restart[i] = self.bytes[self.restarts_boundary + restart_idx * 4 + i];
+        }
+        let restart = u32::from_le_bytes(restart);
+        assert_eq!(self.restarts[restart_idx], restart);
+        self.restarts[restart_idx] as usize
     }
 }
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 #[derive(Clone)]
-struct Cursor<'a> {
-    // The block we have a cursor over.  Will always be the same.
-    block: &'a Block<'a>,
-    // An index [0, num_restarts) that tells us which restart our cursor falls into such that
-    // restarts[restarts_idx] <= cursor < restarts[restarts_idx + 1].
-    restart_idx: usize,
-    // An offset [0, restarts_boundary] of where the cursor is in the file.
-    offset: usize,
-    // An optional (BlockEntry, next_offset) indicating that the offset has been parsed.  As a
-    // special case, can be None when running off the ends of the blocks.
-    // INVARIANT: key_value.is_some() || offset == 0 || offset == restarts_boundary.
-    key_value: Option<(BlockEntry<'a>, usize)>,
-    // The materialized key.
-    valid: bool,
-    key: Vec<u8>,
+pub enum Cursor<'a> {
+    Head { block: &'a Block<'a> },
+    Tail { block: &'a Block<'a> },
+    Positioned {
+        block: &'a Block<'a>,
+        restart_idx: usize,
+        offset: usize, 
+        next_offset: usize,
+        key: Vec<u8>,
+    }
 }
 
 impl<'a> Cursor<'a> {
-    pub fn new(block: &'a Block) -> Self {
-        Cursor {
+    pub fn new(block: &'a Block<'a>) -> Self {
+        Cursor::Head {
             block,
-            restart_idx: 0,
-            offset: 0,
-            key_value: None,
-            key: Vec::new(),
-            valid: false,
         }
     }
 
-    pub fn seek_to_first(&mut self) -> Result<(), Error> {
-        self.seek_to_first_tombstone();
-        self.next()
+    fn block(&self) -> &'a Block<'a> {
+        match self {
+            Cursor::Head { block } => block,
+            Cursor::Tail { block } => block,
+            Cursor::Positioned { block, restart_idx: _, offset: _, next_offset: _, key: _ } => block,
+        }
     }
 
-    pub fn seek_to_first_tombstone(&mut self) {
-        *self = Cursor {
-            block: self.block,
-            restart_idx: 0,
-            offset: 0,
-            key_value: None,
-            key: Vec::new(),
-            valid: false,
+    fn next_offset(&self) -> usize {
+        match self {
+            Cursor::Head { block: _ } => 0,
+            Cursor::Tail { block } => block.restarts_boundary,
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset, key: _ } => *next_offset,
+        }
+    }
+
+    fn restart_idx(&self) -> usize {
+        match self {
+            Cursor::Head { block: _ } => 0,
+            Cursor::Tail { block } => block.restarts_boundary,
+            Cursor::Positioned { block: _, restart_idx, offset: _, next_offset: _, key: _ } => *restart_idx,
+        }
+    }
+
+    fn key(&mut self) -> Vec<u8> {
+        unimplemented!();
+    }
+
+    fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
+        if restart_idx >= self.block().restarts.len() {
+            return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().restarts.len()) });
+        }
+        let offset = self.block().restarts[restart_idx] as usize;
+        if offset >= self.block().restarts_boundary {
+            return Err(Error::Corruption { context: format!("offset={} exceeds restarts_boundary={}", offset, self.block().restarts_boundary) });
+        }
+        // Parse `key_value`.
+        // TODO(rescrv):  It's the third time these 7 lines show up.  Maybe dedupe?
+        let mut up = Unpacker::new(&self.block().bytes[offset..self.block().restarts_boundary]);
+        let be: BlockEntry = up.unpack()
+            .map_err(|e| Error::UnpackError{
+                error: e,
+                context: format!("could not unpack key-value pair at offset={}", offset),
+            })?;
+        let next_offset = self.block().restarts_boundary - up.remain().len();
+        // Assemble the current cursor.
+        let mut key = self.key();
+        key.truncate(be.shared());
+        key.extend_from_slice(be.key_frag());
+        *self = Cursor::Positioned {
+            block: self.block(),
+            restart_idx: self.restart_idx(),
+            offset: offset,
+            next_offset: next_offset,
+            key,
         };
+        Ok(())
     }
+}
 
-    pub fn seek_to_last(&mut self) -> Result<(), Error> {
-        self.seek_to_last_tombstone();
-        self.prev()
-    }
-
-    pub fn seek_to_last_tombstone(&mut self) {
-        assert!(self.block.restarts.len() > 0);
-        let restart_idx = self.block.restarts.len() - 1;
-        let offset = self.block.restarts_boundary;
-        *self = Cursor {
-            block: self.block,
-            restart_idx,
-            offset,
-            key_value: None,
-            key: Vec::new(),
-            valid: false,
+impl<'a> Iterator for Cursor<'a> {
+    fn seek_to_first(&mut self) -> Result<(), super::Error> {
+        *self = Cursor::Head {
+            block: self.block(),
         };
+        Ok(())
     }
 
-    pub fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), super::Error> {
+        *self = Cursor::Tail {
+            block: self.block(),
+        };
+        Ok(())
+    }
+
+    fn seek(&mut self, key: &[u8]) -> Result<(), super::Error> {
         let mut query = self.clone();
         let mut left: usize = 0usize;
-        let mut right: usize = self.block.restarts.len() - 1;
+        let mut right: usize = self.block().restarts.len() - 1;
 
         // Break when left == right.
         while left < right {
@@ -334,8 +395,14 @@ impl<'a> Cursor<'a> {
             // move much closer to the top of the loop.
             let mid = (left + right + 1) / 2;
             query.seek_block(mid)?;
-            assert!(query.valid);
-            match compare_bytes(key, &query.key) {
+            let value = match query.next()? {
+                Some(value) => value,
+                None => {
+                    right = mid;
+                    continue;
+                }
+            };
+            match compare_bytes(key, &value.key) {
                 Ordering::Less => {
                     // left     mid     right
                     // |--------|-------|
@@ -360,107 +427,134 @@ impl<'a> Cursor<'a> {
         }
 
         // query has been seek_block'd to the block with the key we are seeking to.
-        while compare_bytes(key, &query.key).is_gt() {
-            query.next()?;
-        }
-
-        Ok(())
-    }
-
-    pub fn prev(&mut self) -> Result<(), Error> {
-        // This is the offset of the item we will seek to with a call to `next`, so record the
-        // offset of next.
-        let next_offset = self.offset;
-        if next_offset <= 0 {
-            self.seek_to_first_tombstone();
-            return Ok(());
-        }
-        // If we happen to be at the boundary of a restart, step.
-        let restart_idx = if next_offset <= self.block.restarts[self.restart_idx] as usize {
-            // 0th block restart cannot happen here because next_offset == 0 check above.
-            self.restart_idx - 1
-        } else {
-            self.restart_idx
-        };
-        // There's a choice here to use an unpacker or to call next().  Calling next() is not that
-        // much more expensive, and makes sure to use the correct key materialization code in both
-        // directions.  Instead, chose to seek to the restart_idx as the latest-known point where
-        // we can pick up and roll forward.  We known from the restart_idx check above that if
-        // next_offset is also a restart point, we will select restart_idx as its predecessor and
-        // the next_offset will never tangle with the first tombstone.
-        self.seek_block(restart_idx)?;
-        while let Some((_, next)) = self.key_value {
-            if next >= next_offset {
+        let mut value = query.same()?;
+        while let Some(v) = value {
+            if compare_bytes(key, v.key).is_gt() {
+                value = query.next()?;
+            } else {
                 break;
             }
+        }
+
+        Ok(())
+    }
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+        // This is the offset of the item we will seek to with a call to `next`, so record the
+        // offset of next.
+        let next_offset = self.next_offset();
+        if next_offset <= 0 {
+            *self = Cursor::Head {
+                block: self.block(),
+            };
+            return Ok(None)
+        }
+        // If we happen to be at the boundary of a restart, step.
+        let current_restart_idx = self.restart_idx();
+        let restart_idx = if next_offset <= self.block().restarts[current_restart_idx] as usize {
+            if current_restart_idx == 0 {
+                return Err(Error::Corruption {
+                    context: format!("next_offset={} <= restarts[{}]={} on zero'th restart",
+                                     next_offset, current_restart_idx, self.block().restarts[current_restart_idx]),
+                }.into());
+            }
+            current_restart_idx - 1
+        } else {
+            current_restart_idx
+        };
+        if restart_idx >= self.block().restarts_boundary {
+            return Err(Error::Corruption {
+                context: format!("restart_idx={} exceeds restarts_boundary={}",
+                                 restart_idx, self.block().restarts_boundary),
+            }.into());
+        }
+        if restart_idx >= current_restart_idx {
+            return Err(Error::Corruption {
+                context: format!("restart_idx={} >= previous restart_idx={}",
+                                 restart_idx, current_restart_idx),
+            }.into());
+        }
+        // Use next so that we use the same code in both directions.
+        self.seek_block(restart_idx)?;
+        while self.next_offset() < next_offset {
             self.next()?;
         }
-        Ok(())
+        // TODO(rescrv): Double parsing with same.
+        self.same()
     }
 
-    pub fn next(&mut self) -> Result<(), Error> {
-        // Over-run check.
-        if self.offset >= self.block.restarts_boundary {
-            self.seek_to_last_tombstone();
-            return Ok(());
+    fn next(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+        if let Cursor::Tail { block: _ } = self {
+            return Ok(None);
         }
-        // Compute `offset`.
-        let offset = match &self.key_value {
-            Some((_, next_offset)) => {
-                *next_offset
-            },
-            None => {
-                if self.offset == 0 {
-                    0
-                } else {
-                    // There's no case where this should happen, so it shall remain unimplemented.
-                    unimplemented!();
-                }
-            },
-        };
-        // Compute `restart_idx`.
-        let restart_idx = if self.restart_idx + 1 < self.block.restarts.len() && self.block.restarts[self.restart_idx + 1] as usize <= offset {
-            self.restart_idx + 1
-        } else {
-            self.restart_idx
+        let offset = self.next_offset();
+        if offset >= self.block().restarts_boundary {
+            return Ok(None);
+        }
+        if self.restart_idx() + 1 < self.block().restarts.len() && self.block().restarts[self.restart_idx() + 1] as usize <= offset {
+            // We're jumping to the next block, so just seek_block to force a refresh of the key,
+            // along with safety checks on key_frag.
+            self.seek_block(self.restart_idx() + 1);
+            return self.same();
         };
         // Parse `key_value`.
-        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
+        let mut up = Unpacker::new(&self.block().bytes[offset..self.block().restarts_boundary]);
         let be: BlockEntry = up.unpack()
-            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack next key-value".to_string() })?;
-        let next_offset = self.block.restarts_boundary - up.remain().len();
+            .map_err(|e| Error::UnpackError{
+                error: e,
+                context: format!("could not unpack key-value pair at offset={}", offset),
+            })?;
+        let next_offset = self.block().restarts_boundary - up.remain().len();
         // Assemble the current cursor.
-        self.restart_idx = restart_idx;
-        self.offset = offset;
-        self.key.truncate(be.shared());
-        self.key.extend_from_slice(be.key_frag());
-        self.key_value = Some((be, next_offset));
-        self.valid = true;
-        Ok(())
+        let mut key = self.key();
+        key.truncate(be.shared());
+        key.extend_from_slice(be.key_frag());
+        *self = Cursor::Positioned {
+            block: self.block(),
+            restart_idx: self.restart_idx(),
+            offset: offset,
+            next_offset: next_offset,
+            key,
+        };
+        // Assemble the return value.
+        let kv = KeyValuePair {
+            key: match self {
+                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
+                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
+                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
+            },
+            timestamp: be.timestamp(),
+            value: be.value(),
+        };
+        Ok(Some(kv))
     }
 
-    fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
-        assert!(restart_idx <= self.block.restarts.len());
-        // Comput offset.
-        let offset = self.block.restarts[restart_idx] as usize;
-
+    fn same(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+        let (block, restart_idx, offset, next_offset, key) = match self {
+            Cursor::Head { block } => { return Ok(None); }
+            Cursor::Tail { block } => { return Ok(None); }
+            Cursor::Positioned { block, restart_idx, offset, next_offset, key } => {
+                (block, *restart_idx, *offset, *next_offset, key)
+            }
+        };
         // Parse `key_value`.
-        let mut up = Unpacker::new(&self.block.bytes[offset..self.block.restarts_boundary]);
+        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
         let be: BlockEntry = up.unpack()
-            .map_err(|e| Error::UnpackError{ error: e, context: "could not unpack next key-value".to_string() })?;
-        let next_offset = self.block.restarts_boundary - up.remain().len();
-
-        // Assemble the key.
-        self.key.truncate(0);
-        // TODO(rescrv, corruption):  This should always have a shared=0.
-        self.key.extend_from_slice(be.key_frag());
-
-        // Assemble the current cursor.
-        self.restart_idx = restart_idx;
-        self.offset = offset;
-        self.key_value = Some((be, next_offset));
-        self.valid = true;
-        Ok(())
+            .map_err(|e| Error::UnpackError{
+                error: e,
+                context: format!("could not unpack key-value pair at offset={}", offset),
+            })?;
+        // Assemble the return value.
+        let kv = KeyValuePair {
+            key: match self {
+                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
+                Cursor::Head { block: _ } => { panic!(format!("we just assigned a Cursor::Positioned to self and it is now a Head")) },
+                Cursor::Tail { block: _ } => { panic!(format!("we just assigned a Cursor::Positioned to self and it is now a Tail")) },
+            },
+            timestamp: be.timestamp(),
+            value: be.value(),
+        };
+        Ok(Some(kv))
     }
 }
 
@@ -522,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_compression() {
+    fn build_prefix_compression() {
         let mut block = Builder::new(BuilderOptions::default());
         block.put("key1".as_bytes(), 0xc0ffee, "value1".as_bytes());
         block.put("key2".as_bytes(), 0xc0ffee, "value2".as_bytes());
@@ -552,6 +646,36 @@ mod tests {
         assert_eq!(exp, got);
     }
 
-    // TODO(rescrv): Test the restart points code.
+    #[test]
+    fn load_restart_points() {
+        let block_bytes = &[
+            // first record
+            66/*8*/, 21/*sz*/,
+            8/*1*/, 0,
+            18/*2*/, 4/*sz*/, 107, 101, 121, 49,
+            24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
+            34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 49,
+
+            // second record
+            66/*8*/, 21/*sz*/,
+            8/*1*/, 0,
+            18/*2*/, 4/*sz*/, 107, 101, 121, 50,
+            24/*3*/, /*varint(0xc0ffee)*/238, 255, 131, 6,
+            34/*4*/, 6/*sz*/, 118, 97, 108, 117, 101, 50,
+
+            // restarts
+            82/*10*/, 8/*sz*/,
+            0, 0, 0, 0,
+            22, 0, 0, 0,
+            93/*11*/,
+            2, 0, 0, 0,
+        ];
+        let block = Block::new(block_bytes).unwrap();
+        assert_eq!(2, block.num_restarts);
+        assert_eq!(0, block.restart_point(0));
+        assert_eq!(22, block.restart_point(1));
+    }
+
     // TODO(rescrv): Test empty tables.
+    // TODO(rescrv): Test corruption cases.
 }
