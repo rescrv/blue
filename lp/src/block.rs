@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 
 use prototk::{length_free, stack_pack, Packable, Unpacker, v64};
 
-use super::{KeyValuePair,Iterator};
+use super::{compare_bytes,KeyValuePair,Iterator};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -223,7 +223,7 @@ impl Builder {
 
 /////////////////////////////////////////////// Block //////////////////////////////////////////////
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Block<'a> {
     // The raw bytes built by a builder.
     bytes: &'a [u8],
@@ -271,11 +271,44 @@ impl<'a> Block<'a> {
         }
         u32::from_le_bytes(restart) as usize
     }
+
+    fn restart_for_offset(&self, offset: usize) -> usize {
+        let mut left: usize = 0usize;
+        let mut right: usize = self.num_restarts - 1;
+
+        // NOTE(rescrv):  This is not the same as the binary search below because we are looking
+        // for incomplete ranges.  The value at i may cover a range [x, y) where restart[i + 1] = y.
+        while left < right {
+            // Pick a mid such that when left and right are adjacent, mid equal right.
+            let mid = (left + right + 1) / 2;
+            let value = self.restart_point(mid);
+            match offset.cmp(&value) {
+                Ordering::Less => {
+                    // The offset is less than this restart point.  It cannot be contained within
+                    // this restart.
+                    right = mid - 1;
+                },
+                Ordering::Equal => {
+                    // The offset exactly equals this restart point.  We're lucky that we can go
+                    // home early.
+                    left = mid;
+                    right = mid;
+                },
+                Ordering::Greater => {
+                    // The offset > value.  The best we can do is to move the left to the mid
+                    // because it could still equal left.
+                    left = mid;
+                }
+            }
+        }
+
+        self.restart_point(left)
+    }
 }
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Cursor<'a> {
     Head { block: &'a Block<'a> },
     Tail { block: &'a Block<'a> },
@@ -285,6 +318,8 @@ pub enum Cursor<'a> {
         offset: usize,
         next_offset: usize,
         key: Vec<u8>,
+        timestamp: u64,
+        value: Option<&'a [u8]>,
     }
 }
 
@@ -299,7 +334,7 @@ impl<'a> Cursor<'a> {
         match self {
             Cursor::Head { block } => block,
             Cursor::Tail { block } => block,
-            Cursor::Positioned { block, restart_idx: _, offset: _, next_offset: _, key: _ } => block,
+            Cursor::Positioned { block, restart_idx: _, offset: _, next_offset: _, key: _, timestamp: _, value: _ } => block,
         }
     }
 
@@ -307,7 +342,7 @@ impl<'a> Cursor<'a> {
         match self {
             Cursor::Head { block: _ } => 0,
             Cursor::Tail { block } => block.restarts_boundary,
-            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset, key: _ } => *next_offset,
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset, key: _, timestamp: _, value: _ } => *next_offset,
         }
     }
 
@@ -315,11 +350,11 @@ impl<'a> Cursor<'a> {
         match self {
             Cursor::Head { block: _ } => 0,
             Cursor::Tail { block } => block.restarts_boundary,
-            Cursor::Positioned { block: _, restart_idx, offset: _, next_offset: _, key: _ } => *restart_idx,
+            Cursor::Positioned { block: _, restart_idx, offset: _, next_offset: _, key: _, timestamp: _, value: _ } => *restart_idx,
         }
     }
 
-    fn seek_block(&mut self, restart_idx: usize) -> Result<(), Error> {
+    fn seek_block(&mut self, restart_idx: usize) -> Result<KeyValuePair, Error> {
         if restart_idx >= self.block().num_restarts {
             return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().num_restarts) });
         }
@@ -327,55 +362,73 @@ impl<'a> Cursor<'a> {
         if offset >= self.block().restarts_boundary {
             return Err(Error::Corruption { context: format!("offset={} exceeds restarts_boundary={}", offset, self.block().restarts_boundary) });
         }
-        match self {
-            Cursor::Head { block: _ } => {},
-            Cursor::Tail { block: _ } => {},
-            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, key } => { key.truncate(0) },
+        let key = match self {
+            Cursor::Head { block: _ } => Vec::new(),
+            Cursor::Tail { block: _ } => Vec::new(),
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, ref mut key, timestamp: _, value: _ } => {
+                let mut ret = Vec::new();
+                key.truncate(0);
+                std::mem::swap(&mut ret, key);
+                ret
+            },
         };
-        // TODO(rescrv): Wasteful double-load.
-        self.load_key_value(offset)?;
-        Ok(())
+        *self = Cursor::load_key_value(self.block(), offset, key)?;
+        match self {
+            // TODO(rescrv):  Ask whether these can be inlined into the type system.  Sounds like
+            // dependent types, so the answer is probably not.
+            Cursor::Head { block: _ } => { panic!("load_key_value must position the cursor"); },
+            Cursor::Tail { block: _ } => { panic!("load_key_value must position the cursor"); },
+            Cursor::Positioned { block: _, restart_idx: _, offset, next_offset, key: _, timestamp: _, value: _ } => {
+                // When we seek to a block, we set next_offset to offset so that a call to next or
+                // prev will fall on the divider.  A call to prev or next will span the divider.
+                *next_offset = *offset;
+                Ok(self.key_value_pair().unwrap())
+            }
+        }
     }
 
-    fn load_key_value(&mut self, offset: usize) -> Result<KeyValuePair, Error> {
+    fn load_key_value(block: &'a Block, offset: usize, mut key: Vec<u8>) -> Result<Cursor<'a>, Error> {
+        // Check for overrun.
+        if offset >= block.restarts_boundary {
+            return Ok(Cursor::Tail { block });
+        }
         // Parse `key_value`.
-        let mut up = Unpacker::new(&self.block().bytes[offset..self.block().restarts_boundary]);
+        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
         let be: BlockEntry = up.unpack()
             .map_err(|e| Error::UnpackError{
                 error: e,
                 context: format!("could not unpack key-value pair at offset={}", offset),
             })?;
-        let next_offset = self.block().restarts_boundary - up.remain().len();
-        // Assemble the cursor for the current position.  Always positioned.
-        let mut key = match self {
-            Cursor::Head { block: _ } => Vec::new(),
-            Cursor::Tail { block: _ } => Vec::new(),
-            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, key } => {
-                let mut new = Vec::new();
-                std::mem::swap(key, &mut new);
-                new
-            },
-        };
+        let next_offset = block.restarts_boundary - up.remain().len();
+        let restart_idx = block.restart_for_offset(offset);
+        // Assemble the returnable cursor.
         key.truncate(be.shared());
         key.extend_from_slice(be.key_frag());
-        *self = Cursor::Positioned {
-            block: self.block(),
-            restart_idx: self.restart_idx(),
+        let cursor = Cursor::Positioned {
+            block: block,
+            restart_idx,
             offset,
             next_offset,
             key,
-        };
-        // Assemble the return value.
-        let kv = KeyValuePair {
-            key: match self {
-                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
-                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
-                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
-            },
             timestamp: be.timestamp(),
             value: be.value(),
         };
-        Ok(kv)
+        Ok(cursor)
+    }
+
+    fn key_value_pair(&self) -> Option<KeyValuePair> {
+        match self {
+            Cursor::Head { block: _ } => { None },
+            Cursor::Tail { block: _ } => { None },
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, ref key, timestamp, value } => {
+                let kvp = KeyValuePair {
+                    key: &key,
+                    timestamp: *timestamp,
+                    value: *value,
+                };
+                Some(kvp)
+            }
+        }
     }
 }
 
@@ -384,6 +437,7 @@ impl<'a> Iterator for Cursor<'a> {
         *self = Cursor::Head {
             block: self.block(),
         };
+        self.next()?;
         Ok(())
     }
 
@@ -391,6 +445,7 @@ impl<'a> Iterator for Cursor<'a> {
         *self = Cursor::Tail {
             block: self.block(),
         };
+        self.prev()?;
         Ok(())
     }
 
@@ -398,30 +453,22 @@ impl<'a> Iterator for Cursor<'a> {
         if self.block().num_restarts == 0 {
             return Err(Error::Corruption { context: "a block with 0 restarts".to_string() }.into());
         }
-        let mut query = self.clone();
         let mut left: usize = 0usize;
         let mut right: usize = self.block().num_restarts - 1;
 
-        // Break when left == right.
+        // Binary search to the correct block.
         while left < right {
             // When left + 1 == right this will set mid == right allowing us to
             // assign right = mid - 1 and hit the left == right condition at top of loop; else,
             // move much closer to the top of the loop.
             let mid = (left + right + 1) / 2;
-            query.seek_block(mid)?;
-            let value = match query.next()? {
-                Some(value) => value,
-                None => {
-                    right = mid;
-                    continue;
-                }
-            };
-            match compare_bytes(key, &value.key) {
+            let kvp = self.seek_block(mid)?;
+            match compare_bytes(key, &kvp.key) {
                 Ordering::Less => {
                     // left     mid     right
                     // |--------|-------|
                     //       |
-                    right = mid - 1
+                    right = mid - 1;
                 },
                 Ordering::Equal => {
                     // left     mid     right
@@ -429,35 +476,62 @@ impl<'a> Iterator for Cursor<'a> {
                     //          |
                     // When the keys are equal, move left.  We don't move to mid - 1 in case the
                     // first of the key is in mid.
-                    right = mid
+                    //
+                    // NOTE(rescrv):  It's critical we don't bail early on equal.  If the key is
+                    // equal we'll keep moving the right barrier until we hit the first key.  Left
+                    // will never move to past the first key.
+                    right = mid;
                 },
                 Ordering::Greater => {
                     // left     mid     right
                     // |--------|-------|
                     //           |
-                    left = mid + 1
+                    left = mid + 1;
                 },
             };
         }
 
-        // query has been seek_block'd to the block with the key we are seeking to.
-        let mut value = query.same()?;
-        while let Some(v) = value {
+        let mut kvp = Some(self.seek_block(left)?);
+
+        // Check for the case where all keys are bigger.
+        if compare_bytes(key, kvp.as_ref().unwrap().key).is_lt() {
+            assert_eq!(0, left);
+            *self = Cursor::Head {
+                block: self.block(),
+            };
+            return Ok(());
+        }
+
+        // Scan until we find the key.
+        while let Some(v) = kvp {
             if compare_bytes(key, v.key).is_gt() {
-                value = query.next()?;
+                kvp = self.next()?;
             } else {
                 break;
             }
         }
 
+        // Reposition the cursor so that a call to next or prev will bias it appropriately.
+        match self {
+            Cursor::Head { .. } => {},
+            Cursor::Tail { .. } => {},
+            Cursor::Positioned { block: _, restart_idx: _, offset, next_offset, key: _, timestamp: _, value: _ } => {
+                *next_offset = *offset;
+            },
+        };
+
         Ok(())
     }
 
     fn prev(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
-        // This is the offset of the item we will seek to with a call to `next`, so record the
-        // offset of next.
-        let next_offset = self.next_offset();
-        if next_offset <= 0 {
+        // The target offset where we won't proceed past.
+        let target_offset = match self {
+            Cursor::Head { block: _ } => { return Ok(None); },
+            Cursor::Tail { block } => { block.restarts_boundary },
+            Cursor::Positioned { block: _, restart_idx: _, offset, next_offset: _, key: _, timestamp: _, value: _ } => { *offset },
+        };
+        // Check for left-underrun.
+        if target_offset <= 0 {
             *self = Cursor::Head {
                 block: self.block(),
             };
@@ -465,36 +539,30 @@ impl<'a> Iterator for Cursor<'a> {
         }
         // If we happen to be at the boundary of a restart, step.
         let current_restart_idx = self.restart_idx();
-        let restart_idx = if next_offset <= self.block().restart_point(current_restart_idx) as usize {
+        let restart_idx = if target_offset <= self.block().restart_point(current_restart_idx) as usize {
             if current_restart_idx == 0 {
                 return Err(Error::Corruption {
-                    context: format!("next_offset={} <= restarts[{}]={} on zero'th restart",
-                                     next_offset, current_restart_idx, self.block().restart_point(current_restart_idx)),
+                    context: format!("target_offset={} <= restarts[{}]={} on zero'th restart",
+                                     target_offset, current_restart_idx, self.block().restart_point(current_restart_idx)),
                 }.into());
             }
             current_restart_idx - 1
         } else {
             current_restart_idx
         };
+        // If the restart index is out of bounds.
         if restart_idx >= self.block().restarts_boundary {
             return Err(Error::Corruption {
                 context: format!("restart_idx={} exceeds restarts_boundary={}",
                                  restart_idx, self.block().restarts_boundary),
             }.into());
         }
-        if restart_idx >= current_restart_idx {
-            return Err(Error::Corruption {
-                context: format!("restart_idx={} >= previous restart_idx={}",
-                                 restart_idx, current_restart_idx),
-            }.into());
-        }
-        // Use next so that we use the same code in both directions.
+        // Scan forward from the block index.
         self.seek_block(restart_idx)?;
-        while self.next_offset() < next_offset {
+        while self.next_offset() < target_offset {
             self.next()?;
         }
-        // TODO(rescrv): Double parsing with same.
-        self.same()
+        Ok(self.key_value_pair())
     }
 
     fn next(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
@@ -503,63 +571,49 @@ impl<'a> Iterator for Cursor<'a> {
         }
         let offset = self.next_offset();
         if offset >= self.block().restarts_boundary {
+            *self = Cursor::Tail {
+                block: self.block()
+            };
             return Ok(None);
         }
         if self.restart_idx() + 1 < self.block().num_restarts && self.block().restart_point(self.restart_idx() + 1) as usize <= offset {
             // We're jumping to the next block, so just seek_block to force a refresh of the key,
             // along with safety checks on key_frag.
-            self.seek_block(self.restart_idx() + 1)?;
-            return self.same();
+            let value = self.seek_block(self.restart_idx() + 1)?;
+            return Ok(Some(value));
         };
-        let kv = self.load_key_value(offset)?;
-        Ok(Some(kv))
+        let key = match self {
+            Cursor::Head { block: _ } => Vec::new(),
+            Cursor::Tail { block: _ } => Vec::new(),
+            Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, ref mut key, timestamp: _, value: _ } => {
+                let mut ret = Vec::new();
+                key.truncate(0);
+                std::mem::swap(&mut ret, key);
+                ret
+            },
+        };
+        *self = Cursor::load_key_value(self.block(), offset, key)?;
+        Ok(self.key_value_pair())
     }
 
     fn same(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
-        let (block, offset) = match self {
-            Cursor::Head { block: _ } => { return Ok(None); }
-            Cursor::Tail { block: _ } => { return Ok(None); }
-            Cursor::Positioned { block, restart_idx: _, offset, next_offset: _, key: _ } => {
-                (block, *offset)
-            }
-        };
-        // Parse `key_value`.
-        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
-        let be: BlockEntry = up.unpack()
-            .map_err(|e| Error::UnpackError{
-                error: e,
-                context: format!("could not unpack key-value pair at offset={}", offset),
-            })?;
-        // Assemble the return value.
-        let kv = KeyValuePair {
-            key: match self {
-                Cursor::Positioned { block:_, restart_idx: _, offset: _, next_offset: _, key } => { key },
-                Cursor::Head { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Head") },
-                Cursor::Tail { block: _ } => { panic!("we just assigned a Cursor::Positioned to self and it is now a Tail") },
-            },
-            timestamp: be.timestamp(),
-            value: be.value(),
-        };
-        Ok(Some(kv))
+        Ok(self.key_value_pair())
     }
 }
 
-/////////////////////////////////////////// compare_bytes //////////////////////////////////////////
-
-// Content under CC By-Sa.  I just use as is, as can you.
-// https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
-fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
-    for (ai, bi) in a.iter().zip(b.iter()) {
-        match ai.cmp(&bi) {
-            Ordering::Equal => continue,
-            ord => return ord
+impl<'a> PartialEq for Cursor<'a> {
+    fn eq(&self, rhs: &Cursor<'a>) -> bool {
+        match (self, rhs) {
+            (&Cursor::Head { block: _ }, &Cursor::Head { block: _ }) => { true },
+            (&Cursor::Tail { block: _ }, &Cursor::Tail { block: _ }) => { true },
+            (&Cursor::Positioned { block: _, restart_idx: ri1, offset: o1, next_offset: no1, key: ref k1, timestamp: t1, value: v1 },
+             &Cursor::Positioned { block: _, restart_idx: ri2, offset: o2, next_offset: no2, key: ref k2, timestamp: t2, value: v2 }) => {
+                ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2 && v1 == v2
+            },
+            _ => { false }
         }
     }
-
-    /* if every single element was equal, compare length */
-    a.len().cmp(&b.len())
 }
-// End borrowed code
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
@@ -685,12 +739,175 @@ mod tests {
         let got = finisher.as_slice();
         assert_eq!(exp, got);
 
-
-
         let block = Block::new(&got).unwrap();
         let mut cursor = Cursor::new(&block);
         cursor.seek(&[106, 113, 67, 73, 122, 73, 98, 85]).unwrap();
     }
+
+    #[test]
+    fn seek_bug_gone() {
+        let key = "kAvwRm5E";
+        let timestamp = 4092481979873166344;
+        let value = "xdQPKOyZwQUykR8i";
+
+        let mut block = Builder::new(BuilderOptions::default());
+        block.put(key.as_bytes(), timestamp, value.as_bytes());
+        let finisher = block.finish();
+
+        let block = Block::new(finisher.as_slice()).unwrap();
+        let mut cursor = Cursor::new(&block);
+        let target = "jqCIzIbU";
+        cursor.seek(target.as_bytes()).unwrap();
+        let kvp = cursor.next().unwrap().unwrap();
+        assert_eq!(key.as_bytes(), kvp.key);
+        assert_eq!(timestamp, kvp.timestamp);
+        assert_eq!(Some(value.as_bytes()), kvp.value);
+    }
+
+    #[test]
+    fn cursor_equals() {
+        let mut builder = Builder::new(BuilderOptions::default());
+        builder.put("E".as_bytes(), 17563921251225492277, "".as_bytes());
+        let finished = builder.finish();
+        let block = &Block::new(finished.as_slice()).unwrap();
+
+        let lhs = Cursor::Head { block };
+        let rhs = Cursor::Head { block };
+        assert_eq!(lhs, rhs);
+
+        let lhs = Cursor::Tail { block };
+        let rhs = Cursor::Tail { block };
+        assert_eq!(lhs, rhs);
+
+        let lhs = Cursor::Positioned {
+            block,
+            restart_idx: 0,
+            offset: 0,
+            next_offset: 19,
+            key: "E".as_bytes().to_vec(),
+            timestamp: 17563921251225492277,
+            value: Some("".as_bytes()),
+        };
+        let rhs = Cursor::Positioned {
+            block,
+            restart_idx: 0,
+            offset: 0,
+            next_offset: 19,
+            key: "E".as_bytes().to_vec(),
+            timestamp: 17563921251225492277,
+            value: Some("".as_bytes()),
+        };
+        assert_eq!(lhs, rhs);
+    }
+
+    #[test]
+    fn load_key_value() {
+		let bytes = &[
+            // record
+            66/*8*/, 18/*sz*/,
+            8/*1*/, 0,
+            18/*2*/, 1/*sz*/, 69,
+            24/*3*/, /*varint*/181, 182, 235, 145, 160, 170, 229, 223, 243, 1,
+            34/*4*/, 0/*sz*/,
+
+			// record
+			66/*8*/, 17/*sz*/,
+			8/*1*/, 0,
+			18/*2*/, 1/*sz*/, 107,
+			24/*3*/, /*varint*/136, 136, 156, 160, 216, 213, 218, 229, 56,
+			34/*4*/, 0/*sz*/,
+
+            // restarts
+            82/*10*/, 4/*sz*/,
+            0, 0, 0, 0,
+            93/*11*/,
+            1, 0, 0, 0,
+		];
+        let block = Block::new(bytes).unwrap();
+
+        let exp = Cursor::Positioned {
+            block: &block,
+            restart_idx: 0,
+            offset: 0,
+            next_offset: 20,
+            key: "E".as_bytes().to_vec(),
+            timestamp: 17563921251225492277,
+            value: Some("".as_bytes()),
+        };
+        let got = Cursor::load_key_value(&block, 0, Vec::new()).unwrap();
+        assert_eq!(exp, got);
+
+        let exp = Cursor::Positioned {
+            block: &block,
+            restart_idx: 0,
+            offset: 20,
+            next_offset: 39,
+            key: "k".as_bytes().to_vec(),
+            timestamp: 4092481979873166344,
+            value: Some("".as_bytes()),
+        };
+        let got = Cursor::load_key_value(&block, 20, Vec::new()).unwrap();
+        assert_eq!(exp, got);
+
+        let exp = Cursor::Tail { block: &block };
+        let got = Cursor::load_key_value(&block, 39, Vec::new()).unwrap();
+        assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn human_guacamole_1() {
+        // --num-keys 2
+        // --key-bytes 1
+        // --value-bytes 0
+        // --num-seeks 1000
+        // --seek-distance 10
+        let builder_opts = BuilderOptions {
+            bytes_restart_interval: 512,
+            key_value_pairs_restart_interval: 16,
+        };
+        let mut builder = Builder::new(builder_opts);
+        builder.put("E".as_bytes(), 17563921251225492277, "".as_bytes());
+        builder.put("k".as_bytes(), 4092481979873166344, "".as_bytes());
+        let finished = builder.finish();
+
+        let block = Block::new(finished.as_slice()).unwrap();
+		let exp = [
+            // record
+            66/*8*/, 18/*sz*/,
+            8/*1*/, 0,
+            18/*2*/, 1/*sz*/, 69,
+            24/*3*/, /*varint*/181, 182, 235, 145, 160, 170, 229, 223, 243, 1,
+            34/*4*/, 0/*sz*/,
+
+			// record
+			66/*8*/, 17/*sz*/,
+			8/*1*/, 0,
+			18/*2*/, 1/*sz*/, 107,
+			24/*3*/, /*varint*/136, 136, 156, 160, 216, 213, 218, 229, 56,
+			34/*4*/, 0/*sz*/,
+
+            // restarts
+            82/*10*/, 4/*sz*/,
+            0, 0, 0, 0,
+            93/*11*/,
+            1, 0, 0, 0,
+		];
+		assert_eq!(exp, block.bytes);
+
+        let mut cursor = Cursor::new(&block);
+        match cursor {
+            Cursor::Head { .. } => {},
+            _ => { panic!("cursor should always init to head: {:?}", cursor) },
+        };
+        cursor.seek("t".as_bytes()).unwrap();
+        match cursor {
+            Cursor::Tail { .. } => {},
+            _ => { panic!("cursor should seek to the end: {:?}", cursor) },
+        };
+        let got = cursor.next().unwrap();
+        assert_eq!(None, got);
+    }
+
 
     // TODO(rescrv): Test empty tables.
     // TODO(rescrv): Test corruption cases.
