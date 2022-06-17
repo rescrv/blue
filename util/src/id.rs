@@ -67,6 +67,61 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
     Some(result)
 }
 
+macro_rules! generate_id {
+    ($what:ident, $prefix:literal) => {
+        #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
+        pub struct $what {
+            id: [u8; id::BYTES],
+        }
+
+        impl $what {
+            pub const BOTTOM: $what = $what { id: [0u8; id::BYTES] };
+            pub const TOP: $what = $what { id: [0xffu8; id::BYTES], };
+
+            pub fn generate() -> Option<$what> {
+                match id::urandom() {
+                    Some(id) => Some($what { id }),
+                    None => None
+                }
+            }
+
+            pub fn from_human_readable(s: &str) -> Option<Self> {
+                let prefix = $prefix;
+                if !s.starts_with(prefix) {
+                    return None;
+                }
+                match id::decode(&s[prefix.len()..]) {
+                    Some(x) => Some(Self::new(x)),
+                    None => None,
+                }
+            }
+
+            pub fn human_readable(&self) -> String {
+                let readable = $prefix.to_string();
+                readable + encode_id(self.id)
+            }
+
+            fn new(id: [u8; id::BYTES]) -> Self {
+                Self {
+                    id
+                }
+            }
+        }
+
+        impl Default for $what {
+            fn default() -> $what {
+                $what::BOTTOM
+            }
+        }
+
+        impl fmt::Display for $what {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}{}", $prefix, id::encode(&self.id))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,23 +131,29 @@ mod tests {
         assert_ne!(Some([0u8; BYTES]), urandom());
     }
 
-    // Test that this constant does not change and document why.
     #[test]
     fn id_bytes_is_sixteen() {
         assert_eq!(BYTES, 16);
     }
 
-    // Test that the encode-to-human-readable function does its job.
     #[test]
     fn encode_id() {
         let id = [0x55u8; BYTES];
         assert_eq!(encode(&id), "55555555-5555-5555-5555-555555555555");
     }
 
-    // Test that the decode-from-human-readable function does its job.
     #[test]
     fn decode_id() {
         let id = [0x55u8; BYTES];
         assert_eq!(decode("55555555-5555-5555-5555-555555555555"), Some(id));
+    }
+
+    generate_id!(FooID, "foo:");
+
+    #[test]
+    fn generate_id() {
+        let id = FooID::new([0xffu8; BYTES]);
+        assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.human_readable());
+        assert_eq!(id, FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff"));
     }
 }
