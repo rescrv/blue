@@ -182,7 +182,7 @@ impl ReferenceKeyValueStore {
     fn seek(&mut self, what: Key) -> impl std::iter::Iterator<Item=KeyValueOperation> + '_ {
         let key = ReferenceKey {
             key: what,
-            timestamp: u64::max_value(),
+            timestamp: 0,
         };
         self.map.range((Bound::Included(key), Bound::Unbounded)).map(|x| x.1.clone())
     }

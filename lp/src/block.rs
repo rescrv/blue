@@ -373,18 +373,7 @@ impl<'a> Cursor<'a> {
             },
         };
         *self = Cursor::load_key_value(self.block(), offset, key)?;
-        match self {
-            // TODO(rescrv):  Ask whether these can be inlined into the type system.  Sounds like
-            // dependent types, so the answer is probably not.
-            Cursor::Head { block: _ } => { panic!("load_key_value must position the cursor"); },
-            Cursor::Tail { block: _ } => { panic!("load_key_value must position the cursor"); },
-            Cursor::Positioned { block: _, restart_idx: _, offset, next_offset, key: _, timestamp: _, value: _ } => {
-                // When we seek to a block, we set next_offset to offset so that a call to next or
-                // prev will fall on the divider.  A call to prev or next will span the divider.
-                *next_offset = *offset;
-                Ok(self.key_value_pair().unwrap())
-            }
-        }
+        Ok(self.key_value_pair().unwrap())
     }
 
     fn load_key_value(block: &'a Block, offset: usize, mut key: Vec<u8>) -> Result<Cursor<'a>, Error> {
@@ -495,7 +484,6 @@ impl<'a> Iterator for Cursor<'a> {
 
         // Check for the case where all keys are bigger.
         if compare_bytes(key, kvp.as_ref().unwrap().key).is_lt() {
-            assert_eq!(0, left);
             *self = Cursor::Head {
                 block: self.block(),
             };
@@ -908,6 +896,82 @@ mod tests {
         assert_eq!(None, got);
     }
 
+	#[test]
+    fn human_guacamole_2() {
+        // --num-keys 10
+        // --key-bytes 1
+        // --value-bytes 64
+        // --num-seeks 1
+        // --seek-distance 4
+        let builder_opts = BuilderOptions {
+            bytes_restart_interval: 512,
+            key_value_pairs_restart_interval: 16,
+        };
+        let mut builder = Builder::new(builder_opts);
+        builder.put("4".as_bytes(), 5220327133503220768, "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes());
+        builder.put("A".as_bytes(), 2365635627947495809, "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes());
+        builder.put("E".as_bytes(), 17563921251225492277, "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes());
+        builder.put("I".as_bytes(), 3844377046565620216, "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes());
+        builder.put("J".as_bytes(), 14848435744026832213, "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes());
+        builder.del("U".as_bytes(), 8329339752768468916);
+        builder.put("g".as_bytes(), 10374159306796994843, "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes());
+        builder.put("k".as_bytes(), 4092481979873166344, "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes());
+        builder.put("t".as_bytes(), 7790837488841419319, "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes());
+        builder.put("v".as_bytes(), 2133827469768204743, "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes());
+        let finisher = builder.finish();
+        let block = Block::new(finisher.as_slice()).unwrap();
+        // Top of loop seeks to: Key { key: "d" }
+        let mut cursor = Cursor::new(&block);
+        cursor.seek("d".as_bytes()).unwrap();
+        // Next to g
+        let got = cursor.next().unwrap().unwrap();
+        assert_eq!("g".as_bytes(), got.key);
+        assert_eq!(10374159306796994843, got.timestamp);
+        assert_eq!(Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes()), got.value);
+        assert_eq!(Cursor::Positioned {
+            block: &block,
+            restart_idx: 0,
+            offset: 434,
+            next_offset: 518,
+            key: "g".as_bytes().to_vec(),
+            timestamp: 10374159306796994843,
+            value: Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes()),
+        }, cursor);
+        // Next to k
+        let got = cursor.next().unwrap().unwrap();
+        assert_eq!("k".as_bytes(), got.key);
+        assert_eq!(4092481979873166344, got.timestamp);
+        assert_eq!(Some("xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes()), got.value);
+        assert_eq!(Cursor::Positioned {
+            block: &block,
+            restart_idx: 518,
+            offset: 518,
+            next_offset: 601,
+            key: "k".as_bytes().to_vec(),
+            timestamp: 4092481979873166344,
+            value: Some("xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes()),
+        }, cursor);
+        // Next to t
+        let got = cursor.next().unwrap().unwrap();
+        let exp = KeyValuePair {
+            key: "t".as_bytes(),
+            timestamp: 7790837488841419319,
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
+        };
+        assert_eq!(exp, got);
+        assert_eq!("t".as_bytes(), got.key);
+        assert_eq!(7790837488841419319, got.timestamp);
+        assert_eq!(Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()), got.value);
+        assert_eq!(Cursor::Positioned {
+            block: &block,
+            restart_idx: 518,
+            offset: 601,
+            next_offset: 684,
+            key: "t".as_bytes().to_vec(),
+            timestamp: 7790837488841419319,
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
+        }, cursor);
+    }
 
     // TODO(rescrv): Test empty tables.
     // TODO(rescrv): Test corruption cases.
