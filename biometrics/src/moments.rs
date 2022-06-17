@@ -10,6 +10,16 @@ pub struct Moments {
 }
 
 impl Moments {
+    pub const fn new() -> Self {
+        Moments {
+            n: 0,
+            m1: 0.0,
+            m2: 0.0,
+            m3: 0.0,
+            m4: 0.0,
+        }
+    }
+
     pub fn push(&mut self, x: f64) {
         let n1: f64 = self.n as f64;
         self.n += 1;
@@ -95,5 +105,18 @@ impl Moments {
             m3,
             m4,
         }
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moments_may_be_static() {
+        static MOMENTS: Moments = Moments::new();
+        println!("MOMENTS = {} {} {} {}", MOMENTS.n(), MOMENTS.mean(), MOMENTS.skewness(), MOMENTS.kurtosis());
     }
 }
