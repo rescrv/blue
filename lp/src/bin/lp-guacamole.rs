@@ -146,18 +146,24 @@ impl Guac<KeyValueOperation> for KeyValueOperationGuacamole {
 
 ////////////////////////////////////// ReferenceKeyValueStore //////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ReferenceKey {
     key: Key,
     timestamp: u64,
 }
 
-impl PartialOrd for ReferenceKey {
-    fn partial_cmp(&self, rhs: &ReferenceKey) -> Option<std::cmp::Ordering> {
+impl Ord for ReferenceKey {
+    fn cmp(&self, rhs: &ReferenceKey) -> std::cmp::Ordering {
         let key1 = self.key.key.as_bytes();
         let key2 = rhs.key.key.as_bytes();
-        Some(key1.cmp(key2)
-            .then(self.timestamp.cmp(&rhs.timestamp).reverse()))
+        lp::compare_bytes(key1, key2)
+            .then(self.timestamp.cmp(&rhs.timestamp).reverse())
+    }
+}
+
+impl PartialOrd for ReferenceKey {
+    fn partial_cmp(&self, rhs: &ReferenceKey) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
     }
 }
 
@@ -182,7 +188,7 @@ impl ReferenceKeyValueStore {
     fn seek(&mut self, what: Key) -> impl std::iter::Iterator<Item=KeyValueOperation> + '_ {
         let key = ReferenceKey {
             key: what,
-            timestamp: 0,
+            timestamp: u64::max_value(),
         };
         self.map.range((Bound::Included(key), Bound::Unbounded)).map(|x| x.1.clone())
     }
@@ -225,7 +231,29 @@ fn main() {
                       .takes_value(true)
                       .help("Number of keys to scan from seek position."));
     let args = app.get_matches();
-    // Our workload generator
+    // Check the reference key value store for sort order.
+    let mut refkv = ReferenceKeyValueStore::default();
+    let kvo1 = KeyValueOperation::Put(KeyValuePut {
+        key: Key {
+            key: "k".to_string(),
+        },
+        timestamp: 0,
+        value: "".to_string(),
+    });
+    let kvo2 = KeyValueOperation::Put(KeyValuePut {
+        key: Key {
+            key: "k".to_string(),
+        },
+        timestamp: 1,
+        value: "".to_string(),
+    });
+    refkv.op(kvo1.clone());
+    refkv.op(kvo2.clone());
+    let mut iter = refkv.seek(Key::default());
+    assert_eq!(Some(kvo2), iter.next(), "reference key value store not so reference");
+    assert_eq!(Some(kvo1), iter.next(), "reference key value store not so reference");
+    assert_eq!(None, iter.next(), "reference key value store not so reference");
+    // Our workload generator.
     let key_bytes = arg_as_u64(&args, "key-bytes", "8") as usize;
     let value_bytes = arg_as_u64(&args, "value-bytes", "128") as usize;
     let mut guac = Guacamole::default();
