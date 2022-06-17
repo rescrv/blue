@@ -445,11 +445,12 @@ impl<'a> Iterator for Cursor<'a> {
         let mut left: usize = 0usize;
         let mut right: usize = self.block().num_restarts - 1;
 
+        if right >= u32::max_value() as usize {
+            return Err(Error::Corruption { context: "a block with too many restarts".to_string() }.into());
+        }
+
         // Binary search to the correct block.
         while left < right {
-            // When left + 1 == right this will set mid == right allowing us to
-            // assign right = mid - 1 and hit the left == right condition at top of loop; else,
-            // move much closer to the top of the loop.
             let mid = (left + right + 1) / 2;
             let kvp = self.seek_block(mid)?;
             match compare_bytes(key, &kvp.key) {
@@ -475,7 +476,10 @@ impl<'a> Iterator for Cursor<'a> {
                     // left     mid     right
                     // |--------|-------|
                     //           |
-                    left = mid + 1;
+                    // NOTE(rescrv):  We move to mid because the +1 in the mid computation ensures
+                    // we'll never have mid == left so long as left < right.  If we move to mid+1
+                    // we will potentially run off the end of the original value of right.
+                    left = mid;
                 },
             };
         }
@@ -973,6 +977,72 @@ mod tests {
         }, cursor);
     }
 
+	#[test]
+    fn guacamole_2() {
+        // --num-keys 10
+        // --key-bytes 1
+        // --value-bytes 64
+        // --num-seeks 1
+        // --seek-distance 4
+        let builder_opts = BuilderOptions {
+            bytes_restart_interval: 512,
+            key_value_pairs_restart_interval: 16,
+        };
+        let mut builder = Builder::new(builder_opts);
+        builder.put("4".as_bytes(), 5220327133503220768, "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes());
+        builder.put("A".as_bytes(), 2365635627947495809, "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes());
+        builder.put("E".as_bytes(), 17563921251225492277, "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes());
+        builder.put("I".as_bytes(), 3844377046565620216, "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes());
+        builder.put("J".as_bytes(), 14848435744026832213, "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes());
+        builder.del("U".as_bytes(), 8329339752768468916);
+        builder.put("g".as_bytes(), 10374159306796994843, "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes());
+        builder.put("k".as_bytes(), 4092481979873166344, "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes());
+        builder.put("t".as_bytes(), 7790837488841419319, "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes());
+        builder.put("v".as_bytes(), 2133827469768204743, "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes());
+        let finisher = builder.finish();
+        let block = Block::new(finisher.as_slice()).unwrap();
+        // Top of loop seeks to: Key { key: "d" }
+        let mut cursor = Cursor::new(&block);
+        cursor.seek("d".as_bytes()).unwrap();
+        let _got = cursor.next().unwrap();
+        let _got = cursor.next().unwrap();
+        let got = cursor.next().unwrap();
+        let exp = KeyValuePair {
+            key: "t".as_bytes(),
+            timestamp: 7790837488841419319,
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
+        };
+        assert_eq!(Some(exp), got);
+    }
+
+	#[test]
+    fn human_guacamole_3() {
+        // --num-keys 10
+        // --key-bytes 1
+        // --value-bytes 64
+        // --num-seeks 10
+        // --seek-distance 1
+        let builder_opts = BuilderOptions {
+            bytes_restart_interval: 512,
+            key_value_pairs_restart_interval: 16,
+        };
+        let mut builder = Builder::new(builder_opts);
+        builder.put("4".as_bytes(), 5220327133503220768, "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes());
+        builder.put("A".as_bytes(), 2365635627947495809, "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes());
+        builder.put("E".as_bytes(), 17563921251225492277, "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes());
+        builder.put("I".as_bytes(), 3844377046565620216, "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes());
+        builder.put("J".as_bytes(), 14848435744026832213, "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes());
+        builder.del("U".as_bytes(), 8329339752768468916);
+        builder.put("g".as_bytes(), 10374159306796994843, "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes());
+        builder.put("k".as_bytes(), 4092481979873166344, "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes());
+        builder.put("t".as_bytes(), 7790837488841419319, "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes());
+        builder.put("v".as_bytes(), 2133827469768204743, "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes());
+        let finisher = builder.finish();
+        let block = Block::new(finisher.as_slice()).unwrap();
+        // Top of loop seeks to: Key { key: "u" }
+        let mut cursor = Cursor::new(&block);
+        cursor.seek("u".as_bytes()).unwrap();
+	}
+
     // TODO(rescrv): Test empty tables.
-    // TODO(rescrv): Test corruption cases.
 }
