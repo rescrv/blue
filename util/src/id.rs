@@ -101,6 +101,10 @@ macro_rules! generate_id {
                 readable + encode_id(self.id)
             }
 
+            pub fn prefix_free_readable(&self) -> String {
+                encode_id(self.id)
+            }
+
             fn new(id: [u8; id::BYTES]) -> Self {
                 Self {
                     id
