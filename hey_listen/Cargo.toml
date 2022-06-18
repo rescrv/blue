@@ -1,0 +1,12 @@
+[package]
+name = "hey_listen"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+prototk = { path = "../prototk" }
+prototk_derive = { path = "../prototk_derive" }
+
+biometrics = { path = "../biometrics" }
