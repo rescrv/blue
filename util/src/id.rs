@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Read;
@@ -71,15 +72,15 @@ macro_rules! generate_id {
     ($what:ident, $prefix:literal) => {
         #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
         pub struct $what {
-            id: [u8; id::BYTES],
+            id: [u8; BYTES],
         }
 
         impl $what {
-            pub const BOTTOM: $what = $what { id: [0u8; id::BYTES] };
-            pub const TOP: $what = $what { id: [0xffu8; id::BYTES], };
+            pub const BOTTOM: $what = $what { id: [0u8; BYTES] };
+            pub const TOP: $what = $what { id: [0xffu8; BYTES], };
 
             pub fn generate() -> Option<$what> {
-                match id::urandom() {
+                match urandom() {
                     Some(id) => Some($what { id }),
                     None => None
                 }
@@ -90,7 +91,7 @@ macro_rules! generate_id {
                 if !s.starts_with(prefix) {
                     return None;
                 }
-                match id::decode(&s[prefix.len()..]) {
+                match decode(&s[prefix.len()..]) {
                     Some(x) => Some(Self::new(x)),
                     None => None,
                 }
@@ -98,14 +99,14 @@ macro_rules! generate_id {
 
             pub fn human_readable(&self) -> String {
                 let readable = $prefix.to_string();
-                readable + encode_id(self.id)
+                readable + &encode(&self.id)
             }
 
             pub fn prefix_free_readable(&self) -> String {
-                encode_id(self.id)
+                encode(&self.id)
             }
 
-            fn new(id: [u8; id::BYTES]) -> Self {
+            fn new(id: [u8; BYTES]) -> Self {
                 Self {
                     id
                 }
@@ -120,7 +121,7 @@ macro_rules! generate_id {
 
         impl fmt::Display for $what {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "{}{}", $prefix, id::encode(&self.id))
+                write!(f, "{}{}", $prefix, encode(&self.id))
             }
         }
     }
@@ -158,6 +159,6 @@ mod tests {
     fn generate_id() {
         let id = FooID::new([0xffu8; BYTES]);
         assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.human_readable());
-        assert_eq!(id, FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff"));
+        assert_eq!(Some(id), FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff"));
     }
 }
