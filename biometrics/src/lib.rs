@@ -7,6 +7,7 @@ use std::time::{SystemTime,UNIX_EPOCH};
 
 pub mod sensors;
 pub mod moments;
+pub mod t_digest;
 
 pub use sensors::Counter;
 pub use sensors::Gauge;
