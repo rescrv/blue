@@ -1,15 +1,13 @@
-#[macro_use]
-extern crate util;
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use biometrics::{Counter,Moments};
+use id::generate_id;
 use util::stopwatch::Stopwatch;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
-util::generate_id!{TraceID, "trace:"}
+generate_id!{TraceID, "trace:"}
 
 /////////////////////////////////////////////// Clue ///////////////////////////////////////////////
 

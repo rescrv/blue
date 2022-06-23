@@ -67,6 +67,66 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
     Some(result)
 }
 
+#[macro_export]
+macro_rules! generate_id {
+    ($what:ident, $prefix:literal) => {
+        #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
+        pub struct $what {
+            pub id: [u8; $crate::BYTES],
+        }
+
+        impl $what {
+            pub const BOTTOM: $what = $what { id: [0u8; $crate::BYTES] };
+            pub const TOP: $what = $what { id: [0xffu8; $crate::BYTES], };
+
+            pub fn generate() -> Option<$what> {
+                match $crate::urandom() {
+                    Some(id) => Some($what { id }),
+                    None => None
+                }
+            }
+
+            pub fn from_human_readable(s: &str) -> Option<Self> {
+                let prefix = $prefix;
+                if !s.starts_with(prefix) {
+                    return None;
+                }
+                match $crate::decode(&s[prefix.len()..]) {
+                    Some(x) => Some(Self::new(x)),
+                    None => None,
+                }
+            }
+
+            pub fn human_readable(&self) -> String {
+                let readable = $prefix.to_string();
+                readable + &$crate::encode(&self.id)
+            }
+
+            pub fn prefix_free_readable(&self) -> String {
+                $crate::encode(&self.id)
+            }
+
+            pub fn new(id: [u8; $crate::BYTES]) -> Self {
+                Self {
+                    id
+                }
+            }
+        }
+
+        impl Default for $what {
+            fn default() -> $what {
+                $what::BOTTOM
+            }
+        }
+
+        impl std::fmt::Display for $what {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}{}", $prefix, $crate::encode(&self.id))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,8 +157,12 @@ mod tests {
 
     #[test]
     fn generate_id() {
+        let _x = FooID::generate().unwrap();
         let id = FooID::new([0xffu8; BYTES]);
         assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.human_readable());
+        assert_eq!("ffffffff-ffff-ffff-ffff-ffffffffffff", id.prefix_free_readable());
         assert_eq!(Some(id), FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff"));
+        assert_eq!([0x00u8; BYTES], FooID::BOTTOM.id);
+        assert_eq!([0xffu8; BYTES], FooID::TOP.id);
     }
 }
