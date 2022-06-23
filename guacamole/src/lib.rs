@@ -17,7 +17,7 @@ D. J. Bernstein
 Public domain.
 */
 
-fn mash(x: u64, output: &mut [u32; 16]) {
+pub fn mash(x: u64, output: &mut [u32; 16]) {
     let low: u32 = (x & 0xffffffffu64) as u32;
     let high: u32 = (x >> 32) as u32;
 
