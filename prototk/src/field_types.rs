@@ -777,46 +777,6 @@ impl<'a> From<&'a &'a [u8]> for bytes<'a> {
     }
 }
 
-////////////////////////////////////////////// bytes32 /////////////////////////////////////////////
-
-pub struct bytes32([u8; 32]);
-
-impl<'a> FieldType<'a> for bytes32 {
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
-
-    type NativeType = [u8; 32];
-
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-}
-
-impl Packable for bytes32 {
-    fn pack_sz(&self) -> usize {
-        let x: &[u8] = &self.0;
-        <&[u8]>::pack_sz(&x)
-    }
-
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        let x: &[u8] = &self.0;
-        <&[u8]>::pack(&x, buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for bytes32 {
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (arr, rem) = <[u8; 32]>::unpack(buf)?;
-        Ok((bytes32(arr), rem))
-    }
-}
-
-impl<'a> From<&[u8; 32]> for bytes32 {
-    fn from(x: &[u8; 32]) -> Self {
-        Self(*x)
-    }
-}
-
 ////////////////////////////////////////////// buffer //////////////////////////////////////////////
 
 pub struct buffer(Buffer);

@@ -277,42 +277,6 @@ impl<'a, U: Unpackable<'a> + 'a> Unpackable<'a> for Vec<U> {
     }
 }
 
-///////////////////////////////// Packable/Unpackable for &[u8; 32] ////////////////////////////////
-// NOTE(rescrv):  I did not just reuse the n-byte packer with 32 bytes because I wanted to have
-// error messages and such, as well as make it easy on the proto field type code.  Lots easier.
-
-impl Packable for [u8; 32] {
-    fn pack_sz(&self) -> usize {
-        let x: &[u8] = self;
-        x.pack_sz()
-    }
-
-    fn pack(&self, out: &mut [u8]) {
-        let x: &[u8] = self;
-        x.pack(out)
-    }
-}
-
-impl<'a> Unpackable<'a> for [u8; 32] {
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let mut up = Unpacker::new(buf);
-        let len: v64 = up.unpack()?;
-        let len: usize = len.into();
-        if len != 32 {
-            return Err(Error::BufferWrongSize{ required: 32, had: len });
-        }
-        let rem = up.remain();
-        if rem.len() != 32 {
-            return Err(Error::BufferWrongSize{ required: 32, had: rem.len() });
-        }
-        let mut ret: [u8; 32] = <[u8; 32]>::default();
-        for i in 0..32 {
-            ret[i] = rem[i]
-        }
-        Ok((ret, &rem[32..]))
-    }
-}
-
 ////////////////////////////// Packable/Unpackable for n-tuple, n > 1 //////////////////////////////
 
 macro_rules! impl_pack_unpack_tuple {
@@ -774,8 +738,6 @@ impl FieldTypePackable for u64 {}
 impl FieldTypePackable for f32 {}
 impl FieldTypePackable for f64 {}
 impl<'a> FieldTypePackable for &'a [u8] {}
-impl<'a> FieldTypePackable for [u8; 32] {}
-impl<'a> FieldTypePackable for &'a [u8; 32] {}
 impl<'a> FieldTypePackable for Buffer {}
 impl<'a> FieldTypePackable for &'a str {}
 impl<'a> FieldTypePackable for String {}
@@ -910,22 +872,6 @@ impl<'a> FieldTypeAssigner for &'a [u8] {
     type NativeType = &'a [u8];
 
     fn assign_field_type(&mut self, x: &'a [u8]) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for [u8; 32] {
-    type NativeType = [u8; 32];
-
-    fn assign_field_type(&mut self, x: [u8; 32]) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for &'a [u8; 32] {
-    type NativeType = &'a [u8; 32];
-
-    fn assign_field_type(&mut self, x: &'a [u8; 32]) {
         *self = x;
     }
 }
