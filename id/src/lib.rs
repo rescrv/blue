@@ -127,6 +127,46 @@ macro_rules! generate_id {
     }
 }
 
+#[macro_export]
+macro_rules! generate_id_prototk {
+    ($what:ident) => {
+        impl prototk::Packable for $what {
+            fn pack_sz(&self) -> usize {
+                let id_buf: &[u8] = &self.id;
+                prototk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).pack_sz()
+            }
+
+            fn pack(&self, buf: &mut [u8]) {
+                let id_buf: &[u8] = &self.id;
+                prototk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).into_slice(buf);
+            }
+        }
+
+        impl<'a> prototk::Unpackable<'a> for $what {
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), prototk::Error> {
+                let mut up = prototk::Unpacker::new(buf);
+                let tag: prototk::v64 = up.unpack()?;
+                let v: prototk::v64 = up.unpack()?;
+                let v: usize = v.into();
+                let rem = up.remain();
+                if rem.len() < v {
+                    return Err(prototk::Error::BufferTooShort{ required: v, had: rem.len() });
+                }
+                if v != 16 {
+                    return Err(prototk::Error::BufferWrongSize{ required: 16, had: v });
+                }
+                let id = $what {
+                    id: rem[..16].try_into().unwrap(),
+                };
+                Ok((id, &rem[v..]))
+            }
+        }
+
+        impl<'a> prototk::Message<'a> for $what {
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
