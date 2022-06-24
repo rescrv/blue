@@ -3,7 +3,7 @@ use std::collections::BinaryHeap;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use util::generate_id;
+use id::{generate_id, generate_id_prototk};
 
 pub const MILLIS: u64 = 1_000;
 pub const SECONDS: u64 = 1_000_000;
@@ -14,6 +14,7 @@ pub const SECONDS: u64 = 1_000_000;
 enum Event {
     NOP,
     WatchDog { who: ProcessID },
+    Deliver { from: ProcessID, to: ProcessID, what: Vec<u8> },
 }
 
 impl Default for Event {
@@ -66,11 +67,13 @@ impl EventHeap {
 pub trait Process {
     fn pid(&self) -> ProcessID;
     fn watch_dog(&mut self, env: &mut Environment);
+    fn deliver(&mut self, env: &mut Environment, from: ProcessID, what: Vec<u8>);
 }
 
 ///////////////////////////////////////////// ProcessID ////////////////////////////////////////////
 
 generate_id!{ProcessID, "net:"}
+generate_id_prototk!{ProcessID}
 
 /////////////////////////////////////////// NetworkSwitch //////////////////////////////////////////
 
@@ -95,11 +98,16 @@ impl NetworkSwitch {
 #[derive(Clone,Debug,Default)]
 pub struct Environment {
     watch_dog: Option<u64>,
+    messages: Vec<(ProcessID, Vec<u8>)>,
 }
 
 impl Environment {
     pub fn set_watch_dog(&mut self, micros: u64) {
         self.watch_dog = Some(micros);
+    }
+
+    pub fn send(&mut self, destination: ProcessID, what: Vec<u8>) {
+        self.messages.push((destination, what));
     }
 }
 
@@ -140,6 +148,7 @@ impl Simulator {
             match ev {
                 Event::NOP => { self.nop(); },
                 Event::WatchDog { who } => { self.watch_dog(who); },
+                Event::Deliver { from, to, what } => { self.deliver(from, to, what); },
             };
         }
     }
@@ -152,6 +161,14 @@ impl Simulator {
         let proc: &mut dyn Process = &mut *proc.borrow_mut();
         let mut env = self.environment();
         proc.watch_dog(&mut env);
+        self.integrate(proc, env);
+    }
+
+    pub fn deliver(&mut self, from: ProcessID, to: ProcessID, what: Vec<u8>) {
+        let proc = self.get_process(to);
+        let proc: &mut dyn Process = &mut *proc.borrow_mut();
+        let mut env = self.environment();
+        proc.deliver(&mut env, from, what);
         self.integrate(proc, env);
     }
 
@@ -171,6 +188,10 @@ impl Simulator {
     fn integrate(&mut self, proc: &mut dyn Process, env: Environment) {
         if let Some(micros) = env.watch_dog {
             self.events.push(Event::WatchDog { who: proc.pid() }, micros);
+        }
+        let from = proc.pid();
+        for (to, what) in env.messages {
+            self.events.push(Event::Deliver { from, to, what }, 1);
         }
     }
 }
