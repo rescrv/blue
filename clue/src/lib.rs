@@ -219,8 +219,8 @@ pub struct PlainTextEmitter {
 impl Emitter for PlainTextEmitter {
     fn emit<'a>(&self, clue: &Clue<'a>) {
         let mode = match clue.data {
-            EnterOrExit::Enter { buffer } => { "enter" },
-            EnterOrExit::Exit { buffer } => { "exit" },
+            EnterOrExit::Enter { buffer: _ } => { "enter" },
+            EnterOrExit::Exit { buffer: _ } => { "exit" },
         };
         println!("{}:{}: {} {}", clue.file, clue.line, mode, clue.what);
     }
@@ -236,7 +236,7 @@ mod tests {
     fn it_works() {
         let emitter = PlainTextEmitter{};
         TRACER.with(|t| {
-            t.borrow_mut().emitter = Some(Rc::new(emitter));
+            t.borrow_mut().set_emitter(Rc::new(emitter));
         });
         let t = Trace::new(file!(), line!(), "clue.it_works1")
             .enter_with(Box::new(|_v| "foo".as_bytes()))
