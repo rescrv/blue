@@ -11,9 +11,9 @@ generate_id!{TraceID, "trace:"}
 
 /////////////////////////////////////////////// Clue ///////////////////////////////////////////////
 
-pub enum EnterOrExit<'a> {
-    Enter { buffer: &'a [u8] },
-    Exit { buffer: &'a [u8] },
+pub enum EnterOrExit {
+    Enter { buffer: Vec<u8> },
+    Exit { buffer: Vec<u8> },
 }
 
 pub struct Clue<'a> {
@@ -22,7 +22,7 @@ pub struct Clue<'a> {
     pub file: &'a str,
     pub line: u32,
     pub what: &'a str,
-    pub data: EnterOrExit<'a>,
+    pub data: EnterOrExit,
 }
 
 ////////////////////////////////////////////// Tracer //////////////////////////////////////////////
@@ -118,8 +118,8 @@ pub struct Trace {
     line: u32,
     what: &'static str,
     tracer: Rc<RefCell<Tracer>>,
-    enter: Option<Box<dyn for<'b> Fn(&'b mut Vec<u8>) -> &'b [u8]>>,
-    exit: Option<Box<dyn for<'b> Fn(&'b mut Vec<u8>) -> &'b [u8]>>,
+    enter: Option<Box<dyn Fn() -> Vec<u8>>>,
+    exit: Option<Box<dyn Fn() -> Vec<u8>>>,
 }
 
 impl Trace {
@@ -138,12 +138,12 @@ impl Trace {
         }
     }
 
-    pub fn enter_with(mut self, enter: Box<dyn for<'b> Fn(&'b mut Vec<u8>) -> &'b [u8]>) -> Self {
+    pub fn enter_with(mut self, enter: Box<dyn Fn() -> Vec<u8>>) -> Self {
         self.enter = Some(enter);
         self
     }
 
-    pub fn exit_with(mut self, exit: Box<dyn for<'b> Fn(&'b mut Vec<u8>) -> &'b [u8]>) -> Self {
+    pub fn exit_with(mut self, exit: Box<dyn Fn() -> Vec<u8>>) -> Self {
         self.exit = Some(exit);
         self
     }
@@ -157,14 +157,13 @@ impl Trace {
             file: self.file,
             line: self.line,
             what: self.what,
-            data: EnterOrExit::Enter { buffer: &[] },
+            data: EnterOrExit::Enter { buffer: Vec::default() },
         };
         let emitter = self.tracer.borrow().emitter();
         if let Some(ref emitter) = emitter {
-            let mut data = Vec::new();
             if let &Some(ref f) = &self.enter {
                 TRACE_EVAL_ENTER.click();
-                clue.data = EnterOrExit::Enter { buffer: f(&mut data) };
+                clue.data = EnterOrExit::Enter { buffer: f() };
             }
             emitter.emit(&clue);
             ENTER_MOMENTS.add(stopwatch.since());
@@ -182,14 +181,13 @@ impl Trace {
             file: self.file,
             line: self.line,
             what: self.what,
-            data: EnterOrExit::Exit { buffer: &[] },
+            data: EnterOrExit::Exit { buffer: Vec::default() },
         };
         let emitter = self.tracer.borrow().emitter();
         if let Some(ref emitter) = emitter {
-            let mut data = Vec::new();
             if let &Some(ref f) = &self.exit {
                 TRACE_EVAL_EXIT.click();
-                clue.data = EnterOrExit::Exit { buffer: f(&mut data) };
+                clue.data = EnterOrExit::Exit { buffer: f() };
             }
             emitter.emit(&clue);
             EXIT_MOMENTS.add(stopwatch.since());
@@ -205,10 +203,37 @@ impl Drop for Trace {
     }
 }
 
+/////////////////////////////////////////////// clue ///////////////////////////////////////////////
+
+#[macro_export]
+macro_rules! clue {
+    ($name:literal) => {
+        let t = Trace::new(file!(), line!(), $name);
+        t.enter();
+    };
+    ($name:literal, $exit:expr) => {
+        let t = Trace::new(file!(), line!(), $name)
+            .exit_with(Box::new($exit));
+        t.enter();
+    };
+    ($name:literal, $enter:expr, $exit:expr) => {
+        let t = Trace::new(file!(), line!(), $name)
+            .enter_with(Box::new($enter))
+            .exit_with(Box::new($exit));
+        t.enter();
+    };
+}
+
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
 pub trait Emitter {
     fn emit<'a>(&self, clue: &Clue<'a>);
+}
+
+pub fn register_emitter<E: 'static + Emitter>(emitter: E) {
+    TRACER.with(|t| {
+        t.borrow_mut().set_emitter(Rc::new(emitter));
+    });
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -235,16 +260,21 @@ mod tests {
     #[test]
     fn it_works() {
         let emitter = PlainTextEmitter{};
-        TRACER.with(|t| {
-            t.borrow_mut().set_emitter(Rc::new(emitter));
-        });
+        register_emitter(emitter);
         let t = Trace::new(file!(), line!(), "clue.it_works1")
-            .enter_with(Box::new(|_v| "foo".as_bytes()))
-            .exit_with(Box::new(|_v| "bar".as_bytes()));
+            .enter_with(Box::new(|| "foo".as_bytes().to_vec()))
+            .exit_with(Box::new(|| "bar".as_bytes().to_vec()));
         t.enter();
         let t = Trace::new(file!(), line!(), "clue.it_works2");
         t.enter();
         let t = Trace::new(file!(), line!(), "clue.it_works3");
         t.enter();
+    }
+
+    #[test]
+    fn macro_works() {
+        clue!{"macro.call1"};
+        clue!{"macro.call1", || { Vec::new() }};
+        clue!{"macro.call1", || { Vec::new() }, || { Vec::new() }};
     }
 }
