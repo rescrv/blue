@@ -1,0 +1,41 @@
+use std::str::FromStr;
+
+use super::{DataType,Field,Identifier};
+
+grammar;
+
+pub Field: Field = {
+    <t:FieldType> <i:Identifier> "=" <n:FieldNumber> => Field::Defined { number: n, name: i, data_type: t },
+    "reserved" <n: FieldNumber> => Field::Reserved { number: n },
+}
+
+///*
+//pub enum Field {
+//    Defined { number: u32, data_type: DataType },
+//    Reserved { number: u32 },
+//}
+
+pub FieldNumber: u32 = <s:r"[1-9][0-9]*"> => u32::from_str(s).unwrap();
+
+pub FieldType: DataType = {
+    "int32" => DataType::int32,
+    "int64" => DataType::int64,
+    "uint32" => DataType::uint32,
+    "uint64" => DataType::uint64,
+    "sint32" => DataType::sint32,
+    "sint64" => DataType::sint64,
+    "Bool" => DataType::Bool,
+    "fixed32" => DataType::fixed32,
+    "fixed64" => DataType::fixed64,
+    "sfixed32" => DataType::sfixed32,
+    "sfixed64" => DataType::sfixed64,
+    "float" => DataType::float,
+    "double" => DataType::double,
+    "bytes" => DataType::bytes,
+    "string" => DataType::string,
+    // XXX "message" <w:Identifier> => DataType::message { what: Box::new(<>), },
+}
+
+pub Identifier: Identifier = {
+    r"[_a-zA-Z][_a-zA-Z0-9]*" => Identifier::new(<>).unwrap(),
+}
