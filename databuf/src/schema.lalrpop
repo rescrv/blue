@@ -1,19 +1,31 @@
 use std::str::FromStr;
 
-use super::{DataType,Field,Identifier};
+use super::{DataType,Field,FieldList,Identifier,TableDefinition};
 
 grammar;
+
+pub TableDefinition: Result<TableDefinition, String> = {
+    "table" <name:Identifier> "(" <k: IdentifierList> ")" "{" <fields:FieldList> "}" => TableDefinition::new(name, k, fields),
+}
+
+pub FieldList: FieldList = {
+    <t:VectorOfFields> => FieldList::from_vec(t).unwrap(),
+}
+
+VectorOfFields: Vec<Field> = {
+    <mut fl:(<Field> ";")*> <f:Field?> ";" => match f {
+        None => fl,
+        Some(f) => {
+            fl.push(f);
+            fl
+        }
+    }
+}
 
 pub Field: Field = {
     <t:FieldType> <i:Identifier> "=" <n:FieldNumber> => Field::Defined { number: n, name: i, data_type: t },
     "reserved" <n: FieldNumber> => Field::Reserved { number: n },
 }
-
-///*
-//pub enum Field {
-//    Defined { number: u32, data_type: DataType },
-//    Reserved { number: u32 },
-//}
 
 pub FieldNumber: u32 = <s:r"[1-9][0-9]*"> => u32::from_str(s).unwrap();
 
@@ -33,7 +45,18 @@ pub FieldType: DataType = {
     "double" => DataType::double,
     "bytes" => DataType::bytes,
     "string" => DataType::string,
+    "uuid" => DataType::uuid,
     // XXX "message" <w:Identifier> => DataType::message { what: Box::new(<>), },
+}
+
+pub IdentifierList: Vec<Identifier> = {
+    <mut v:(<Identifier> ",")*> <e:Identifier?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
 }
 
 pub Identifier: Identifier = {
