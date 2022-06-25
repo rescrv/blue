@@ -1,0 +1,11 @@
+[package]
+name = "databuf"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+lalrpop = "0.19.8"
+
+[dependencies]
+lalrpop-util = "0.19.8"
+regex = "1"
