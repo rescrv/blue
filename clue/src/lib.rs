@@ -113,16 +113,17 @@ static TRACE_ID_GENERATE_LATENCY: Moments = Moments::new("clue.trace.id.generate
 static ENTER_MOMENTS: Moments = Moments::new("clue.trace.enter.latency");
 static EXIT_MOMENTS: Moments = Moments::new("clue.trace.exit.latency");
 
-pub struct Trace {
+pub struct Trace<'a> {
     file: &'static str,
     line: u32,
     what: &'static str,
     tracer: Rc<RefCell<Tracer>>,
-    enter: Option<Box<dyn Fn() -> Vec<u8>>>,
-    exit: Option<Box<dyn Fn() -> Vec<u8>>>,
+    enter: Option<Box<dyn FnOnce() -> Vec<u8> + 'a>>,
+    exit: Option<Box<dyn FnOnce() -> Vec<u8> + 'a>>,
+    marker: std::marker::PhantomData<&'a u8>,
 }
 
-impl Trace {
+impl<'a> Trace<'a> {
     pub fn new(file: &'static str, line: u32, what: &'static str) -> Self {
         TRACE_INSTANTIATIONS.click();
         let tracer: Rc<RefCell<Tracer>> = TRACER.with(|f| {
@@ -135,20 +136,21 @@ impl Trace {
             tracer: Rc::clone(&tracer),
             enter: None,
             exit: None,
+            marker: std::marker::PhantomData::default(),
         }
     }
 
-    pub fn enter_with(mut self, enter: Box<dyn Fn() -> Vec<u8>>) -> Self {
+    pub fn enter_with(mut self, enter: Box<dyn FnOnce() -> Vec<u8> + 'a>) -> Self {
         self.enter = Some(enter);
         self
     }
 
-    pub fn exit_with(mut self, exit: Box<dyn Fn() -> Vec<u8>>) -> Self {
+    pub fn exit_with(mut self, exit: Box<dyn FnOnce() -> Vec<u8> + 'a>) -> Self {
         self.exit = Some(exit);
         self
     }
 
-    pub fn enter(&self) {
+    pub fn enter(&mut self) {
         let stopwatch = Stopwatch::new();
         let (id, node) = self.tracer.borrow_mut().click_enter();
         let mut clue = Clue {
@@ -161,7 +163,7 @@ impl Trace {
         };
         let emitter = self.tracer.borrow().emitter();
         if let Some(ref emitter) = emitter {
-            if let &Some(ref f) = &self.enter {
+            if let Some(f) = self.enter.take() {
                 TRACE_EVAL_ENTER.click();
                 clue.data = EnterOrExit::Enter { buffer: f() };
             }
@@ -185,7 +187,7 @@ impl Trace {
         };
         let emitter = self.tracer.borrow().emitter();
         if let Some(ref emitter) = emitter {
-            if let &Some(ref f) = &self.exit {
+            if let Some(f) = self.exit.take() {
                 TRACE_EVAL_EXIT.click();
                 clue.data = EnterOrExit::Exit { buffer: f() };
             }
@@ -197,7 +199,7 @@ impl Trace {
     }
 }
 
-impl Drop for Trace {
+impl<'a> Drop for Trace<'a> {
     fn drop(&mut self) {
         self.exit();
     }
@@ -208,16 +210,16 @@ impl Drop for Trace {
 #[macro_export]
 macro_rules! clue {
     ($name:literal) => {
-        let t = $crate::Trace::new(file!(), line!(), $name);
+        let mut t = $crate::Trace::new(file!(), line!(), $name);
         t.enter();
     };
     ($name:literal, $exit:expr) => {
-        let t = $crate::Trace::new(file!(), line!(), $name)
+        let mut t = $crate::Trace::new(file!(), line!(), $name)
             .exit_with(Box::new($exit));
         t.enter();
     };
     ($name:literal, $enter:expr, $exit:expr) => {
-        let t = $crate::Trace::new(file!(), line!(), $name)
+        let mut t = $crate::Trace::new(file!(), line!(), $name)
             .enter_with(Box::new($enter))
             .exit_with(Box::new($exit));
         t.enter();
@@ -261,13 +263,13 @@ mod tests {
     fn it_works() {
         let emitter = PlainTextEmitter{};
         register_emitter(emitter);
-        let t = Trace::new(file!(), line!(), "clue.it_works1")
+        let mut t = Trace::new(file!(), line!(), "clue.it_works1")
             .enter_with(Box::new(|| "foo".as_bytes().to_vec()))
             .exit_with(Box::new(|| "bar".as_bytes().to_vec()));
         t.enter();
-        let t = Trace::new(file!(), line!(), "clue.it_works2");
+        let mut t = Trace::new(file!(), line!(), "clue.it_works2");
         t.enter();
-        let t = Trace::new(file!(), line!(), "clue.it_works3");
+        let mut t = Trace::new(file!(), line!(), "clue.it_works3");
         t.enter();
     }
 
@@ -286,6 +288,14 @@ mod tests {
         let y = 0.0;
         clue!{"macro.closure", move || {
             format!("x={} y={}", x, y).as_bytes().to_vec()
+        }};
+    }
+
+    #[test]
+    fn macro_move() {
+        let moved: Vec<u8> = Vec::new();
+        clue!{"macro.move", move || {
+            moved
         }};
     }
 }
