@@ -208,16 +208,16 @@ impl Drop for Trace {
 #[macro_export]
 macro_rules! clue {
     ($name:literal) => {
-        let t = Trace::new(file!(), line!(), $name);
+        let t = $crate::Trace::new(file!(), line!(), $name);
         t.enter();
     };
     ($name:literal, $exit:expr) => {
-        let t = Trace::new(file!(), line!(), $name)
+        let t = $crate::Trace::new(file!(), line!(), $name)
             .exit_with(Box::new($exit));
         t.enter();
     };
     ($name:literal, $enter:expr, $exit:expr) => {
-        let t = Trace::new(file!(), line!(), $name)
+        let t = $crate::Trace::new(file!(), line!(), $name)
             .enter_with(Box::new($enter))
             .exit_with(Box::new($exit));
         t.enter();
