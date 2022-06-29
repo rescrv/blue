@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "biometrics",
+    "clue",
+    "databuf",
+    "guacamole",
+    "hey_listen",
+    "id",
+    "lp",
+    "macaroons",
+    "prototk",
+    "prototk_derive",
+    "setsum",
+    "util",
+]
