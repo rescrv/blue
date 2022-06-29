@@ -274,7 +274,18 @@ mod tests {
     #[test]
     fn macro_works() {
         clue!{"macro.call1"};
-        clue!{"macro.call1", || { Vec::new() }};
-        clue!{"macro.call1", || { Vec::new() }, || { Vec::new() }};
+        clue!{"macro.call2", || { Vec::new() }};
+        clue!{"macro.call3", || { Vec::new() }, || { Vec::new() }};
+    }
+
+    #[test]
+    fn macro_closure() {
+        // Unfortunately we always have to move into a closure or deal with awkwardness.  Leave the
+        // surrounding boiler-plate for the rest of people.
+        let x = 5;
+        let y = 0.0;
+        clue!{"macro.closure", move || {
+            format!("x={} y={}", x, y).as_bytes().to_vec()
+        }};
     }
 }
