@@ -12,6 +12,7 @@ pub mod t_digest;
 pub use sensors::Counter;
 pub use sensors::Gauge;
 pub use sensors::Moments;
+pub use t_digest::TDigest;
 
 /////////////////////////////////////////// thread locals //////////////////////////////////////////
 
