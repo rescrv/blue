@@ -267,7 +267,7 @@ impl Collector {
 #[macro_export]
 macro_rules! click {
     ($name:literal) => {
-        static COUNTER: Counter = Counter::new($name);
+        static COUNTER: $crate::Counter = $crate::Counter::new($name);
         COUNTER.click();
     }
 }
