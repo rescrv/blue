@@ -33,19 +33,13 @@ struct EventState {
 
 ///////////////////////////////////////////// EventHeap ////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 struct EventHeap {
     clock: u64,
     events: BinaryHeap<Reverse<EventState>>,
 }
 
 impl EventHeap {
-    fn new() -> Self {
-        Self {
-            clock: 0,
-            events: BinaryHeap::new(),
-        }
-    }
-
     fn push(&mut self, what: Event, how_far_in_the_future: u64) {
         let when = self.clock + how_far_in_the_future;
         let state = EventState {
@@ -77,6 +71,7 @@ generate_id_prototk!{ProcessID}
 
 /////////////////////////////////////////// NetworkSwitch //////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 pub struct NetworkSwitch {
     links: Vec<ProcessID>,
 }
@@ -122,7 +117,7 @@ pub struct Simulator {
 impl Simulator {
     pub fn new() -> Self {
         Self {
-            events: EventHeap::new(),
+            events: EventHeap::default(),
             processes: Vec::new(),
             switches: Vec::new(),
         }
