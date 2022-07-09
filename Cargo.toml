@@ -11,5 +11,6 @@ members = [
     "prototk",
     "prototk_derive",
     "setsum",
+    "sim",
     "util",
 ]
