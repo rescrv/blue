@@ -184,14 +184,6 @@ impl Builder {
             while shared < max_shared && key[shared] == self.last_key[shared] {
                 shared += 1;
             }
-            // Assert that keys go in order.
-            // Either we ran out the end of the shared space and the last key is shorter than the
-            // current key, or we hit a division point where the keys diverged before their common
-            // length
-            assert!(
-                (shared == max_shared && self.last_key.len() < key.len())
-                    || self.last_key[shared] < key[shared]
-            );
             shared
         } else {
             // do a restart
@@ -553,7 +545,7 @@ impl<'a> Iterator for Cursor<'a> {
         while self.next_offset() < target_offset {
             self.next()?;
         }
-        Ok(self.key_value_pair())
+        self.same()
     }
 
     fn next(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
@@ -578,13 +570,12 @@ impl<'a> Iterator for Cursor<'a> {
             Cursor::Tail { block: _ } => Vec::new(),
             Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, ref mut key, timestamp: _, value: _ } => {
                 let mut ret = Vec::new();
-                key.truncate(0);
                 std::mem::swap(&mut ret, key);
                 ret
             },
         };
         *self = Cursor::load_key_value(self.block(), offset, key)?;
-        Ok(self.key_value_pair())
+        self.same()
     }
 
     fn same(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
@@ -1042,6 +1033,134 @@ mod tests {
         let mut cursor = Cursor::new(&block);
         cursor.seek("u".as_bytes()).unwrap();
 	}
+
+    #[test]
+    fn guacamole_4() {
+        // --num-keys 100
+        // --key-bytes 1
+        // --value-bytes 0
+        // --num-seeks 1
+        // --seek-distance 4
+        let builder_opts = BuilderOptions {
+            bytes_restart_interval: 512,
+            key_value_pairs_restart_interval: 16,
+        };
+        let mut builder = Builder::new(builder_opts);
+        builder.put("0".as_bytes(), 9697512111035884403, "".as_bytes());
+        builder.put("1".as_bytes(), 3798246989967619197, "".as_bytes());
+        builder.put("2".as_bytes(), 10342091538431028726, "".as_bytes());
+        builder.put("3".as_bytes(), 15157365073906098091, "".as_bytes());
+        builder.put("3".as_bytes(), 9466660179799601223, "".as_bytes());
+        builder.put("3".as_bytes(), 5028655377053437110, "".as_bytes());
+        builder.put("4".as_bytes(), 16805872069322243742, "".as_bytes());
+        builder.put("4".as_bytes(), 16112959034514062976, "".as_bytes());
+        builder.put("4".as_bytes(), 7876299547345770848, "".as_bytes());
+        builder.put("4".as_bytes(), 5220327133503220768, "".as_bytes());
+        builder.put("7".as_bytes(), 14395010029865413065, "".as_bytes());
+        builder.put("8".as_bytes(), 17618669414409465042, "".as_bytes());
+        builder.put("8".as_bytes(), 13191224295862555992, "".as_bytes());
+        builder.put("8".as_bytes(), 5084626311153408505, "".as_bytes());
+        builder.put("9".as_bytes(), 12995477672441385068, "".as_bytes());
+        builder.put("A".as_bytes(), 9605838007579610207, "".as_bytes());
+        builder.put("A".as_bytes(), 2365635627947495809, "".as_bytes());
+        builder.put("A".as_bytes(), 1952263260996816483, "".as_bytes());
+        builder.put("B".as_bytes(), 10126582942351468573, "".as_bytes());
+        builder.put("C".as_bytes(), 16217491379957293402, "".as_bytes());
+        builder.put("C".as_bytes(), 1973107251517101738, "".as_bytes());
+        builder.put("E".as_bytes(), 17563921251225492277, "".as_bytes());
+        builder.put("F".as_bytes(), 7744344282933500472, "".as_bytes());
+        builder.put("F".as_bytes(), 7572175103299679188, "".as_bytes());
+        builder.put("G".as_bytes(), 3562951228830167005, "".as_bytes());
+        builder.put("H".as_bytes(), 10415469497441400582, "".as_bytes());
+        builder.put("I".as_bytes(), 3844377046565620216, "".as_bytes());
+        builder.put("J".as_bytes(), 17476236525666259675, "".as_bytes());
+        builder.put("J".as_bytes(), 14848435744026832213, "".as_bytes());
+        builder.put("K".as_bytes(), 5137225721270789888, "".as_bytes());
+        builder.put("K".as_bytes(), 4825960407565437069, "".as_bytes());
+        builder.put("L".as_bytes(), 15335622082534854763, "".as_bytes());
+        builder.put("L".as_bytes(), 7211574025721472487, "".as_bytes());
+        builder.put("M".as_bytes(), 485375931245920424, "".as_bytes());
+        builder.put("O".as_bytes(), 6226508136092163051, "".as_bytes());
+        builder.put("P".as_bytes(), 11429503906557966656, "".as_bytes());
+        builder.put("P".as_bytes(), 6890969690330950371, "".as_bytes());
+        builder.put("P".as_bytes(), 1488139426474409410, "".as_bytes());
+        builder.put("P".as_bytes(), 418483046145178590, "".as_bytes());
+        builder.put("R".as_bytes(), 13695467658803848996, "".as_bytes());
+        builder.put("R".as_bytes(), 9039056961022621355, "".as_bytes());
+        builder.put("T".as_bytes(), 17741635360323564569, "".as_bytes());
+        builder.put("T".as_bytes(), 3442885773277545517, "".as_bytes());
+        builder.put("U".as_bytes(), 16798869817908785490, "".as_bytes());
+        builder.del("U".as_bytes(), 8329339752768468916);
+        builder.put("V".as_bytes(), 9966687898902172033, "".as_bytes());
+        builder.put("W".as_bytes(), 13095774311180215755, "".as_bytes());
+        builder.put("W".as_bytes(), 9347164485663886373, "".as_bytes());
+        builder.put("X".as_bytes(), 14105912430424664753, "".as_bytes());
+        builder.put("X".as_bytes(), 6418138334934602254, "".as_bytes());
+        builder.put("X".as_bytes(), 55139404659432737, "".as_bytes());
+        builder.put("Y".as_bytes(), 2104644631976488051, "".as_bytes());
+        builder.put("Z".as_bytes(), 16236856772926750404, "".as_bytes());
+        builder.put("Z".as_bytes(), 5615871050668577040, "".as_bytes());
+        builder.put("a".as_bytes(), 3071821918069870007, "".as_bytes());
+        builder.put("c".as_bytes(), 15097321419089962068, "".as_bytes());
+        builder.put("c".as_bytes(), 8516680308564098410, "".as_bytes());
+        builder.put("c".as_bytes(), 1136922606904185019, "".as_bytes());
+        builder.put("d".as_bytes(), 11470523903049678620, "".as_bytes());
+        builder.put("d".as_bytes(), 7780339209940962240, "".as_bytes());
+        builder.put("e".as_bytes(), 11794849320489348897, "".as_bytes());
+        builder.put("f".as_bytes(), 14643758144615450198, "".as_bytes());
+        builder.put("g".as_bytes(), 10374159306796994843, "".as_bytes());
+        builder.put("h".as_bytes(), 15699718780789327398, "".as_bytes());
+        builder.put("k".as_bytes(), 4326521581274956632, "".as_bytes());
+        builder.put("k".as_bytes(), 4092481979873166344, "".as_bytes());
+        builder.put("l".as_bytes(), 16731700614287774313, "".as_bytes());
+        builder.put("l".as_bytes(), 589255275485757846, "".as_bytes());
+        builder.put("m".as_bytes(), 12311958346976601852, "".as_bytes());
+        builder.put("m".as_bytes(), 4965766951128923512, "".as_bytes());
+        builder.put("m".as_bytes(), 3693140343459290526, "".as_bytes());
+        builder.put("m".as_bytes(), 735770394729692338, "".as_bytes());
+        builder.put("n".as_bytes(), 12504712481410458650, "".as_bytes());
+        builder.put("n".as_bytes(), 7535384965626452878, "".as_bytes());
+        builder.put("p".as_bytes(), 11164631123798495192, "".as_bytes());
+        builder.put("p".as_bytes(), 7904065694230536285, "".as_bytes());
+        builder.put("p".as_bytes(), 2533648604198286980, "".as_bytes());
+        builder.put("q".as_bytes(), 16221674258603117598, "".as_bytes());
+        builder.put("q".as_bytes(), 15702955376497465948, "".as_bytes());
+        builder.put("q".as_bytes(), 11880355228727610904, "".as_bytes());
+        builder.put("q".as_bytes(), 3128143053549102168, "".as_bytes());
+        builder.put("r".as_bytes(), 16352360294892915532, "".as_bytes());
+        builder.put("r".as_bytes(), 5031220163138947161, "".as_bytes());
+        builder.put("s".as_bytes(), 4251152130762342499, "".as_bytes());
+        builder.put("s".as_bytes(), 383014263170880432, "".as_bytes());
+        builder.put("t".as_bytes(), 15277352805187180008, "".as_bytes());
+        builder.put("t".as_bytes(), 9106274701266412083, "".as_bytes());
+        builder.put("t".as_bytes(), 7790837488841419319, "".as_bytes());
+        builder.put("u".as_bytes(), 15023686233576793040, "".as_bytes());
+        builder.put("u".as_bytes(), 13698086237460213740, "".as_bytes());
+        builder.put("u".as_bytes(), 13011900067377589610, "".as_bytes());
+        builder.put("u".as_bytes(), 12118947660501920842, "".as_bytes());
+        builder.put("u".as_bytes(), 5277242483551738373, "".as_bytes());
+        builder.put("v".as_bytes(), 4652147366029290205, "".as_bytes());
+        builder.put("v".as_bytes(), 2133827469768204743, "".as_bytes());
+        builder.put("x".as_bytes(), 733450490007248290, "".as_bytes());
+        builder.put("y".as_bytes(), 13099064855710329456, "".as_bytes());
+        builder.put("y".as_bytes(), 10455969331245208597, "".as_bytes());
+        builder.put("y".as_bytes(), 10097328861729949124, "".as_bytes());
+        builder.put("y".as_bytes(), 6129378363940112657, "".as_bytes());
+        let finisher = builder.finish();
+        let block = Block::new(finisher.as_slice()).unwrap();
+        // Top of loop seeks to: Key { key: "6" }
+        let mut cursor = Cursor::new(&block);
+        cursor.seek("6".as_bytes()).unwrap();
+        let got = cursor.next().unwrap();
+        let got = cursor.next().unwrap();
+        let got = cursor.next().unwrap();
+        let exp = KeyValuePair {
+            key: "8".as_bytes(),
+            timestamp: 13191224295862555992,
+            value: Some("".as_bytes()),
+        };
+        assert_eq!(Some(exp), got);
+    }
 
     // TODO(rescrv): Test empty tables.
 }
