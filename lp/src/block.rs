@@ -111,7 +111,6 @@ pub struct Builder {
     buffer: Vec<u8>,
     last_key: Vec<u8>,
     // Restart metadata.
-    // TODO(rescrv):  Lazily load this.
     restarts: Vec<u32>,
     bytes_since_restart: u64,
     key_value_pairs_since_restart: u64,
