@@ -345,7 +345,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn seek_block(&mut self, restart_idx: usize) -> Result<KeyValuePair, Error> {
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<KeyValuePair, Error> {
         if restart_idx >= self.block().num_restarts {
             return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().num_restarts) });
         }
@@ -442,8 +442,8 @@ impl<'a> Iterator for Cursor<'a> {
 
         // Binary search to the correct block.
         while left < right {
-            let mid = (left + right + 1) / 2;
-            let kvp = self.seek_block(mid)?;
+            let mid = left + (right - left + 1) / 2;
+            let kvp = self.seek_restart(mid)?;
             match compare_bytes(key, &kvp.key) {
                 Ordering::Less => {
                     // left     mid     right
@@ -455,27 +455,18 @@ impl<'a> Iterator for Cursor<'a> {
                     // left     mid     right
                     // |--------|-------|
                     //          |
-                    // When the keys are equal, move left.  We don't move to mid - 1 in case the
-                    // first of the key is in mid.
-                    //
-                    // NOTE(rescrv):  It's critical we don't bail early on equal.  If the key is
-                    // equal we'll keep moving the right barrier until we hit the first key.  Left
-                    // will never move to past the first key.
-                    right = mid;
+                    right = mid - 1;
                 },
                 Ordering::Greater => {
                     // left     mid     right
                     // |--------|-------|
                     //           |
-                    // NOTE(rescrv):  We move to mid because the +1 in the mid computation ensures
-                    // we'll never have mid == left so long as left < right.  If we move to mid+1
-                    // we will potentially run off the end of the original value of right.
                     left = mid;
                 },
             };
         }
 
-        let mut kvp = Some(self.seek_block(left)?);
+        let mut kvp = Some(self.seek_restart(left)?);
 
         // Check for the case where all keys are bigger.
         if compare_bytes(key, kvp.as_ref().unwrap().key).is_lt() {
@@ -541,7 +532,7 @@ impl<'a> Iterator for Cursor<'a> {
             }.into());
         }
         // Scan forward from the block index.
-        self.seek_block(restart_idx)?;
+        self.seek_restart(restart_idx)?;
         while self.next_offset() < target_offset {
             self.next()?;
         }
@@ -560,9 +551,9 @@ impl<'a> Iterator for Cursor<'a> {
             return Ok(None);
         }
         if self.restart_idx() + 1 < self.block().num_restarts && self.block().restart_point(self.restart_idx() + 1) as usize <= offset {
-            // We're jumping to the next block, so just seek_block to force a refresh of the key,
+            // We're jumping to the next block, so just seek_restart to force a refresh of the key,
             // along with safety checks on key_frag.
-            let value = self.seek_block(self.restart_idx() + 1)?;
+            let value = self.seek_restart(self.restart_idx() + 1)?;
             return Ok(Some(value));
         };
         let key = match self {
