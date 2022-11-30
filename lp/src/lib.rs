@@ -6,6 +6,7 @@ extern crate prototk;
 extern crate prototk_derive;
 
 pub mod block;
+pub mod reference;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -24,11 +25,32 @@ impl From<block::Error> for Error {
 
 /////////////////////////////////////////// KeyValuePair ///////////////////////////////////////////
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Eq)]
 pub struct KeyValuePair<'a> {
     pub key: &'a [u8],
     pub timestamp: u64,
     pub value: Option<&'a [u8]>,
+}
+
+impl<'a> PartialEq for KeyValuePair<'a> {
+    fn eq(&self, rhs: &KeyValuePair) -> bool {
+        self.cmp(rhs) == std::cmp::Ordering::Equal
+    }
+}
+
+impl<'a> Ord for KeyValuePair<'a> {
+    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
+        let key1 = self.key;
+        let key2 = rhs.key;
+        compare_bytes(key1, key2)
+            .then(self.timestamp.cmp(&rhs.timestamp).reverse())
+    }
+}
+
+impl<'a> PartialOrd for KeyValuePair<'a> {
+    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
 }
 
 ///////////////////////////////////////////// Iterator /////////////////////////////////////////////
@@ -46,6 +68,26 @@ pub trait Iterator {
     fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
     fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
     fn same(&mut self) -> Result<Option<KeyValuePair>, Error>;
+}
+
+/////////////////////////////////////////// KeyValueStore //////////////////////////////////////////
+
+pub trait KeyValueStore {
+    fn get_at_timestamp<'a>(&'a self, key: &[u8], timestamp: u64) -> Option<KeyValuePair<'a>>;
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator + 'a>;
+    fn scan<'a>(&'a self, key: &[u8], timestamp: u64) -> Result<Box<dyn Iterator + 'a>, Error>;
+
+    fn transact<'a>(&'a mut self, timestamp: u64) -> Box<dyn Transaction + 'a>;
+}
+
+//////////////////////////////////////////// Transaction ///////////////////////////////////////////
+
+pub trait Transaction: KeyValueStore {
+    fn commit(self);
+    fn get<'a>(&'a mut self, key: &[u8]) -> Option<KeyValuePair<'a>>;
+    fn put(&mut self, key: &[u8], value: &[u8]);
+    fn del(&mut self, key: &[u8]);
 }
 
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
