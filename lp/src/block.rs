@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 
 use prototk::{length_free, stack_pack, Packable, Unpacker, v64};
 
-use super::{compare_bytes,KeyValuePair,Iterator};
+use super::{compare_bytes,KeyOptionalValuePair,LowLevelIterator};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -345,7 +345,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn seek_restart(&mut self, restart_idx: usize) -> Result<KeyValuePair, Error> {
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<KeyOptionalValuePair, Error> {
         if restart_idx >= self.block().num_restarts {
             return Err(Error::Corruption { context: format!("restart_idx={} exceeds num_restarts={}", restart_idx, self.block().num_restarts) });
         }
@@ -396,12 +396,12 @@ impl<'a> Cursor<'a> {
         Ok(cursor)
     }
 
-    fn key_value_pair(&self) -> Option<KeyValuePair> {
+    fn key_value_pair(&self) -> Option<KeyOptionalValuePair> {
         match self {
             Cursor::Head { block: _ } => { None },
             Cursor::Tail { block: _ } => { None },
             Cursor::Positioned { block: _, restart_idx: _, offset: _, next_offset: _, ref key, timestamp, value } => {
-                let kvp = KeyValuePair {
+                let kvp = KeyOptionalValuePair {
                     key: &key,
                     timestamp: *timestamp,
                     value: *value,
@@ -412,7 +412,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
-impl<'a> Iterator for Cursor<'a> {
+impl<'a> LowLevelIterator for Cursor<'a> {
     fn seek_to_first(&mut self) -> Result<(), super::Error> {
         *self = Cursor::Head {
             block: self.block(),
@@ -497,7 +497,7 @@ impl<'a> Iterator for Cursor<'a> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+    fn prev(&mut self) -> Result<Option<KeyOptionalValuePair>, super::Error> {
         // The target offset where we won't proceed past.
         let target_offset = match self {
             Cursor::Head { block: _ } => { return Ok(None); },
@@ -539,7 +539,7 @@ impl<'a> Iterator for Cursor<'a> {
         self.same()
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+    fn next(&mut self) -> Result<Option<KeyOptionalValuePair>, super::Error> {
         if let Cursor::Tail { block: _ } = self {
             return Ok(None);
         }
@@ -569,7 +569,7 @@ impl<'a> Iterator for Cursor<'a> {
         self.same()
     }
 
-    fn same(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+    fn same(&mut self) -> Result<Option<KeyOptionalValuePair>, super::Error> {
         Ok(self.key_value_pair())
     }
 }
@@ -938,7 +938,7 @@ mod tests {
         }, cursor);
         // Next to t
         let got = cursor.next().unwrap().unwrap();
-        let exp = KeyValuePair {
+        let exp = KeyOptionalValuePair {
             key: "t".as_bytes(),
             timestamp: 7790837488841419319,
             value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
@@ -988,7 +988,7 @@ mod tests {
         let _got = cursor.next().unwrap();
         let _got = cursor.next().unwrap();
         let got = cursor.next().unwrap();
-        let exp = KeyValuePair {
+        let exp = KeyOptionalValuePair {
             key: "t".as_bytes(),
             timestamp: 7790837488841419319,
             value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
@@ -1145,7 +1145,7 @@ mod tests {
         let got = cursor.next().unwrap();
         let got = cursor.next().unwrap();
         let got = cursor.next().unwrap();
-        let exp = KeyValuePair {
+        let exp = KeyOptionalValuePair {
             key: "8".as_bytes(),
             timestamp: 13191224295862555992,
             value: Some("".as_bytes()),

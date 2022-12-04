@@ -29,7 +29,7 @@ impl From<block::Error> for Error {
 pub struct KeyValuePair<'a> {
     pub key: &'a [u8],
     pub timestamp: u64,
-    pub value: Option<&'a [u8]>,
+    pub value: &'a [u8],
 }
 
 impl<'a> PartialEq for KeyValuePair<'a> {
@@ -49,6 +49,36 @@ impl<'a> Ord for KeyValuePair<'a> {
 
 impl<'a> PartialOrd for KeyValuePair<'a> {
     fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+/////////////////////////////////////// KeyOptionalValuePair ///////////////////////////////////////
+
+#[derive(Debug, Eq)]
+pub struct KeyOptionalValuePair<'a> {
+    pub key: &'a [u8],
+    pub timestamp: u64,
+    pub value: Option<&'a [u8]>,
+}
+
+impl<'a> PartialEq for KeyOptionalValuePair<'a> {
+    fn eq(&self, rhs: &KeyOptionalValuePair) -> bool {
+        self.cmp(rhs) == std::cmp::Ordering::Equal
+    }
+}
+
+impl<'a> Ord for KeyOptionalValuePair<'a> {
+    fn cmp(&self, rhs: &KeyOptionalValuePair) -> std::cmp::Ordering {
+        let key1 = self.key;
+        let key2 = rhs.key;
+        compare_bytes(key1, key2)
+            .then(self.timestamp.cmp(&rhs.timestamp).reverse())
+    }
+}
+
+impl<'a> PartialOrd for KeyOptionalValuePair<'a> {
+    fn partial_cmp(&self, rhs: &KeyOptionalValuePair) -> Option<std::cmp::Ordering> {
         Some(self.cmp(rhs))
     }
 }
@@ -90,6 +120,38 @@ pub trait Transaction: KeyValueStore {
     fn del(&mut self, key: &[u8]);
 }
 
+///////////////////////////////////////// LowLevelIterator /////////////////////////////////////////
+
+pub trait LowLevelIterator {
+    fn seek_to_first(&mut self) -> Result<(), Error>;
+    fn seek_to_last(&mut self) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
+
+    fn prev(&mut self) -> Result<Option<KeyOptionalValuePair>, Error>;
+    fn next(&mut self) -> Result<Option<KeyOptionalValuePair>, Error>;
+    fn same(&mut self) -> Result<Option<KeyOptionalValuePair>, Error>;
+}
+
+/////////////////////////////////////// LowLevelKeyValueStore //////////////////////////////////////
+
+pub trait LowLevelKeyValueStore {
+    fn get_at_timestamp<'a>(&'a self, key: &[u8], timestamp: u64) -> Option<KeyOptionalValuePair<'a>>;
+
+    fn iter<'a>(&'a self) -> Box<dyn LowLevelIterator + 'a>;
+    fn scan<'a>(&'a self, key: &[u8], timestamp: u64) -> Result<Box<dyn LowLevelIterator + 'a>, Error>;
+
+    fn transact<'a>(&'a mut self, timestamp: u64) -> Box<dyn LowLevelTransaction + 'a>;
+}
+
+//////////////////////////////////////// LowLevelTransaction ///////////////////////////////////////
+
+pub trait LowLevelTransaction: LowLevelKeyValueStore {
+    fn commit(self);
+    fn get<'a>(&'a mut self, key: &[u8]) -> Option<KeyOptionalValuePair<'a>>;
+    fn put(&mut self, key: &[u8], value: &[u8]);
+    fn del(&mut self, key: &[u8]);
+}
+
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
 
 // Content under CC By-Sa.  I just use as is, as can you.
@@ -126,6 +188,28 @@ mod tests {
             value: Some("value".as_bytes()),
         };
         let kvp3 = KeyValuePair {
+            key: "key2".as_bytes(),
+            timestamp: 99,
+            value: Some("value".as_bytes()),
+        };
+        assert!(kvp2 > kvp1);
+        assert!(kvp3 > kvp2);
+        assert!(kvp3 > kvp1);
+    }
+
+    #[test]
+    fn key_optional_value_pair_ordering() {
+        let kvp1 = KeyOptionalValuePair {
+            key: "key1".as_bytes(),
+            timestamp: 42,
+            value: Some("value".as_bytes()),
+        };
+        let kvp2 = KeyOptionalValuePair {
+            key: "key1".as_bytes(),
+            timestamp: 84,
+            value: Some("value".as_bytes()),
+        };
+        let kvp3 = KeyOptionalValuePair {
             key: "key2".as_bytes(),
             timestamp: 99,
             value: Some("value".as_bytes()),

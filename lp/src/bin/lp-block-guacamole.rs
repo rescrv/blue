@@ -9,7 +9,7 @@ use guacamole::Guac;
 use guacamole::Guacamole;
 use guacamole::strings;
 
-use lp::{KeyValuePair,Iterator};
+use lp::{KeyOptionalValuePair,LowLevelIterator,compare_bytes};
 use lp::block::{Block,Builder,BuilderOptions,Cursor};
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
@@ -108,12 +108,12 @@ enum KeyValueOperation {
 }
 
 impl KeyValueOperation {
-    fn to_key_value_pair(&self) -> lp::KeyValuePair {
+    fn to_key_value_pair(&self) -> KeyOptionalValuePair {
         let (key, timestamp, value) = match self {
             KeyValueOperation::Put(x) => { (x.key.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())) },
             KeyValueOperation::Del(x) => { (x.key.key.as_bytes(), x.timestamp, None) },
         };
-        lp::KeyValuePair {
+        KeyOptionalValuePair {
             key,
             timestamp,
             value,
@@ -156,7 +156,7 @@ impl Ord for ReferenceKey {
     fn cmp(&self, rhs: &ReferenceKey) -> std::cmp::Ordering {
         let key1 = self.key.key.as_bytes();
         let key2 = rhs.key.key.as_bytes();
-        lp::compare_bytes(key1, key2)
+        compare_bytes(key1, key2)
             .then(self.timestamp.cmp(&rhs.timestamp).reverse())
     }
 }
@@ -344,7 +344,7 @@ fn main() {
             let exp = iter.next();
             println!("        let got = cursor.next().unwrap();");
             let got = cursor.next().unwrap();
-            let print_x = |x: &KeyValuePair| {
+            let print_x = |x: &KeyOptionalValuePair| {
                 println!("        let exp = KeyValuePair {{");
                 println!("            key: \"{}\".as_bytes(),", std::str::from_utf8(x.key).unwrap());
                 println!("            timestamp: {},", x.timestamp);
