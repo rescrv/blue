@@ -7,7 +7,7 @@ use guacamole::Guac;
 use guacamole::Guacamole;
 
 use lp::block::{Builder, BuilderOptions};
-use lp::reference::{TableBuilder};
+use lp::reference::TableBuilder;
 use lp::KeyValuePair;
 use lp::Table as TableTrait;
 use lp::TableBuilder as TableBuilderTrait;
@@ -96,20 +96,6 @@ impl Guac<KeyValueDel> for KeyValueDelGuacamole {
 enum KeyValueOperation {
     Put(KeyValuePut),
     Del(KeyValueDel),
-}
-
-impl KeyValueOperation {
-    fn to_key_value_pair(&self) -> KeyValuePair {
-        let (key, timestamp, value) = match self {
-            KeyValueOperation::Put(x) => (x.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())),
-            KeyValueOperation::Del(x) => (x.key.as_bytes(), x.timestamp, None),
-        };
-        KeyValuePair {
-            key,
-            timestamp,
-            value,
-        }
-    }
 }
 
 //////////////////////////////////// KeyValueOperationGuacamole ////////////////////////////////////
@@ -242,10 +228,12 @@ fn main() {
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
         match kvo {
             KeyValueOperation::Put(x) => {
-                builder.put(x.key.as_bytes(), x.timestamp, x.value.as_bytes());
+                builder
+                    .put(x.key.as_bytes(), x.timestamp, x.value.as_bytes())
+                    .unwrap();
             }
             KeyValueOperation::Del(x) => {
-                builder.del(x.key.as_bytes(), x.timestamp);
+                builder.del(x.key.as_bytes(), x.timestamp).unwrap();
             }
         }
     }
@@ -279,20 +267,20 @@ fn main() {
         match x.value {
             Some(ref v) => {
                 println!(
-                    "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes());",
+                    "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes()).unwrap();",
                     std::str::from_utf8(x.key).unwrap(),
                     x.timestamp,
                     std::str::from_utf8(v).unwrap()
                 );
-                builder.put(x.key, x.timestamp, v);
+                builder.put(x.key, x.timestamp, v).unwrap();
             }
             None => {
                 println!(
-                    "        builder.del(\"{}\".as_bytes(), {});",
+                    "        builder.del(\"{}\".as_bytes(), {}).unwrap();",
                     std::str::from_utf8(x.key).unwrap(),
                     x.timestamp
                 );
-                builder.del(x.key, x.timestamp);
+                builder.del(x.key, x.timestamp).unwrap();
             }
         };
     }
