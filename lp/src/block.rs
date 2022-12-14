@@ -1754,14 +1754,14 @@ mod guacamole {
         // Top of loop seeks to: "d"@4793296426793138773
         let mut cursor = block.iterate();
         cursor.seek("d".as_bytes(), 4793296426793138773).unwrap();
-        let got = cursor.next().unwrap();
+        let _got = cursor.next().unwrap();
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
         let got = cursor.prev().unwrap();
         let exp = KeyValuePair {
-            key: "A".as_bytes(),
-            timestamp: 2365635627947495809,
+            key: "E".as_bytes(),
+            timestamp: 17563921251225492277,
             value: Some("".as_bytes()),
         };
         assert_eq!(Some(exp), got);

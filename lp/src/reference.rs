@@ -165,14 +165,15 @@ impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
         match self
             .table
             .entries
-            .range((Bound::Included(target), Bound::Unbounded))
+            .range((Bound::Included(target.clone()), Bound::Unbounded))
             .next()
         {
             Some(entry) => {
-                self.position = TablePosition::Forward {
-                    last_key: entry.0.clone(),
-                };
-                self.prev()?;
+                let should_prev = entry.0 == &target;
+                self.position = TablePosition::Forward { last_key: target };
+                if should_prev {
+                    self.prev()?;
+                }
             }
             None => {
                 self.position = TablePosition::Last;
@@ -756,6 +757,55 @@ mod alphabet {
             value: Some("a".as_bytes()),
         };
         let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+    }
+}
+
+#[cfg(test)]
+mod guacamole {
+    use super::*;
+
+    #[test]
+    fn human_guacamole_5() {
+        let mut builder = TableBuilder::default();
+        builder
+            .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
+            .unwrap();
+        builder
+            .put("A".as_bytes(), 2365635627947495809, "".as_bytes())
+            .unwrap();
+        builder
+            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
+            .unwrap();
+        builder
+            .put("I".as_bytes(), 3844377046565620216, "".as_bytes())
+            .unwrap();
+        builder
+            .put("J".as_bytes(), 14848435744026832213, "".as_bytes())
+            .unwrap();
+        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
+        builder
+            .put("g".as_bytes(), 10374159306796994843, "".as_bytes())
+            .unwrap();
+        builder
+            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
+            .unwrap();
+        builder
+            .put("t".as_bytes(), 7790837488841419319, "".as_bytes())
+            .unwrap();
+        builder
+            .put("v".as_bytes(), 2133827469768204743, "".as_bytes())
+            .unwrap();
+        let block = builder.seal().unwrap();
+        // Top of loop seeks to: "I"@13021764449837349261
+        let mut cursor = block.iterate();
+        cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        let got = cursor.prev().unwrap();
+        let exp = KeyValuePair {
+            key: "E".as_bytes(),
+            timestamp: 17563921251225492277,
+            value: Some("".as_bytes()),
+        };
         assert_eq!(Some(exp), got);
     }
 }
