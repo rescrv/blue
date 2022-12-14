@@ -7,7 +7,6 @@ members = [
     "hey_listen",
     "id",
     "lp",
-    "macaroons",
     "prototk",
     "prototk_derive",
     "setsum",
