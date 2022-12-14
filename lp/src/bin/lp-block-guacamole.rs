@@ -1,16 +1,17 @@
-/*
-use clap::{Arg, ArgMatches, App};
+use clap::{App, Arg, ArgMatches};
 
 use rand::Rng;
 
+use guacamole::strings;
 use guacamole::Guac;
 use guacamole::Guacamole;
-use guacamole::strings;
 
-use lp::{KeyValuePair, Reader, Writer};
-use lp::Iterator as IteratorTrait;
-use lp::block::{Block,Builder,BuilderOptions,Cursor};
-use lp::reference::{Iterator,Table};
+use lp::block::{Builder, BuilderOptions};
+use lp::reference::{TableBuilder};
+use lp::KeyValuePair;
+use lp::Table as TableTrait;
+use lp::TableBuilder as TableBuilderTrait;
+use lp::TableCursor as TableCursorTrait;
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -28,8 +29,7 @@ impl Guac<String> for KeyGuacamole {
 //////////////////////////////////////// TimestampGuacamole ////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-struct TimestampGuacamole {
-}
+struct TimestampGuacamole {}
 
 impl Guac<u64> for TimestampGuacamole {
     fn guacamole(&self, guac: &mut Guacamole) -> u64 {
@@ -101,8 +101,8 @@ enum KeyValueOperation {
 impl KeyValueOperation {
     fn to_key_value_pair(&self) -> KeyValuePair {
         let (key, timestamp, value) = match self {
-            KeyValueOperation::Put(x) => { (x.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())) },
-            KeyValueOperation::Del(x) => { (x.key.as_bytes(), x.timestamp, None) },
+            KeyValueOperation::Put(x) => (x.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())),
+            KeyValueOperation::Del(x) => (x.key.as_bytes(), x.timestamp, None),
         };
         KeyValuePair {
             key,
@@ -143,7 +143,7 @@ fn arg_as_u64(args: &ArgMatches, value: &str, default: &str) -> u64 {
         Ok(x) => x,
         Err(e) => {
             panic!("don't know how to parse \"{}\" as u64: {}", value, e);
-        },
+        }
     }
 }
 
@@ -153,38 +153,50 @@ fn arg_as_f64(args: &ArgMatches, value: &str, default: &str) -> f64 {
         Ok(x) => x,
         Err(e) => {
             panic!("don't know how to parse \"{}\" as f64: {}", value, e);
-        },
+        }
     }
 }
 
 fn main() {
     let app = App::new("lp-block-guacamole")
-                      .version("0.1")
-                      .about("Runs random workloads against lp-block.");
-    let app = app.arg(Arg::with_name("num-keys")
-                      .long("num-keys")
-                      .takes_value(true)
-                      .help("Number of keys to load into reference key-value store."));
-    let app = app.arg(Arg::with_name("key-bytes")
-                      .long("key-bytes")
-                      .takes_value(true)
-                      .help("Number of bytes to generate per key."));
-    let app = app.arg(Arg::with_name("value-bytes")
-                      .long("value-bytes")
-                      .takes_value(true)
-                      .help("Number of bytes to generate per value."));
-    let app = app.arg(Arg::with_name("num-seeks")
-                      .long("num-seeks")
-                      .takes_value(true)
-                      .help("Number of keys to scan from seek position."));
-    let app = app.arg(Arg::with_name("seek-distance")
-                      .long("seek-distance")
-                      .takes_value(true)
-                      .help("Number of keys to scan from seek position."));
-    let app = app.arg(Arg::with_name("prev-probability")
-                      .long("prev-probability")
-                      .takes_value(true)
-                      .help("Probability of calling \"prev\" on a cursor instead of \"next\"."));
+        .version("0.1")
+        .about("Runs random workloads against lp-block.");
+    let app = app.arg(
+        Arg::with_name("num-keys")
+            .long("num-keys")
+            .takes_value(true)
+            .help("Number of keys to load into reference key-value store."),
+    );
+    let app = app.arg(
+        Arg::with_name("key-bytes")
+            .long("key-bytes")
+            .takes_value(true)
+            .help("Number of bytes to generate per key."),
+    );
+    let app = app.arg(
+        Arg::with_name("value-bytes")
+            .long("value-bytes")
+            .takes_value(true)
+            .help("Number of bytes to generate per value."),
+    );
+    let app = app.arg(
+        Arg::with_name("num-seeks")
+            .long("num-seeks")
+            .takes_value(true)
+            .help("Number of keys to scan from seek position."),
+    );
+    let app = app.arg(
+        Arg::with_name("seek-distance")
+            .long("seek-distance")
+            .takes_value(true)
+            .help("Number of keys to scan from seek position."),
+    );
+    let app = app.arg(
+        Arg::with_name("prev-probability")
+            .long("prev-probability")
+            .takes_value(true)
+            .help("Probability of calling \"prev\" on a cursor instead of \"next\"."),
+    );
     let args = app.get_matches();
     // Our workload generator.
     let key_bytes = arg_as_u64(&args, "key-bytes", "8") as usize;
@@ -195,42 +207,49 @@ fn main() {
         weight_put: 0.99,
         weight_del: 0.01,
         guacamole_put: KeyValuePutGuacamole {
-            key:  KeyGuacamole {
+            key: KeyGuacamole {
                 key: Box::new(strings::IndependentStrings {
-                    length: Box::new(strings::ConstantLength{ constant: key_bytes }),
-                    select: Box::new(strings::RandomSelect{}),
+                    length: Box::new(strings::ConstantLength {
+                        constant: key_bytes,
+                    }),
+                    select: Box::new(strings::RandomSelect {}),
                 }),
             },
-            timestamp:  TimestampGuacamole::default(),
-            value:  Box::new(strings::IndependentStrings {
-                length: Box::new(strings::ConstantLength{ constant: value_bytes }),
-                select: Box::new(strings::RandomSelect{}),
+            timestamp: TimestampGuacamole::default(),
+            value: Box::new(strings::IndependentStrings {
+                length: Box::new(strings::ConstantLength {
+                    constant: value_bytes,
+                }),
+                select: Box::new(strings::RandomSelect {}),
             }),
         },
         guacamole_del: KeyValueDelGuacamole {
-            key:  KeyGuacamole {
+            key: KeyGuacamole {
                 key: Box::new(strings::IndependentStrings {
-                    length: Box::new(strings::ConstantLength{ constant: key_bytes }),
-                    select: Box::new(strings::RandomSelect{}),
+                    length: Box::new(strings::ConstantLength {
+                        constant: key_bytes,
+                    }),
+                    select: Box::new(strings::RandomSelect {}),
                 }),
             },
-            timestamp:  TimestampGuacamole::default(),
-        }
+            timestamp: TimestampGuacamole::default(),
+        },
     };
     // Load up a minimal key-value store.
     let num_keys = arg_as_u64(&args, "num-keys", "1000");
-    let mut kvs = LowLevelKeyValueStore::default();
+    let mut builder = TableBuilder::default();
     for _ in 0..num_keys {
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
         match kvo {
             KeyValueOperation::Put(x) => {
-                kvs.put(x.key.as_bytes(), x.timestamp, x.value.as_bytes());
-            },
+                builder.put(x.key.as_bytes(), x.timestamp, x.value.as_bytes());
+            }
             KeyValueOperation::Del(x) => {
-                kvs.del(x.key.as_bytes(), x.timestamp);
-            },
+                builder.del(x.key.as_bytes(), x.timestamp);
+            }
         }
     }
+    let kvs = builder.seal().unwrap();
     // Create a new builder using the keys in the key-value store.
     let builder_opts = BuilderOptions {
         bytes_restart_interval: 512,
@@ -250,7 +269,7 @@ fn main() {
     println!("            key_value_pairs_restart_interval: 16,");
     println!("        }};");
     println!("        let mut builder = Builder::new(builder_opts);");
-    let mut iter = kvs.iter();
+    let mut iter = kvs.iterate();
     loop {
         let x = iter.next().unwrap();
         if x.is_none() {
@@ -259,25 +278,33 @@ fn main() {
         let x = x.unwrap();
         match x.value {
             Some(ref v) => {
-                println!("        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes());",
-                    std::str::from_utf8(x.key).unwrap(), x.timestamp, std::str::from_utf8(v).unwrap());
+                println!(
+                    "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes());",
+                    std::str::from_utf8(x.key).unwrap(),
+                    x.timestamp,
+                    std::str::from_utf8(v).unwrap()
+                );
                 builder.put(x.key, x.timestamp, v);
-            },
+            }
             None => {
-                println!("        builder.del(\"{}\".as_bytes(), {});", std::str::from_utf8(x.key).unwrap(), x.timestamp);
+                println!(
+                    "        builder.del(\"{}\".as_bytes(), {});",
+                    std::str::from_utf8(x.key).unwrap(),
+                    x.timestamp
+                );
                 builder.del(x.key, x.timestamp);
-            },
+            }
         };
     }
-    println!("        let finisher = builder.finish();");
-    let finisher = builder.finish();
-    println!("        let block = Block::new(finisher.as_slice()).unwrap();");
-    let block = Block::new(finisher.as_slice()).unwrap();
+    println!("        let block = builder.seal().unwrap();");
+    let block = builder.seal().unwrap();
     // Now seek randomly and compare the key-value store and the builder.
     let key_gen = KeyGuacamole {
         key: Box::new(strings::IndependentStrings {
-            length: Box::new(strings::ConstantLength{ constant: key_bytes }),
-            select: Box::new(strings::RandomSelect{}),
+            length: Box::new(strings::ConstantLength {
+                constant: key_bytes,
+            }),
+            select: Box::new(strings::RandomSelect {}),
         }),
     };
     let ts_gen = TimestampGuacamole {};
@@ -285,10 +312,13 @@ fn main() {
         let key: String = key_gen.guacamole(&mut guac);
         let ts: u64 = ts_gen.guacamole(&mut guac);
         println!("        // Top of loop seeks to: {:?}@{}", key, ts);
-        let mut iter = kvs.scan(key.as_bytes(), ts).unwrap();
-        println!("        let mut cursor = Cursor::new(&block);");
-        let mut cursor = Cursor::new(&block);
-        println!("        cursor.seek(\"{}\".as_bytes(), {}).unwrap();", key, ts);
+        iter.seek(key.as_bytes(), ts).unwrap();
+        println!("        let mut cursor = block.iterate();");
+        let mut cursor = block.iterate();
+        println!(
+            "        cursor.seek(\"{}\".as_bytes(), {}).unwrap();",
+            key, ts
+        );
         cursor.seek(key.as_bytes(), ts).unwrap();
         for _ in 0..seek_distance {
             let exp = iter.next().unwrap();
@@ -296,11 +326,21 @@ fn main() {
             let got = cursor.next().unwrap();
             let print_x = |x: &KeyValuePair| {
                 println!("        let exp = KeyValuePair {{");
-                println!("            key: \"{}\".as_bytes(),", std::str::from_utf8(x.key).unwrap());
+                println!(
+                    "            key: \"{}\".as_bytes(),",
+                    std::str::from_utf8(x.key).unwrap()
+                );
                 println!("            timestamp: {},", x.timestamp);
                 match x.value {
-                    Some(x) => { println!("            value: Some(\"{}\".as_bytes()),", std::str::from_utf8(x).unwrap()); }
-                    None => { println!("            value: None,"); }
+                    Some(x) => {
+                        println!(
+                            "            value: Some(\"{}\".as_bytes()),",
+                            std::str::from_utf8(x).unwrap()
+                        );
+                    }
+                    None => {
+                        println!("            value: None,");
+                    }
                 };
                 println!("        }};");
             };
@@ -313,24 +353,20 @@ fn main() {
                     }
                     assert_eq!(x, y);
                 }
-                (None, None) => {
-                    break
-                },
+                (None, None) => break,
                 (None, Some(x)) => {
                     println!("        assert_eq!(None, got);");
                     println!("    }}");
                     panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
-                },
+                }
                 (Some(x), None) => {
                     print_x(&x);
                     println!("        assert_eq!(exp, got);");
                     println!("    }}");
                     panic!("found bad case (open a debugger or print out a dump of info above)");
-                },
+                }
             }
         }
     }
     println!("    }}");
 }
-*/
-fn main() {}

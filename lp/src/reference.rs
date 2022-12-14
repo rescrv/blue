@@ -46,7 +46,7 @@ impl Key {
 /////////////////////////////////////////////// Table //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-struct Table {
+pub struct Table {
     entries: BTreeMap<Key, Option<Vec<u8>>>,
 }
 
@@ -91,7 +91,7 @@ impl<'a> TableTrait<'a> for Table {
 /////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-struct TableBuilder {
+pub struct TableBuilder {
     table: Table,
 }
 
@@ -141,7 +141,7 @@ impl Default for TablePosition {
 //////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
 #[derive(Clone, Debug)]
-struct TableCursor<'a> {
+pub struct TableCursor<'a> {
     table: &'a Table,
     position: TablePosition,
 }
