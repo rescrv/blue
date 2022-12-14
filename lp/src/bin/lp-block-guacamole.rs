@@ -1,6 +1,4 @@
-use std::collections::btree_map::BTreeMap;
-use std::ops::Bound;
-
+/*
 use clap::{Arg, ArgMatches, App};
 
 use rand::Rng;
@@ -9,15 +7,10 @@ use guacamole::Guac;
 use guacamole::Guacamole;
 use guacamole::strings;
 
-use lp::{KeyOptionalValuePair,LowLevelIterator,compare_bytes};
+use lp::{KeyValuePair, Reader, Writer};
+use lp::Iterator as IteratorTrait;
 use lp::block::{Block,Builder,BuilderOptions,Cursor};
-
-//////////////////////////////////////////////// Key ///////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-struct Key {
-    key: String,
-}
+use lp::reference::{Iterator,Table};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -26,11 +19,9 @@ struct KeyGuacamole {
     key: Box<dyn strings::StringGuacamole>,
 }
 
-impl Guac<Key> for KeyGuacamole {
-    fn guacamole(&self, guac: &mut Guacamole) -> Key {
-        Key {
-            key: self.key.guacamole(guac)
-        }
+impl Guac<String> for KeyGuacamole {
+    fn guacamole(&self, guac: &mut Guacamole) -> String {
+        self.key.guacamole(guac)
     }
 }
 
@@ -50,7 +41,7 @@ impl Guac<u64> for TimestampGuacamole {
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct KeyValuePut {
-    key: Key,
+    key: String,
     timestamp: u64,
     value: String,
 }
@@ -78,7 +69,7 @@ impl Guac<KeyValuePut> for KeyValuePutGuacamole {
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct KeyValueDel {
-    key: Key,
+    key: String,
     timestamp: u64,
 }
 
@@ -108,12 +99,12 @@ enum KeyValueOperation {
 }
 
 impl KeyValueOperation {
-    fn to_key_value_pair(&self) -> KeyOptionalValuePair {
+    fn to_key_value_pair(&self) -> KeyValuePair {
         let (key, timestamp, value) = match self {
-            KeyValueOperation::Put(x) => { (x.key.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())) },
-            KeyValueOperation::Del(x) => { (x.key.key.as_bytes(), x.timestamp, None) },
+            KeyValueOperation::Put(x) => { (x.key.as_bytes(), x.timestamp, Some(x.value.as_bytes())) },
+            KeyValueOperation::Del(x) => { (x.key.as_bytes(), x.timestamp, None) },
         };
-        KeyOptionalValuePair {
+        KeyValuePair {
             key,
             timestamp,
             value,
@@ -144,56 +135,6 @@ impl Guac<KeyValueOperation> for KeyValueOperationGuacamole {
     }
 }
 
-////////////////////////////////////// ReferenceKeyValueStore //////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct ReferenceKey {
-    key: Key,
-    timestamp: u64,
-}
-
-impl Ord for ReferenceKey {
-    fn cmp(&self, rhs: &ReferenceKey) -> std::cmp::Ordering {
-        let key1 = self.key.key.as_bytes();
-        let key2 = rhs.key.key.as_bytes();
-        compare_bytes(key1, key2)
-            .then(self.timestamp.cmp(&rhs.timestamp).reverse())
-    }
-}
-
-impl PartialOrd for ReferenceKey {
-    fn partial_cmp(&self, rhs: &ReferenceKey) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-#[derive(Clone, Default)]
-struct ReferenceKeyValueStore {
-    map: BTreeMap<ReferenceKey, KeyValueOperation>,
-}
-
-impl ReferenceKeyValueStore {
-    fn op(&mut self, what: KeyValueOperation) {
-        let key_ts = match what {
-            KeyValueOperation::Put(ref x) => { (x.key.clone(), x.timestamp) },
-            KeyValueOperation::Del(ref x) => { (x.key.clone(), x.timestamp) },
-        };
-        let key = ReferenceKey {
-            key: key_ts.0,
-            timestamp: key_ts.1,
-        };
-        self.map.insert(key, what);
-    }
-
-    fn seek(&mut self, what: Key) -> impl std::iter::Iterator<Item=KeyValueOperation> + '_ {
-        let key = ReferenceKey {
-            key: what,
-            timestamp: u64::max_value(),
-        };
-        self.map.range((Bound::Included(key), Bound::Unbounded)).map(|x| x.1.clone())
-    }
-}
-
 /////////////////////////////////////////////// main ///////////////////////////////////////////////
 
 fn arg_as_u64(args: &ArgMatches, value: &str, default: &str) -> u64 {
@@ -201,15 +142,25 @@ fn arg_as_u64(args: &ArgMatches, value: &str, default: &str) -> u64 {
     match value.parse::<u64>() {
         Ok(x) => x,
         Err(e) => {
-            panic!("don't know how to parse \"{}\": {}", value, e);
+            panic!("don't know how to parse \"{}\" as u64: {}", value, e);
+        },
+    }
+}
+
+fn arg_as_f64(args: &ArgMatches, value: &str, default: &str) -> f64 {
+    let value = args.value_of(value).unwrap_or(default);
+    match value.parse::<f64>() {
+        Ok(x) => x,
+        Err(e) => {
+            panic!("don't know how to parse \"{}\" as f64: {}", value, e);
         },
     }
 }
 
 fn main() {
-    let app = App::new("lp-guacamole")
+    let app = App::new("lp-block-guacamole")
                       .version("0.1")
-                      .about("Runs random workloads against lp.");
+                      .about("Runs random workloads against lp-block.");
     let app = app.arg(Arg::with_name("num-keys")
                       .long("num-keys")
                       .takes_value(true)
@@ -230,32 +181,15 @@ fn main() {
                       .long("seek-distance")
                       .takes_value(true)
                       .help("Number of keys to scan from seek position."));
+    let app = app.arg(Arg::with_name("prev-probability")
+                      .long("prev-probability")
+                      .takes_value(true)
+                      .help("Probability of calling \"prev\" on a cursor instead of \"next\"."));
     let args = app.get_matches();
-    // Check the reference key value store for sort order.
-    let mut refkv = ReferenceKeyValueStore::default();
-    let kvo1 = KeyValueOperation::Put(KeyValuePut {
-        key: Key {
-            key: "k".to_string(),
-        },
-        timestamp: 0,
-        value: "".to_string(),
-    });
-    let kvo2 = KeyValueOperation::Put(KeyValuePut {
-        key: Key {
-            key: "k".to_string(),
-        },
-        timestamp: 1,
-        value: "".to_string(),
-    });
-    refkv.op(kvo1.clone());
-    refkv.op(kvo2.clone());
-    let mut iter = refkv.seek(Key::default());
-    assert_eq!(Some(kvo2), iter.next(), "reference key value store not so reference");
-    assert_eq!(Some(kvo1), iter.next(), "reference key value store not so reference");
-    assert_eq!(None, iter.next(), "reference key value store not so reference");
     // Our workload generator.
     let key_bytes = arg_as_u64(&args, "key-bytes", "8") as usize;
     let value_bytes = arg_as_u64(&args, "value-bytes", "128") as usize;
+    let prev_probability = arg_as_f64(&args, "prev-probability", "0.01") as f64;
     let mut guac = Guacamole::default();
     let gen = KeyValueOperationGuacamole {
         weight_put: 0.99,
@@ -285,10 +219,17 @@ fn main() {
     };
     // Load up a minimal key-value store.
     let num_keys = arg_as_u64(&args, "num-keys", "1000");
-    let mut kvs = ReferenceKeyValueStore::default();
+    let mut kvs = LowLevelKeyValueStore::default();
     for _ in 0..num_keys {
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
-        kvs.op(kvo);
+        match kvo {
+            KeyValueOperation::Put(x) => {
+                kvs.put(x.key.as_bytes(), x.timestamp, x.value.as_bytes());
+            },
+            KeyValueOperation::Del(x) => {
+                kvs.del(x.key.as_bytes(), x.timestamp);
+            },
+        }
     }
     // Create a new builder using the keys in the key-value store.
     let builder_opts = BuilderOptions {
@@ -309,17 +250,24 @@ fn main() {
     println!("            key_value_pairs_restart_interval: 16,");
     println!("        }};");
     println!("        let mut builder = Builder::new(builder_opts);");
-    for v in kvs.seek(Key::default()) {
-        match v {
-            KeyValueOperation::Put(x) => {
-                println!("        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes());", &x.key.key, x.timestamp, &x.value);
-                builder.put(&x.key.key.as_bytes(), x.timestamp, &x.value.as_bytes());
-            },
-            KeyValueOperation::Del(x) => {
-                println!("        builder.del(\"{}\".as_bytes(), {});", &x.key.key, x.timestamp);
-                builder.del(&x.key.key.as_bytes(), x.timestamp);
-            }
+    let mut iter = kvs.iter();
+    loop {
+        let x = iter.next().unwrap();
+        if x.is_none() {
+            break;
         }
+        let x = x.unwrap();
+        match x.value {
+            Some(ref v) => {
+                println!("        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes());",
+                    std::str::from_utf8(x.key).unwrap(), x.timestamp, std::str::from_utf8(v).unwrap());
+                builder.put(x.key, x.timestamp, v);
+            },
+            None => {
+                println!("        builder.del(\"{}\".as_bytes(), {});", std::str::from_utf8(x.key).unwrap(), x.timestamp);
+                builder.del(x.key, x.timestamp);
+            },
+        };
     }
     println!("        let finisher = builder.finish();");
     let finisher = builder.finish();
@@ -332,19 +280,21 @@ fn main() {
             select: Box::new(strings::RandomSelect{}),
         }),
     };
+    let ts_gen = TimestampGuacamole {};
     for _ in 0..num_seeks {
-        let key: Key = key_gen.guacamole(&mut guac);
-        println!("        // Top of loop seeks to: {:?}", key);
-        let mut iter = kvs.seek(key.clone());
+        let key: String = key_gen.guacamole(&mut guac);
+        let ts: u64 = ts_gen.guacamole(&mut guac);
+        println!("        // Top of loop seeks to: {:?}@{}", key, ts);
+        let mut iter = kvs.scan(key.as_bytes(), ts).unwrap();
         println!("        let mut cursor = Cursor::new(&block);");
         let mut cursor = Cursor::new(&block);
-        println!("        cursor.seek(\"{}\".as_bytes()).unwrap();", key.key);
-        cursor.seek(key.key.as_bytes()).unwrap();
+        println!("        cursor.seek(\"{}\".as_bytes(), {}).unwrap();", key, ts);
+        cursor.seek(key.as_bytes(), ts).unwrap();
         for _ in 0..seek_distance {
-            let exp = iter.next();
+            let exp = iter.next().unwrap();
             println!("        let got = cursor.next().unwrap();");
             let got = cursor.next().unwrap();
-            let print_x = |x: &KeyOptionalValuePair| {
+            let print_x = |x: &KeyValuePair| {
                 println!("        let exp = KeyValuePair {{");
                 println!("            key: \"{}\".as_bytes(),", std::str::from_utf8(x.key).unwrap());
                 println!("            timestamp: {},", x.timestamp);
@@ -356,12 +306,12 @@ fn main() {
             };
             match (exp, got) {
                 (Some(x), Some(y)) => {
-                    if x.to_key_value_pair() != y {
-                        print_x(&x.to_key_value_pair());
-                        println!("        assert_eq!(Some(exp), got);");
+                    if x != y {
+                        print_x(&x);
+                        println!("        assert_eq!(exp, got);");
                         println!("    }}");
                     }
-                    assert_eq!(x.to_key_value_pair(), y);
+                    assert_eq!(x, y);
                 }
                 (None, None) => {
                     break
@@ -372,8 +322,8 @@ fn main() {
                     panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
                 },
                 (Some(x), None) => {
-                    print_x(&x.to_key_value_pair());
-                    println!("        assert_eq!(Some(exp), got);");
+                    print_x(&x);
+                    println!("        assert_eq!(exp, got);");
                     println!("    }}");
                     panic!("found bad case (open a debugger or print out a dump of info above)");
                 },
@@ -382,3 +332,5 @@ fn main() {
     }
     println!("    }}");
 }
+*/
+fn main() {}
