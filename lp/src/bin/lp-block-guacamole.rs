@@ -252,6 +252,7 @@ fn main() {
     println!("        // --value-bytes {}", value_bytes);
     println!("        // --num-seeks {}", num_seeks);
     println!("        // --seek-distance {}", seek_distance);
+    println!("        // --prev-probability {}", prev_probability);
     println!("        let builder_opts = BuilderOptions {{");
     println!("            bytes_restart_interval: 512,");
     println!("            key_value_pairs_restart_interval: 16,");
@@ -309,9 +310,18 @@ fn main() {
         );
         cursor.seek(key.as_bytes(), ts).unwrap();
         for _ in 0..seek_distance {
-            let exp = iter.next().unwrap();
-            println!("        let got = cursor.next().unwrap();");
-            let got = cursor.next().unwrap();
+            let will_do_prev = guac.gen_range(0.0, 1.0) < prev_probability;
+            let (exp, got) = if will_do_prev {
+                let exp = iter.prev().unwrap();
+                println!("        let got = cursor.prev().unwrap();");
+                let got = cursor.prev().unwrap();
+                (exp, got)
+            } else {
+                let exp = iter.next().unwrap();
+                println!("        let got = cursor.next().unwrap();");
+                let got = cursor.next().unwrap();
+                (exp, got)
+            };
             let print_x = |x: &KeyValuePair| {
                 println!("        let exp = KeyValuePair {{");
                 println!(
@@ -336,7 +346,7 @@ fn main() {
                 (Some(x), Some(y)) => {
                     if x != y {
                         print_x(&x);
-                        println!("        assert_eq!(exp, got);");
+                        println!("        assert_eq!(Some(exp), got);");
                         println!("    }}");
                     }
                     assert_eq!(x, y);
