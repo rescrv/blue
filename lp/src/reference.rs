@@ -1,7 +1,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
 
-use super::{compare_bytes, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
+use super::{compare_key, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
@@ -23,7 +23,7 @@ impl<'a> Ord for Key {
         let key_rhs = &rhs.key;
         let ts_lhs = self.timestamp;
         let ts_rhs = rhs.timestamp;
-        compare_bytes(key_lhs, key_rhs).then(ts_rhs.cmp(&ts_lhs))
+        compare_key(key_lhs, ts_lhs, key_rhs, ts_rhs)
     }
 }
 
