@@ -1,266 +1,350 @@
-use std::collections::hash_map::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
+use std::time::SystemTime;
+
+use rand::{thread_rng, RngCore};
 
 use biometrics::Counter;
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
 
-#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Condition {
     Firing,
     Stable,
 }
 
+impl Default for Condition {
+    fn default() -> Self {
+        Condition::Firing
+    }
+}
+
+/////////////////////////////////////////////// Alert //////////////////////////////////////////////
+
+trait Alert: Clone {
+    type State: Clone + Debug + Default;
+    type Delta: Clone + Debug + Default;
+
+    fn label(&self) -> &'static str;
+    fn observations_to_keep(&self) -> usize;
+    fn evaluate(&self, previous_state: &Self::State) -> (Condition, Self::State, Self::Delta);
+
+    fn print(state: Self::State, delta: Self::Delta) -> String;
+}
+
+//////////////////////////////////////////// Observation ///////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+struct Observation<A: Alert> {
+    iter: u64,
+    when: SystemTime,
+    state: A::State,
+    delta: A::Delta,
+}
+
+/////////////////////////////////////////// AlertSampler ///////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+struct AlertSampler<A: Alert> {
+    prev: A::State,
+    iter: u64,
+    samples: Vec<Observation<A>>,
+}
+
+impl<A: Alert> AlertSampler<A> {
+    fn observe(&mut self, observations_to_keep: usize, state: A::State, delta: A::Delta) {
+        self.iter += 1;
+        let iter = self.iter;
+        let when = SystemTime::now();
+        let obs = Observation {
+            iter,
+            when,
+            state,
+            delta,
+        };
+        if self.samples.len() >= observations_to_keep {
+            let idx = (thread_rng().next_u64() as usize) % observations_to_keep;
+            self.samples[idx] = obs;
+            self.samples.truncate(observations_to_keep);
+        } else {
+            self.samples.push(obs);
+        }
+    }
+
+    fn clear(&mut self, iter: u64) -> bool {
+        for idx in 0..self.samples.len() {
+            if self.samples[idx].iter == iter {
+                self.samples[idx] = self.samples[self.samples.len() - 1].clone();
+                self.samples.pop();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn clear_all(&mut self) {
+        self.samples.truncate(0);
+    }
+}
+
+impl<A: Alert> Default for AlertSampler<A> {
+    fn default() -> Self {
+        Self {
+            prev: A::State::default(),
+            iter: 0,
+            samples: Vec::new(),
+        }
+    }
+}
+
+/////////////////////////////////////////// AlertRegistry //////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+struct AlertRegistry<A: Alert + 'static> {
+    registered: HashMap<&'static str, (&'static A, AlertSampler<A>)>,
+}
+
+impl<A: Alert + 'static> AlertRegistry<A> {
+    fn register(&mut self, alert: &'static A) {
+        self.registered
+            .insert(alert.label(), (alert, AlertSampler::default()));
+    }
+
+    fn evaluate(&mut self) {
+        for (_, (alert, sampler)) in self.registered.iter_mut() {
+            let (condition, new_state, delta) = alert.evaluate(&sampler.prev);
+            if condition == Condition::Firing {
+                sampler.observe(alert.observations_to_keep(), new_state, delta);
+            }
+        }
+    }
+
+    fn clear(&mut self, label: &'static str, iter: u64) -> bool {
+        if let Entry::Occupied(entry) = self.registered.entry(label) {
+            let (_, sampler) = entry.into_mut();
+            sampler.clear(iter)
+        } else {
+            false
+        }
+    }
+
+    fn clear_all(&mut self, label: &'static str) {
+        if let Entry::Occupied(entry) = self.registered.entry(label) {
+            let (_, sampler) = entry.into_mut();
+            sampler.clear_all();
+        }
+    }
+}
+
+impl<A: Alert + 'static> Default for AlertRegistry<A> {
+    fn default() -> Self {
+        Self {
+            registered: HashMap::default(),
+        }
+    }
+}
+
 //////////////////////////////////////////// SuccessRate ///////////////////////////////////////////
 
-#[derive(Clone,Debug,Default)]
-pub struct SuccessRateState {
+#[derive(Clone, Debug, Default)]
+struct SuccessRateState {
     success: u64,
     failure: u64,
 }
 
+#[derive(Clone, Debug, Default)]
+struct SuccessRateDelta {
+    success: u64,
+    failure: u64,
+}
+
+#[derive(Clone, Debug)]
 pub struct SuccessRate {
     label: &'static str,
     success: &'static Counter,
     failure: &'static Counter,
     threshold: f64,
+    observations_to_keep: usize,
 }
 
 impl SuccessRate {
-    pub const fn new(label: &'static str, success: &'static Counter, failure: &'static Counter, threshold: f64) -> Self {
+    pub const fn new(
+        label: &'static str,
+        success: &'static Counter,
+        failure: &'static Counter,
+        threshold: f64,
+        observations_to_keep: usize,
+    ) -> Self {
         SuccessRate {
             label,
             success,
             failure,
             threshold,
+            observations_to_keep,
         }
     }
+}
 
-    fn evaluate(&self, previous_state: &mut SuccessRateState) -> Condition {
+impl Alert for SuccessRate {
+    type State = SuccessRateState;
+    type Delta = SuccessRateDelta;
+
+    fn label(&self) -> &'static str {
+        self.label
+    }
+
+    fn observations_to_keep(&self) -> usize {
+        self.observations_to_keep
+    }
+
+    fn evaluate(&self, previous_state: &Self::State) -> (Condition, Self::State, Self::Delta) {
         let current_state = SuccessRateState {
             success: self.success.read(),
             failure: self.failure.read(),
         };
+        let delta = SuccessRateDelta {
+            success: current_state.success,
+            failure: current_state.failure,
+        };
         if current_state.success < previous_state.success {
-            *previous_state = current_state;
-            return Condition::Firing;
+            return (Condition::Firing, current_state, delta);
         }
-        if current_state.success - previous_state.success >= (1u64<<56) {
-            *previous_state = current_state;
-            return Condition::Firing;
+        if current_state.success - previous_state.success >= (1u64 << 56) {
+            return (Condition::Firing, current_state, delta);
         }
         if current_state.failure < previous_state.failure {
-            *previous_state = current_state;
-            return Condition::Firing;
+            return (Condition::Firing, current_state, delta);
         }
-        if current_state.failure - previous_state.failure >= (1u64<<56)  {
-            *previous_state = current_state;
-            return Condition::Firing;
+        if current_state.failure - previous_state.failure >= (1u64 << 56) {
+            return (Condition::Firing, current_state, delta);
         }
-        let success = (current_state.success - previous_state.success) as f64;
-        let failure = (current_state.failure - previous_state.failure) as f64;
+        let delta = SuccessRateDelta {
+            success: current_state.success - previous_state.success,
+            failure: current_state.failure - previous_state.failure,
+        };
+        let success = delta.success as f64;
+        let failure = delta.failure as f64;
         if success + failure <= 0.0 {
-            *previous_state = current_state;
-            return Condition::Firing;
+            return (Condition::Firing, current_state, delta);
         }
-        *previous_state = current_state;
         let success_rate = success / (success + failure);
         if success_rate >= self.threshold {
-            Condition::Stable
+            (Condition::Stable, current_state, delta)
         } else {
-            Condition::Firing
+            (Condition::Firing, current_state, delta)
         }
+    }
+
+    fn print(state: Self::State, delta: Self::Delta) -> String {
+        format!("{} {} {} {}", state.success, state.failure, delta.success, delta.failure)
     }
 }
 
-/////////////////////////////////////////// FireWhenClick //////////////////////////////////////////
+///////////////////////////////////////////// Clicking /////////////////////////////////////////////
 
-#[derive(Clone,Debug,Default)]
-struct FireWhenClickState {
+#[derive(Clone, Debug, Default)]
+struct ClickingState {
     count: u64,
 }
 
-pub struct FireWhenClick {
+#[derive(Clone, Debug, Default)]
+struct ClickingDelta {
+    count: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct Clicking {
     label: &'static str,
     counter: &'static Counter,
+    observations_to_keep: usize,
 }
 
-impl FireWhenClick {
-    pub const fn new(label: &'static str, counter: &'static Counter) -> Self {
-        Self {
+impl Clicking {
+    pub const fn new(
+        label: &'static str,
+        counter: &'static Counter,
+        observations_to_keep: usize,
+    ) -> Self {
+        Clicking {
             label,
-            counter
+            counter,
+            observations_to_keep,
         }
     }
+}
 
-    fn evaluate(&self, previous_state: &mut FireWhenClickState) -> Condition {
-        let current_state = FireWhenClickState {
+impl Alert for Clicking {
+    type State = ClickingState;
+    type Delta = ClickingDelta;
+
+    fn label(&self) -> &'static str {
+        self.label
+    }
+
+    fn observations_to_keep(&self) -> usize {
+        self.observations_to_keep
+    }
+
+    fn evaluate(&self, previous_state: &Self::State) -> (Condition, Self::State, Self::Delta) {
+        let current_state = ClickingState {
             count: self.counter.read(),
         };
-        if current_state.count < previous_state.count {
-            *previous_state = current_state;
-            return Condition::Firing;
-        }
-        if current_state.count > previous_state.count {
-            *previous_state = current_state;
-            return Condition::Firing;
-        }
-        *previous_state = current_state;
-        Condition::Stable
-    }
-}
-
-///////////////////////////////////////// FiringSuccessRate ////////////////////////////////////////
-
-struct FiringSuccessRate {
-    record: Vec<(Condition, SuccessRateState)>,
-}
-
-impl FiringSuccessRate {
-    fn new() -> Self {
-        Self {
-            record: Vec::new(),
-        }
+        let delta = ClickingDelta {
+            count: current_state.count - previous_state.count,
+        };
+        let condition = if current_state.count == previous_state.count {
+            Condition::Stable
+        } else {
+            Condition::Firing
+        };
+        (condition, current_state, delta)
     }
 
-    fn report_stable(&mut self, state: &SuccessRateState) {
-        self.record.push((Condition::Stable, state.clone()));
-    }
-
-    fn report_firing(&mut self, state: &SuccessRateState) {
-        self.record.push((Condition::Firing, state.clone()));
-    }
-}
-
-//////////////////////////////////////// FiringFireWhenClick ///////////////////////////////////////
-
-struct FiringFireWhenClick {
-    record: Vec<(Condition, FireWhenClickState)>,
-}
-
-impl FiringFireWhenClick {
-    fn new() -> Self {
-        Self {
-            record: Vec::new(),
-        }
-    }
-
-    fn report_stable(&mut self, state: &FireWhenClickState) {
-        self.record.push((Condition::Stable, state.clone()));
-    }
-
-    fn report_firing(&mut self, state: &FireWhenClickState) {
-        self.record.push((Condition::Firing, state.clone()));
+    fn print(state: Self::State, delta: Self::Delta) -> String {
+        format!("{} {}", state.count, delta.count)
     }
 }
 
 ///////////////////////////////////////////// HeyListen ////////////////////////////////////////////
 
+#[derive(Default)]
 pub struct HeyListen {
-    success_rates: Vec<(&'static SuccessRate, SuccessRateState)>,
-    success_rates_firing: HashMap<&'static str, FiringSuccessRate>,
-    fire_when_clicks: Vec<(&'static FireWhenClick, FireWhenClickState)>,
-    fire_when_clicks_firing: HashMap<&'static str, FiringFireWhenClick>,
+    labels: HashSet<&'static str>,
+    success_rates: AlertRegistry<SuccessRate>,
+    clicking: AlertRegistry<Clicking>,
 }
 
 impl HeyListen {
-    pub fn new() -> Self {
-        Self {
-            success_rates: Vec::new(),
-            success_rates_firing: HashMap::new(),
-            fire_when_clicks: Vec::new(),
-            fire_when_clicks_firing: HashMap::new(),
-        }
-    }
-
     pub fn register_success_rate(&mut self, alert: &'static SuccessRate) {
-        self.success_rates.push((alert, SuccessRateState::default()));
+        self.claim_label(alert.label());
+        self.success_rates.register(alert);
     }
 
-    pub fn register_fire_when_click(&mut self, alert: &'static FireWhenClick) {
-        self.fire_when_clicks.push((alert, FireWhenClickState::default()));
+    pub fn register_clicking(&mut self, alert: &'static Clicking) {
+        self.claim_label(alert.label());
+        self.clicking.register(alert);
     }
 
     pub fn evaluate(&mut self) {
-        for (success_rate, ref mut success_rate_state) in self.success_rates.iter_mut() {
-            let firing = self.success_rates_firing.get_mut(success_rate.label);
-            let report = success_rate.evaluate(success_rate_state);
-            match (firing, report) {
-                (Some(ref mut firing), Condition::Firing) => {
-                    firing.report_firing(success_rate_state);
-                },
-                (Some(ref mut firing), Condition::Stable) => {
-                    firing.report_stable(success_rate_state);
-                },
-                (None, Condition::Firing) => {
-                    let mut firing = FiringSuccessRate::new();
-                    firing.report_firing(success_rate_state);
-                    self.success_rates_firing.insert(success_rate.label, firing);
-                }
-                (None, Condition::Stable) => { /* intentonally blank */ }
-            }
-        }
-
-        for (fire_when_click, ref mut fire_when_click_state) in self.fire_when_clicks.iter_mut() {
-            let firing = self.fire_when_clicks_firing.get_mut(fire_when_click.label);
-            let report = fire_when_click.evaluate(fire_when_click_state);
-            match (firing, report) {
-                (Some(ref mut firing), Condition::Firing) => {
-                    firing.report_firing(fire_when_click_state);
-                },
-                (Some(ref mut firing), Condition::Stable) => {
-                    firing.report_stable(fire_when_click_state);
-                },
-                (None, Condition::Firing) => {
-                    let mut firing = FiringFireWhenClick::new();
-                    firing.report_firing(fire_when_click_state);
-                    self.fire_when_clicks_firing.insert(fire_when_click.label, firing);
-                },
-                (None, Condition::Stable) => { /* intentionally blank */ },
-            }
-        }
-    }
-}
-
-/////////////////////////////////////////////// tests //////////////////////////////////////////////
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn success_rate() {
-        static COUNTER1: Counter = Counter::new("success.rate.counter.1");
-        static COUNTER2: Counter = Counter::new("success.rate.counter.2");
-        static SUCCESS: SuccessRate = SuccessRate::new("success.rate.test", &COUNTER1, &COUNTER2, 0.999);
-
-        let mut state = SuccessRateState::default();
-
-        assert_eq!(0, COUNTER1.read());
-        assert_eq!(0, COUNTER2.read());
-        assert_eq!(Condition::Firing, SUCCESS.evaluate(&mut state));
-
-        for _ in 0..999 {
-            COUNTER1.click();
-        }
-        COUNTER2.click();
-
-        assert_eq!(999, COUNTER1.read());
-        assert_eq!(1, COUNTER2.read());
-        assert_eq!(Condition::Stable, SUCCESS.evaluate(&mut state));
+        self.success_rates.evaluate();
+        self.clicking.evaluate();
     }
 
-    #[test]
-    fn fire_when_click() {
-        static COUNTER: Counter = Counter::new("fire.when.click.counter");
-        static FIRE_WHEN_CLICK: FireWhenClick = FireWhenClick::new("fire.when.click.alert", &COUNTER);
+    pub fn clear(&mut self, label: &'static str, iter: u64) -> bool {
+        self.success_rates.clear(label, iter) || self.clicking.clear(label, iter)
+    }
 
-        let mut state = FireWhenClickState::default();
+    pub fn clear_all(&mut self, label: &'static str) {
+        self.success_rates.clear_all(label);
+        self.clicking.clear_all(label);
+    }
 
-        assert_eq!(Condition::Stable, FIRE_WHEN_CLICK.evaluate(&mut state));
-
-        COUNTER.click();
-        assert_eq!(Condition::Firing, FIRE_WHEN_CLICK.evaluate(&mut state));
-        assert_eq!(Condition::Stable, FIRE_WHEN_CLICK.evaluate(&mut state));
+    fn claim_label(&mut self, label: &'static str) {
+        if self.labels.contains(label) {
+            panic!("Cannot register \"{}\" twice", label);
+        }
+        self.labels.insert(label);
     }
 }
