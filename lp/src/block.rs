@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::{compare_key, KeyValuePair, Table, TableBuilder, TableCursor};
+use super::{compare_key, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -206,7 +206,7 @@ impl Block {
     }
 }
 
-impl<'a> Table<'a> for Block {
+impl<'a> TableTrait<'a> for Block {
     type Builder = Builder;
     type Cursor = Cursor<'a>;
 
@@ -287,7 +287,7 @@ impl Builder {
     }
 }
 
-impl<'a> TableBuilder<'a> for Builder {
+impl<'a> TableBuilderTrait<'a> for Builder {
     type Table = Block;
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), super::Error> {
@@ -525,7 +525,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
-impl<'a> TableCursor<'a> for Cursor<'a> {
+impl<'a> TableCursorTrait<'a> for Cursor<'a> {
     fn seek_to_first(&mut self) -> Result<(), super::Error> {
         self.position = CursorPosition::First;
         Ok(())
@@ -1740,16 +1740,34 @@ mod guacamole {
             key_value_pairs_restart_interval: 16,
         };
         let mut builder = Builder::new(builder_opts);
-        builder.put("4".as_bytes(), 5220327133503220768, "".as_bytes()).unwrap();
-        builder.put("A".as_bytes(), 2365635627947495809, "".as_bytes()).unwrap();
-        builder.put("E".as_bytes(), 17563921251225492277, "".as_bytes()).unwrap();
-        builder.put("I".as_bytes(), 3844377046565620216, "".as_bytes()).unwrap();
-        builder.put("J".as_bytes(), 14848435744026832213, "".as_bytes()).unwrap();
+        builder
+            .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
+            .unwrap();
+        builder
+            .put("A".as_bytes(), 2365635627947495809, "".as_bytes())
+            .unwrap();
+        builder
+            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
+            .unwrap();
+        builder
+            .put("I".as_bytes(), 3844377046565620216, "".as_bytes())
+            .unwrap();
+        builder
+            .put("J".as_bytes(), 14848435744026832213, "".as_bytes())
+            .unwrap();
         builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder.put("g".as_bytes(), 10374159306796994843, "".as_bytes()).unwrap();
-        builder.put("k".as_bytes(), 4092481979873166344, "".as_bytes()).unwrap();
-        builder.put("t".as_bytes(), 7790837488841419319, "".as_bytes()).unwrap();
-        builder.put("v".as_bytes(), 2133827469768204743, "".as_bytes()).unwrap();
+        builder
+            .put("g".as_bytes(), 10374159306796994843, "".as_bytes())
+            .unwrap();
+        builder
+            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
+            .unwrap();
+        builder
+            .put("t".as_bytes(), 7790837488841419319, "".as_bytes())
+            .unwrap();
+        builder
+            .put("v".as_bytes(), 2133827469768204743, "".as_bytes())
+            .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: "d"@4793296426793138773
         let mut cursor = block.iterate();

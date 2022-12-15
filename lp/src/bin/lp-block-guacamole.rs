@@ -8,10 +8,7 @@ use guacamole::Guacamole;
 
 use lp::block::{Builder, BuilderOptions};
 use lp::reference::TableBuilder;
-use lp::KeyValuePair;
-use lp::Table as TableTrait;
-use lp::TableBuilder as TableBuilderTrait;
-use lp::TableCursor as TableCursorTrait;
+use lp::{KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 

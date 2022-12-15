@@ -51,9 +51,9 @@ impl<'a> PartialOrd for KeyValuePair<'a> {
 
 /////////////////////////////////////////////// Table //////////////////////////////////////////////
 
-pub trait Table<'a> {
-    type Builder: TableBuilder<'a, Table = Self>;
-    type Cursor: TableCursor<'a>;
+pub trait TableTrait<'a> {
+    type Builder: TableBuilderTrait<'a, Table = Self>;
+    type Cursor: TableCursorTrait<'a>;
 
     fn get(&'a self, key: &[u8], timestamp: u64) -> Option<KeyValuePair<'a>>;
     fn iterate(&'a self) -> Self::Cursor;
@@ -61,8 +61,8 @@ pub trait Table<'a> {
 
 /////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
 
-pub trait TableBuilder<'a> {
-    type Table: Table<'a>;
+pub trait TableBuilderTrait<'a> {
+    type Table: TableTrait<'a>;
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
@@ -72,7 +72,7 @@ pub trait TableBuilder<'a> {
 
 //////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
-pub trait TableCursor<'a> {
+pub trait TableCursorTrait<'a> {
     fn seek_to_first(&mut self) -> Result<(), Error>;
     fn seek_to_last(&mut self) -> Result<(), Error>;
     fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
@@ -100,7 +100,12 @@ pub fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
 
 //////////////////////////////////////////// compare_key ///////////////////////////////////////////
 
-pub fn compare_key(key_lhs: &[u8], timestamp_lhs: u64, key_rhs: &[u8], timestamp_rhs: u64) -> Ordering {
+pub fn compare_key(
+    key_lhs: &[u8],
+    timestamp_lhs: u64,
+    key_rhs: &[u8],
+    timestamp_rhs: u64,
+) -> Ordering {
     compare_bytes(key_lhs, key_rhs).then(timestamp_lhs.cmp(&timestamp_rhs).reverse())
 }
 
@@ -134,7 +139,7 @@ mod tests {
 
     struct TestTable {}
 
-    impl<'a> Table<'a> for TestTable {
+    impl<'a> TableTrait<'a> for TestTable {
         type Builder = TestBuilder;
         type Cursor = TestCursor;
 
@@ -149,7 +154,7 @@ mod tests {
 
     struct TestBuilder {}
 
-    impl<'a> TableBuilder<'a> for TestBuilder {
+    impl<'a> TableBuilderTrait<'a> for TestBuilder {
         type Table = TestTable;
 
         fn put(&mut self, _key: &[u8], _timestamp: u64, _value: &[u8]) -> Result<(), Error> {
@@ -167,7 +172,7 @@ mod tests {
 
     struct TestCursor {}
 
-    impl<'a> TableCursor<'a> for TestCursor {
+    impl<'a> TableCursorTrait<'a> for TestCursor {
         fn seek_to_first(&mut self) -> Result<(), Error> {
             unimplemented!();
         }

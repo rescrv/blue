@@ -1,10 +1,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
 
-use super::Table as TableTrait;
-use super::TableBuilder as TableBuilderTrait;
-use super::TableCursor as TableCursorTrait;
-use super::{compare_bytes, Error, KeyValuePair};
+use super::{compare_bytes, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
