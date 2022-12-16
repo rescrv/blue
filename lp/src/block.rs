@@ -210,10 +210,6 @@ impl<'a> TableTrait<'a> for Block {
     type Builder = Builder;
     type Cursor = Cursor<'a>;
 
-    fn get(&'a self, key: &[u8], timestamp: u64) -> Option<KeyValuePair<'a>> {
-        todo!();
-    }
-
     fn iterate(&'a self) -> Self::Cursor {
         Cursor::new(self)
     }

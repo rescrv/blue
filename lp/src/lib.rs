@@ -1,8 +1,8 @@
-use std::cmp;
-use std::cmp::Ordering;
-
 extern crate prototk;
 extern crate prototk_derive;
+
+use std::cmp;
+use std::cmp::Ordering;
 
 pub mod block;
 pub mod reference;
@@ -54,8 +54,6 @@ impl<'a> PartialOrd for KeyValuePair<'a> {
 pub trait TableTrait<'a> {
     type Builder: TableBuilderTrait<'a, Table = Self>;
     type Cursor: TableCursorTrait<'a>;
-
-    fn get(&'a self, key: &[u8], timestamp: u64) -> Option<KeyValuePair<'a>>;
     fn iterate(&'a self) -> Self::Cursor;
 }
 
@@ -73,6 +71,28 @@ pub trait TableBuilderTrait<'a> {
 //////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
 pub trait TableCursorTrait<'a> {
+    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
+        self.seek(key, timestamp)?;
+        match self.next()? {
+            Some(kvp) => {
+                if compare_bytes(kvp.key, key) == Ordering::Equal {
+                    Ok(Some(KeyValuePair {
+                        key: kvp.key,
+                        timestamp: kvp.timestamp,
+                        value: match kvp.value {
+                            Some(v) => Some(&v),
+                            None => None,
+                        },
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+
     fn seek_to_first(&mut self) -> Result<(), Error>;
     fn seek_to_last(&mut self) -> Result<(), Error>;
     fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
@@ -143,10 +163,6 @@ mod tests {
         type Builder = TestBuilder;
         type Cursor = TestCursor;
 
-        fn get(&self, _key: &[u8], _timestamp: u64) -> Option<KeyValuePair<'a>> {
-            unimplemented!();
-        }
-
         fn iterate(&self) -> Self::Cursor {
             unimplemented!();
         }
@@ -173,6 +189,10 @@ mod tests {
     struct TestCursor {}
 
     impl<'a> TableCursorTrait<'a> for TestCursor {
+        fn get(&mut self, _key: &[u8], _timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
+            unimplemented!();
+        }
+
         fn seek_to_first(&mut self) -> Result<(), Error> {
             unimplemented!();
         }

@@ -51,32 +51,6 @@ impl<'a> TableTrait<'a> for Table {
     type Builder = TableBuilder;
     type Cursor = TableCursor<'a>;
 
-    fn get(&'a self, key: &[u8], timestamp: u64) -> Option<KeyValuePair<'a>> {
-        let start = Key {
-            key: key.to_vec(),
-            timestamp,
-        };
-        let limit = Key {
-            key: key.to_vec(),
-            timestamp: 0,
-        };
-        match self
-            .entries
-            .range((Bound::Included(start), Bound::Included(limit)))
-            .next()
-        {
-            Some(entry) => Some(KeyValuePair {
-                key: &entry.0.key,
-                timestamp: entry.0.timestamp,
-                value: match entry.1 {
-                    Some(x) => Some(&x),
-                    None => None,
-                },
-            }),
-            None => None,
-        }
-    }
-
     fn iterate(&'a self) -> Self::Cursor {
         TableCursor {
             table: self,
@@ -144,6 +118,33 @@ pub struct TableCursor<'a> {
 }
 
 impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
+    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, super::Error> {
+        let start = Key {
+            key: key.to_vec(),
+            timestamp,
+        };
+        let limit = Key {
+            key: key.to_vec(),
+            timestamp: 0,
+        };
+        match self
+            .table
+            .entries
+            .range((Bound::Included(start), Bound::Included(limit)))
+            .next()
+        {
+            Some(entry) => Ok(Some(KeyValuePair {
+                key: &entry.0.key,
+                timestamp: entry.0.timestamp,
+                value: match entry.1 {
+                    Some(x) => Some(&x),
+                    None => None,
+                },
+            })),
+            None => Ok(None),
+        }
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = TablePosition::First;
         Ok(())
