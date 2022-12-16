@@ -4,27 +4,7 @@ use std::cmp::Ordering;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::{compare_key, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
-
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
-
-#[derive(Debug)]
-pub enum Error {
-    BlockTooSmall {
-        length: usize,
-        required: usize,
-    },
-    UnpackError {
-        error: prototk::Error,
-        context: String,
-    },
-    Corruption {
-        context: String,
-    },
-    LogicError {
-        context: String,
-    },
-}
+use super::{compare_key, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
 
 ////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
 
@@ -128,16 +108,14 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(bytes: Vec<u8>) -> Result<Self, super::Error> {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
         // Load num_restarts.
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
-            return Err(super::Error::BlockError {
-                what: Error::BlockTooSmall {
-                    length: bytes.len(),
-                    required: 4,
-                },
+            return Err(Error::BlockTooSmall {
+                length: bytes.len(),
+                required: 4,
             });
         }
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
@@ -266,7 +244,7 @@ impl Builder {
     }
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
-    fn append<'a>(&mut self, be: BlockEntry<'a>) -> Result<(), super::Error> {
+    fn append<'a>(&mut self, be: BlockEntry<'a>) -> Result<(), Error> {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
@@ -286,7 +264,7 @@ impl Builder {
 impl<'a> TableBuilderTrait<'a> for Builder {
     type Table = Block;
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), super::Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValuePut {
             shared: shared as u64,
@@ -298,7 +276,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
         self.append(be)
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), super::Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValueDel {
             shared: shared as u64,
@@ -309,7 +287,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
         self.append(be)
     }
 
-    fn seal(self) -> Result<Block, super::Error> {
+    fn seal(self) -> Result<Block, Error> {
         // Append each restart.
         let restarts = length_free(&self.restarts);
         let tag10: v64 = ((10 << 3) | 2).into();
@@ -522,17 +500,17 @@ impl<'a> Cursor<'a> {
 }
 
 impl<'a> TableCursorTrait<'a> for Cursor<'a> {
-    fn seek_to_first(&mut self) -> Result<(), super::Error> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), super::Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), super::Error> {
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
             return Err(Error::Corruption {
@@ -582,8 +560,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         if left != right {
             return Err(Error::Corruption {
                 context: format!("binary_search (left={}) != (right={})", left, right),
-            }
-            .into());
+            });
         }
 
         // We position at the left restart point
@@ -595,8 +572,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
             None => {
                 return Err(Error::Corruption {
                     context: format!("restart point={} returned no key-value pair.", left),
-                }
-                .into());
+                });
             }
         };
 
@@ -637,7 +613,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
         // We won't go past here.
         let target_next_offset = match self.position {
             CursorPosition::First => {
@@ -669,8 +645,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
             if current_restart_idx == 0 {
                 return Err(Error::LogicError {
                     context: "tried taking the -1st restart_idx".to_string(),
-                }
-                .into());
+                });
             }
             current_restart_idx - 1
         } else {
@@ -686,7 +661,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         Ok(self.key_value_pair())
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, super::Error> {
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
         // We start with the first block.
         if let CursorPosition::First = self.position {
             return Ok(self.seek_restart(0)?);
@@ -715,8 +690,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         if !self.position.is_positioned() {
             return Err(Error::LogicError {
                 context: "next was not positioned, but made it to here.".to_string(),
-            }
-            .into());
+            });
         }
 
         // Extract the key from self.position.

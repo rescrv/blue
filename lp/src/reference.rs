@@ -118,7 +118,7 @@ pub struct TableCursor<'a> {
 }
 
 impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
-    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, super::Error> {
+    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
         let start = Key {
             key: key.to_vec(),
             timestamp,

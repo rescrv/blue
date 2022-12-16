@@ -11,13 +11,20 @@ pub mod reference;
 
 #[derive(Debug)]
 pub enum Error {
-    BlockError { what: block::Error },
-}
-
-impl From<block::Error> for Error {
-    fn from(what: block::Error) -> Error {
-        Error::BlockError { what }
-    }
+    BlockTooSmall {
+        length: usize,
+        required: usize,
+    },
+    UnpackError {
+        error: prototk::Error,
+        context: String,
+    },
+    Corruption {
+        context: String,
+    },
+    LogicError {
+        context: String,
+    },
 }
 
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////
