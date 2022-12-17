@@ -10,8 +10,20 @@ use super::{compare_key, Error, KeyValuePair, TableBuilderTrait, TableCursorTrai
 
 #[derive(Clone, Debug)]
 pub struct BuilderOptions {
-    pub bytes_restart_interval: u64,
-    pub key_value_pairs_restart_interval: u64,
+    bytes_restart_interval: u64,
+    key_value_pairs_restart_interval: u64,
+}
+
+impl BuilderOptions {
+    pub fn bytes_restart_interval(mut self, bytes_restart_interval: u32) -> Self {
+        self.bytes_restart_interval = bytes_restart_interval as u64;
+        self
+    }
+
+    pub fn key_value_pairs_restart_interval(mut self, key_value_pairs_restart_interval: u32) -> Self {
+        self.key_value_pairs_restart_interval = key_value_pairs_restart_interval as u64;
+        self
+    }
 }
 
 impl Default for BuilderOptions {

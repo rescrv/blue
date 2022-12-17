@@ -236,10 +236,7 @@ fn main() {
     }
     let kvs = builder.seal().unwrap();
     // Create a new builder using the keys in the key-value store.
-    let builder_opts = BuilderOptions {
-        bytes_restart_interval: 512,
-        key_value_pairs_restart_interval: 16,
-    };
+    let builder_opts = BuilderOptions::default();
     let mut builder = Builder::new(builder_opts);
     let num_seeks = arg_as_u64(&args, "num-seeks", "1000");
     let seek_distance = arg_as_u64(&args, "seek-distance", "10");
