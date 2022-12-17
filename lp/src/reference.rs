@@ -2,8 +2,8 @@ use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
 
 use super::{
-    check_key_len, check_value_len, compare_key, Error, KeyValuePair, TableBuilderTrait,
-    TableCursorTrait, TableTrait,
+    check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair,
+    TableBuilderTrait, TableCursorTrait, TableTrait,
 };
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
@@ -72,9 +72,23 @@ pub struct TableBuilder {
 impl<'a> TableBuilderTrait<'a> for TableBuilder {
     type Table = Table;
 
+    fn approximate_size(&self) -> usize {
+        let mut size = 0;
+        for (key, value) in self.table.entries.iter() {
+            size += key.key.len()
+                + 8
+                + match value {
+                    Some(v) => v.len(),
+                    None => 0,
+                };
+        }
+        size
+    }
+
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
         let key = Key {
             key: key.to_vec(),
             timestamp,
@@ -86,6 +100,7 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
         let key = Key {
             key: key.to_vec(),
             timestamp,

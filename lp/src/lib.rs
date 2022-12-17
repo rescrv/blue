@@ -6,11 +6,17 @@ use std::cmp::Ordering;
 
 pub mod block;
 pub mod reference;
+pub mod table;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 pub const MAX_KEY_LEN: usize = 1usize << 16; /* 64KiB */
 pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
+
+// NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
+// but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
+// general pattern is that the block will exceed this size by up to one key-value pair.
+pub const TABLE_FULL_SIZE: usize = 1usize << 30; /* 1GiB */
 
 fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
@@ -34,6 +40,17 @@ fn check_value_len(value: &[u8]) -> Result<(), Error> {
     }
 }
 
+fn check_table_size(size: usize) -> Result<(), Error> {
+    if size >= TABLE_FULL_SIZE {
+        Err(Error::TableFull {
+            size,
+            limit: TABLE_FULL_SIZE,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -44,6 +61,10 @@ pub enum Error {
     },
     ValueTooLarge {
         length: usize,
+        limit: usize,
+    },
+    TableFull {
+        size: usize,
         limit: usize,
     },
     BlockTooSmall {
@@ -103,6 +124,8 @@ pub trait TableTrait<'a> {
 
 pub trait TableBuilderTrait<'a> {
     type Table: TableTrait<'a>;
+
+    fn approximate_size(&self) -> usize;
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
@@ -286,6 +309,10 @@ mod tests {
 
     impl<'a> TableBuilderTrait<'a> for TestBuilder {
         type Table = TestTable;
+
+        fn approximate_size(&self) -> usize {
+            unimplemented!();
+        }
 
         fn put(&mut self, _key: &[u8], _timestamp: u64, _value: &[u8]) -> Result<(), Error> {
             unimplemented!();

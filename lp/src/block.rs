@@ -5,8 +5,8 @@ use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
 use super::{
-    check_key_len, check_value_len, compare_key, Error, KeyValuePair, TableBuilderTrait,
-    TableCursorTrait, TableTrait,
+    check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair,
+    TableBuilderTrait, TableCursorTrait, TableTrait,
 };
 
 ////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
@@ -279,9 +279,14 @@ impl Builder {
 impl<'a> TableBuilderTrait<'a> for Builder {
     type Table = Block;
 
+    fn approximate_size(&self) -> usize {
+        self.buffer.len() + 16 + self.restarts.len() * 4
+    }
+
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValuePut {
             shared: shared as u64,
@@ -295,6 +300,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValueDel {
             shared: shared as u64,
@@ -307,6 +313,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
 
     fn seal(self) -> Result<Block, Error> {
         // Append each restart.
+        // NOTE(rescrv):  If this changes, change approximate_size above.
         let restarts = length_free(&self.restarts);
         let tag10: v64 = ((10 << 3) | 2).into();
         let tag11: v64 = ((11 << 3) | 5).into();
