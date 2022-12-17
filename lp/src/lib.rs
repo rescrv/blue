@@ -192,6 +192,22 @@ fn divide_keys(
     (d_key, d_timestamp)
 }
 
+/////////////////////////////////////// minimal_successor_key //////////////////////////////////////
+
+fn minimal_successor_key(key: &[u8], timestamp: u64) -> (Vec<u8>, u64) {
+    let all_ff = key.iter().all(|x| *x == 0xffu8);
+    let (sz, ts) = if all_ff && timestamp == 0 {
+        (key.len() + 1, 0)
+    } else if all_ff {
+        (key.len(), timestamp - 1)
+    } else {
+        (key.len(), 0)
+    };
+    let mut key = Vec::with_capacity(sz);
+    key.resize(sz, 0xff);
+    (key, ts)
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -368,6 +384,58 @@ mod tests {
             let exp_key: &[u8] = &[0xff, 0xff, 0x1];
             assert_eq!(exp_key, d_key);
             assert_eq!(5, d_timestamp);
+        }
+    }
+
+    mod minimal_successor_key {
+        use super::*;
+
+        #[test]
+        fn empty_zero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[], 0);
+            let exp: &[u8] = &[0xff];
+            assert_eq!(exp, &key);
+            assert_eq!(0, timestamp);
+        }
+
+        #[test]
+        fn empty_nonzero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[], 1);
+            let exp: &[u8] = &[];
+            assert_eq!(exp, &key);
+            assert_eq!(0, timestamp);
+        }
+
+        #[test]
+        fn nonempty_zero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[0xaa], 0);
+            let exp: &[u8] = &[0xff];
+            assert_eq!(exp, &key);
+            assert_eq!(0, timestamp);
+        }
+
+        #[test]
+        fn nonempty_nonzero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[0xaa], 5);
+            let exp: &[u8] = &[0xff];
+            assert_eq!(exp, &key);
+            assert_eq!(0, timestamp);
+        }
+
+        #[test]
+        fn ffffff_zero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[0xff, 0xff, 0xff], 0);
+            let exp: &[u8] = &[0xff, 0xff, 0xff, 0xff];
+            assert_eq!(exp, &key);
+            assert_eq!(0, timestamp);
+        }
+
+        #[test]
+        fn ffffff_nonzero_timestamp() {
+            let (key, timestamp) = minimal_successor_key(&[0xff, 0xff, 0xff], 7);
+            let exp: &[u8] = &[0xff, 0xff, 0xff];
+            assert_eq!(exp, &key);
+            assert_eq!(6, timestamp);
         }
     }
 }
