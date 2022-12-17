@@ -5,8 +5,8 @@ use std::cmp;
 use std::cmp::Ordering;
 
 pub mod block;
+pub mod guacamole;
 pub mod reference;
-pub mod table;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
