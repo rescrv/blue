@@ -63,6 +63,12 @@ pub enum Error {
         length: usize,
         limit: usize,
     },
+    SortOrder {
+        last_key: Vec<u8>,
+        last_timestamp: u64,
+        new_key: Vec<u8>,
+        new_timestamp: u64,
+    },
     TableFull {
         size: usize,
         limit: usize,

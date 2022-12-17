@@ -215,6 +215,7 @@ pub struct Builder {
     options: BuilderOptions,
     buffer: Vec<u8>,
     last_key: Vec<u8>,
+    last_timestamp: u64,
     // Restart metadata.
     restarts: Vec<u32>,
     bytes_since_restart: u64,
@@ -229,6 +230,7 @@ impl Builder {
             options,
             buffer,
             last_key: Vec::default(),
+            last_timestamp: u64::max_value(),
             restarts,
             bytes_since_restart: 0,
             key_value_pairs_since_restart: 0,
@@ -263,9 +265,12 @@ impl Builder {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
+        self.last_timestamp = be.timestamp();
 
         // Append to the vector.
         let pa = stack_pack(be);
+        // This assert should be safe because our table size is limited to 1<<30 and be's pack size
+        // should not exceed 3GiB.
         assert!(self.buffer.len() + pa.pack_sz() <= u32::max_value() as usize);
         pa.append_to_vec(&mut self.buffer);
 
@@ -273,6 +278,19 @@ impl Builder {
         self.bytes_since_restart += pa.pack_sz() as u64;
         self.key_value_pairs_since_restart += 1;
         Ok(())
+    }
+
+    fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
+            Err(Error::SortOrder {
+                last_key: self.last_key.clone(),
+                last_timestamp: self.last_timestamp,
+                new_key: key.to_vec(),
+                new_timestamp: timestamp,
+            })
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -287,6 +305,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValuePut {
             shared: shared as u64,
@@ -301,6 +320,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValueDel {
             shared: shared as u64,
