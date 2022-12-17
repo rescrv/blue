@@ -46,7 +46,7 @@ impl<'a> Ord for KeyValuePair<'a> {
     fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
         let key1 = self.key;
         let key2 = rhs.key;
-        compare_bytes(key1, key2).then(self.timestamp.cmp(&rhs.timestamp).reverse())
+        compare_key(key1, self.timestamp, key2, rhs.timestamp)
     }
 }
 
@@ -136,6 +136,62 @@ pub fn compare_key(
     compare_bytes(key_lhs, key_rhs).then(timestamp_lhs.cmp(&timestamp_rhs).reverse())
 }
 
+//////////////////////////////////////////// divide_keys ///////////////////////////////////////////
+
+fn divide_keys(
+    key_lhs: &[u8],
+    timestamp_lhs: u64,
+    key_rhs: &[u8],
+    timestamp_rhs: u64,
+) -> (Vec<u8>, u64) {
+    assert!(compare_key(key_lhs, timestamp_lhs, key_rhs, timestamp_rhs) == Ordering::Less);
+    let max_shared = cmp::min(key_lhs.len(), key_rhs.len());
+    let mut shared = 0;
+    while shared < max_shared && key_lhs[shared] == key_rhs[shared] {
+        shared += 1;
+    }
+    let mut d_key: Vec<u8> = Vec::with_capacity(shared + 1);
+    let d_timestamp: u64;
+    // The keys have a shared prefix.  It necessarily means that key_lhs.len() == shared and
+    // key_rhs.len() >= shared.
+    if shared == max_shared {
+        assert!(key_lhs.len() == max_shared);
+        assert!(key_rhs.len() >= max_shared);
+        if key_lhs.len() == key_rhs.len() {
+            // When the keys are equal, fall back to timestamps.
+            assert!(timestamp_lhs > timestamp_rhs);
+            d_key.extend_from_slice(&key_lhs);
+            d_timestamp = timestamp_lhs - 1;
+        } else {
+            // When the keys are not equal, we know that key_rhs.len() > shared.
+            assert!(shared + 1 <= key_rhs.len());
+            assert!(key_lhs.len() < key_rhs.len());
+            d_key.extend_from_slice(&key_rhs[0..shared + 1]);
+            // When key_rhs is one byte longer, use timestamp_rhs; else use timestamp 0.
+            d_timestamp = if key_lhs.len() + 1 == key_rhs.len() {
+                timestamp_rhs
+            } else {
+                0
+            }
+        }
+    } else {
+        // We know we can divide the keys at a byte less than key_lhs.len() and key_rhs.len().
+        assert!(key_lhs.len() > shared);
+        assert!(key_rhs.len() > shared);
+        if key_rhs.len() == shared + 1 && key_lhs[shared] + 1 == key_rhs[shared] {
+            // We have a special case where key_rhs is short and adjacent to key_lhs.  Use key_rhs
+            // with its timestamp.
+            d_key.extend_from_slice(&key_rhs);
+            d_timestamp = timestamp_rhs;
+        } else {
+            // Use a prefix of key_rhs with a zero timestamp.
+            d_key.extend_from_slice(&key_rhs[..shared + 1]);
+            d_timestamp = 0;
+        }
+    }
+    (d_key, d_timestamp)
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -218,6 +274,100 @@ mod tests {
 
         fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
             unimplemented!();
+        }
+    }
+
+    mod divide_keys {
+        use super::*;
+
+        #[test]
+        fn empty_timestamp() {
+            let lhs_key: &[u8] = &[];
+            let rhs_key: &[u8] = &[];
+            let lhs_timestamp = 2u64;
+            let rhs_timestamp = 0u64;
+            let (d_key, d_timestamp) = divide_keys(lhs_key, lhs_timestamp, rhs_key, rhs_timestamp);
+            let d_key: &[u8] = &d_key;
+            assert_eq!(rhs_key, d_key);
+            assert_eq!(1, d_timestamp);
+        }
+
+        #[test]
+        fn empty_timestamp_adjacent() {
+            let lhs_key: &[u8] = &[];
+            let rhs_key: &[u8] = &[];
+            let lhs_timestamp = 1u64;
+            let rhs_timestamp = 0u64;
+            let (d_key, d_timestamp) = divide_keys(lhs_key, lhs_timestamp, rhs_key, rhs_timestamp);
+            let d_key: &[u8] = &d_key;
+            assert_eq!(rhs_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn empty_one() {
+            let lhs_key: &[u8] = &[];
+            let rhs_key: &[u8] = &[1];
+            let (d_key, d_timestamp) = divide_keys(lhs_key, 0, rhs_key, 0);
+            let d_key: &[u8] = &d_key;
+            assert_eq!(rhs_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn max_timestamp() {
+            let lhs_key: &[u8] = &[0xff];
+            let rhs_key: &[u8] = &[0xff];
+            let lhs_timestamp = 1u64;
+            let rhs_timestamp = 0u64;
+            let (d_key, d_timestamp) = divide_keys(lhs_key, lhs_timestamp, rhs_key, rhs_timestamp);
+            let d_key: &[u8] = &d_key;
+            assert_eq!(rhs_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn shared_prefix_no_diff() {
+            let lhs_key: &[u8] = &[0xaa];
+            let rhs_key: &[u8] = &[0xaa, 0xaa];
+            let (d_key, d_timestamp) = divide_keys(lhs_key, 0, rhs_key, 0);
+            let d_key: &[u8] = &d_key;
+            let exp_key: &[u8] = &[0xaa, 0xaa];
+            assert_eq!(exp_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn shared_prefix_0xaa() {
+            let lhs_key: &[u8] = &[0xaa, 0x0];
+            let rhs_key: &[u8] = &[0xaa, 0x5, 0xaa];
+            let (d_key, d_timestamp) = divide_keys(lhs_key, 0, rhs_key, 0);
+            let d_key: &[u8] = &d_key;
+            let exp_key: &[u8] = &[0xaa, 0x5];
+            assert_eq!(exp_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn shared_prefix_0xff() {
+            let lhs_key: &[u8] = &[0xff, 0xff, 0x0];
+            let rhs_key: &[u8] = &[0xff, 0xff, 0x5, 0xff, 0xff];
+            let (d_key, d_timestamp) = divide_keys(lhs_key, 0, rhs_key, 0);
+            let d_key: &[u8] = &d_key;
+            let exp_key: &[u8] = &[0xff, 0xff, 0x5];
+            assert_eq!(exp_key, d_key);
+            assert_eq!(0, d_timestamp);
+        }
+
+        #[test]
+        fn use_rhs() {
+            let lhs_key: &[u8] = &[0xff, 0xff, 0x0];
+            let rhs_key: &[u8] = &[0xff, 0xff, 0x1];
+            let (d_key, d_timestamp) = divide_keys(lhs_key, 0, rhs_key, 5);
+            let d_key: &[u8] = &d_key;
+            let exp_key: &[u8] = &[0xff, 0xff, 0x1];
+            assert_eq!(exp_key, d_key);
+            assert_eq!(5, d_timestamp);
         }
     }
 }
