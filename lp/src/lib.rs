@@ -7,10 +7,45 @@ use std::cmp::Ordering;
 pub mod block;
 pub mod reference;
 
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
+
+pub const MAX_KEY_LEN: usize = 1usize << 16; /* 64KiB */
+pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
+
+fn check_key_len(key: &[u8]) -> Result<(), Error> {
+    if key.len() > MAX_KEY_LEN {
+        Err(Error::KeyTooLarge {
+            length: key.len(),
+            limit: MAX_KEY_LEN,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn check_value_len(value: &[u8]) -> Result<(), Error> {
+    if value.len() > MAX_VALUE_LEN {
+        Err(Error::ValueTooLarge {
+            length: value.len(),
+            limit: MAX_VALUE_LEN,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Debug)]
 pub enum Error {
+    KeyTooLarge {
+        length: usize,
+        limit: usize,
+    },
+    ValueTooLarge {
+        length: usize,
+        limit: usize,
+    },
     BlockTooSmall {
         length: usize,
         required: usize,

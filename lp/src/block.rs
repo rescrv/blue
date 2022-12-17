@@ -4,7 +4,10 @@ use std::cmp::Ordering;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::{compare_key, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
+use super::{
+    check_key_len, check_value_len, compare_key, Error, KeyValuePair, TableBuilderTrait,
+    TableCursorTrait, TableTrait,
+};
 
 ////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
 
@@ -277,6 +280,8 @@ impl<'a> TableBuilderTrait<'a> for Builder {
     type Table = Block;
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValuePut {
             shared: shared as u64,
@@ -289,6 +294,7 @@ impl<'a> TableBuilderTrait<'a> for Builder {
     }
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
         let (shared, key_frag) = self.compute_key_frag(key);
         let kvp = KeyValueDel {
             shared: shared as u64,
