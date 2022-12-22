@@ -1,4 +1,5 @@
 extern crate prototk;
+#[macro_use]
 extern crate prototk_derive;
 
 use std::cmp;
@@ -7,6 +8,7 @@ use std::cmp::Ordering;
 pub mod block;
 pub mod guacamole;
 pub mod reference;
+pub mod table;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -87,6 +89,15 @@ pub enum Error {
     LogicError {
         context: String,
     },
+    IoError {
+        what: std::io::Error,
+    },
+}
+
+impl From<std::io::Error> for Error {
+    fn from(what: std::io::Error) -> Error {
+        Error::IoError { what }
+    }
 }
 
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////

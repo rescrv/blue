@@ -156,6 +156,10 @@ impl Block {
         Ok(block)
     }
 
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
+
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts as usize);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
