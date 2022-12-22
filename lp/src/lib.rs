@@ -6,6 +6,7 @@ use std::cmp;
 use std::cmp::Ordering;
 
 pub mod block;
+pub mod file_manager;
 pub mod guacamole;
 pub mod reference;
 pub mod table;
@@ -91,6 +92,9 @@ pub enum Error {
     },
     IoError {
         what: std::io::Error,
+    },
+    TooManyOpenFiles {
+        limit: usize,
     },
 }
 
