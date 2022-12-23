@@ -5,7 +5,9 @@ use std::rc::Rc;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::{check_key_len, check_table_size, check_value_len, compare_key, Buffer, Error, KeyValuePair};
+use super::{
+    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Error, KeyValuePair,
+};
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
@@ -21,7 +23,10 @@ impl BlockBuilderOptions {
         self
     }
 
-    pub fn key_value_pairs_restart_interval(mut self, key_value_pairs_restart_interval: u32) -> Self {
+    pub fn key_value_pairs_restart_interval(
+        mut self,
+        key_value_pairs_restart_interval: u32,
+    ) -> Self {
         self.key_value_pairs_restart_interval = key_value_pairs_restart_interval as u64;
         self
     }
@@ -721,7 +726,7 @@ impl<'a> BlockCursor<'a> {
                 key: key.into(),
                 timestamp: *timestamp,
                 value: match value {
-                    Some(v) => { Some(v.into()) }
+                    Some(v) => Some(v.into()),
                     None => None,
                 },
             }),
@@ -756,8 +761,8 @@ impl<'a> BlockCursor<'a> {
             key,
             timestamp: be.timestamp(),
             value: match be.value() {
-                Some(v) => { Some(v.to_vec()) },
-                None => { None },
+                Some(v) => Some(v.to_vec()),
+                None => None,
             },
         })
     }
@@ -1216,9 +1221,7 @@ mod guacamole {
         let exp = KeyValuePair {
             key: "t".into(),
             timestamp: 7790837488841419319,
-            value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into(),
-            ),
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
         };
         assert_eq!(exp, got);
         assert_eq!(<&str as Into<Buffer>>::into("t"), got.key);
@@ -1328,9 +1331,7 @@ mod guacamole {
         let exp = KeyValuePair {
             key: "t".into(),
             timestamp: 7790837488841419319,
-            value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into(),
-            ),
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
         };
         assert_eq!(Some(exp), got);
     }

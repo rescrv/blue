@@ -48,8 +48,10 @@ impl BlockMetadata {
     fn sanity_check(&self) -> Result<(), Error> {
         if self.start >= self.limit {
             return Err(Error::Corruption {
-                context: format!("block_metadata.start={} >= block_metadata.limit={}",
-                    self.start, self.limit),
+                context: format!(
+                    "block_metadata.start={} >= block_metadata.limit={}",
+                    self.start, self.limit
+                ),
             });
         }
         Ok(())
@@ -122,7 +124,10 @@ impl Table {
             });
         }
         let index_block = Table::load_block(&handle, &final_block.index_block)?;
-        Ok(Self { handle, index_block })
+        Ok(Self {
+            handle,
+            index_block,
+        })
     }
 
     pub fn iterate<'a>(&'a self) -> TableCursor<'a> {
@@ -219,7 +224,10 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     pub fn new(path: PathBuf, options: TableBuilderOptions) -> Result<Self, Error> {
-        let output = OpenOptions::new().create_new(true).write(true).open(path.clone())?;
+        let output = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(path.clone())?;
         Ok(TableBuilder {
             options,
             last_key: Vec::new(),

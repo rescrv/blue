@@ -10,10 +10,10 @@ fn layout(sz: usize) -> Layout {
         panic!("cannot create buffer bigger than {}", isize::max_value());
     }
     match Layout::from_size_align(sz, 1) {
-        Ok(layout) => { layout },
+        Ok(layout) => layout,
         Err(e) => {
             panic!("cannot create layout: {}", e);
-        },
+        }
     }
 }
 
@@ -28,16 +28,11 @@ pub struct Buffer {
 impl Buffer {
     pub fn new(sz: usize) -> Self {
         let layout = layout(sz);
-        let ptr = unsafe {
-            alloc_zeroed(layout)
-        };
+        let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
             handle_alloc_error(layout);
         }
-        Buffer {
-            ptr,
-            sz,
-        }
+        Buffer { ptr, sz }
     }
 
     pub fn len(&self) -> usize {
@@ -45,15 +40,11 @@ impl Buffer {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            from_raw_parts(self.ptr, self.sz)
-        }
+        unsafe { from_raw_parts(self.ptr, self.sz) }
     }
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            from_raw_parts_mut(self.ptr, self.sz)
-        }
+        unsafe { from_raw_parts_mut(self.ptr, self.sz) }
     }
 }
 
@@ -118,8 +109,7 @@ impl From<&str> for Buffer {
 
 //////////////////////////////////////////// Comparisons ///////////////////////////////////////////
 
-impl Eq for Buffer {
-}
+impl Eq for Buffer {}
 
 impl PartialEq for Buffer {
     fn eq(&self, rhs: &Buffer) -> bool {
@@ -190,7 +180,7 @@ mod tests {
     #[test]
     fn from_vec_u8() {
         let value: Vec<u8> = vec![1, 2, 3];
-        let buf: Buffer  = value.into();
+        let buf: Buffer = value.into();
         let bytes: &[u8] = buf.as_bytes();
         assert_eq!(3, bytes.len());
         assert_eq!(1, bytes[0]);
@@ -201,7 +191,7 @@ mod tests {
     #[test]
     fn from_ref_vec_u8() {
         let value: &Vec<u8> = &vec![1, 2, 3];
-        let buf: Buffer  = value.into();
+        let buf: Buffer = value.into();
         let bytes: &[u8] = buf.as_bytes();
         assert_eq!(3, bytes.len());
         assert_eq!(1, bytes[0]);

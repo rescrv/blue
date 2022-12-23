@@ -116,8 +116,7 @@ pub struct KeyValuePair {
     pub value: Option<Buffer>,
 }
 
-impl Eq for KeyValuePair {
-}
+impl Eq for KeyValuePair {}
 
 impl PartialEq for KeyValuePair {
     fn eq(&self, rhs: &KeyValuePair) -> bool {

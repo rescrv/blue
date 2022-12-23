@@ -143,7 +143,11 @@ pub fn arg_as_f64(args: &ArgMatches, value: &str, default: &str) -> f64 {
 
 //////////////////////////////////////////////// App ///////////////////////////////////////////////
 
-pub fn app(name: &'static str, version: &'static str, about: &'static str) -> App<'static, 'static> {
+pub fn app(
+    name: &'static str,
+    version: &'static str,
+    about: &'static str,
+) -> App<'static, 'static> {
     let app = App::new(name).version(version).about(about);
     let app = app.arg(
         Arg::with_name("num-keys")
@@ -223,7 +227,7 @@ impl<'a> TableTrait<'a> for Block {
     type Builder = BlockBuilder;
     type Cursor = BlockCursor<'a>;
 
-	fn iterate(&'a self) -> Self::Cursor {
+    fn iterate(&'a self) -> Self::Cursor {
         Block::iterate(self)
     }
 }
@@ -276,7 +280,7 @@ impl<'a> TableTrait<'a> for Table {
     type Builder = TableBuilder;
     type Cursor = TableCursor<'a>;
 
-	fn iterate(&'a self) -> Self::Cursor {
+    fn iterate(&'a self) -> Self::Cursor {
         Table::iterate(self)
     }
 }
@@ -326,10 +330,10 @@ impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
 ////////////////////////////////////////////// fuzzer //////////////////////////////////////////////
 
 pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'static str, new_table: F)
-    where
-        for <'a> T: TableTrait<'a>,
-        for <'a> B: TableBuilderTrait<'a, Table=T>,
-        F: Fn() -> B,
+where
+    for<'a> T: TableTrait<'a>,
+    for<'a> B: TableBuilderTrait<'a, Table = T>,
+    F: Fn() -> B,
 {
     let app = app(name, version, about);
     let args = app.get_matches();
@@ -413,7 +417,9 @@ pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'stati
                     x.timestamp,
                     std::str::from_utf8(v.as_bytes()).unwrap()
                 );
-                builder.put(x.key.as_bytes(), x.timestamp, v.as_bytes()).unwrap();
+                builder
+                    .put(x.key.as_bytes(), x.timestamp, v.as_bytes())
+                    .unwrap();
             }
             None => {
                 println!(
