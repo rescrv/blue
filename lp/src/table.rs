@@ -135,7 +135,7 @@ impl Table {
         let mut buf: Vec<u8> = Vec::with_capacity(amt);
         buf.resize(amt, 0);
         file.read_exact_at(&mut buf, block_metadata.start)?;
-        Ok(Block::new(buf.try_into()?)?)
+        Ok(Block::new(buf.into())?)
     }
 }
 

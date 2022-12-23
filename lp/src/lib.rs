@@ -97,7 +97,6 @@ pub enum Error {
     TooManyOpenFiles {
         limit: usize,
     },
-    MemoryAllocationFailed,
 }
 
 impl From<std::io::Error> for Error {

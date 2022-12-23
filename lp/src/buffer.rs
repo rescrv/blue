@@ -1,17 +1,17 @@
-use std::convert::TryFrom;
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
-
-use super::Error;
 
 ////////////////////////////////////////////// layout //////////////////////////////////////////////
 
-fn layout(sz: usize) -> Result<Layout, Error> {
+fn layout(sz: usize) -> Layout {
+    if sz > isize::max_value() as usize {
+        panic!("cannot create buffer bigger than {}", isize::max_value());
+    }
     match Layout::from_size_align(sz, 1) {
-        Ok(layout) => { Ok(layout) },
-        Err(e) => { Err(Error::LogicError {
-            context: format!("layout failed: {}", e),
-        }) },
+        Ok(layout) => { layout },
+        Err(e) => {
+            panic!("cannot create layout: {}", e);
+        },
     }
 }
 
@@ -23,18 +23,18 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new(sz: usize) -> Result<Self, Error> {
-        let layout = layout(sz)?;
+    pub fn new(sz: usize) -> Self {
+        let layout = layout(sz);
         let ptr = unsafe {
             alloc_zeroed(layout)
         };
         if ptr.is_null() {
-            return Err(Error::MemoryAllocationFailed);
+            handle_alloc_error(layout);
         }
-        Ok(Buffer {
+        Buffer {
             ptr,
             sz,
-        })
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -54,28 +54,23 @@ impl Buffer {
     }
 }
 
-impl TryFrom<Vec<u8>> for Buffer {
-    type Error = Error;
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        let layout = layout(self.sz);
+        unsafe {
+            dealloc(self.ptr, layout);
+        }
+    }
+}
 
-    fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
-        let mut buf = Self::new(v.len())?;
+impl From<Vec<u8>> for Buffer {
+    fn from(v: Vec<u8>) -> Self {
+        let mut buf = Self::new(v.len());
         let bytes = buf.as_slice_mut();
         for i in 0..v.len() {
             bytes[i] = v[i];
         }
-        Ok(buf)
-    }
-}
-
-impl Drop for Buffer {
-    fn drop(&mut self) {
-        let layout = match layout(self.sz) {
-            Ok(layout) => { layout },
-            Err(_) => { return; },
-        };
-        unsafe {
-            dealloc(self.ptr, layout);
-        }
+        buf
     }
 }
 
@@ -84,8 +79,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn layout_works() {
+        let _ = layout(0);
+        let _ = layout(1);
+        let _ = layout(isize::max_value() as usize);
+    }
+
+    #[test]
+    #[should_panic]
+    fn layout_panic() {
+        let sz: usize = isize::max_value() as usize + 1;
+        let _ = layout(sz);
+    }
+
+    #[test]
     fn empty() {
-        let mut buffer = Buffer::new(0).unwrap();
+        let mut buffer = Buffer::new(0);
         for byte in buffer.as_slice_mut().iter_mut() {
             *byte = 1;
         }
@@ -98,7 +107,7 @@ mod tests {
 
     #[test]
     fn forty_two() {
-        let mut buffer = Buffer::new(42).unwrap();
+        let mut buffer = Buffer::new(42);
         for byte in buffer.as_slice_mut().iter_mut() {
             *byte = 1;
         }
@@ -110,9 +119,9 @@ mod tests {
     }
 
     #[test]
-    fn try_from_vec_u8() {
+    fn from_vec_u8() {
         let value: Vec<u8> = vec![1, 2, 3];
-        let buf: Buffer  = value.try_into().unwrap();
+        let buf: Buffer  = value.into();
         let bytes: &[u8] = buf.as_slice();
         assert_eq!(3, bytes.len());
         assert_eq!(1, bytes[0]);
