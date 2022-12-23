@@ -8,7 +8,7 @@ use guacamole::Guacamole;
 
 use super::block::{Block, BlockBuilder, BlockCursor};
 use super::reference::TableBuilder as ReferenceBuilder;
-use super::table::{Table, TableBuilder, TableCursor};
+use super::sst::{SST, SSTBuilder, SSTCursor};
 use super::{Builder, Cursor, KeyValuePair};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
@@ -218,19 +218,19 @@ impl<'a> TableBuilderTrait<'a> for BlockBuilder {
     type Table = Block;
 }
 
-//////////////////////////////////////////// Table impls ///////////////////////////////////////////
+///////////////////////////////////////////// SST impls ////////////////////////////////////////////
 
-impl<'a> TableTrait<'a> for Table {
-    type Builder = TableBuilder;
-    type Cursor = TableCursor;
+impl<'a> TableTrait<'a> for SST {
+    type Builder = SSTBuilder;
+    type Cursor = SSTCursor;
 
     fn iterate(&self) -> Self::Cursor {
-        Table::iterate(self)
+        SST::iterate(self)
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for TableBuilder {
-    type Table = Table;
+impl<'a> TableBuilderTrait<'a> for SSTBuilder {
+    type Table = SST;
 }
 
 ////////////////////////////////////////////// fuzzer //////////////////////////////////////////////

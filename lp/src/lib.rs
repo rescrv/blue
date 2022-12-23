@@ -10,7 +10,7 @@ pub mod buffer;
 pub mod file_manager;
 pub mod guacamole;
 pub mod reference;
-pub mod table;
+pub mod sst;
 
 pub use buffer::Buffer;
 

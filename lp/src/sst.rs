@@ -11,10 +11,10 @@ use super::{
     minimal_successor_key, Builder, Cursor, Error, KeyValuePair,
 };
 
-//////////////////////////////////////////// TableEntry ////////////////////////////////////////////
+///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Message)]
-enum TableEntry<'a> {
+enum SSTEntry<'a> {
     #[prototk(10, bytes)]
     NOP(&'a [u8]),
     #[prototk(11, bytes)]
@@ -25,7 +25,7 @@ enum TableEntry<'a> {
     FinalBlock(&'a [u8]),
 }
 
-impl<'a> Default for TableEntry<'a> {
+impl<'a> Default for SSTEntry<'a> {
     fn default() -> Self {
         Self::NOP(&[])
     }
@@ -73,20 +73,20 @@ struct FinalBlock {
 
 const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8;
 
-/////////////////////////////////////////////// Table //////////////////////////////////////////////
+//////////////////////////////////////////////// SST ///////////////////////////////////////////////
 
 #[derive(Clone)]
-pub struct Table {
+pub struct SST {
     // The file backing the table.
     handle: FileHandle,
-    // Table metadata.
+    // SST metadata.
     index_block: Block,
 }
 
-impl Table {
+impl SST {
     pub fn new(path: PathBuf) -> Result<Self, Error> {
         let handle = open_without_manager(path)?;
-        Table::from_file_handle(handle)
+        SST::from_file_handle(handle)
     }
 
     pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
@@ -124,15 +124,15 @@ impl Table {
                 ),
             });
         }
-        let index_block = Table::load_block(&handle, &final_block.index_block)?;
+        let index_block = SST::load_block(&handle, &final_block.index_block)?;
         Ok(Self {
             handle,
             index_block,
         })
     }
 
-    pub fn iterate(&self) -> TableCursor {
-        TableCursor::new(self.clone())
+    pub fn iterate(&self) -> SSTCursor {
+        SSTCursor::new(self.clone())
     }
 
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
@@ -142,20 +142,20 @@ impl Table {
         buf.resize(amt, 0);
         file.read_exact_at(&mut buf, block_metadata.start)?;
         let mut up = Unpacker::new(&buf);
-        let table_entry: TableEntry = up.unpack().map_err(|e| Error::UnpackError {
+        let table_entry: SSTEntry = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
             context: "parsing table entry".to_string(),
         })?;
         match table_entry {
-            TableEntry::NOP(_) => {
+            SSTEntry::NOP(_) => {
                 Err(Error::Corruption {
                     context: "file has a NOP block".to_string(),
                 })
             },
-            TableEntry::PlainBlock(bytes) => {
+            SSTEntry::PlainBlock(bytes) => {
                 Ok(Block::new(bytes.into())?)
             },
-            TableEntry::FinalBlock(_) => {
+            SSTEntry::FinalBlock(_) => {
                 Err(Error::Corruption {
                     context: "tried loading final block".to_string(),
                 })
@@ -171,25 +171,25 @@ pub enum BlockCompression {
 }
 
 impl BlockCompression {
-    fn compress<'a>(&self, bytes: &'a [u8], _scratch: &'a mut Vec<u8>) -> TableEntry<'a> {
+    fn compress<'a>(&self, bytes: &'a [u8], _scratch: &'a mut Vec<u8>) -> SSTEntry<'a> {
         match self {
-            BlockCompression::NoCompression => TableEntry::PlainBlock(bytes),
+            BlockCompression::NoCompression => SSTEntry::PlainBlock(bytes),
         }
     }
 }
 
-//////////////////////////////////////// TableBuilderOptions ///////////////////////////////////////
+///////////////////////////////////////// SSTBuilderOptions ////////////////////////////////////////
 
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
-pub struct TableBuilderOptions {
+pub struct SSTBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,
     target_block_size: usize,
 }
 
-impl TableBuilderOptions {
+impl SSTBuilderOptions {
     pub fn block_options(mut self, block_options: BlockBuilderOptions) -> Self {
         self.block_options = block_options;
         self
@@ -212,9 +212,9 @@ impl TableBuilderOptions {
     }
 }
 
-impl Default for TableBuilderOptions {
-    fn default() -> TableBuilderOptions {
-        TableBuilderOptions {
+impl Default for SSTBuilderOptions {
+    fn default() -> SSTBuilderOptions {
+        SSTBuilderOptions {
             block_options: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
@@ -222,11 +222,11 @@ impl Default for TableBuilderOptions {
     }
 }
 
-/////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
+//////////////////////////////////////////// SSTBuilder ////////////////////////////////////////////
 
-pub struct TableBuilder {
+pub struct SSTBuilder {
     // Options for every "normal" table entry.
-    options: TableBuilderOptions,
+    options: SSTBuilderOptions,
     // The most recent that was successfully written.  Update only after writing to the block to
     // which a key is written.
     last_key: Vec<u8>,
@@ -242,13 +242,13 @@ pub struct TableBuilder {
     path: PathBuf,
 }
 
-impl TableBuilder {
-    pub fn new(path: PathBuf, options: TableBuilderOptions) -> Result<Self, Error> {
+impl SSTBuilder {
+    pub fn new(path: PathBuf, options: SSTBuilderOptions) -> Result<Self, Error> {
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(path.clone())?;
-        Ok(TableBuilder {
+        Ok(SSTBuilder {
             options,
             last_key: Vec::new(),
             last_timestamp: u64::max_value(),
@@ -335,8 +335,8 @@ impl TableBuilder {
     }
 }
 
-impl Builder for TableBuilder {
-    type Sealed = Table;
+impl Builder for SSTBuilder {
+    type Sealed = SST;
 
     fn approximate_size(&self) -> usize {
         let mut sum = self.bytes_written;
@@ -370,7 +370,7 @@ impl Builder for TableBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<Table, Error> {
+    fn seal(self) -> Result<SST, Error> {
         let mut builder = self;
         // Flush the block we have.
         if builder.block_builder.is_some() {
@@ -381,7 +381,7 @@ impl Builder for TableBuilder {
         let index_block = builder.index_block.seal()?;
         let index_block_start = builder.bytes_written;
         let bytes = index_block.as_bytes();
-        let entry = TableEntry::PlainBlock(bytes);
+        let entry = SSTEntry::PlainBlock(bytes);
         let pa = stack_pack(entry);
         builder.bytes_written += pa.stream(&mut builder.output)?;
         let index_block_limit = builder.bytes_written;
@@ -397,14 +397,14 @@ impl Builder for TableBuilder {
         builder.bytes_written += pa.stream(&mut builder.output)?;
         // fsync
         builder.output.sync_all()?;
-        Ok(Table::new(builder.path)?)
+        Ok(SST::new(builder.path)?)
     }
 }
 
-//////////////////////////////////////////// TableCursor ///////////////////////////////////////////
+///////////////////////////////////////////// SSTCursor ////////////////////////////////////////////
 
-pub struct TableCursor {
-    table: Table,
+pub struct SSTCursor {
+    table: SST,
     // The position in the table.  When meta_iter is at its extremes, block_iter is None.
     // Otherwise, block_iter is positioned at the block referred to by the most recent
     // KVP-returning call to meta_iter.
@@ -412,8 +412,8 @@ pub struct TableCursor {
     block_iter: Option<BlockCursor>,
 }
 
-impl TableCursor {
-    fn new(table: Table) -> Self {
+impl SSTCursor {
+    fn new(table: SST) -> Self {
         let meta_iter = table.index_block.iterate();
         Self {
             table,
@@ -430,7 +430,7 @@ impl TableCursor {
                 return Ok(None);
             },
         };
-        TableCursor::metadata_from_kvp(kvp)
+        SSTCursor::metadata_from_kvp(kvp)
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
@@ -441,7 +441,7 @@ impl TableCursor {
                 return Ok(None);
             },
         };
-        TableCursor::metadata_from_kvp(kvp)
+        SSTCursor::metadata_from_kvp(kvp)
     }
 
     fn metadata_from_kvp(kvp: KeyValuePair) -> Result<Option<BlockMetadata>, Error> {
@@ -462,7 +462,7 @@ impl TableCursor {
     }
 }
 
-impl Cursor for TableCursor {
+impl Cursor for SSTCursor {
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.meta_iter.seek_to_first()?;
         self.block_iter = None;
@@ -483,7 +483,7 @@ impl Cursor for TableCursor {
                 return self.seek_to_last();
             },
         };
-        let block = Table::load_block(&self.table.handle, &metadata)?;
+        let block = SST::load_block(&self.table.handle, &metadata)?;
         let mut block_iter = block.iterate();
         block_iter.seek(key, timestamp)?;
         self.block_iter = Some(block_iter);
@@ -499,7 +499,7 @@ impl Cursor for TableCursor {
                     return Ok(None);
                 },
             };
-            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let block = SST::load_block(&self.table.handle, &metadata)?;
             let mut block_iter = block.iterate();
             block_iter.seek_to_last()?;
             self.block_iter = Some(block_iter);
@@ -524,7 +524,7 @@ impl Cursor for TableCursor {
                     return Ok(None);
                 },
             };
-            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let block = SST::load_block(&self.table.handle, &metadata)?;
             let mut block_iter = block.iterate();
             block_iter.seek_to_first()?;
             self.block_iter = Some(block_iter);
@@ -554,12 +554,12 @@ mod alphabet {
 
     use super::*;
 
-    fn alphabet(path: PathBuf) -> Table {
-        let builder_opts = TableBuilderOptions::default()
+    fn alphabet(path: PathBuf) -> SST {
+        let builder_opts = SSTBuilderOptions::default()
             .block_options(BlockBuilderOptions::default())
             .block_compression(BlockCompression::NoCompression)
             .target_block_size(4096);
-        let mut builder = TableBuilder::new(path, builder_opts).unwrap();
+        let mut builder = SSTBuilder::new(path, builder_opts).unwrap();
         builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
         builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
         builder.put("C".as_bytes(), 0, "c".as_bytes()).unwrap();

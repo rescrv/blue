@@ -2,5 +2,5 @@
 **/*.rs.bk
 # specific files
 /Cargo.lock
-/lp-table-guacamole.sst
+/lp-sst-guacamole.sst
 /target/
