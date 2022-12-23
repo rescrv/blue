@@ -108,38 +108,30 @@ impl FileManager {
             state.opening.insert(path.clone());
         }
         // Open the file
-        let file = match File::open(path.clone()) {
+        let file = match open(path.clone()) {
             Ok(file) => { file },
             Err(e) => {
-                self.cleanup(&path);
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.opening.remove(&path);
+                }
+                self.wake_opening.notify_all();
                 return Err(e.into());
-            }
+            },
         };
-        // Check that the file descriptor is [0, usize::max_value).
-        let fd: c_int = file.as_raw_fd();
-        if fd < 0 {
-            self.cleanup(&path);
-            return Err(Error::LogicError {
-                context: "valid file's file descriptor is negative".to_string(),
-            });
-        }
-        let fd: usize = fd as usize;
-        if fd >= usize::max_value() {
-            self.cleanup(&path);
-            return Err(Error::LogicError {
-                context: "valid file's file descriptor meets or exceeds usize::max_value()".to_string(),
-            });
-        }
+        let fd = file.as_raw_fd() as usize;
         // Setup the file as a managed file.
         let file = Arc::new(file);
+        let file2 = Arc::clone(&file);
+        let path2 = path.clone();
         {
-            let mut state = self.state.lock().expect("poisoned mutex");
+            let mut state = self.state.lock().unwrap();
             state.opening.remove(&path);
-            state.names.insert(path.clone(), fd);
+            state.names.insert(path, fd);
             if state.files.len() <= fd {
                 state.files.resize(fd + 1, None);
             }
-            state.files[fd] = Some((path, Arc::clone(&file)));
+            state.files[fd] = Some((path2, file2));
         }
         self.wake_opening.notify_all();
         Ok(FileHandle {
@@ -147,12 +139,50 @@ impl FileManager {
             state: Arc::clone(&self.state),
         })
     }
+}
 
-    fn cleanup(&self, path: &PathBuf) {
-        {
-            let mut state = self.state.lock().expect("poisoned mutex");
-            state.opening.remove(path);
+/////////////////////////////////////////////// open ///////////////////////////////////////////////
+
+pub fn open(path: PathBuf) -> Result<File, Error> {
+    // Open the file
+    let file = match File::open(path.clone()) {
+        Ok(file) => { file },
+        Err(e) => {
+            return Err(e.into());
         }
-        self.wake_opening.notify_all();
+    };
+    // Check that the file descriptor is [0, usize::max_value).
+    let fd: c_int = file.as_raw_fd();
+    if fd < 0 {
+        return Err(Error::LogicError {
+            context: "valid file's file descriptor is negative".to_string(),
+        });
     }
+    if fd as usize >= usize::max_value() {
+        return Err(Error::LogicError {
+            context: "valid file's file descriptor meets or exceeds usize::max_value()".to_string(),
+        });
+    }
+    Ok(file)
+}
+
+/////////////////////////////////////// open_without_manager ///////////////////////////////////////
+
+pub fn open_without_manager(path: PathBuf) -> Result<FileHandle, Error> {
+    let file = Arc::new(open(path.clone())?);
+    let fd = file.as_raw_fd() as usize;
+    assert!(fd < usize::max_value());
+    let mut state = State {
+        opening: HashSet::new(),
+        files: Vec::with_capacity(fd + 1),
+        names: HashMap::new(),
+    };
+    state.names.insert(path.clone(), fd);
+    state.files.resize(fd + 1, None);
+    state.files[fd] = Some((path, Arc::clone(&file)));
+    let state = Arc::new(Mutex::new(state));
+    Ok(FileHandle {
+        file,
+        state,
+    })
 }
