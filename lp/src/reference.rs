@@ -1,10 +1,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
 
-use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair,
-    TableBuilderTrait, TableCursorTrait, TableTrait,
-};
+use super::{check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair};
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
@@ -50,11 +47,8 @@ pub struct Table {
     entries: BTreeMap<Key, Option<Vec<u8>>>,
 }
 
-impl<'a> TableTrait<'a> for Table {
-    type Builder = TableBuilder;
-    type Cursor = TableCursor<'a>;
-
-    fn iterate(&'a self) -> Self::Cursor {
+impl Table {
+    pub fn iterate<'a>(&'a self) -> TableCursor<'a> {
         TableCursor {
             table: self,
             position: TablePosition::default(),
@@ -69,10 +63,8 @@ pub struct TableBuilder {
     table: Table,
 }
 
-impl<'a> TableBuilderTrait<'a> for TableBuilder {
-    type Table = Table;
-
-    fn approximate_size(&self) -> usize {
+impl TableBuilder {
+    pub fn approximate_size(&self) -> usize {
         let mut size = 0;
         for (key, value) in self.table.entries.iter() {
             size += key.key.len()
@@ -85,7 +77,7 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
         size
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
@@ -98,7 +90,7 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
         let key = Key {
@@ -109,7 +101,7 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<Table, Error> {
+    pub fn seal(self) -> Result<Table, Error> {
         Ok(self.table)
     }
 }
@@ -138,8 +130,8 @@ pub struct TableCursor<'a> {
     position: TablePosition,
 }
 
-impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
-    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
+impl<'a> TableCursor<'a> {
+    pub fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
         let start = Key {
             key: key.to_vec(),
             timestamp,
@@ -166,17 +158,17 @@ impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
         }
     }
 
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    pub fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = TablePosition::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    pub fn seek_to_last(&mut self) -> Result<(), Error> {
         self.position = TablePosition::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         let target = Key {
             key: key.to_vec(),
             timestamp,
@@ -201,7 +193,7 @@ impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
         let bound = match &self.position {
             TablePosition::First => {
                 return Ok(None);
@@ -237,7 +229,7 @@ impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
         }
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
         let bound = match &self.position {
             TablePosition::First => Bound::Excluded(Key::BOTTOM),
             TablePosition::Last => {

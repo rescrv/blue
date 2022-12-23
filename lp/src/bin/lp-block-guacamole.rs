@@ -1,16 +1,15 @@
-use lp::block::{Builder, BuilderOptions};
+use lp::block::{BlockBuilder, BlockBuilderOptions};
 use lp::guacamole::fuzzer;
 
-//fn new_table<T: TableTrait, B: TableBuilderTrait<Table=T>>() -> Box<B> {
-fn new_table() -> Builder {
-    let builder_opts = BuilderOptions::default()
+fn new_table() -> BlockBuilder {
+    let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(512)
         .key_value_pairs_restart_interval(16);
-    let builder = Builder::new(builder_opts);
-    println!("        let builder_opts = BuilderOptions::default()");
+    let builder = BlockBuilder::new(builder_opts);
+    println!("        let builder_opts = BlockBuilderOptions::default()");
     println!("            .bytes_restart_interval:(512)");
     println!("            .key_value_pairs_restart_interval(16);");
-    println!("        let mut builder = Builder::new(builder_opts);");
+    println!("        let mut builder = BlockBuilder::new(builder_opts);");
     builder
 }
 

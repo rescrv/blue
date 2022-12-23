@@ -4,20 +4,17 @@ use std::cmp::Ordering;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair,
-    TableBuilderTrait, TableCursorTrait, TableTrait,
-};
+use super::{check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair};
 
-////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
+//////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub struct BuilderOptions {
+pub struct BlockBuilderOptions {
     bytes_restart_interval: u64,
     key_value_pairs_restart_interval: u64,
 }
 
-impl BuilderOptions {
+impl BlockBuilderOptions {
     pub fn bytes_restart_interval(mut self, bytes_restart_interval: u32) -> Self {
         self.bytes_restart_interval = bytes_restart_interval as u64;
         self
@@ -29,7 +26,7 @@ impl BuilderOptions {
     }
 }
 
-impl Default for BuilderOptions {
+impl Default for BlockBuilderOptions {
     fn default() -> Self {
         Self {
             bytes_restart_interval: 1024,
@@ -160,6 +157,10 @@ impl Block {
         &self.bytes
     }
 
+    pub fn iterate<'a>(&'a self) -> BlockCursor<'a> {
+        BlockCursor::new(self)
+    }
+
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts as usize);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
@@ -203,20 +204,11 @@ impl Block {
     }
 }
 
-impl<'a> TableTrait<'a> for Block {
-    type Builder = Builder;
-    type Cursor = Cursor<'a>;
-
-    fn iterate(&'a self) -> Self::Cursor {
-        Cursor::new(self)
-    }
-}
-
-////////////////////////////////////////////// Builder /////////////////////////////////////////////
+/////////////////////////////////////////// BlockBuilder ///////////////////////////////////////////
 
 // Build a block.
-pub struct Builder {
-    options: BuilderOptions,
+pub struct BlockBuilder {
+    options: BlockBuilderOptions,
     buffer: Vec<u8>,
     last_key: Vec<u8>,
     last_timestamp: u64,
@@ -226,11 +218,11 @@ pub struct Builder {
     key_value_pairs_since_restart: u64,
 }
 
-impl Builder {
-    pub fn new(options: BuilderOptions) -> Self {
+impl BlockBuilder {
+    pub fn new(options: BlockBuilderOptions) -> Self {
         let buffer = Vec::default();
         let restarts = vec![0];
-        Builder {
+        BlockBuilder {
             options,
             buffer,
             last_key: Vec::default(),
@@ -239,6 +231,57 @@ impl Builder {
             bytes_since_restart: 0,
             key_value_pairs_since_restart: 0,
         }
+    }
+
+    pub fn approximate_size(&self) -> usize {
+        self.buffer.len() + 16 + self.restarts.len() * 4
+    }
+
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let (shared, key_frag) = self.compute_key_frag(key);
+        let kvp = KeyValuePut {
+            shared: shared as u64,
+            key_frag,
+            timestamp,
+            value,
+        };
+        let be = BlockEntry::KeyValuePut(kvp);
+        self.append(be)
+    }
+
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let (shared, key_frag) = self.compute_key_frag(key);
+        let kvp = KeyValueDel {
+            shared: shared as u64,
+            key_frag,
+            timestamp,
+        };
+        let be = BlockEntry::KeyValueDel(kvp);
+        self.append(be)
+    }
+
+    pub fn seal(self) -> Result<Block, Error> {
+        // Append each restart.
+        // NOTE(rescrv):  If this changes, change approximate_size above.
+        let restarts = length_free(&self.restarts);
+        let tag10: v64 = ((10 << 3) | 2).into();
+        let tag11: v64 = ((11 << 3) | 5).into();
+        let sz: v64 = restarts.pack_sz().into();
+        let pa = stack_pack(tag10);
+        let pa = pa.pack(sz);
+        let pa = pa.pack(restarts);
+        let pa = pa.pack(tag11);
+        let pa = pa.pack(self.restarts.len() as u32);
+        let mut contents = self.buffer;
+        pa.append_to_vec(&mut contents);
+        Block::new(contents)
     }
 
     fn should_restart(&self) -> bool {
@@ -298,61 +341,6 @@ impl Builder {
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for Builder {
-    type Table = Block;
-
-    fn approximate_size(&self) -> usize {
-        self.buffer.len() + 16 + self.restarts.len() * 4
-    }
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let (shared, key_frag) = self.compute_key_frag(key);
-        let kvp = KeyValuePut {
-            shared: shared as u64,
-            key_frag,
-            timestamp,
-            value,
-        };
-        let be = BlockEntry::KeyValuePut(kvp);
-        self.append(be)
-    }
-
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let (shared, key_frag) = self.compute_key_frag(key);
-        let kvp = KeyValueDel {
-            shared: shared as u64,
-            key_frag,
-            timestamp,
-        };
-        let be = BlockEntry::KeyValueDel(kvp);
-        self.append(be)
-    }
-
-    fn seal(self) -> Result<Block, Error> {
-        // Append each restart.
-        // NOTE(rescrv):  If this changes, change approximate_size above.
-        let restarts = length_free(&self.restarts);
-        let tag10: v64 = ((10 << 3) | 2).into();
-        let tag11: v64 = ((11 << 3) | 5).into();
-        let sz: v64 = restarts.pack_sz().into();
-        let pa = stack_pack(tag10);
-        let pa = pa.pack(sz);
-        let pa = pa.pack(restarts);
-        let pa = pa.pack(tag11);
-        let pa = pa.pack(self.restarts.len() as u32);
-        let mut contents = self.buffer;
-        pa.append_to_vec(&mut contents);
-        Block::new(contents)
-    }
-}
-
 ////////////////////////////////////////// CursorPosition //////////////////////////////////////////
 
 #[derive(Clone, Debug)]
@@ -407,159 +395,32 @@ impl<'a> PartialEq for CursorPosition<'a> {
     }
 }
 
-////////////////////////////////////////////// Cursor //////////////////////////////////////////////
+//////////////////////////////////////////// BlockCursor ///////////////////////////////////////////
 
-pub struct Cursor<'a> {
+pub struct BlockCursor<'a> {
     block: &'a Block,
     position: CursorPosition<'a>,
 }
 
-impl<'a> Cursor<'a> {
+impl<'a> BlockCursor<'a> {
     pub fn new(block: &'a Block) -> Self {
-        Cursor {
+        BlockCursor {
             block,
             position: CursorPosition::First,
         }
     }
 
-    fn next_offset(&self) -> usize {
-        match &self.position {
-            CursorPosition::First => 0,
-            CursorPosition::Last => self.block.restarts_boundary,
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset: _,
-                next_offset,
-                key: _,
-                timestamp: _,
-                value: _,
-            } => *next_offset,
-        }
-    }
-
-    fn restart_idx(&self) -> usize {
-        match &self.position {
-            CursorPosition::First => 0,
-            CursorPosition::Last => self.block.num_restarts,
-            CursorPosition::Positioned {
-                restart_idx,
-                offset: _,
-                next_offset: _,
-                key: _,
-                timestamp: _,
-                value: _,
-            } => *restart_idx,
-        }
-    }
-
-    // Make self.position be of type CursorPosition::Positioned and fill in the fields.
-    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyValuePair>, Error> {
-        if restart_idx >= self.block.num_restarts {
-            return Err(Error::LogicError {
-                context: format!(
-                    "restart_idx={} exceeds num_restarts={}",
-                    restart_idx, self.block.num_restarts
-                ),
-            });
-        }
-        let offset = self.block.restart_point(restart_idx);
-        if offset >= self.block.restarts_boundary {
-            return Err(Error::Corruption {
-                context: format!(
-                    "offset={} exceeds restarts_boundary={}",
-                    offset, self.block.restarts_boundary
-                ),
-            });
-        }
-
-        // Extract the key from self.position.
-        let prev_key = match self.position {
-            CursorPosition::First => Vec::new(),
-            CursorPosition::Last => Vec::new(),
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset: _,
-                next_offset: _,
-                ref mut key,
-                timestamp: _,
-                value: _,
-            } => {
-                let mut ret = Vec::new();
-                key.truncate(0);
-                std::mem::swap(&mut ret, key);
-                ret
-            }
-        };
-
-        // Setup the position correctly and return what we see.
-        self.position = Cursor::extract_key_value(self.block, offset, prev_key)?;
-        // Return the kvp for this offset.
-        Ok(self.key_value_pair())
-    }
-
-    // Return the key-value pair associated with the current position.
-    fn key_value_pair(&self) -> Option<KeyValuePair> {
-        match &self.position {
-            CursorPosition::First => None,
-            CursorPosition::Last => None,
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset: _,
-                next_offset: _,
-                key,
-                timestamp,
-                value,
-            } => Some(KeyValuePair {
-                key: &key,
-                timestamp: *timestamp,
-                value: value.clone(),
-            }),
-        }
-    }
-
-    fn extract_key_value(
-        block: &Block,
-        offset: usize,
-        mut key: Vec<u8>,
-    ) -> Result<CursorPosition, Error> {
-        // Check for overrun.
-        if offset >= block.restarts_boundary {
-            return Ok(CursorPosition::Last);
-        }
-        // Parse the key-value pair.
-        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
-        let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
-            context: format!("could not unpack key-value pair at offset={}", offset),
-        })?;
-        let next_offset = block.restarts_boundary - up.remain().len();
-        let restart_idx = block.restart_for_offset(offset);
-        // Assemble the returnable cursor.
-        key.truncate(be.shared());
-        key.extend_from_slice(be.key_frag());
-        Ok(CursorPosition::Positioned {
-            restart_idx,
-            offset,
-            next_offset,
-            key,
-            timestamp: be.timestamp(),
-            value: be.value(),
-        })
-    }
-}
-
-impl<'a> TableCursorTrait<'a> for Cursor<'a> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    pub fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    pub fn seek_to_last(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
             return Err(Error::Corruption {
@@ -662,7 +523,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
         // We won't go past here.
         let target_next_offset = match self.position {
             CursorPosition::First => {
@@ -710,7 +571,7 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         Ok(self.key_value_pair())
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
         // We start with the first block.
         if let CursorPosition::First = self.position {
             return Ok(self.seek_restart(0)?);
@@ -761,9 +622,134 @@ impl<'a> TableCursorTrait<'a> for Cursor<'a> {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = Cursor::extract_key_value(self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key_value(self.block, offset, prev_key)?;
         // Return the kvp for this offset.
         Ok(self.key_value_pair())
+    }
+
+    fn next_offset(&self) -> usize {
+        match &self.position {
+            CursorPosition::First => 0,
+            CursorPosition::Last => self.block.restarts_boundary,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset,
+                key: _,
+                timestamp: _,
+                value: _,
+            } => *next_offset,
+        }
+    }
+
+    fn restart_idx(&self) -> usize {
+        match &self.position {
+            CursorPosition::First => 0,
+            CursorPosition::Last => self.block.num_restarts,
+            CursorPosition::Positioned {
+                restart_idx,
+                offset: _,
+                next_offset: _,
+                key: _,
+                timestamp: _,
+                value: _,
+            } => *restart_idx,
+        }
+    }
+
+    // Make self.position be of type CursorPosition::Positioned and fill in the fields.
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyValuePair>, Error> {
+        if restart_idx >= self.block.num_restarts {
+            return Err(Error::LogicError {
+                context: format!(
+                    "restart_idx={} exceeds num_restarts={}",
+                    restart_idx, self.block.num_restarts
+                ),
+            });
+        }
+        let offset = self.block.restart_point(restart_idx);
+        if offset >= self.block.restarts_boundary {
+            return Err(Error::Corruption {
+                context: format!(
+                    "offset={} exceeds restarts_boundary={}",
+                    offset, self.block.restarts_boundary
+                ),
+            });
+        }
+
+        // Extract the key from self.position.
+        let prev_key = match self.position {
+            CursorPosition::First => Vec::new(),
+            CursorPosition::Last => Vec::new(),
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset: _,
+                ref mut key,
+                timestamp: _,
+                value: _,
+            } => {
+                let mut ret = Vec::new();
+                key.truncate(0);
+                std::mem::swap(&mut ret, key);
+                ret
+            }
+        };
+
+        // Setup the position correctly and return what we see.
+        self.position = BlockCursor::extract_key_value(self.block, offset, prev_key)?;
+        // Return the kvp for this offset.
+        Ok(self.key_value_pair())
+    }
+
+    // Return the key-value pair associated with the current position.
+    fn key_value_pair(&self) -> Option<KeyValuePair> {
+        match &self.position {
+            CursorPosition::First => None,
+            CursorPosition::Last => None,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset: _,
+                key,
+                timestamp,
+                value,
+            } => Some(KeyValuePair {
+                key: &key,
+                timestamp: *timestamp,
+                value: value.clone(),
+            }),
+        }
+    }
+
+    fn extract_key_value(
+        block: &Block,
+        offset: usize,
+        mut key: Vec<u8>,
+    ) -> Result<CursorPosition, Error> {
+        // Check for overrun.
+        if offset >= block.restarts_boundary {
+            return Ok(CursorPosition::Last);
+        }
+        // Parse the key-value pair.
+        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
+        let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
+            error: e,
+            context: format!("could not unpack key-value pair at offset={}", offset),
+        })?;
+        let next_offset = block.restarts_boundary - up.remain().len();
+        let restart_idx = block.restart_for_offset(offset);
+        // Assemble the returnable cursor.
+        key.truncate(be.shared());
+        key.extend_from_slice(be.key_frag());
+        Ok(CursorPosition::Positioned {
+            restart_idx,
+            offset,
+            next_offset,
+            key,
+            timestamp: be.timestamp(),
+            value: be.value(),
+        })
     }
 }
 
@@ -775,7 +761,7 @@ mod tests {
 
     #[test]
     fn build_empty_block() {
-        let builder = Builder::new(BuilderOptions::default());
+        let builder = BlockBuilder::new(BlockBuilderOptions::default());
         let block = builder.seal().unwrap();
         let got = block.bytes.as_slice();
         let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
@@ -785,7 +771,7 @@ mod tests {
 
     #[test]
     fn build_single_item_block() {
-        let mut builder = Builder::new(BuilderOptions::default());
+        let mut builder = BlockBuilder::new(BlockBuilderOptions::default());
         builder
             .put("key".as_bytes(), 0xc0ffee, "value".as_bytes())
             .unwrap();
@@ -813,7 +799,7 @@ mod tests {
 
     #[test]
     fn build_prefix_compression() {
-        let mut builder = Builder::new(BuilderOptions::default());
+        let mut builder = BlockBuilder::new(BlockBuilderOptions::default());
         builder
             .put("key1".as_bytes(), 0xc0ffee, "value1".as_bytes())
             .unwrap();
@@ -888,7 +874,7 @@ mod tests {
         let key = &[107, 65, 118, 119, 82, 109, 53, 69];
         let timestamp = 4092481979873166344;
         let value = &[120, 100, 81, 80, 75, 79, 121, 90];
-        let mut builder = Builder::new(BuilderOptions::default());
+        let mut builder = BlockBuilder::new(BlockBuilderOptions::default());
         builder.put(key, timestamp, value).unwrap();
         let block = builder.seal().unwrap();
         let exp = &[
@@ -922,7 +908,7 @@ mod tests {
         let timestamp = 4092481979873166344;
         let value = "xdQPKOyZwQUykR8i";
 
-        let mut block = Builder::new(BuilderOptions::default());
+        let mut block = BlockBuilder::new(BlockBuilderOptions::default());
         block
             .put(key.as_bytes(), timestamp, value.as_bytes())
             .unwrap();
@@ -1003,7 +989,7 @@ mod tests {
             timestamp: 17563921251225492277,
             value: Some("".as_bytes()),
         };
-        let got = Cursor::extract_key_value(&block, 0, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key_value(&block, 0, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Positioned {
@@ -1014,11 +1000,11 @@ mod tests {
             timestamp: 4092481979873166344,
             value: Some("".as_bytes()),
         };
-        let got = Cursor::extract_key_value(&block, 20, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key_value(&block, 20, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Last;
-        let got = Cursor::extract_key_value(&block, 39, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key_value(&block, 39, Vec::new()).unwrap();
         assert_eq!(exp, got);
     }
 }
@@ -1034,11 +1020,11 @@ mod guacamole {
         // --value-bytes 0
         // --num-seeks 1000
         // --seek-distance 10
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
             .unwrap();
@@ -1100,11 +1086,11 @@ mod guacamole {
         // --value-bytes 64
         // --num-seeks 1
         // --seek-distance 4
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put(
                 "4".as_bytes(),
@@ -1253,11 +1239,11 @@ mod guacamole {
         // --value-bytes 64
         // --num-seeks 1
         // --seek-distance 4
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put(
                 "4".as_bytes(),
@@ -1346,11 +1332,11 @@ mod guacamole {
         // --value-bytes 64
         // --num-seeks 10
         // --seek-distance 1
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put(
                 "4".as_bytes(),
@@ -1428,11 +1414,11 @@ mod guacamole {
         // --value-bytes 0
         // --num-seeks 1
         // --seek-distance 4
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put("0".as_bytes(), 9697512111035884403, "".as_bytes())
             .unwrap();
@@ -1754,11 +1740,11 @@ mod guacamole {
         // --num-seeks 10
         // --seek-distance 1
         // --prev-probability 0.1
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder
             .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
             .unwrap();
@@ -1810,11 +1796,11 @@ mod alphabet {
     use super::*;
 
     fn alphabet() -> Block {
-        let builder_opts = BuilderOptions {
+        let builder_opts = BlockBuilderOptions {
             bytes_restart_interval: 512,
             key_value_pairs_restart_interval: 16,
         };
-        let mut builder = Builder::new(builder_opts);
+        let mut builder = BlockBuilder::new(builder_opts);
         builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
         builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
         builder.put("C".as_bytes(), 0, "c".as_bytes()).unwrap();

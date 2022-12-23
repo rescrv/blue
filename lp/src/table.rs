@@ -5,13 +5,10 @@ use std::os::unix::fs::FileExt;
 
 use prototk::{stack_pack, Packable, Unpacker};
 
-use super::block::Block;
-use super::block::Builder as BlockBuilder;
-use super::block::Cursor as BlockCursor;
-use super::block::BuilderOptions as BlockBuilderOptions;
+use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Error, KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait,
+    minimal_successor_key, Error, KeyValuePair,
 };
 
 //////////////////////////////////////////// TableEntry ////////////////////////////////////////////
@@ -118,6 +115,10 @@ impl Table {
         Ok(Self { file, index_block })
     }
 
+    fn iterate<'a>(&'a self) -> TableCursor<'a> {
+        TableCursor::new(self)
+    }
+
     fn load_block(file: &File, block_metadata: &BlockMetadata) -> Result<Block, Error> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -125,15 +126,6 @@ impl Table {
         buf.resize(amt, 0);
         file.read_exact_at(&mut buf, block_metadata.start)?;
         Ok(Block::new(buf)?)
-    }
-}
-
-impl<'a> TableTrait<'a> for Table {
-    type Builder = Builder;
-    type Cursor = Cursor<'a>;
-
-    fn iterate(&'a self) -> Self::Cursor {
-        Self::Cursor::new(self)
     }
 }
 
@@ -151,18 +143,18 @@ impl BlockCompression {
     }
 }
 
-////////////////////////////////////////// BuilderOptions //////////////////////////////////////////
+//////////////////////////////////////// TableBuilderOptions ///////////////////////////////////////
 
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
-pub struct BuilderOptions {
+pub struct TableBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,
     target_block_size: usize,
 }
 
-impl BuilderOptions {
+impl TableBuilderOptions {
     pub fn block_options(mut self, block_options: BlockBuilderOptions) -> Self {
         self.block_options = block_options;
         self
@@ -185,9 +177,9 @@ impl BuilderOptions {
     }
 }
 
-impl Default for BuilderOptions {
-    fn default() -> BuilderOptions {
-        BuilderOptions {
+impl Default for TableBuilderOptions {
+    fn default() -> TableBuilderOptions {
+        TableBuilderOptions {
             block_options: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
@@ -195,11 +187,11 @@ impl Default for BuilderOptions {
     }
 }
 
-////////////////////////////////////////////// Builder /////////////////////////////////////////////
+/////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
 
-pub struct Builder {
+pub struct TableBuilder {
     // Options for every "normal" table entry.
-    options: BuilderOptions,
+    options: TableBuilderOptions,
     // The most recent that was successfully written.  Update only after writing to the block to
     // which a key is written.
     last_key: Vec<u8>,
@@ -215,10 +207,10 @@ pub struct Builder {
     path: String,
 }
 
-impl Builder {
-    pub fn new(path: &str, options: BuilderOptions) -> Result<Self, Error> {
+impl TableBuilder {
+    pub fn new(path: &str, options: TableBuilderOptions) -> Result<Self, Error> {
         let output = OpenOptions::new().create_new(true).write(true).open(path)?;
-        Ok(Builder {
+        Ok(TableBuilder {
             options,
             last_key: Vec::new(),
             last_timestamp: u64::max_value(),
@@ -229,6 +221,68 @@ impl Builder {
             output,
             path: path.to_string(),
         })
+    }
+
+    pub fn approximate_size(&self) -> usize {
+        let mut sum = self.bytes_written;
+        sum += match &self.block_builder {
+            Some(block) => block.approximate_size(),
+            None => 0,
+        };
+        sum += 1 + self.index_block.approximate_size();
+        sum += FINAL_BLOCK_MAX_SZ;
+        sum
+    }
+
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let block = self.get_block(key, timestamp)?;
+        block.put(key, timestamp, value)?;
+        self.assign_last_key(key, timestamp);
+        Ok(())
+    }
+
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let block = self.get_block(key, timestamp)?;
+        block.del(key, timestamp)?;
+        self.assign_last_key(key, timestamp);
+        Ok(())
+    }
+
+    pub fn seal(self) -> Result<Table, Error> {
+        let mut builder = self;
+        // Flush the block we have.
+        if builder.block_builder.is_some() {
+            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
+            builder.flush_block(&key, timestamp)?;
+        }
+        // Flush the index block at the end.
+        let index_block = builder.index_block.seal()?;
+        let index_block_start = builder.bytes_written;
+        let bytes = index_block.as_slice();
+        let entry = TableEntry::PlainBlock(bytes);
+        let pa = stack_pack(entry);
+        builder.bytes_written += pa.stream(&mut builder.output)?;
+        let index_block_limit = builder.bytes_written;
+        // Our final_block
+        let final_block = FinalBlock {
+            index_block: BlockMetadata {
+                start: index_block_start as u64,
+                limit: index_block_limit as u64,
+            },
+            final_block_offset: builder.bytes_written as u64,
+        };
+        let pa = stack_pack(final_block);
+        builder.bytes_written += pa.stream(&mut builder.output)?;
+        // fsync
+        builder.output.sync_all()?;
+        Ok(Table::new(builder.path)?)
     }
 
     fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
@@ -305,75 +359,9 @@ impl Builder {
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for Builder {
-    type Table = Table;
+//////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
-    fn approximate_size(&self) -> usize {
-        let mut sum = self.bytes_written;
-        sum += match &self.block_builder {
-            Some(block) => block.approximate_size(),
-            None => 0,
-        };
-        sum += 1 + self.index_block.approximate_size();
-        sum += FINAL_BLOCK_MAX_SZ;
-        sum
-    }
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let block = self.get_block(key, timestamp)?;
-        block.put(key, timestamp, value)?;
-        self.assign_last_key(key, timestamp);
-        Ok(())
-    }
-
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let block = self.get_block(key, timestamp)?;
-        block.del(key, timestamp)?;
-        self.assign_last_key(key, timestamp);
-        Ok(())
-    }
-
-    fn seal(self) -> Result<Self::Table, Error> {
-        let mut builder = self;
-        // Flush the block we have.
-        if builder.block_builder.is_some() {
-            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
-            builder.flush_block(&key, timestamp)?;
-        }
-        // Flush the index block at the end.
-        let index_block = builder.index_block.seal()?;
-        let index_block_start = builder.bytes_written;
-        let bytes = index_block.as_slice();
-        let entry = TableEntry::PlainBlock(bytes);
-        let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
-        let index_block_limit = builder.bytes_written;
-        // Our final_block
-        let final_block = FinalBlock {
-            index_block: BlockMetadata {
-                start: index_block_start as u64,
-                limit: index_block_limit as u64,
-            },
-            final_block_offset: builder.bytes_written as u64,
-        };
-        let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
-        // fsync
-        builder.output.sync_all()?;
-        Ok(Table::new(builder.path)?)
-    }
-}
-
-////////////////////////////////////////////// Cursor //////////////////////////////////////////////
-
-pub struct Cursor<'a> {
+pub struct TableCursor<'a> {
     table: &'a Table,
     // The position in the table.  When meta_iter is at its extremes, block_iter is None.
     // Otherwise, block_iter is positioned at the block referred to by the most recent
@@ -382,7 +370,7 @@ pub struct Cursor<'a> {
     block_iter: Option<BlockCursor<'a>>,
 }
 
-impl<'a> Cursor<'a> {
+impl<'a> TableCursor<'a> {
     fn new(table: &'a Table) -> Self {
         let meta_iter = table.index_block.iterate();
         Self {
@@ -391,30 +379,28 @@ impl<'a> Cursor<'a> {
             block_iter: None,
         }
     }
-}
 
-impl<'a> TableCursorTrait<'a> for Cursor<'a> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    pub fn seek_to_first(&mut self) -> Result<(), Error> {
         self.meta_iter.seek_to_first()?;
         self.block_iter = None;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    pub fn seek_to_last(&mut self) -> Result<(), Error> {
         self.meta_iter.seek_to_last()?;
         self.block_iter = None;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         todo!();
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
         todo!();
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
         todo!();
     }
 }

@@ -133,60 +133,6 @@ impl<'a> PartialOrd for KeyValuePair<'a> {
     }
 }
 
-/////////////////////////////////////////////// Table //////////////////////////////////////////////
-
-pub trait TableTrait<'a> {
-    type Builder: TableBuilderTrait<'a, Table = Self>;
-    type Cursor: TableCursorTrait<'a>;
-    fn iterate(&'a self) -> Self::Cursor;
-}
-
-/////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
-
-pub trait TableBuilderTrait<'a> {
-    type Table: TableTrait<'a>;
-
-    fn approximate_size(&self) -> usize;
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
-
-    fn seal(self) -> Result<Self::Table, Error>;
-}
-
-//////////////////////////////////////////// TableCursor ///////////////////////////////////////////
-
-pub trait TableCursorTrait<'a> {
-    fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
-        self.seek(key, timestamp)?;
-        match self.next()? {
-            Some(kvp) => {
-                if compare_bytes(kvp.key, key) == Ordering::Equal {
-                    Ok(Some(KeyValuePair {
-                        key: kvp.key,
-                        timestamp: kvp.timestamp,
-                        value: match kvp.value {
-                            Some(v) => Some(&v),
-                            None => None,
-                        },
-                    }))
-                } else {
-                    Ok(None)
-                }
-            }
-            None => Ok(None),
-        }
-    }
-
-
-    fn seek_to_first(&mut self) -> Result<(), Error>;
-    fn seek_to_last(&mut self) -> Result<(), Error>;
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
-
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
-}
-
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
 
 // Content under CC By-Sa.  I just use as is, as can you.
@@ -313,67 +259,6 @@ mod tests {
         assert!(kvp2 < kvp1);
         assert!(kvp3 > kvp2);
         assert!(kvp3 > kvp1);
-    }
-
-    struct TestTable {}
-
-    impl<'a> TableTrait<'a> for TestTable {
-        type Builder = TestBuilder;
-        type Cursor = TestCursor;
-
-        fn iterate(&self) -> Self::Cursor {
-            unimplemented!();
-        }
-    }
-
-    struct TestBuilder {}
-
-    impl<'a> TableBuilderTrait<'a> for TestBuilder {
-        type Table = TestTable;
-
-        fn approximate_size(&self) -> usize {
-            unimplemented!();
-        }
-
-        fn put(&mut self, _key: &[u8], _timestamp: u64, _value: &[u8]) -> Result<(), Error> {
-            unimplemented!();
-        }
-
-        fn del(&mut self, _key: &[u8], _timestamp: u64) -> Result<(), Error> {
-            unimplemented!();
-        }
-
-        fn seal(self) -> Result<TestTable, Error> {
-            unimplemented!();
-        }
-    }
-
-    struct TestCursor {}
-
-    impl<'a> TableCursorTrait<'a> for TestCursor {
-        fn get(&mut self, _key: &[u8], _timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
-            unimplemented!();
-        }
-
-        fn seek_to_first(&mut self) -> Result<(), Error> {
-            unimplemented!();
-        }
-
-        fn seek_to_last(&mut self) -> Result<(), Error> {
-            unimplemented!();
-        }
-
-        fn seek(&mut self, _key: &[u8], _timestamp: u64) -> Result<(), Error> {
-            unimplemented!();
-        }
-
-        fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-            unimplemented!();
-        }
-
-        fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-            unimplemented!();
-        }
     }
 
     mod divide_keys {

@@ -6,8 +6,10 @@ use guacamole::strings;
 use guacamole::Guac;
 use guacamole::Guacamole;
 
-use super::reference::TableBuilder;
-use super::{KeyValuePair, TableBuilderTrait, TableCursorTrait, TableTrait};
+use super::block::{Block, BlockBuilder, BlockCursor};
+use super::reference::TableBuilder as ReferenceBuilder;
+use super::table::{Table, TableBuilder, TableCursor};
+use super::{Error, KeyValuePair};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -182,6 +184,145 @@ pub fn app(name: &'static str, version: &'static str, about: &'static str) -> Ap
     app
 }
 
+//////////////////////////////////////////// TableTrait ////////////////////////////////////////////
+
+pub trait TableTrait<'a> {
+    type Builder: TableBuilderTrait<'a, Table = Self>;
+    type Cursor: TableCursorTrait<'a>;
+
+    fn iterate(&'a self) -> Self::Cursor;
+}
+
+///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
+
+pub trait TableBuilderTrait<'a> {
+    type Table: TableTrait<'a>;
+
+    fn approximate_size(&self) -> usize;
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+
+    fn seal(self) -> Result<Self::Table, Error>;
+}
+
+///////////////////////////////////////// TableCursorTrait /////////////////////////////////////////
+
+pub trait TableCursorTrait<'a> {
+    fn seek_to_first(&mut self) -> Result<(), Error>;
+    fn seek_to_last(&mut self) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
+}
+
+//////////////////////////////////////////// Block impls ///////////////////////////////////////////
+
+impl<'a> TableTrait<'a> for Block {
+    type Builder = BlockBuilder;
+    type Cursor = BlockCursor<'a>;
+
+	fn iterate(&'a self) -> Self::Cursor {
+        Block::iterate(self)
+    }
+}
+
+impl<'a> TableBuilderTrait<'a> for BlockBuilder {
+    type Table = Block;
+
+    fn approximate_size(&self) -> usize {
+        BlockBuilder::approximate_size(self)
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        BlockBuilder::put(self, key, timestamp, value)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        BlockBuilder::del(self, key, timestamp)
+    }
+
+    fn seal(self) -> Result<Self::Table, Error> {
+        BlockBuilder::seal(self)
+    }
+}
+
+impl<'a> TableCursorTrait<'a> for BlockCursor<'a> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
+        BlockCursor::seek_to_first(self)
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Error> {
+        BlockCursor::seek_to_last(self)
+    }
+
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        BlockCursor::seek(self, key, timestamp)
+    }
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        BlockCursor::prev(self)
+    }
+
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        BlockCursor::next(self)
+    }
+}
+
+//////////////////////////////////////////// Table impls ///////////////////////////////////////////
+
+impl<'a> TableTrait<'a> for Table {
+    type Builder = TableBuilder;
+    type Cursor = TableCursor<'a>;
+
+	fn iterate(&'a self) -> Self::Cursor {
+        todo!();
+    }
+}
+
+impl<'a> TableBuilderTrait<'a> for TableBuilder {
+    type Table = Table;
+
+    fn approximate_size(&self) -> usize {
+        TableBuilder::approximate_size(self)
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        TableBuilder::put(self, key, timestamp, value)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        TableBuilder::del(self, key, timestamp)
+    }
+
+    fn seal(self) -> Result<Self::Table, Error> {
+        TableBuilder::seal(self)
+    }
+}
+
+impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
+        TableCursor::seek_to_first(self)
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Error> {
+        TableCursor::seek_to_last(self)
+    }
+
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        TableCursor::seek(self, key, timestamp)
+    }
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        TableCursor::prev(self)
+    }
+
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        TableCursor::next(self)
+    }
+}
+
 ////////////////////////////////////////////// fuzzer //////////////////////////////////////////////
 
 pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'static str, new_table: F)
@@ -230,7 +371,7 @@ pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'stati
     };
     // Load up a minimal key-value store.
     let num_keys = arg_as_u64(&args, "num-keys", "1000");
-    let mut builder = TableBuilder::default();
+    let mut builder = ReferenceBuilder::default();
     for _ in 0..num_keys {
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
         match kvo {
@@ -368,191 +509,64 @@ pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'stati
     println!("    }}");
 }
 
-/*
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/////////////////////////////////////////////// main ///////////////////////////////////////////////
+    struct TestTable {}
 
-fn main() {
-    let args = app.get_matches();
-    // Our workload generator.
-    let key_bytes = arg_as_u64(&args, "key-bytes", "8") as usize;
-    let value_bytes = arg_as_u64(&args, "value-bytes", "128") as usize;
-    let prev_probability = arg_as_f64(&args, "prev-probability", "0.01") as f64;
-    let mut guac = Guacamole::default();
-    let gen = KeyValueOperationGuacamole {
-        weight_put: 0.99,
-        weight_del: 0.01,
-        guacamole_put: KeyValuePutGuacamole {
-            key: KeyGuacamole {
-                key: Box::new(strings::IndependentStrings {
-                    length: Box::new(strings::ConstantLength {
-                        constant: key_bytes,
-                    }),
-                    select: Box::new(strings::RandomSelect {}),
-                }),
-            },
-            timestamp: TimestampGuacamole::default(),
-            value: Box::new(strings::IndependentStrings {
-                length: Box::new(strings::ConstantLength {
-                    constant: value_bytes,
-                }),
-                select: Box::new(strings::RandomSelect {}),
-            }),
-        },
-        guacamole_del: KeyValueDelGuacamole {
-            key: KeyGuacamole {
-                key: Box::new(strings::IndependentStrings {
-                    length: Box::new(strings::ConstantLength {
-                        constant: key_bytes,
-                    }),
-                    select: Box::new(strings::RandomSelect {}),
-                }),
-            },
-            timestamp: TimestampGuacamole::default(),
-        },
-    };
-    // Load up a minimal key-value store.
-    let num_keys = arg_as_u64(&args, "num-keys", "1000");
-    let mut builder = TableBuilder::default();
-    for _ in 0..num_keys {
-        let kvo: KeyValueOperation = gen.guacamole(&mut guac);
-        match kvo {
-            KeyValueOperation::Put(x) => {
-                builder
-                    .put(x.key.as_bytes(), x.timestamp, x.value.as_bytes())
-                    .unwrap();
-            }
-            KeyValueOperation::Del(x) => {
-                builder.del(x.key.as_bytes(), x.timestamp).unwrap();
-            }
+    impl<'a> TableTrait<'a> for TestTable {
+        type Builder = TestBuilder;
+        type Cursor = TestCursor;
+
+        fn iterate(&self) -> Self::Cursor {
+            unimplemented!();
         }
     }
-    let kvs = builder.seal().unwrap();
-    // Create a new builder using the keys in the key-value store.
-    let builder_opts = BuilderOptions::default();
-    let mut builder = Builder::new(builder_opts);
-    let num_seeks = arg_as_u64(&args, "num-seeks", "1000");
-    let seek_distance = arg_as_u64(&args, "seek-distance", "10");
-    println!("    fn test() {{");
-    println!("        // --num-keys {}", num_keys);
-    println!("        // --key-bytes {}", key_bytes);
-    println!("        // --value-bytes {}", value_bytes);
-    println!("        // --num-seeks {}", num_seeks);
-    println!("        // --seek-distance {}", seek_distance);
-    println!("        // --prev-probability {}", prev_probability);
-    println!("        let builder_opts = BuilderOptions {{");
-    println!("            bytes_restart_interval: 512,");
-    println!("            key_value_pairs_restart_interval: 16,");
-    println!("        }};");
-    println!("        let mut builder = Builder::new(builder_opts);");
-    let mut iter = kvs.iterate();
-    loop {
-        let x = iter.next().unwrap();
-        if x.is_none() {
-            break;
+
+    struct TestBuilder {}
+
+    impl<'a> TableBuilderTrait<'a> for TestBuilder {
+        type Table = TestTable;
+
+        fn approximate_size(&self) -> usize {
+            unimplemented!();
         }
-        let x = x.unwrap();
-        match x.value {
-            Some(ref v) => {
-                println!(
-                    "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes()).unwrap();",
-                    std::str::from_utf8(x.key).unwrap(),
-                    x.timestamp,
-                    std::str::from_utf8(v).unwrap()
-                );
-                builder.put(x.key, x.timestamp, v).unwrap();
-            }
-            None => {
-                println!(
-                    "        builder.del(\"{}\".as_bytes(), {}).unwrap();",
-                    std::str::from_utf8(x.key).unwrap(),
-                    x.timestamp
-                );
-                builder.del(x.key, x.timestamp).unwrap();
-            }
-        };
-    }
-    println!("        let block = builder.seal().unwrap();");
-    let block = builder.seal().unwrap();
-    // Now seek randomly and compare the key-value store and the builder.
-    let key_gen = KeyGuacamole {
-        key: Box::new(strings::IndependentStrings {
-            length: Box::new(strings::ConstantLength {
-                constant: key_bytes,
-            }),
-            select: Box::new(strings::RandomSelect {}),
-        }),
-    };
-    let ts_gen = TimestampGuacamole {};
-    for _ in 0..num_seeks {
-        let key: String = key_gen.guacamole(&mut guac);
-        let ts: u64 = ts_gen.guacamole(&mut guac);
-        println!("        // Top of loop seeks to: {:?}@{}", key, ts);
-        iter.seek(key.as_bytes(), ts).unwrap();
-        println!("        let mut cursor = block.iterate();");
-        let mut cursor = block.iterate();
-        println!(
-            "        cursor.seek(\"{}\".as_bytes(), {}).unwrap();",
-            key, ts
-        );
-        cursor.seek(key.as_bytes(), ts).unwrap();
-        for _ in 0..seek_distance {
-            let will_do_prev = guac.gen_range(0.0, 1.0) < prev_probability;
-            let (exp, got) = if will_do_prev {
-                let exp = iter.prev().unwrap();
-                println!("        let got = cursor.prev().unwrap();");
-                let got = cursor.prev().unwrap();
-                (exp, got)
-            } else {
-                let exp = iter.next().unwrap();
-                println!("        let got = cursor.next().unwrap();");
-                let got = cursor.next().unwrap();
-                (exp, got)
-            };
-            let print_x = |x: &KeyValuePair| {
-                println!("        let exp = KeyValuePair {{");
-                println!(
-                    "            key: \"{}\".as_bytes(),",
-                    std::str::from_utf8(x.key).unwrap()
-                );
-                println!("            timestamp: {},", x.timestamp);
-                match x.value {
-                    Some(x) => {
-                        println!(
-                            "            value: Some(\"{}\".as_bytes()),",
-                            std::str::from_utf8(x).unwrap()
-                        );
-                    }
-                    None => {
-                        println!("            value: None,");
-                    }
-                };
-                println!("        }};");
-            };
-            match (exp, got) {
-                (Some(x), Some(y)) => {
-                    if x != y {
-                        print_x(&x);
-                        println!("        assert_eq!(Some(exp), got);");
-                        println!("    }}");
-                    }
-                    assert_eq!(x, y);
-                }
-                (None, None) => break,
-                (None, Some(x)) => {
-                    println!("        assert_eq!(None, got);");
-                    println!("    }}");
-                    panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
-                }
-                (Some(x), None) => {
-                    print_x(&x);
-                    println!("        assert_eq!(exp, got);");
-                    println!("    }}");
-                    panic!("found bad case (open a debugger or print out a dump of info above)");
-                }
-            }
+
+        fn put(&mut self, _key: &[u8], _timestamp: u64, _value: &[u8]) -> Result<(), Error> {
+            unimplemented!();
+        }
+
+        fn del(&mut self, _key: &[u8], _timestamp: u64) -> Result<(), Error> {
+            unimplemented!();
+        }
+
+        fn seal(self) -> Result<TestTable, Error> {
+            unimplemented!();
         }
     }
-    println!("    }}");
+
+    struct TestCursor {}
+
+    impl<'a> TableCursorTrait<'a> for TestCursor {
+        fn seek_to_first(&mut self) -> Result<(), Error> {
+            unimplemented!();
+        }
+
+        fn seek_to_last(&mut self) -> Result<(), Error> {
+            unimplemented!();
+        }
+
+        fn seek(&mut self, _key: &[u8], _timestamp: u64) -> Result<(), Error> {
+            unimplemented!();
+        }
+
+        fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+            unimplemented!();
+        }
+
+        fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+            unimplemented!();
+        }
+    }
 }
-*/
