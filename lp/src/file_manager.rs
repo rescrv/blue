@@ -44,7 +44,9 @@ impl Drop for FileHandle {
         // This FileHandle and the State object.
         if Arc::strong_count(&self.file) == 2 {
             let mut state = self.state.lock().unwrap();
-            state.close_file(self.file.as_raw_fd());
+            if Arc::strong_count(&self.file) == 2 {
+                state.close_file(self.file.as_raw_fd());
+            }
         }
     }
 }
