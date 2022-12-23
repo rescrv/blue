@@ -384,8 +384,8 @@ pub struct TableCursor<'a> {
     // The position in the table.  When meta_iter is at its extremes, block_iter is None.
     // Otherwise, block_iter is positioned at the block referred to by the most recent
     // KVP-returning call to meta_iter.
-    meta_iter: BlockCursor<'a>,
-    block_iter: Option<BlockCursor<'a>>,
+    meta_iter: BlockCursor,
+    block_iter: Option<BlockCursor>,
 }
 
 impl<'a> TableCursor<'a> {

@@ -115,6 +115,7 @@ impl<'a> Default for BlockEntry<'a> {
 
 /////////////////////////////////////////////// Block //////////////////////////////////////////////
 
+#[derive(Clone)]
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
     bytes: Rc<Buffer>,
@@ -164,8 +165,8 @@ impl Block {
         self.bytes.as_bytes()
     }
 
-    pub fn iterate<'a>(&'a self) -> BlockCursor<'a> {
-        BlockCursor::new(self)
+    pub fn iterate(&self) -> BlockCursor {
+        BlockCursor::new(self.clone())
     }
 
     fn restart_point(&self, restart_idx: usize) -> usize {
@@ -405,13 +406,13 @@ impl PartialEq for CursorPosition {
 
 //////////////////////////////////////////// BlockCursor ///////////////////////////////////////////
 
-pub struct BlockCursor<'a> {
-    block: &'a Block,
+pub struct BlockCursor {
+    block: Block,
     position: CursorPosition,
 }
 
-impl<'a> BlockCursor<'a> {
-    pub fn new(block: &'a Block) -> Self {
+impl BlockCursor {
+    pub fn new(block: Block) -> Self {
         BlockCursor {
             block,
             position: CursorPosition::First,
@@ -630,7 +631,7 @@ impl<'a> BlockCursor<'a> {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key_value(self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
         // Return the kvp for this offset.
         Ok(self.key_value_pair())
     }
@@ -705,7 +706,7 @@ impl<'a> BlockCursor<'a> {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key_value(self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
         // Return the kvp for this offset.
         Ok(self.key_value_pair())
     }
