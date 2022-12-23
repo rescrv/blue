@@ -138,6 +138,17 @@ impl PartialOrd for KeyValuePair {
     }
 }
 
+////////////////////////////////////////////// Cursor //////////////////////////////////////////////
+
+pub trait Cursor {
+    fn seek_to_first(&mut self) -> Result<(), Error>;
+    fn seek_to_last(&mut self) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
+}
+
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
 
 // Content under CC By-Sa.  I just use as is, as can you.

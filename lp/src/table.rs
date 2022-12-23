@@ -8,7 +8,7 @@ use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Error, KeyValuePair,
+    minimal_successor_key, Cursor, Error, KeyValuePair,
 };
 
 //////////////////////////////////////////// TableEntry ////////////////////////////////////////////
@@ -418,58 +418,6 @@ impl TableCursor {
         }
     }
 
-    pub fn seek_to_first(&mut self) -> Result<(), Error> {
-        self.meta_iter.seek_to_first()?;
-        self.block_iter = None;
-        Ok(())
-    }
-
-    pub fn seek_to_last(&mut self) -> Result<(), Error> {
-        self.meta_iter.seek_to_last()?;
-        self.block_iter = None;
-        Ok(())
-    }
-
-    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        self.meta_iter.seek(key, timestamp)?;
-        let metadata = match self.meta_next()? {
-            Some(m) => { m },
-            None => {
-                return self.seek_to_last();
-            },
-        };
-        let block = Table::load_block(&self.table.handle, &metadata)?;
-        let mut block_iter = block.iterate();
-        block_iter.seek(key, timestamp)?;
-        self.block_iter = Some(block_iter);
-        Ok(())
-    }
-
-    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        if self.block_iter.is_none() {
-            let metadata = match self.meta_prev()? {
-                Some(m) => { m },
-                None => {
-                    self.seek_to_first()?;
-                    return Ok(None);
-                },
-            };
-            let block = Table::load_block(&self.table.handle, &metadata)?;
-            let mut block_iter = block.iterate();
-            block_iter.seek_to_last()?;
-            self.block_iter = Some(block_iter);
-        }
-        assert!(self.block_iter.is_some());
-        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        match block_iter.prev()? {
-            Some(kvp) => { Ok(Some(kvp)) },
-            None => {
-                self.block_iter = None;
-                self.prev()
-            }
-        }
-    }
-
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
         let kvp = match self.meta_iter.prev()? {
             Some(kvp) => { kvp },
@@ -479,31 +427,6 @@ impl TableCursor {
             },
         };
         TableCursor::metadata_from_kvp(kvp)
-    }
-
-    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        if self.block_iter.is_none() {
-            let metadata = match self.meta_next()? {
-                Some(m) => { m },
-                None => {
-                    self.seek_to_last()?;
-                    return Ok(None);
-                },
-            };
-            let block = Table::load_block(&self.table.handle, &metadata)?;
-            let mut block_iter = block.iterate();
-            block_iter.seek_to_first()?;
-            self.block_iter = Some(block_iter);
-        }
-        assert!(self.block_iter.is_some());
-        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        match block_iter.next()? {
-            Some(kvp) => { Ok(Some(kvp)) },
-            None => {
-                self.block_iter = None;
-                self.next()
-            }
-        }
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
@@ -532,6 +455,85 @@ impl TableCursor {
             context: "parsing block metadata".to_string(),
         })?;
         Ok(Some(metadata))
+    }
+}
+
+impl Cursor for TableCursor {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
+        self.meta_iter.seek_to_first()?;
+        self.block_iter = None;
+        Ok(())
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Error> {
+        self.meta_iter.seek_to_last()?;
+        self.block_iter = None;
+        Ok(())
+    }
+
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        self.meta_iter.seek(key, timestamp)?;
+        let metadata = match self.meta_next()? {
+            Some(m) => { m },
+            None => {
+                return self.seek_to_last();
+            },
+        };
+        let block = Table::load_block(&self.table.handle, &metadata)?;
+        let mut block_iter = block.iterate();
+        block_iter.seek(key, timestamp)?;
+        self.block_iter = Some(block_iter);
+        Ok(())
+    }
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        if self.block_iter.is_none() {
+            let metadata = match self.meta_prev()? {
+                Some(m) => { m },
+                None => {
+                    self.seek_to_first()?;
+                    return Ok(None);
+                },
+            };
+            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let mut block_iter = block.iterate();
+            block_iter.seek_to_last()?;
+            self.block_iter = Some(block_iter);
+        }
+        assert!(self.block_iter.is_some());
+        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
+        match block_iter.prev()? {
+            Some(kvp) => { Ok(Some(kvp)) },
+            None => {
+                self.block_iter = None;
+                self.prev()
+            }
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        if self.block_iter.is_none() {
+            let metadata = match self.meta_next()? {
+                Some(m) => { m },
+                None => {
+                    self.seek_to_last()?;
+                    return Ok(None);
+                },
+            };
+            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let mut block_iter = block.iterate();
+            block_iter.seek_to_first()?;
+            self.block_iter = Some(block_iter);
+        }
+        assert!(self.block_iter.is_some());
+        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
+        match block_iter.next()? {
+            Some(kvp) => { Ok(Some(kvp)) },
+            None => {
+                self.block_iter = None;
+                self.next()
+            }
+        }
     }
 }
 

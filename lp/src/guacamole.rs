@@ -9,7 +9,7 @@ use guacamole::Guacamole;
 use super::block::{Block, BlockBuilder, BlockCursor};
 use super::reference::TableBuilder as ReferenceBuilder;
 use super::table::{Table, TableBuilder, TableCursor};
-use super::{Error, KeyValuePair};
+use super::{Cursor, Error, KeyValuePair};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -192,9 +192,9 @@ pub fn app(
 
 pub trait TableTrait<'a> {
     type Builder: TableBuilderTrait<'a, Table = Self>;
-    type Cursor: TableCursorTrait<'a>;
+    type Cursor: Cursor;
 
-    fn iterate(&'a self) -> Self::Cursor;
+    fn iterate(&self) -> Self::Cursor;
 }
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
@@ -210,24 +210,13 @@ pub trait TableBuilderTrait<'a> {
     fn seal(self) -> Result<Self::Table, Error>;
 }
 
-///////////////////////////////////////// TableCursorTrait /////////////////////////////////////////
-
-pub trait TableCursorTrait<'a> {
-    fn seek_to_first(&mut self) -> Result<(), Error>;
-    fn seek_to_last(&mut self) -> Result<(), Error>;
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
-
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
-}
-
 //////////////////////////////////////////// Block impls ///////////////////////////////////////////
 
 impl<'a> TableTrait<'a> for Block {
     type Builder = BlockBuilder;
     type Cursor = BlockCursor;
 
-    fn iterate(&'a self) -> Self::Cursor {
+    fn iterate(&self) -> Self::Cursor {
         Block::iterate(self)
     }
 }
@@ -252,35 +241,13 @@ impl<'a> TableBuilderTrait<'a> for BlockBuilder {
     }
 }
 
-impl<'a> TableCursorTrait<'a> for BlockCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
-        BlockCursor::seek_to_first(self)
-    }
-
-    fn seek_to_last(&mut self) -> Result<(), Error> {
-        BlockCursor::seek_to_last(self)
-    }
-
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        BlockCursor::seek(self, key, timestamp)
-    }
-
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        BlockCursor::prev(self)
-    }
-
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        BlockCursor::next(self)
-    }
-}
-
 //////////////////////////////////////////// Table impls ///////////////////////////////////////////
 
 impl<'a> TableTrait<'a> for Table {
     type Builder = TableBuilder;
     type Cursor = TableCursor;
 
-    fn iterate(&'a self) -> Self::Cursor {
+    fn iterate(&self) -> Self::Cursor {
         Table::iterate(self)
     }
 }
@@ -302,28 +269,6 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
 
     fn seal(self) -> Result<Self::Table, Error> {
         TableBuilder::seal(self)
-    }
-}
-
-impl<'a> TableCursorTrait<'a> for TableCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
-        TableCursor::seek_to_first(self)
-    }
-
-    fn seek_to_last(&mut self) -> Result<(), Error> {
-        TableCursor::seek_to_last(self)
-    }
-
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        TableCursor::seek(self, key, timestamp)
-    }
-
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        TableCursor::prev(self)
-    }
-
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        TableCursor::next(self)
     }
 }
 
@@ -554,7 +499,7 @@ mod tests {
 
     struct TestCursor {}
 
-    impl<'a> TableCursorTrait<'a> for TestCursor {
+    impl Cursor for TestCursor {
         fn seek_to_first(&mut self) -> Result<(), Error> {
             unimplemented!();
         }

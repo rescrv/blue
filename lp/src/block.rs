@@ -6,7 +6,8 @@ use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Error, KeyValuePair,
+    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Cursor, Error,
+    KeyValuePair,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -419,223 +420,6 @@ impl BlockCursor {
         }
     }
 
-    pub fn seek_to_first(&mut self) -> Result<(), Error> {
-        self.position = CursorPosition::First;
-        Ok(())
-    }
-
-    pub fn seek_to_last(&mut self) -> Result<(), Error> {
-        self.position = CursorPosition::Last;
-        Ok(())
-    }
-
-    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        // Make sure there are restarts.
-        if self.block.num_restarts == 0 {
-            return Err(Error::Corruption {
-                context: "a block with 0 restarts".to_string(),
-            }
-            .into());
-        }
-
-        // Binary search to the correct restart point.
-        let mut left: usize = 0usize;
-        let mut right: usize = self.block.num_restarts - 1;
-        while left < right {
-            // When left and right are adjacent, it will seek to the right.
-            let mid = left + (right - left + 1) / 2;
-            let kvp = match self.seek_restart(mid)? {
-                Some(x) => x,
-                None => {
-                    return Err(Error::Corruption {
-                        context: format!("restart point={} returned no key-value pair.", mid),
-                    }
-                    .into());
-                }
-            };
-            match compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp) {
-                Ordering::Less => {
-                    // left     mid     right
-                    // |--------|-------|
-                    //       |
-                    right = mid - 1;
-                }
-                Ordering::Equal => {
-                    // left     mid     right
-                    // |--------|-------|
-                    //          |
-                    left = mid;
-                }
-                Ordering::Greater => {
-                    // left     mid     right
-                    // |--------|-------|
-                    //           |
-                    left = mid;
-                }
-            };
-        }
-
-        // Sanity check the outcome of the binary search.
-        if left != right {
-            return Err(Error::Corruption {
-                context: format!("binary_search (left={}) != (right={})", left, right),
-            });
-        }
-
-        // We position at the left restart point
-        //
-        // This may be redundant, but only about 50% of the time.  The complexity to get it right
-        // all the time is not currently worth the savings.
-        let kvp = match self.seek_restart(left)? {
-            Some(x) => x,
-            None => {
-                return Err(Error::Corruption {
-                    context: format!("restart point={} returned no key-value pair.", left),
-                });
-            }
-        };
-
-        // Check for the case where all keys are bigger.
-        if compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp).is_lt() {
-            self.position = CursorPosition::First;
-            return Ok(());
-        }
-
-        // Scan until we find the key.
-        let mut kvp = Some(kvp);
-        while let Some(x) = kvp {
-            if compare_key(key, timestamp, x.key.as_bytes(), x.timestamp).is_gt() {
-                kvp = self.next()?;
-            } else {
-                break;
-            }
-        }
-
-        // Adjust the next_offset for prev/next.  prev will operate off offset, which is positioned
-        // accordingly.  next will operate off next_offset.  Adjust it downward to offset so the
-        // next key returned will be the key we seek'ed to.
-        match &mut self.position {
-            CursorPosition::First => {}
-            CursorPosition::Last => {}
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset,
-                next_offset,
-                key: _,
-                timestamp: _,
-                value: _,
-            } => {
-                *next_offset = *offset;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        // We won't go past here.
-        let target_next_offset = match self.position {
-            CursorPosition::First => {
-                return Ok(None);
-            }
-            CursorPosition::Last => self.block.restarts_boundary,
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset,
-                next_offset: _,
-                key: _,
-                timestamp: _,
-                value: _,
-            } => offset,
-        };
-
-        // Boundary condition
-        if target_next_offset <= 0 {
-            self.position = CursorPosition::First;
-            return Ok(None);
-        }
-
-        // Step to the correct restart point.  If this is the first value in a restart point, set
-        // the restart_idx to the previous point, unless we are at the first restart point.
-        let current_restart_idx = self.restart_idx();
-        let restart_idx = if current_restart_idx >= self.block.num_restarts
-            || target_next_offset <= self.block.restart_point(current_restart_idx)
-        {
-            if current_restart_idx == 0 {
-                return Err(Error::LogicError {
-                    context: "tried taking the -1st restart_idx".to_string(),
-                });
-            }
-            current_restart_idx - 1
-        } else {
-            current_restart_idx
-        };
-
-        // Seek and scan.
-        self.seek_restart(restart_idx)?;
-        while self.next_offset() < target_next_offset {
-            self.next()?;
-        }
-        // Return the kvp for this offset.
-        Ok(self.key_value_pair())
-    }
-
-    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        // We start with the first block.
-        if let CursorPosition::First = self.position {
-            return Ok(self.seek_restart(0)?);
-        }
-
-        // We always return None for the next of Last.
-        if let CursorPosition::Last = self.position {
-            return Ok(None);
-        }
-
-        // Hit up against the end, make it a Last.
-        let offset = self.next_offset();
-        if offset >= self.block.restarts_boundary {
-            self.position = CursorPosition::Last;
-            return Ok(None);
-        }
-
-        // We are jumping to the next block, so use seek_restart.
-        if self.restart_idx() + 1 < self.block.num_restarts
-            && self.block.restart_point(self.restart_idx() + 1) <= offset
-        {
-            return Ok(self.seek_restart(self.restart_idx() + 1)?);
-        }
-
-        // We are positioned.
-        if !self.position.is_positioned() {
-            return Err(Error::LogicError {
-                context: "next was not positioned, but made it to here.".to_string(),
-            });
-        }
-
-        // Extract the key from self.position.
-        let prev_key = match self.position {
-            CursorPosition::First => Vec::new(),
-            CursorPosition::Last => Vec::new(),
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset: _,
-                next_offset: _,
-                ref mut key,
-                timestamp: _,
-                value: _,
-            } => {
-                let mut ret = Vec::new();
-                std::mem::swap(&mut ret, key);
-                ret
-            }
-        };
-
-        // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
-        // Return the kvp for this offset.
-        Ok(self.key_value_pair())
-    }
-
     fn next_offset(&self) -> usize {
         match &self.position {
             CursorPosition::First => 0,
@@ -766,6 +550,225 @@ impl BlockCursor {
                 None => None,
             },
         })
+    }
+}
+
+impl Cursor for BlockCursor {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
+        self.position = CursorPosition::First;
+        Ok(())
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Error> {
+        self.position = CursorPosition::Last;
+        Ok(())
+    }
+
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        // Make sure there are restarts.
+        if self.block.num_restarts == 0 {
+            return Err(Error::Corruption {
+                context: "a block with 0 restarts".to_string(),
+            }
+            .into());
+        }
+
+        // Binary search to the correct restart point.
+        let mut left: usize = 0usize;
+        let mut right: usize = self.block.num_restarts - 1;
+        while left < right {
+            // When left and right are adjacent, it will seek to the right.
+            let mid = left + (right - left + 1) / 2;
+            let kvp = match self.seek_restart(mid)? {
+                Some(x) => x,
+                None => {
+                    return Err(Error::Corruption {
+                        context: format!("restart point={} returned no key-value pair.", mid),
+                    }
+                    .into());
+                }
+            };
+            match compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp) {
+                Ordering::Less => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //       |
+                    right = mid - 1;
+                }
+                Ordering::Equal => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //          |
+                    left = mid;
+                }
+                Ordering::Greater => {
+                    // left     mid     right
+                    // |--------|-------|
+                    //           |
+                    left = mid;
+                }
+            };
+        }
+
+        // Sanity check the outcome of the binary search.
+        if left != right {
+            return Err(Error::Corruption {
+                context: format!("binary_search (left={}) != (right={})", left, right),
+            });
+        }
+
+        // We position at the left restart point
+        //
+        // This may be redundant, but only about 50% of the time.  The complexity to get it right
+        // all the time is not currently worth the savings.
+        let kvp = match self.seek_restart(left)? {
+            Some(x) => x,
+            None => {
+                return Err(Error::Corruption {
+                    context: format!("restart point={} returned no key-value pair.", left),
+                });
+            }
+        };
+
+        // Check for the case where all keys are bigger.
+        if compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp).is_lt() {
+            self.position = CursorPosition::First;
+            return Ok(());
+        }
+
+        // Scan until we find the key.
+        let mut kvp = Some(kvp);
+        while let Some(x) = kvp {
+            if compare_key(key, timestamp, x.key.as_bytes(), x.timestamp).is_gt() {
+                kvp = self.next()?;
+            } else {
+                break;
+            }
+        }
+
+        // Adjust the next_offset for prev/next.  prev will operate off offset, which is positioned
+        // accordingly.  next will operate off next_offset.  Adjust it downward to offset so the
+        // next key returned will be the key we seek'ed to.
+        match &mut self.position {
+            CursorPosition::First => {}
+            CursorPosition::Last => {}
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset,
+                next_offset,
+                key: _,
+                timestamp: _,
+                value: _,
+            } => {
+                *next_offset = *offset;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        // We won't go past here.
+        let target_next_offset = match self.position {
+            CursorPosition::First => {
+                return Ok(None);
+            }
+            CursorPosition::Last => self.block.restarts_boundary,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset,
+                next_offset: _,
+                key: _,
+                timestamp: _,
+                value: _,
+            } => offset,
+        };
+
+        // Boundary condition
+        if target_next_offset <= 0 {
+            self.position = CursorPosition::First;
+            return Ok(None);
+        }
+
+        // Step to the correct restart point.  If this is the first value in a restart point, set
+        // the restart_idx to the previous point, unless we are at the first restart point.
+        let current_restart_idx = self.restart_idx();
+        let restart_idx = if current_restart_idx >= self.block.num_restarts
+            || target_next_offset <= self.block.restart_point(current_restart_idx)
+        {
+            if current_restart_idx == 0 {
+                return Err(Error::LogicError {
+                    context: "tried taking the -1st restart_idx".to_string(),
+                });
+            }
+            current_restart_idx - 1
+        } else {
+            current_restart_idx
+        };
+
+        // Seek and scan.
+        self.seek_restart(restart_idx)?;
+        while self.next_offset() < target_next_offset {
+            self.next()?;
+        }
+        // Return the kvp for this offset.
+        Ok(self.key_value_pair())
+    }
+
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        // We start with the first block.
+        if let CursorPosition::First = self.position {
+            return Ok(self.seek_restart(0)?);
+        }
+
+        // We always return None for the next of Last.
+        if let CursorPosition::Last = self.position {
+            return Ok(None);
+        }
+
+        // Hit up against the end, make it a Last.
+        let offset = self.next_offset();
+        if offset >= self.block.restarts_boundary {
+            self.position = CursorPosition::Last;
+            return Ok(None);
+        }
+
+        // We are jumping to the next block, so use seek_restart.
+        if self.restart_idx() + 1 < self.block.num_restarts
+            && self.block.restart_point(self.restart_idx() + 1) <= offset
+        {
+            return Ok(self.seek_restart(self.restart_idx() + 1)?);
+        }
+
+        // We are positioned.
+        if !self.position.is_positioned() {
+            return Err(Error::LogicError {
+                context: "next was not positioned, but made it to here.".to_string(),
+            });
+        }
+
+        // Extract the key from self.position.
+        let prev_key = match self.position {
+            CursorPosition::First => Vec::new(),
+            CursorPosition::Last => Vec::new(),
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset: _,
+                ref mut key,
+                timestamp: _,
+                value: _,
+            } => {
+                let mut ret = Vec::new();
+                std::mem::swap(&mut ret, key);
+                ret
+            }
+        };
+
+        // Setup the position correctly and return what we see.
+        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
+        // Return the kvp for this offset.
+        Ok(self.key_value_pair())
     }
 }
 
