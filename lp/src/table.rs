@@ -8,7 +8,7 @@ use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Cursor, Error, KeyValuePair,
+    minimal_successor_key, Builder, Cursor, Error, KeyValuePair,
 };
 
 //////////////////////////////////////////// TableEntry ////////////////////////////////////////////
@@ -261,68 +261,6 @@ impl TableBuilder {
         })
     }
 
-    pub fn approximate_size(&self) -> usize {
-        let mut sum = self.bytes_written;
-        sum += match &self.block_builder {
-            Some(block) => block.approximate_size(),
-            None => 0,
-        };
-        sum += 1 + self.index_block.approximate_size();
-        sum += FINAL_BLOCK_MAX_SZ;
-        sum
-    }
-
-    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let block = self.get_block(key, timestamp)?;
-        block.put(key, timestamp, value)?;
-        self.assign_last_key(key, timestamp);
-        Ok(())
-    }
-
-    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let block = self.get_block(key, timestamp)?;
-        block.del(key, timestamp)?;
-        self.assign_last_key(key, timestamp);
-        Ok(())
-    }
-
-    pub fn seal(self) -> Result<Table, Error> {
-        let mut builder = self;
-        // Flush the block we have.
-        if builder.block_builder.is_some() {
-            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
-            builder.flush_block(&key, timestamp)?;
-        }
-        // Flush the index block at the end.
-        let index_block = builder.index_block.seal()?;
-        let index_block_start = builder.bytes_written;
-        let bytes = index_block.as_bytes();
-        let entry = TableEntry::PlainBlock(bytes);
-        let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
-        let index_block_limit = builder.bytes_written;
-        // Our final_block
-        let final_block = FinalBlock {
-            index_block: BlockMetadata {
-                start: index_block_start as u64,
-                limit: index_block_limit as u64,
-            },
-            final_block_offset: builder.bytes_written as u64,
-        };
-        let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
-        // fsync
-        builder.output.sync_all()?;
-        Ok(Table::new(builder.path)?)
-    }
-
     fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
             Err(Error::SortOrder {
@@ -394,6 +332,72 @@ impl TableBuilder {
         }
 
         Ok(self.block_builder.as_mut().unwrap())
+    }
+}
+
+impl Builder for TableBuilder {
+    type Sealed = Table;
+
+    fn approximate_size(&self) -> usize {
+        let mut sum = self.bytes_written;
+        sum += match &self.block_builder {
+            Some(block) => block.approximate_size(),
+            None => 0,
+        };
+        sum += 1 + self.index_block.approximate_size();
+        sum += FINAL_BLOCK_MAX_SZ;
+        sum
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let block = self.get_block(key, timestamp)?;
+        block.put(key, timestamp, value)?;
+        self.assign_last_key(key, timestamp);
+        Ok(())
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let block = self.get_block(key, timestamp)?;
+        block.del(key, timestamp)?;
+        self.assign_last_key(key, timestamp);
+        Ok(())
+    }
+
+    fn seal(self) -> Result<Table, Error> {
+        let mut builder = self;
+        // Flush the block we have.
+        if builder.block_builder.is_some() {
+            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
+            builder.flush_block(&key, timestamp)?;
+        }
+        // Flush the index block at the end.
+        let index_block = builder.index_block.seal()?;
+        let index_block_start = builder.bytes_written;
+        let bytes = index_block.as_bytes();
+        let entry = TableEntry::PlainBlock(bytes);
+        let pa = stack_pack(entry);
+        builder.bytes_written += pa.stream(&mut builder.output)?;
+        let index_block_limit = builder.bytes_written;
+        // Our final_block
+        let final_block = FinalBlock {
+            index_block: BlockMetadata {
+                start: index_block_start as u64,
+                limit: index_block_limit as u64,
+            },
+            final_block_offset: builder.bytes_written as u64,
+        };
+        let pa = stack_pack(final_block);
+        builder.bytes_written += pa.stream(&mut builder.output)?;
+        // fsync
+        builder.output.sync_all()?;
+        Ok(Table::new(builder.path)?)
     }
 }
 

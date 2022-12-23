@@ -6,7 +6,7 @@ use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Cursor, Error,
+    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Builder, Cursor, Error,
     KeyValuePair,
 };
 
@@ -243,57 +243,6 @@ impl BlockBuilder {
         }
     }
 
-    pub fn approximate_size(&self) -> usize {
-        self.buffer.len() + 16 + self.restarts.len() * 4
-    }
-
-    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let (shared, key_frag) = self.compute_key_frag(key);
-        let kvp = KeyValuePut {
-            shared: shared as u64,
-            key_frag,
-            timestamp,
-            value,
-        };
-        let be = BlockEntry::KeyValuePut(kvp);
-        self.append(be)
-    }
-
-    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
-        self.enforce_sort_order(key, timestamp)?;
-        let (shared, key_frag) = self.compute_key_frag(key);
-        let kvp = KeyValueDel {
-            shared: shared as u64,
-            key_frag,
-            timestamp,
-        };
-        let be = BlockEntry::KeyValueDel(kvp);
-        self.append(be)
-    }
-
-    pub fn seal(self) -> Result<Block, Error> {
-        // Append each restart.
-        // NOTE(rescrv):  If this changes, change approximate_size above.
-        let restarts = length_free(&self.restarts);
-        let tag10: v64 = ((10 << 3) | 2).into();
-        let tag11: v64 = ((11 << 3) | 5).into();
-        let sz: v64 = restarts.pack_sz().into();
-        let pa = stack_pack(tag10);
-        let pa = pa.pack(sz);
-        let pa = pa.pack(restarts);
-        let pa = pa.pack(tag11);
-        let pa = pa.pack(self.restarts.len() as u32);
-        let mut contents = self.buffer;
-        pa.append_to_vec(&mut contents);
-        Block::new(contents.into())
-    }
-
     fn should_restart(&self) -> bool {
         self.options.bytes_restart_interval <= self.bytes_since_restart
             || self.options.key_value_pairs_restart_interval <= self.key_value_pairs_since_restart
@@ -348,6 +297,61 @@ impl BlockBuilder {
         } else {
             Ok(())
         }
+    }
+}
+
+impl Builder for BlockBuilder {
+    type Sealed = Block;
+
+    fn approximate_size(&self) -> usize {
+        self.buffer.len() + 16 + self.restarts.len() * 4
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let (shared, key_frag) = self.compute_key_frag(key);
+        let kvp = KeyValuePut {
+            shared: shared as u64,
+            key_frag,
+            timestamp,
+            value,
+        };
+        let be = BlockEntry::KeyValuePut(kvp);
+        self.append(be)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_table_size(self.approximate_size())?;
+        self.enforce_sort_order(key, timestamp)?;
+        let (shared, key_frag) = self.compute_key_frag(key);
+        let kvp = KeyValueDel {
+            shared: shared as u64,
+            key_frag,
+            timestamp,
+        };
+        let be = BlockEntry::KeyValueDel(kvp);
+        self.append(be)
+    }
+
+    fn seal(self) -> Result<Block, Error> {
+        // Append each restart.
+        // NOTE(rescrv):  If this changes, change approximate_size above.
+        let restarts = length_free(&self.restarts);
+        let tag10: v64 = ((10 << 3) | 2).into();
+        let tag11: v64 = ((11 << 3) | 5).into();
+        let sz: v64 = restarts.pack_sz().into();
+        let pa = stack_pack(tag10);
+        let pa = pa.pack(sz);
+        let pa = pa.pack(restarts);
+        let pa = pa.pack(tag11);
+        let pa = pa.pack(self.restarts.len() as u32);
+        let mut contents = self.buffer;
+        pa.append_to_vec(&mut contents);
+        Block::new(contents.into())
     }
 }
 

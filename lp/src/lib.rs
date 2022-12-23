@@ -138,6 +138,19 @@ impl PartialOrd for KeyValuePair {
     }
 }
 
+////////////////////////////////////////////// Builder /////////////////////////////////////////////
+
+pub trait Builder {
+    type Sealed;
+
+    fn approximate_size(&self) -> usize;
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+
+    fn seal(self) -> Result<Self::Sealed, Error>;
+}
+
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 pub trait Cursor {

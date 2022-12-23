@@ -9,7 +9,7 @@ use guacamole::Guacamole;
 use super::block::{Block, BlockBuilder, BlockCursor};
 use super::reference::TableBuilder as ReferenceBuilder;
 use super::table::{Table, TableBuilder, TableCursor};
-use super::{Cursor, Error, KeyValuePair};
+use super::{Builder, Cursor, KeyValuePair};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -199,15 +199,8 @@ pub trait TableTrait<'a> {
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
 
-pub trait TableBuilderTrait<'a> {
+pub trait TableBuilderTrait<'a>: Builder<Sealed=Self::Table> {
     type Table: TableTrait<'a>;
-
-    fn approximate_size(&self) -> usize;
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
-
-    fn seal(self) -> Result<Self::Table, Error>;
 }
 
 //////////////////////////////////////////// Block impls ///////////////////////////////////////////
@@ -223,22 +216,6 @@ impl<'a> TableTrait<'a> for Block {
 
 impl<'a> TableBuilderTrait<'a> for BlockBuilder {
     type Table = Block;
-
-    fn approximate_size(&self) -> usize {
-        BlockBuilder::approximate_size(self)
-    }
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        BlockBuilder::put(self, key, timestamp, value)
-    }
-
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        BlockBuilder::del(self, key, timestamp)
-    }
-
-    fn seal(self) -> Result<Self::Table, Error> {
-        BlockBuilder::seal(self)
-    }
 }
 
 //////////////////////////////////////////// Table impls ///////////////////////////////////////////
@@ -254,22 +231,6 @@ impl<'a> TableTrait<'a> for Table {
 
 impl<'a> TableBuilderTrait<'a> for TableBuilder {
     type Table = Table;
-
-    fn approximate_size(&self) -> usize {
-        TableBuilder::approximate_size(self)
-    }
-
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        TableBuilder::put(self, key, timestamp, value)
-    }
-
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        TableBuilder::del(self, key, timestamp)
-    }
-
-    fn seal(self) -> Result<Self::Table, Error> {
-        TableBuilder::seal(self)
-    }
 }
 
 ////////////////////////////////////////////// fuzzer //////////////////////////////////////////////
@@ -462,6 +423,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::super::Error;
     use super::*;
 
     struct TestTable {}
@@ -479,6 +441,10 @@ mod tests {
 
     impl<'a> TableBuilderTrait<'a> for TestBuilder {
         type Table = TestTable;
+    }
+
+    impl Builder for TestBuilder {
+        type Sealed = TestTable;
 
         fn approximate_size(&self) -> usize {
             unimplemented!();
