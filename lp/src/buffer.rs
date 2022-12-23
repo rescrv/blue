@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
@@ -36,6 +37,10 @@ impl Buffer {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.sz
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         unsafe {
             from_raw_parts(self.ptr, self.sz)
@@ -46,6 +51,19 @@ impl Buffer {
         unsafe {
             from_raw_parts_mut(self.ptr, self.sz)
         }
+    }
+}
+
+impl TryFrom<Vec<u8>> for Buffer {
+    type Error = Error;
+
+    fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
+        let mut buf = Self::new(v.len())?;
+        let bytes = buf.as_slice_mut();
+        for i in 0..v.len() {
+            bytes[i] = v[i];
+        }
+        Ok(buf)
     }
 }
 
@@ -89,5 +107,16 @@ mod tests {
             sum += *byte;
         }
         assert_eq!(42, sum);
+    }
+
+    #[test]
+    fn try_from_vec_u8() {
+        let value: Vec<u8> = vec![1, 2, 3];
+        let buf: Buffer  = value.try_into().unwrap();
+        let bytes: &[u8] = buf.as_slice();
+        assert_eq!(3, bytes.len());
+        assert_eq!(1, bytes[0]);
+        assert_eq!(2, bytes[1]);
+        assert_eq!(3, bytes[2]);
     }
 }

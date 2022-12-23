@@ -1,9 +1,11 @@
 use std::cmp;
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
+use super::buffer::Buffer;
 use super::{check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair};
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -111,7 +113,7 @@ impl<'a> Default for BlockEntry<'a> {
 
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
-    bytes: Vec<u8>,
+    bytes: Rc<Buffer>,
 
     // The restart intervals.  restarts_boundary points to the first restart point.
     restarts_boundary: usize,
@@ -120,8 +122,9 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn new(bytes: Buffer) -> Result<Self, Error> {
         // Load num_restarts.
+        let bytes = Rc::new(bytes);
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
@@ -130,7 +133,7 @@ impl Block {
                 required: 4,
             });
         }
-        let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
+        let mut up = Unpacker::new(&bytes.as_slice()[bytes.len() - 4..]);
         let num_restarts: u32 = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
             context: "could not read last four bytes of block".to_string(),
@@ -154,7 +157,7 @@ impl Block {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.as_slice()
     }
 
     pub fn iterate<'a>(&'a self) -> BlockCursor<'a> {
@@ -164,8 +167,9 @@ impl Block {
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts as usize);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
+        let bytes = self.bytes.as_slice();
         for i in 0..4 {
-            restart[i] = self.bytes[self.restarts_idx + restart_idx * 4 + i];
+            restart[i] = bytes[self.restarts_idx + restart_idx * 4 + i];
         }
         u32::from_le_bytes(restart) as usize
     }
@@ -281,7 +285,7 @@ impl BlockBuilder {
         let pa = pa.pack(self.restarts.len() as u32);
         let mut contents = self.buffer;
         pa.append_to_vec(&mut contents);
-        Block::new(contents)
+        Block::new(contents.try_into()?)
     }
 
     fn should_restart(&self) -> bool {
@@ -732,7 +736,8 @@ impl<'a> BlockCursor<'a> {
             return Ok(CursorPosition::Last);
         }
         // Parse the key-value pair.
-        let mut up = Unpacker::new(&block.bytes[offset..block.restarts_boundary]);
+        let bytes = block.bytes.as_slice();
+        let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
         let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
             context: format!("could not unpack key-value pair at offset={}", offset),
@@ -863,7 +868,7 @@ mod tests {
             0, 0, 0, 0, 22, 0, 0, 0, 93, /*11*/
             2, 0, 0, 0,
         ];
-        let block = Block::new(block_bytes.to_vec()).unwrap();
+        let block = Block::new(block_bytes.to_vec().try_into().unwrap()).unwrap();
         assert_eq!(2, block.num_restarts);
         assert_eq!(0, block.restart_point(0));
         assert_eq!(22, block.restart_point(1));
@@ -979,7 +984,7 @@ mod tests {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let block = Block::new(bytes.to_vec()).unwrap();
+        let block = Block::new(bytes.to_vec().try_into().unwrap()).unwrap();
 
         let exp = CursorPosition::Positioned {
             restart_idx: 0,
@@ -1058,7 +1063,7 @@ mod guacamole {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let bytes: &[u8] = &block.bytes;
+        let bytes: &[u8] = block.bytes.as_slice();
         assert_eq!(exp, bytes);
 
         let mut cursor = block.iterate();
