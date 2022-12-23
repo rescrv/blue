@@ -275,7 +275,7 @@ impl TableBuilder {
         // Flush the index block at the end.
         let index_block = builder.index_block.seal()?;
         let index_block_start = builder.bytes_written;
-        let bytes = index_block.as_slice();
+        let bytes = index_block.as_bytes();
         let entry = TableEntry::PlainBlock(bytes);
         let pa = stack_pack(entry);
         builder.bytes_written += pa.stream(&mut builder.output)?;
@@ -336,7 +336,7 @@ impl TableBuilder {
         block_metadata.start = self.bytes_written as u64;
         // Write out the block.
         let block = self.block_builder.take().unwrap().seal()?;
-        let bytes = block.as_slice();
+        let bytes = block.as_bytes();
         let mut scratch = Vec::new();
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         let pa = stack_pack(entry);

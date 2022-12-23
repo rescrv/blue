@@ -12,6 +12,8 @@ pub mod guacamole;
 pub mod reference;
 pub mod table;
 
+pub use buffer::Buffer;
+
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 pub const MAX_KEY_LEN: usize = 1usize << 16; /* 64KiB */
@@ -107,11 +109,14 @@ impl From<std::io::Error> for Error {
 
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////
 
-#[derive(Debug, Eq)]
+#[derive(Debug)]
 pub struct KeyValuePair {
-    pub key: Vec<u8>,
+    pub key: Buffer,
     pub timestamp: u64,
-    pub value: Option<Vec<u8>>,
+    pub value: Option<Buffer>,
+}
+
+impl Eq for KeyValuePair {
 }
 
 impl PartialEq for KeyValuePair {
@@ -122,8 +127,8 @@ impl PartialEq for KeyValuePair {
 
 impl Ord for KeyValuePair {
     fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let key_lhs: &[u8] = &self.key;
-        let key_rhs: &[u8] = &rhs.key;
+        let key_lhs: &[u8] = self.key.as_bytes();
+        let key_rhs: &[u8] = rhs.key.as_bytes();
         compare_key(key_lhs, self.timestamp, key_rhs, rhs.timestamp)
     }
 }
@@ -243,19 +248,19 @@ mod tests {
     #[test]
     fn key_value_pair_ordering() {
         let kvp1 = KeyValuePair {
-            key: "key1".as_bytes().to_vec(),
+            key: "key1".into(),
             timestamp: 42,
-            value: Some("value".as_bytes().to_vec()),
+            value: Some("value".into()),
         };
         let kvp2 = KeyValuePair {
-            key: "key1".as_bytes().to_vec(),
+            key: "key1".into(),
             timestamp: 84,
-            value: Some("value".as_bytes().to_vec()),
+            value: Some("value".into()),
         };
         let kvp3 = KeyValuePair {
-            key: "key2".as_bytes().to_vec(),
+            key: "key2".into(),
             timestamp: 99,
-            value: Some("value".as_bytes().to_vec()),
+            value: Some("value".into()),
         };
         assert!(kvp2 < kvp1);
         assert!(kvp3 > kvp2);

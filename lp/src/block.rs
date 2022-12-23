@@ -5,8 +5,7 @@ use std::rc::Rc;
 use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
-use super::buffer::Buffer;
-use super::{check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair};
+use super::{check_key_len, check_table_size, check_value_len, compare_key, Buffer, Error, KeyValuePair};
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
@@ -133,7 +132,7 @@ impl Block {
                 required: 4,
             });
         }
-        let mut up = Unpacker::new(&bytes.as_slice()[bytes.len() - 4..]);
+        let mut up = Unpacker::new(&bytes.as_bytes()[bytes.len() - 4..]);
         let num_restarts: u32 = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
             context: "could not read last four bytes of block".to_string(),
@@ -156,8 +155,8 @@ impl Block {
         Ok(block)
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        self.bytes.as_slice()
+    pub fn as_bytes(&self) -> &[u8] {
+        self.bytes.as_bytes()
     }
 
     pub fn iterate<'a>(&'a self) -> BlockCursor<'a> {
@@ -167,7 +166,7 @@ impl Block {
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts as usize);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
-        let bytes = self.bytes.as_slice();
+        let bytes = self.bytes.as_bytes();
         for i in 0..4 {
             restart[i] = bytes[self.restarts_idx + restart_idx * 4 + i];
         }
@@ -448,7 +447,7 @@ impl<'a> BlockCursor<'a> {
                     .into());
                 }
             };
-            match compare_key(key, timestamp, &kvp.key, kvp.timestamp) {
+            match compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp) {
                 Ordering::Less => {
                     // left     mid     right
                     // |--------|-------|
@@ -491,7 +490,7 @@ impl<'a> BlockCursor<'a> {
         };
 
         // Check for the case where all keys are bigger.
-        if compare_key(key, timestamp, &kvp.key, kvp.timestamp).is_lt() {
+        if compare_key(key, timestamp, kvp.key.as_bytes(), kvp.timestamp).is_lt() {
             self.position = CursorPosition::First;
             return Ok(());
         }
@@ -499,7 +498,7 @@ impl<'a> BlockCursor<'a> {
         // Scan until we find the key.
         let mut kvp = Some(kvp);
         while let Some(x) = kvp {
-            if compare_key(key, timestamp, &x.key, x.timestamp).is_gt() {
+            if compare_key(key, timestamp, x.key.as_bytes(), x.timestamp).is_gt() {
                 kvp = self.next()?;
             } else {
                 break;
@@ -719,10 +718,10 @@ impl<'a> BlockCursor<'a> {
                 timestamp,
                 value,
             } => Some(KeyValuePair {
-                key: key.clone(),
+                key: key.into(),
                 timestamp: *timestamp,
                 value: match value {
-                    Some(v) => { Some(v.clone()) }
+                    Some(v) => { Some(v.into()) }
                     None => None,
                 },
             }),
@@ -739,7 +738,7 @@ impl<'a> BlockCursor<'a> {
             return Ok(CursorPosition::Last);
         }
         // Parse the key-value pair.
-        let bytes = block.bytes.as_slice();
+        let bytes = block.bytes.as_bytes();
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
         let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
@@ -774,7 +773,7 @@ mod tests {
     fn build_empty_block() {
         let builder = BlockBuilder::new(BlockBuilderOptions::default());
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_slice();
+        let got = block.bytes.as_bytes();
         let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
         assert_eq!(exp, got);
         assert_eq!(11, got.len());
@@ -787,7 +786,7 @@ mod tests {
             .put("key".as_bytes(), 0xc0ffee, "value".as_bytes())
             .unwrap();
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_slice();
+        let got = block.bytes.as_bytes();
         let exp = &[
             66, /*8*/
             19, /*sz*/
@@ -818,7 +817,7 @@ mod tests {
             .put("key2".as_bytes(), 0xc0ffee, "value2".as_bytes())
             .unwrap();
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_slice();
+        let got = block.bytes.as_bytes();
         let exp = &[
             // first record
             66, /*8*/
@@ -904,7 +903,7 @@ mod tests {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let got = block.bytes.as_slice();
+        let got = block.bytes.as_bytes();
         assert_eq!(exp, got);
 
         let mut cursor = block.iterate();
@@ -928,10 +927,10 @@ mod tests {
         let mut cursor = block.iterate();
         let target = "jqCIzIbU";
         cursor.seek(target.as_bytes(), u64::max_value()).unwrap();
+        let key: Buffer = key.into();
         let kvp = cursor.next().unwrap().unwrap();
-        assert_eq!(key.as_bytes().to_vec(), kvp.key);
+        assert_eq!(key.as_bytes(), kvp.key.as_bytes());
         assert_eq!(timestamp, kvp.timestamp);
-        assert_eq!(Some(value.as_bytes().to_vec()), kvp.value);
     }
 
     #[test]
@@ -948,17 +947,17 @@ mod tests {
             restart_idx: 0,
             offset: 0,
             next_offset: 19,
-            key: "E".as_bytes().to_vec(),
+            key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         let rhs = CursorPosition::Positioned {
             restart_idx: 0,
             offset: 0,
             next_offset: 19,
-            key: "E".as_bytes().to_vec().to_vec(),
+            key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         assert_eq!(lhs, rhs);
     }
@@ -996,9 +995,9 @@ mod tests {
             restart_idx: 0,
             offset: 0,
             next_offset: 20,
-            key: "E".as_bytes().to_vec(),
+            key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         let got = BlockCursor::extract_key_value(&block, 0, Vec::new()).unwrap();
         assert_eq!(exp, got);
@@ -1007,9 +1006,9 @@ mod tests {
             restart_idx: 0,
             offset: 20,
             next_offset: 39,
-            key: "k".as_bytes().to_vec(),
+            key: "k".into(),
             timestamp: 4092481979873166344,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         let got = BlockCursor::extract_key_value(&block, 20, Vec::new()).unwrap();
         assert_eq!(exp, got);
@@ -1069,7 +1068,7 @@ mod guacamole {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let bytes: &[u8] = block.bytes.as_slice();
+        let bytes: &[u8] = block.bytes.as_bytes();
         assert_eq!(exp, bytes);
 
         let mut cursor = block.iterate();
@@ -1172,10 +1171,10 @@ mod guacamole {
         cursor.seek("d".as_bytes(), u64::max_value()).unwrap();
         // Next to g
         let got = cursor.next().unwrap().unwrap();
-        assert_eq!("g".as_bytes(), got.key);
+        assert_eq!(<&str as Into<Buffer>>::into("g"), got.key);
         assert_eq!(10374159306796994843, got.timestamp);
         assert_eq!(
-            Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes().to_vec()),
+            Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".into()),
             got.value
         );
         assert_eq!(
@@ -1183,20 +1182,20 @@ mod guacamole {
                 restart_idx: 0,
                 offset: 434,
                 next_offset: 518,
-                key: "g".as_bytes().to_vec(),
+                key: "g".into(),
                 timestamp: 10374159306796994843,
                 value: Some(
-                    "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes().to_vec()
+                    "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".into()
                 ),
             },
             cursor.position
         );
         // Next to k
         let got = cursor.next().unwrap().unwrap();
-        assert_eq!("k".as_bytes().to_vec(), got.key);
+        assert_eq!(<&str as Into<Buffer>>::into("k"), got.key);
         assert_eq!(4092481979873166344, got.timestamp);
         assert_eq!(
-            Some("xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes().to_vec()),
+            Some("xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".into()),
             got.value
         );
         assert_eq!(
@@ -1204,10 +1203,10 @@ mod guacamole {
                 restart_idx: 1,
                 offset: 518,
                 next_offset: 601,
-                key: "k".as_bytes().to_vec().to_vec(),
+                key: "k".into(),
                 timestamp: 4092481979873166344,
                 value: Some(
-                    "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes().to_vec()
+                    "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".into()
                 ),
             },
             cursor.position
@@ -1215,17 +1214,17 @@ mod guacamole {
         // Next to t
         let got = cursor.next().unwrap().unwrap();
         let exp = KeyValuePair {
-            key: "t".as_bytes().to_vec(),
+            key: "t".into(),
             timestamp: 7790837488841419319,
             value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes().to_vec(),
+                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into(),
             ),
         };
         assert_eq!(exp, got);
-        assert_eq!("t".as_bytes().to_vec(), got.key);
+        assert_eq!(<&str as Into<Buffer>>::into("t"), got.key);
         assert_eq!(7790837488841419319, got.timestamp);
         assert_eq!(
-            Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes().to_vec()),
+            Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
             got.value
         );
         assert_eq!(
@@ -1233,10 +1232,10 @@ mod guacamole {
                 restart_idx: 1,
                 offset: 601,
                 next_offset: 684,
-                key: "t".as_bytes().to_vec(),
+                key: "t".into(),
                 timestamp: 7790837488841419319,
                 value: Some(
-                    "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes().to_vec()
+                    "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()
                 ),
             },
             cursor.position
@@ -1327,10 +1326,10 @@ mod guacamole {
         let _got = cursor.next().unwrap();
         let got = cursor.next().unwrap();
         let exp = KeyValuePair {
-            key: "t".as_bytes().to_vec(),
+            key: "t".into(),
             timestamp: 7790837488841419319,
             value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes().to_vec(),
+                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into(),
             ),
         };
         assert_eq!(Some(exp), got);
@@ -1736,9 +1735,9 @@ mod guacamole {
         let _got = cursor.next().unwrap();
         let got = cursor.next().unwrap();
         let exp = KeyValuePair {
-            key: "8".as_bytes().to_vec(),
+            key: "8".into(),
             timestamp: 13191224295862555992,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         assert_eq!(Some(exp), got);
     }
@@ -1794,9 +1793,9 @@ mod guacamole {
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
         let got = cursor.prev().unwrap();
         let exp = KeyValuePair {
-            key: "E".as_bytes().to_vec(),
+            key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".as_bytes().to_vec()),
+            value: Some("".into()),
         };
         assert_eq!(Some(exp), got);
     }
@@ -1847,25 +1846,25 @@ mod alphabet {
         let mut iter = block.iterate();
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
         // C
         let exp = KeyValuePair {
-            key: "C".as_bytes().to_vec(),
+            key: "C".into(),
             timestamp: 0,
-            value: Some("c".as_bytes().to_vec()),
+            value: Some("c".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -1875,25 +1874,25 @@ mod alphabet {
         }
         // X
         let exp = KeyValuePair {
-            key: "X".as_bytes().to_vec(),
+            key: "X".into(),
             timestamp: 0,
-            value: Some("x".as_bytes().to_vec()),
+            value: Some("x".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -1909,25 +1908,25 @@ mod alphabet {
         iter.seek_to_last().unwrap();
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
         // X
         let exp = KeyValuePair {
-            key: "X".as_bytes().to_vec(),
+            key: "X".into(),
             timestamp: 0,
-            value: Some("x".as_bytes().to_vec()),
+            value: Some("x".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -1937,25 +1936,25 @@ mod alphabet {
         }
         // C
         let exp = KeyValuePair {
-            key: "C".as_bytes().to_vec(),
+            key: "C".into(),
             timestamp: 0,
-            value: Some("c".as_bytes().to_vec()),
+            value: Some("c".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.prev().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -1971,9 +1970,9 @@ mod alphabet {
         iter.seek("@".as_bytes(), 0).unwrap();
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -1986,9 +1985,9 @@ mod alphabet {
         iter.seek("Z".as_bytes(), 0).unwrap();
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.next().unwrap().unwrap();
         assert_eq!(exp, got);
@@ -2003,49 +2002,49 @@ mod alphabet {
         let mut iter = block.iterate();
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // C
         let exp = KeyValuePair {
-            key: "C".as_bytes().to_vec(),
+            key: "C".into(),
             timestamp: 0,
-            value: Some("c".as_bytes().to_vec()),
+            value: Some("c".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
@@ -2057,57 +2056,57 @@ mod alphabet {
         }
         // X
         let exp = KeyValuePair {
-            key: "X".as_bytes().to_vec(),
+            key: "X".into(),
             timestamp: 0,
-            value: Some("x".as_bytes().to_vec()),
+            value: Some("x".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // X
         let exp = KeyValuePair {
-            key: "X".as_bytes().to_vec(),
+            key: "X".into(),
             timestamp: 0,
-            value: Some("x".as_bytes().to_vec()),
+            value: Some("x".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
@@ -2116,9 +2115,9 @@ mod alphabet {
         assert_eq!(None, got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
@@ -2130,9 +2129,9 @@ mod alphabet {
         assert_eq!(None, got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
@@ -2145,49 +2144,49 @@ mod alphabet {
         iter.seek_to_last().unwrap();
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // Z
         let exp = KeyValuePair {
-            key: "Z".as_bytes().to_vec(),
+            key: "Z".into(),
             timestamp: 0,
-            value: Some("z".as_bytes().to_vec()),
+            value: Some("z".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // X
         let exp = KeyValuePair {
-            key: "X".as_bytes().to_vec(),
+            key: "X".into(),
             timestamp: 0,
-            value: Some("x".as_bytes().to_vec()),
+            value: Some("x".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // Y
         let exp = KeyValuePair {
-            key: "Y".as_bytes().to_vec(),
+            key: "Y".into(),
             timestamp: 0,
-            value: Some("y".as_bytes().to_vec()),
+            value: Some("y".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
@@ -2199,57 +2198,57 @@ mod alphabet {
         }
         // C
         let exp = KeyValuePair {
-            key: "C".as_bytes().to_vec(),
+            key: "C".into(),
             timestamp: 0,
-            value: Some("c".as_bytes().to_vec()),
+            value: Some("c".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // C
         let exp = KeyValuePair {
-            key: "C".as_bytes().to_vec(),
+            key: "C".into(),
             timestamp: 0,
-            value: Some("c".as_bytes().to_vec()),
+            value: Some("c".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
         // B
         let exp = KeyValuePair {
-            key: "B".as_bytes().to_vec(),
+            key: "B".into(),
             timestamp: 0,
-            value: Some("b".as_bytes().to_vec()),
+            value: Some("b".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.prev().unwrap();
         assert_eq!(Some(exp), got);
@@ -2258,9 +2257,9 @@ mod alphabet {
         assert_eq!(None, got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);
@@ -2272,9 +2271,9 @@ mod alphabet {
         assert_eq!(None, got);
         // A
         let exp = KeyValuePair {
-            key: "A".as_bytes().to_vec(),
+            key: "A".into(),
             timestamp: 0,
-            value: Some("a".as_bytes().to_vec()),
+            value: Some("a".into()),
         };
         let got = iter.next().unwrap();
         assert_eq!(Some(exp), got);

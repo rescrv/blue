@@ -409,19 +409,19 @@ pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'stati
             Some(ref v) => {
                 println!(
                     "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes()).unwrap();",
-                    std::str::from_utf8(&x.key).unwrap(),
+                    std::str::from_utf8(x.key.as_bytes()).unwrap(),
                     x.timestamp,
-                    std::str::from_utf8(&v).unwrap()
+                    std::str::from_utf8(v.as_bytes()).unwrap()
                 );
-                builder.put(&x.key, x.timestamp, &v).unwrap();
+                builder.put(x.key.as_bytes(), x.timestamp, v.as_bytes()).unwrap();
             }
             None => {
                 println!(
                     "        builder.del(\"{}\".as_bytes(), {}).unwrap();",
-                    std::str::from_utf8(&x.key).unwrap(),
+                    std::str::from_utf8(x.key.as_bytes()).unwrap(),
                     x.timestamp
                 );
-                builder.del(&x.key, x.timestamp).unwrap();
+                builder.del(x.key.as_bytes(), x.timestamp).unwrap();
             }
         };
     }
@@ -466,14 +466,14 @@ pub fn fuzzer<T, B, F>(name: &'static str, version: &'static str, about: &'stati
                 println!("        let exp = KeyValuePair {{");
                 println!(
                     "            key: \"{}\".as_bytes().to_vec(),",
-                    std::str::from_utf8(&x.key).unwrap()
+                    std::str::from_utf8(x.key.as_bytes()).unwrap()
                 );
                 println!("            timestamp: {},", x.timestamp);
                 match &x.value {
                     Some(x) => {
                         println!(
                             "            value: Some(\"{}\".as_bytes().to_vec()),",
-                            std::str::from_utf8(&x).unwrap()
+                            std::str::from_utf8(x.as_bytes()).unwrap()
                         );
                     }
                     None => {
