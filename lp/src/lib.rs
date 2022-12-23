@@ -109,27 +109,27 @@ impl From<std::io::Error> for Error {
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////
 
 #[derive(Debug, Eq)]
-pub struct KeyValuePair<'a> {
-    pub key: &'a [u8],
+pub struct KeyValuePair {
+    pub key: Vec<u8>,
     pub timestamp: u64,
-    pub value: Option<&'a [u8]>,
+    pub value: Option<Vec<u8>>,
 }
 
-impl<'a> PartialEq for KeyValuePair<'a> {
+impl PartialEq for KeyValuePair {
     fn eq(&self, rhs: &KeyValuePair) -> bool {
         self.cmp(rhs) == std::cmp::Ordering::Equal
     }
 }
 
-impl<'a> Ord for KeyValuePair<'a> {
+impl Ord for KeyValuePair {
     fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let key1 = self.key;
-        let key2 = rhs.key;
-        compare_key(key1, self.timestamp, key2, rhs.timestamp)
+        let key_lhs: &[u8] = &self.key;
+        let key_rhs: &[u8] = &rhs.key;
+        compare_key(key_lhs, self.timestamp, key_rhs, rhs.timestamp)
     }
 }
 
-impl<'a> PartialOrd for KeyValuePair<'a> {
+impl PartialOrd for KeyValuePair {
     fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
         Some(self.cmp(rhs))
     }
@@ -244,19 +244,19 @@ mod tests {
     #[test]
     fn key_value_pair_ordering() {
         let kvp1 = KeyValuePair {
-            key: "key1".as_bytes(),
+            key: "key1".as_bytes().to_vec(),
             timestamp: 42,
-            value: Some("value".as_bytes()),
+            value: Some("value".as_bytes().to_vec()),
         };
         let kvp2 = KeyValuePair {
-            key: "key1".as_bytes(),
+            key: "key1".as_bytes().to_vec(),
             timestamp: 84,
-            value: Some("value".as_bytes()),
+            value: Some("value".as_bytes().to_vec()),
         };
         let kvp3 = KeyValuePair {
-            key: "key2".as_bytes(),
+            key: "key2".as_bytes().to_vec(),
             timestamp: 99,
-            value: Some("value".as_bytes()),
+            value: Some("value".as_bytes().to_vec()),
         };
         assert!(kvp2 < kvp1);
         assert!(kvp3 > kvp2);
