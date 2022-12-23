@@ -277,7 +277,7 @@ impl<'a> TableTrait<'a> for Table {
     type Cursor = TableCursor<'a>;
 
 	fn iterate(&'a self) -> Self::Cursor {
-        todo!();
+        Table::iterate(self)
     }
 }
 

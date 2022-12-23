@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::c_int;
 use std::fs::File;
+use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
@@ -10,9 +11,32 @@ use super::Error;
 
 //////////////////////////////////////////// FileHandle ////////////////////////////////////////////
 
+#[derive(Clone)]
 pub struct FileHandle {
     file: Arc<File>,
     state: Arc<Mutex<State>>,
+}
+
+impl FileHandle {
+    pub fn path(&self) -> Result<PathBuf, Error> {
+        let fd = check_fd(self.file.as_raw_fd())?;
+        let state = self.state.lock().unwrap();
+        if let Some((path, _)) = &state.files[fd] {
+            return Ok(path.clone());
+        } else {
+            return Err(Error::LogicError {
+                context: "FileManager has broken names->files pointer".to_string(),
+            });
+        }
+    }
+
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
+        Ok(self.file.read_exact_at(buf, offset)?)
+    }
+
+    pub fn size(&self) -> Result<u64, Error> {
+        Ok(self.file.metadata()?.len())
+    }
 }
 
 impl Drop for FileHandle {
@@ -141,6 +165,24 @@ impl FileManager {
     }
 }
 
+///////////////////////////////////////////// check_fd /////////////////////////////////////////////
+
+// Check that the file descriptor is [0, usize::max_value).
+fn check_fd(fd: c_int) -> Result<usize, Error> {
+    if fd < 0 {
+        return Err(Error::LogicError {
+            context: "valid file's file descriptor is negative".to_string(),
+        });
+    }
+    let fd = fd as usize;
+    if fd >= usize::max_value() {
+        return Err(Error::LogicError {
+            context: "valid file's file descriptor meets or exceeds usize::max_value()".to_string(),
+        });
+    }
+    Ok(fd)
+}
+
 /////////////////////////////////////////////// open ///////////////////////////////////////////////
 
 pub fn open(path: PathBuf) -> Result<File, Error> {
@@ -151,18 +193,7 @@ pub fn open(path: PathBuf) -> Result<File, Error> {
             return Err(e.into());
         }
     };
-    // Check that the file descriptor is [0, usize::max_value).
-    let fd: c_int = file.as_raw_fd();
-    if fd < 0 {
-        return Err(Error::LogicError {
-            context: "valid file's file descriptor is negative".to_string(),
-        });
-    }
-    if fd as usize >= usize::max_value() {
-        return Err(Error::LogicError {
-            context: "valid file's file descriptor meets or exceeds usize::max_value()".to_string(),
-        });
-    }
+    check_fd(file.as_raw_fd())?;
     Ok(file)
 }
 

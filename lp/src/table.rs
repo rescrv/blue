@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
+use std::path::PathBuf;
 
 use prototk::{stack_pack, Packable, Unpacker};
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
+use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
     minimal_successor_key, Error, KeyValuePair,
@@ -75,18 +75,28 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8;
 
 pub struct Table {
     // The file backing the table.
-    file: File,
+    handle: FileHandle,
     // Table metadata.
     index_block: Block,
 }
 
 impl Table {
-    pub fn new(path: String) -> Result<Self, Error> {
-        let mut file = File::open(path)?;
+    pub fn new(path: PathBuf) -> Result<Self, Error> {
+        let handle = open_without_manager(path)?;
+        Table::from_file_handle(handle)
+    }
+
+    pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
         // Read and parse the final block's offset
-        let position = file.seek(SeekFrom::End(-8))? as u64;
+        let file_sz = handle.size()?;
+        if file_sz < 8 {
+            return Err(Error::Corruption {
+                context: "file has fewer than eight bytes".to_string(),
+            });
+        }
+        let position = file_sz - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
-        file.read_exact(&mut buf)?;
+        handle.read_exact_at(&mut buf, position)?;
         let mut up = Unpacker::new(&buf);
         let final_block_offset: u64 = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
@@ -95,7 +105,7 @@ impl Table {
         // Read and parse the final block
         let size_of_final_block = position + 8 - (final_block_offset);
         buf.resize(size_of_final_block as usize, 0);
-        file.read_exact_at(&mut buf, final_block_offset)?;
+        handle.read_exact_at(&mut buf, final_block_offset)?;
         let mut up = Unpacker::new(&buf);
         let final_block: FinalBlock = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
@@ -111,15 +121,15 @@ impl Table {
                 ),
             });
         }
-        let index_block = Table::load_block(&file, &final_block.index_block)?;
-        Ok(Self { file, index_block })
+        let index_block = Table::load_block(&handle, &final_block.index_block)?;
+        Ok(Self { handle, index_block })
     }
 
-    fn iterate<'a>(&'a self) -> TableCursor<'a> {
+    pub fn iterate<'a>(&'a self) -> TableCursor<'a> {
         TableCursor::new(self)
     }
 
-    fn load_block(file: &File, block_metadata: &BlockMetadata) -> Result<Block, Error> {
+    fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
         let mut buf: Vec<u8> = Vec::with_capacity(amt);
@@ -204,12 +214,12 @@ pub struct TableBuilder {
     index_block: BlockBuilder,
     // Output information.
     output: File,
-    path: String,
+    path: PathBuf,
 }
 
 impl TableBuilder {
-    pub fn new(path: &str, options: TableBuilderOptions) -> Result<Self, Error> {
-        let output = OpenOptions::new().create_new(true).write(true).open(path)?;
+    pub fn new(path: PathBuf, options: TableBuilderOptions) -> Result<Self, Error> {
+        let output = OpenOptions::new().create_new(true).write(true).open(path.clone())?;
         Ok(TableBuilder {
             options,
             last_key: Vec::new(),
@@ -219,7 +229,7 @@ impl TableBuilder {
             bytes_written: 0,
             index_block: BlockBuilder::new(BlockBuilderOptions::default()),
             output,
-            path: path.to_string(),
+            path,
         })
     }
 

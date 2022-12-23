@@ -17,8 +17,8 @@ fn new_table() -> TableBuilder {
         .block_options(block_opts)
         .block_compression(BlockCompression::NoCompression)
         .target_block_size(4096);
-    println!("        let mut builder = TableBuilder::new(\"lp-table-guacamole.sst\", builder_opts).unwrap();");
-    let builder = TableBuilder::new("lp-table-guacamole.sst", builder_opts).unwrap();
+    println!("        let mut builder = TableBuilder::new(\"lp-table-guacamole.sst\".into(), builder_opts).unwrap();");
+    let builder = TableBuilder::new("lp-table-guacamole.sst".into(), builder_opts).unwrap();
     builder
 }
 
