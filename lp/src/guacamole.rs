@@ -278,7 +278,7 @@ impl<'a> TableCursorTrait<'a> for BlockCursor {
 
 impl<'a> TableTrait<'a> for Table {
     type Builder = TableBuilder;
-    type Cursor = TableCursor<'a>;
+    type Cursor = TableCursor;
 
     fn iterate(&'a self) -> Self::Cursor {
         Table::iterate(self)
@@ -305,7 +305,7 @@ impl<'a> TableBuilderTrait<'a> for TableBuilder {
     }
 }
 
-impl<'a> TableCursorTrait<'a> for TableCursor<'a> {
+impl<'a> TableCursorTrait<'a> for TableCursor {
     fn seek_to_first(&mut self) -> Result<(), Error> {
         TableCursor::seek_to_first(self)
     }

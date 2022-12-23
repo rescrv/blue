@@ -75,6 +75,7 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8;
 
 /////////////////////////////////////////////// Table //////////////////////////////////////////////
 
+#[derive(Clone)]
 pub struct Table {
     // The file backing the table.
     handle: FileHandle,
@@ -130,8 +131,8 @@ impl Table {
         })
     }
 
-    pub fn iterate<'a>(&'a self) -> TableCursor<'a> {
-        TableCursor::new(self)
+    pub fn iterate(&self) -> TableCursor {
+        TableCursor::new(self.clone())
     }
 
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
@@ -140,7 +141,26 @@ impl Table {
         let mut buf: Vec<u8> = Vec::with_capacity(amt);
         buf.resize(amt, 0);
         file.read_exact_at(&mut buf, block_metadata.start)?;
-        Ok(Block::new(buf.into())?)
+        let mut up = Unpacker::new(&buf);
+        let table_entry: TableEntry = up.unpack().map_err(|e| Error::UnpackError {
+            error: e,
+            context: "parsing table entry".to_string(),
+        })?;
+        match table_entry {
+            TableEntry::NOP(_) => {
+                Err(Error::Corruption {
+                    context: "file has a NOP block".to_string(),
+                })
+            },
+            TableEntry::PlainBlock(bytes) => {
+                Ok(Block::new(bytes.into())?)
+            },
+            TableEntry::FinalBlock(_) => {
+                Err(Error::Corruption {
+                    context: "tried loading final block".to_string(),
+                })
+            }
+        }
     }
 }
 
@@ -379,8 +399,8 @@ impl TableBuilder {
 
 //////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
-pub struct TableCursor<'a> {
-    table: &'a Table,
+pub struct TableCursor {
+    table: Table,
     // The position in the table.  When meta_iter is at its extremes, block_iter is None.
     // Otherwise, block_iter is positioned at the block referred to by the most recent
     // KVP-returning call to meta_iter.
@@ -388,8 +408,8 @@ pub struct TableCursor<'a> {
     block_iter: Option<BlockCursor>,
 }
 
-impl<'a> TableCursor<'a> {
-    fn new(table: &'a Table) -> Self {
+impl TableCursor {
+    fn new(table: Table) -> Self {
         let meta_iter = table.index_block.iterate();
         Self {
             table,
@@ -411,14 +431,599 @@ impl<'a> TableCursor<'a> {
     }
 
     pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        todo!();
+        self.meta_iter.seek(key, timestamp)?;
+        let metadata = match self.meta_next()? {
+            Some(m) => { m },
+            None => {
+                return self.seek_to_last();
+            },
+        };
+        let block = Table::load_block(&self.table.handle, &metadata)?;
+        let mut block_iter = block.iterate();
+        block_iter.seek(key, timestamp)?;
+        self.block_iter = Some(block_iter);
+        Ok(())
     }
 
     pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        todo!();
+        if self.block_iter.is_none() {
+            let metadata = match self.meta_prev()? {
+                Some(m) => { m },
+                None => {
+                    self.seek_to_first()?;
+                    return Ok(None);
+                },
+            };
+            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let mut block_iter = block.iterate();
+            block_iter.seek_to_last()?;
+            self.block_iter = Some(block_iter);
+        }
+        assert!(self.block_iter.is_some());
+        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
+        match block_iter.prev()? {
+            Some(kvp) => { Ok(Some(kvp)) },
+            None => {
+                self.block_iter = None;
+                self.prev()
+            }
+        }
+    }
+
+    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
+        let kvp = match self.meta_iter.prev()? {
+            Some(kvp) => { kvp },
+            None => {
+                self.seek_to_first()?;
+                return Ok(None);
+            },
+        };
+        TableCursor::metadata_from_kvp(kvp)
     }
 
     pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        todo!();
+        if self.block_iter.is_none() {
+            let metadata = match self.meta_next()? {
+                Some(m) => { m },
+                None => {
+                    self.seek_to_last()?;
+                    return Ok(None);
+                },
+            };
+            let block = Table::load_block(&self.table.handle, &metadata)?;
+            let mut block_iter = block.iterate();
+            block_iter.seek_to_first()?;
+            self.block_iter = Some(block_iter);
+        }
+        assert!(self.block_iter.is_some());
+        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
+        match block_iter.next()? {
+            Some(kvp) => { Ok(Some(kvp)) },
+            None => {
+                self.block_iter = None;
+                self.next()
+            }
+        }
+    }
+
+    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
+        let kvp = match self.meta_iter.next()? {
+            Some(kvp) => { kvp },
+            None => {
+                self.seek_to_last()?;
+                return Ok(None);
+            },
+        };
+        TableCursor::metadata_from_kvp(kvp)
+    }
+
+    fn metadata_from_kvp(kvp: KeyValuePair) -> Result<Option<BlockMetadata>, Error> {
+        let value = match kvp.value {
+            Some(v) => { v },
+            None => {
+                return Err(Error::Corruption {
+                    context: "meta block has null value".to_string(),
+                });
+            },
+        };
+        let mut up = Unpacker::new(value.as_bytes());
+        let metadata: BlockMetadata = up.unpack().map_err(|e| Error::UnpackError {
+            error: e,
+            context: "parsing block metadata".to_string(),
+        })?;
+        Ok(Some(metadata))
+    }
+}
+
+#[cfg(test)]
+mod alphabet {
+    use std::fs::remove_file;
+
+    use super::*;
+
+    fn alphabet(path: PathBuf) -> Table {
+        let builder_opts = TableBuilderOptions::default()
+            .block_options(BlockBuilderOptions::default())
+            .block_compression(BlockCompression::NoCompression)
+            .target_block_size(4096);
+        let mut builder = TableBuilder::new(path, builder_opts).unwrap();
+        builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
+        builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
+        builder.put("C".as_bytes(), 0, "c".as_bytes()).unwrap();
+        builder.put("D".as_bytes(), 0, "d".as_bytes()).unwrap();
+        builder.put("E".as_bytes(), 0, "e".as_bytes()).unwrap();
+        builder.put("F".as_bytes(), 0, "f".as_bytes()).unwrap();
+        builder.put("G".as_bytes(), 0, "g".as_bytes()).unwrap();
+        builder.put("H".as_bytes(), 0, "h".as_bytes()).unwrap();
+        builder.put("I".as_bytes(), 0, "i".as_bytes()).unwrap();
+        builder.put("J".as_bytes(), 0, "j".as_bytes()).unwrap();
+        builder.put("K".as_bytes(), 0, "k".as_bytes()).unwrap();
+        builder.put("L".as_bytes(), 0, "l".as_bytes()).unwrap();
+        builder.put("M".as_bytes(), 0, "m".as_bytes()).unwrap();
+        builder.put("N".as_bytes(), 0, "n".as_bytes()).unwrap();
+        builder.put("O".as_bytes(), 0, "o".as_bytes()).unwrap();
+        builder.put("P".as_bytes(), 0, "p".as_bytes()).unwrap();
+        builder.put("Q".as_bytes(), 0, "q".as_bytes()).unwrap();
+        builder.put("R".as_bytes(), 0, "r".as_bytes()).unwrap();
+        builder.put("S".as_bytes(), 0, "s".as_bytes()).unwrap();
+        builder.put("T".as_bytes(), 0, "t".as_bytes()).unwrap();
+        builder.put("U".as_bytes(), 0, "u".as_bytes()).unwrap();
+        builder.put("V".as_bytes(), 0, "v".as_bytes()).unwrap();
+        builder.put("W".as_bytes(), 0, "w".as_bytes()).unwrap();
+        builder.put("X".as_bytes(), 0, "x".as_bytes()).unwrap();
+        builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
+        builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
+        builder.seal().unwrap()
+    }
+
+    #[test]
+    fn step_the_alphabet_forward() {
+        const FILENAME: &str = "step_the_alphabet_forward.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // C
+        let exp = KeyValuePair {
+            key: "C".into(),
+            timestamp: 0,
+            value: Some("c".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // D-W
+        for _ in 0..20 {
+            let _got = iter.next().unwrap().unwrap();
+        }
+        // X
+        let exp = KeyValuePair {
+            key: "X".into(),
+            timestamp: 0,
+            value: Some("x".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Last
+        let got = iter.next().unwrap();
+        assert_eq!(None, got);
+    }
+
+    #[test]
+    fn step_the_alphabet_reverse() {
+        const FILENAME: &str = "step_the_alphabet_reverse.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        iter.seek_to_last().unwrap();
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // X
+        let exp = KeyValuePair {
+            key: "X".into(),
+            timestamp: 0,
+            value: Some("x".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // W-D
+        for _ in 0..20 {
+            let _got = iter.prev().unwrap().unwrap();
+        }
+        // C
+        let exp = KeyValuePair {
+            key: "C".into(),
+            timestamp: 0,
+            value: Some("c".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.prev().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Last
+        let got = iter.prev().unwrap();
+        assert_eq!(None, got);
+    }
+
+    #[test]
+    fn seek_to_at() {
+        const FILENAME: &str = "seek_to_at.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        iter.seek("@".as_bytes(), 0).unwrap();
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn seek_to_z() {
+        const FILENAME: &str = "seek_to_z.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        iter.seek("Z".as_bytes(), 0).unwrap();
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.next().unwrap().unwrap();
+        assert_eq!(exp, got);
+        // Last
+        let got = iter.next().unwrap();
+        assert_eq!(None, got);
+    }
+
+    #[test]
+    fn two_steps_forward_one_step_reverse() {
+        const FILENAME: &str = "two_steps_forward_one_step_reverse.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // C
+        let exp = KeyValuePair {
+            key: "C".into(),
+            timestamp: 0,
+            value: Some("c".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // D-W
+        for _ in 0..21 {
+            iter.next().unwrap();
+            iter.next().unwrap();
+            iter.prev().unwrap();
+        }
+        // X
+        let exp = KeyValuePair {
+            key: "X".into(),
+            timestamp: 0,
+            value: Some("x".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // X
+        let exp = KeyValuePair {
+            key: "X".into(),
+            timestamp: 0,
+            value: Some("x".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // Last
+        let got = iter.next().unwrap();
+        assert_eq!(None, got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Last
+        let got = iter.next().unwrap();
+        assert_eq!(None, got);
+        // Last
+        let got = iter.next().unwrap();
+        assert_eq!(None, got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+    }
+
+    #[test]
+    fn two_steps_reverse_one_step_forward() {
+        const FILENAME: &str = "two_steps_reverse_one_step_forward.sst";
+        let table = alphabet(FILENAME.into());
+        let mut iter = table.iterate();
+        remove_file::<PathBuf>(FILENAME.into()).unwrap();
+        iter.seek_to_last().unwrap();
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Z
+        let exp = KeyValuePair {
+            key: "Z".into(),
+            timestamp: 0,
+            value: Some("z".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // X
+        let exp = KeyValuePair {
+            key: "X".into(),
+            timestamp: 0,
+            value: Some("x".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // Y
+        let exp = KeyValuePair {
+            key: "Y".into(),
+            timestamp: 0,
+            value: Some("y".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // W-D
+        for _ in 0..21 {
+            iter.prev().unwrap();
+            iter.prev().unwrap();
+            iter.next().unwrap();
+        }
+        // C
+        let exp = KeyValuePair {
+            key: "C".into(),
+            timestamp: 0,
+            value: Some("c".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // C
+        let exp = KeyValuePair {
+            key: "C".into(),
+            timestamp: 0,
+            value: Some("c".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // B
+        let exp = KeyValuePair {
+            key: "B".into(),
+            timestamp: 0,
+            value: Some("b".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.prev().unwrap();
+        assert_eq!(Some(exp), got);
+        // First
+        let got = iter.prev().unwrap();
+        assert_eq!(None, got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
+        // First
+        let got = iter.prev().unwrap();
+        assert_eq!(None, got);
+        // First
+        let got = iter.prev().unwrap();
+        assert_eq!(None, got);
+        // A
+        let exp = KeyValuePair {
+            key: "A".into(),
+            timestamp: 0,
+            value: Some("a".into()),
+        };
+        let got = iter.next().unwrap();
+        assert_eq!(Some(exp), got);
     }
 }

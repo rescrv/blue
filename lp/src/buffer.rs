@@ -73,6 +73,17 @@ impl AsMut<[u8]> for Buffer {
 
 ///////////////////////////////////////////// From/Into ////////////////////////////////////////////
 
+impl From<&[u8]> for Buffer {
+    fn from(x: &[u8]) -> Self {
+        let mut buf = Self::new(x.len());
+        let bytes = buf.as_bytes_mut();
+        for i in 0..x.len() {
+            bytes[i] = x[i];
+        }
+        buf
+    }
+}
+
 impl From<Vec<u8>> for Buffer {
     fn from(v: Vec<u8>) -> Self {
         let mut buf = Self::new(v.len());
