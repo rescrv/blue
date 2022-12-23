@@ -535,6 +535,13 @@ impl Cursor for TableCursor {
             }
         }
     }
+
+    fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        match &mut self.block_iter {
+            Some(iter) => { iter.same() },
+            None => { Ok(None) },
+        }
+    }
 }
 
 #[cfg(test)]
