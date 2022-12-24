@@ -246,9 +246,9 @@ fn divide_keys(
     (d_key, d_timestamp)
 }
 
-/////////////////////////////////////// minimal_successor_key //////////////////////////////////////
+////////////////////////////////////// minimal_upper_bound_key /////////////////////////////////////
 
-fn minimal_successor_key(key: &[u8], timestamp: u64) -> (Vec<u8>, u64) {
+fn minimal_upper_bound_key(key: &[u8], timestamp: u64) -> (Vec<u8>, u64) {
     let all_ff = key.iter().all(|x| *x == 0xffu8);
     let (sz, ts) = if all_ff && timestamp == 0 {
         (key.len() + 1, 0)
@@ -384,12 +384,12 @@ mod tests {
         }
     }
 
-    mod minimal_successor_key {
+    mod minimal_upper_bound_key {
         use super::*;
 
         #[test]
         fn empty_zero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[], 0);
+            let (key, timestamp) = minimal_upper_bound_key(&[], 0);
             let exp: &[u8] = &[0xff];
             assert_eq!(exp, &key);
             assert_eq!(0, timestamp);
@@ -397,7 +397,7 @@ mod tests {
 
         #[test]
         fn empty_nonzero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[], 1);
+            let (key, timestamp) = minimal_upper_bound_key(&[], 1);
             let exp: &[u8] = &[];
             assert_eq!(exp, &key);
             assert_eq!(0, timestamp);
@@ -405,7 +405,7 @@ mod tests {
 
         #[test]
         fn nonempty_zero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[0xaa], 0);
+            let (key, timestamp) = minimal_upper_bound_key(&[0xaa], 0);
             let exp: &[u8] = &[0xff];
             assert_eq!(exp, &key);
             assert_eq!(0, timestamp);
@@ -413,7 +413,7 @@ mod tests {
 
         #[test]
         fn nonempty_nonzero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[0xaa], 5);
+            let (key, timestamp) = minimal_upper_bound_key(&[0xaa], 5);
             let exp: &[u8] = &[0xff];
             assert_eq!(exp, &key);
             assert_eq!(0, timestamp);
@@ -421,7 +421,7 @@ mod tests {
 
         #[test]
         fn ffffff_zero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[0xff, 0xff, 0xff], 0);
+            let (key, timestamp) = minimal_upper_bound_key(&[0xff, 0xff, 0xff], 0);
             let exp: &[u8] = &[0xff, 0xff, 0xff, 0xff];
             assert_eq!(exp, &key);
             assert_eq!(0, timestamp);
@@ -429,7 +429,7 @@ mod tests {
 
         #[test]
         fn ffffff_nonzero_timestamp() {
-            let (key, timestamp) = minimal_successor_key(&[0xff, 0xff, 0xff], 7);
+            let (key, timestamp) = minimal_upper_bound_key(&[0xff, 0xff, 0xff], 7);
             let exp: &[u8] = &[0xff, 0xff, 0xff];
             assert_eq!(exp, &key);
             assert_eq!(6, timestamp);

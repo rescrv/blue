@@ -8,7 +8,7 @@ use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Builder, Cursor, Error, KeyValuePair,
+    minimal_upper_bound_key, Builder, Cursor, Error, KeyValuePair,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -374,7 +374,7 @@ impl Builder for SSTBuilder {
         let mut builder = self;
         // Flush the block we have.
         if builder.block_builder.is_some() {
-            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
+            let (key, timestamp) = minimal_upper_bound_key(&builder.last_key, builder.last_timestamp);
             builder.flush_block(&key, timestamp)?;
         }
         // Flush the index block at the end.
