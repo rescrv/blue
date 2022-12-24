@@ -1,4 +1,5 @@
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
+use std::fmt;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 use super::compare_bytes;
@@ -19,7 +20,6 @@ fn layout(sz: usize) -> Layout {
 
 ////////////////////////////////////////////// Buffer //////////////////////////////////////////////
 
-#[derive(Debug)]
 pub struct Buffer {
     ptr: *mut u8,
     sz: usize,
@@ -54,6 +54,12 @@ impl Drop for Buffer {
         unsafe {
             dealloc(self.ptr, layout);
         }
+    }
+}
+
+impl fmt::Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.as_bytes())
     }
 }
 
