@@ -1,7 +1,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
 
-use super::{check_key_len, check_table_size, check_value_len, compare_key, Error, KeyValuePair};
+use super::{check_key_len, check_table_size, check_value_len, compare_key, Cursor, Error, KeyValuePair};
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
@@ -48,9 +48,9 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn iterate<'a>(&'a self) -> TableCursor<'a> {
+    pub fn iterate(&self) -> TableCursor {
         TableCursor {
-            table: self,
+            table: self.clone(),
             position: TablePosition::default(),
         }
     }
@@ -125,12 +125,12 @@ impl Default for TablePosition {
 //////////////////////////////////////////// TableCursor ///////////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub struct TableCursor<'a> {
-    table: &'a Table,
+pub struct TableCursor {
+    table: Table,
     position: TablePosition,
 }
 
-impl<'a> TableCursor<'a> {
+impl TableCursor {
     pub fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
         let start = Key {
             key: key.to_vec(),
@@ -157,18 +157,20 @@ impl<'a> TableCursor<'a> {
             None => Ok(None),
         }
     }
+}
 
-    pub fn seek_to_first(&mut self) -> Result<(), Error> {
+impl Cursor for TableCursor {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = TablePosition::First;
         Ok(())
     }
 
-    pub fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.position = TablePosition::Last;
         Ok(())
     }
 
-    pub fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         let target = Key {
             key: key.to_vec(),
             timestamp,
@@ -193,7 +195,7 @@ impl<'a> TableCursor<'a> {
         Ok(())
     }
 
-    pub fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
         let bound = match &self.position {
             TablePosition::First => {
                 return Ok(None);
@@ -229,7 +231,7 @@ impl<'a> TableCursor<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
         let bound = match &self.position {
             TablePosition::First => Bound::Excluded(Key::BOTTOM),
             TablePosition::Last => {
@@ -257,6 +259,10 @@ impl<'a> TableCursor<'a> {
                 Ok(None)
             }
         }
+    }
+
+    fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
+        todo!();
     }
 }
 
