@@ -8,7 +8,6 @@ use std::cmp::Ordering;
 pub mod block;
 pub mod buffer;
 pub mod file_manager;
-pub mod guacamole;
 pub mod reference;
 pub mod sst;
 
