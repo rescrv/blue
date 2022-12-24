@@ -260,10 +260,6 @@ impl Cursor for TableCursor {
             }
         }
     }
-
-    fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        todo!();
-    }
 }
 
 #[cfg(test)]

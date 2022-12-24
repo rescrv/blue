@@ -160,7 +160,6 @@ pub trait Cursor {
 
     fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
     fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
-    fn same(&mut self) -> Result<Option<KeyValuePair>, Error>;
 }
 
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////

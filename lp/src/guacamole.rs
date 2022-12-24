@@ -485,9 +485,5 @@ mod tests {
         fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
             unimplemented!();
         }
-
-        fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
-            unimplemented!();
-        }
     }
 }

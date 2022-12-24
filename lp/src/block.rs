@@ -774,10 +774,6 @@ impl Cursor for BlockCursor {
         // Return the kvp for this offset.
         Ok(self.key_value_pair())
     }
-
-    fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        Ok(self.key_value_pair())
-    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////

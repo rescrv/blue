@@ -539,13 +539,6 @@ impl Cursor for SSTCursor {
             }
         }
     }
-
-    fn same(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        match &mut self.block_iter {
-            Some(iter) => { iter.same() },
-            None => { Ok(None) },
-        }
-    }
 }
 
 #[cfg(test)]
