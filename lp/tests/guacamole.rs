@@ -6,7 +6,7 @@ use guacamole::{Guac, Guacamole};
 use guacamole::strings;
 
 use lp::block::{Block, BlockBuilder, BlockCursor};
-use lp::reference::TableBuilder as ReferenceBuilder;
+use lp::reference::ReferenceBuilder;
 use lp::sst::{SST, SSTBuilder, SSTCursor};
 use lp::{Builder, Cursor};
 

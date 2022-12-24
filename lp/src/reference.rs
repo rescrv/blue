@@ -40,30 +40,30 @@ impl Key {
     };
 }
 
-/////////////////////////////////////////////// Table //////////////////////////////////////////////
+////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct Table {
+pub struct ReferenceTable {
     entries: BTreeMap<Key, Option<Vec<u8>>>,
 }
 
-impl Table {
-    pub fn iterate(&self) -> TableCursor {
-        TableCursor {
+impl ReferenceTable {
+    pub fn iterate(&self) -> ReferenceCursor {
+        ReferenceCursor {
             table: self.clone(),
             position: TablePosition::default(),
         }
     }
 }
 
-/////////////////////////////////////////// TableBuilder ///////////////////////////////////////////
+///////////////////////////////////////// ReferenceBuilder /////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct TableBuilder {
-    table: Table,
+pub struct ReferenceBuilder {
+    table: ReferenceTable,
 }
 
-impl TableBuilder {
+impl ReferenceBuilder {
     pub fn approximate_size(&self) -> usize {
         let mut size = 0;
         for (key, value) in self.table.entries.iter() {
@@ -101,7 +101,7 @@ impl TableBuilder {
         Ok(())
     }
 
-    pub fn seal(self) -> Result<Table, Error> {
+    pub fn seal(self) -> Result<ReferenceTable, Error> {
         Ok(self.table)
     }
 }
@@ -122,15 +122,15 @@ impl Default for TablePosition {
     }
 }
 
-//////////////////////////////////////////// TableCursor ///////////////////////////////////////////
+////////////////////////////////////////// ReferenceCursor /////////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub struct TableCursor {
-    table: Table,
+pub struct ReferenceCursor {
+    table: ReferenceTable,
     position: TablePosition,
 }
 
-impl TableCursor {
+impl ReferenceCursor {
     pub fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
         let start = Key {
             key: key.to_vec(),
@@ -159,7 +159,7 @@ impl TableCursor {
     }
 }
 
-impl Cursor for TableCursor {
+impl Cursor for ReferenceCursor {
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = TablePosition::First;
         Ok(())
@@ -292,7 +292,7 @@ mod tables {
 
     #[test]
     fn empty() {
-        let table = TableBuilder::default().seal().unwrap();
+        let table = ReferenceBuilder::default().seal().unwrap();
         let mut iter = table.iterate();
         let got = iter.next().unwrap();
         assert_eq!(None, got);
@@ -303,8 +303,8 @@ mod tables {
 mod alphabet {
     use super::*;
 
-    fn alphabet() -> Table {
-        let mut builder = TableBuilder::default();
+    fn alphabet() -> ReferenceTable {
+        let mut builder = ReferenceBuilder::default();
         builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
         builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
         builder.put("C".as_bytes(), 0, "c".as_bytes()).unwrap();
@@ -780,7 +780,7 @@ mod guacamole {
 
     #[test]
     fn human_guacamole_5() {
-        let mut builder = TableBuilder::default();
+        let mut builder = ReferenceBuilder::default();
         builder
             .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
             .unwrap();
