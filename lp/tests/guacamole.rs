@@ -8,7 +8,7 @@ use guacamole::strings;
 use lp::block::{Block, BlockBuilder, BlockCursor};
 use lp::reference::TableBuilder as ReferenceBuilder;
 use lp::sst::{SST, SSTBuilder, SSTCursor};
-use lp::{Builder, Cursor, KeyValuePair};
+use lp::{Builder, Cursor};
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -249,15 +249,6 @@ pub fn fuzzer<T, B, F>(
     }
     let kvs = builder.seal().unwrap();
     // Create a new builder using the keys in the key-value store.
-    println!("    fn test() {{");
-    println!("        let config = FuzzerConfig {{");
-    println!("            num_keys: {},", config.num_keys);
-    println!("            key_bytes: {},", config.key_bytes);
-    println!("            value_bytes: {},", config.value_bytes);
-    println!("            num_seeks: {},", config.num_seeks);
-    println!("            seek distance: {},", config.seek_distance);
-    println!("            prev probability: {},", config.prev_probability);
-    println!("        }}");
     let mut builder = new_table(name);
     let mut iter = kvs.iterate();
     loop {
@@ -268,27 +259,15 @@ pub fn fuzzer<T, B, F>(
         let x = x.unwrap();
         match x.value {
             Some(ref v) => {
-                println!(
-                    "        builder.put(\"{}\".as_bytes(), {}, \"{}\".as_bytes()).unwrap();",
-                    std::str::from_utf8(x.key.as_bytes()).unwrap(),
-                    x.timestamp,
-                    std::str::from_utf8(v.as_bytes()).unwrap()
-                );
                 builder
                     .put(x.key.as_bytes(), x.timestamp, v.as_bytes())
                     .unwrap();
             }
             None => {
-                println!(
-                    "        builder.del(\"{}\".as_bytes(), {}).unwrap();",
-                    std::str::from_utf8(x.key.as_bytes()).unwrap(),
-                    x.timestamp
-                );
                 builder.del(x.key.as_bytes(), x.timestamp).unwrap();
             }
         };
     }
-    println!("        let table = builder.seal().unwrap();");
     let table = builder.seal().unwrap();
     // Now seek randomly and compare the key-value store and the builder.
     let key_gen = KeyGuacamole {
@@ -303,73 +282,34 @@ pub fn fuzzer<T, B, F>(
     for _ in 0..config.num_seeks {
         let key: String = key_gen.guacamole(&mut guac);
         let ts: u64 = ts_gen.guacamole(&mut guac);
-        println!("        // Top of loop seeks to: {:?}@{}", key, ts);
         iter.seek(key.as_bytes(), ts).unwrap();
-        println!("        let mut cursor = table.iterate();");
         let mut cursor = table.iterate();
-        println!(
-            "        cursor.seek(\"{}\".as_bytes(), {}).unwrap();",
-            key, ts
-        );
         cursor.seek(key.as_bytes(), ts).unwrap();
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
             let (exp, got) = if will_do_prev {
                 let exp = iter.prev().unwrap();
-                println!("        let got = cursor.prev().unwrap();");
                 let got = cursor.prev().unwrap();
                 (exp, got)
             } else {
                 let exp = iter.next().unwrap();
-                println!("        let got = cursor.next().unwrap();");
                 let got = cursor.next().unwrap();
                 (exp, got)
             };
-            let print_x = |x: &KeyValuePair| {
-                println!("        let exp = KeyValuePair {{");
-                println!(
-                    "            key: \"{}\".as_bytes().to_vec(),",
-                    std::str::from_utf8(x.key.as_bytes()).unwrap()
-                );
-                println!("            timestamp: {},", x.timestamp);
-                match &x.value {
-                    Some(x) => {
-                        println!(
-                            "            value: Some(\"{}\".as_bytes().to_vec()),",
-                            std::str::from_utf8(x.as_bytes()).unwrap()
-                        );
-                    }
-                    None => {
-                        println!("            value: None,");
-                    }
-                };
-                println!("        }};");
-            };
             match (exp, got) {
                 (Some(x), Some(y)) => {
-                    if x != y {
-                        print_x(&x);
-                        println!("        assert_eq!(Some(exp), got);");
-                        println!("    }}");
-                    }
                     assert_eq!(x, y);
                 }
                 (None, None) => break,
                 (None, Some(x)) => {
-                    println!("        assert_eq!(None, got);");
-                    println!("    }}");
                     panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
                 }
                 (Some(x), None) => {
-                    print_x(&x);
-                    println!("        assert_eq!(exp, got);");
-                    println!("    }}");
-                    panic!("found bad case (open a debugger or print out a dump of info above)");
+                    panic!("found bad case (open a debugger or print out a dump of info above): exp: {:?}", x);
                 }
             }
         }
     }
-    println!("    }}");
 }
 
 ////////////////////////////////////////// guacamole_tests /////////////////////////////////////////
