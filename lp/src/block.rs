@@ -367,7 +367,6 @@ enum CursorPosition {
         next_offset: usize,
         key: Vec<u8>,
         timestamp: u64,
-        value: Option<Vec<u8>>,
     },
 }
 
@@ -393,7 +392,6 @@ impl PartialEq for CursorPosition {
                     next_offset: no1,
                     key: ref k1,
                     timestamp: t1,
-                    value: ref v1,
                 },
                 &CursorPosition::Positioned {
                     restart_idx: ri2,
@@ -401,9 +399,8 @@ impl PartialEq for CursorPosition {
                     next_offset: no2,
                     key: ref k2,
                     timestamp: t2,
-                    value: ref v2,
                 },
-            ) => ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2 && v1 == v2,
+            ) => ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2,
             _ => false,
         }
     }
@@ -434,7 +431,6 @@ impl BlockCursor {
                 next_offset,
                 key: _,
                 timestamp: _,
-                value: _,
             } => *next_offset,
         }
     }
@@ -449,7 +445,6 @@ impl BlockCursor {
                 next_offset: _,
                 key: _,
                 timestamp: _,
-                value: _,
             } => *restart_idx,
         }
     }
@@ -484,7 +479,6 @@ impl BlockCursor {
                 next_offset: _,
                 ref mut key,
                 timestamp: _,
-                value: _,
             } => {
                 let mut ret = Vec::new();
                 key.truncate(0);
@@ -494,35 +488,43 @@ impl BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
         // Return the kvp for this offset.
-        Ok(self.key_value_pair())
+        self.key_value_pair()
     }
 
     // Return the key-value pair associated with the current position.
-    fn key_value_pair(&self) -> Option<KeyValuePair> {
+    fn key_value_pair(&self) -> Result<Option<KeyValuePair>, Error> {
         match &self.position {
-            CursorPosition::First => None,
-            CursorPosition::Last => None,
+            CursorPosition::First => Ok(None),
+            CursorPosition::Last => Ok(None),
             CursorPosition::Positioned {
                 restart_idx: _,
-                offset: _,
+                offset,
                 next_offset: _,
                 key,
                 timestamp,
-                value,
-            } => Some(KeyValuePair {
-                key: key.into(),
-                timestamp: *timestamp,
-                value: match value {
-                    Some(v) => Some(v.into()),
-                    None => None,
-                },
-            }),
+            } => {
+                // Parse the value from the block entry.
+                let bytes = self.block.bytes.as_bytes();
+                let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
+                let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
+                    error: e,
+                    context: format!("could not unpack key-value pair at offset={}", offset),
+                })?;
+                Ok(Some(KeyValuePair {
+                    key: key.into(),
+                    timestamp: *timestamp,
+                    value: match be.value() {
+                        Some(v) => Some(v.into()),
+                        None => None,
+                    },
+                }))
+            },
         }
     }
 
-    fn extract_key_value(
+    fn extract_key(
         block: &Block,
         offset: usize,
         mut key: Vec<u8>,
@@ -549,10 +551,6 @@ impl BlockCursor {
             next_offset,
             key,
             timestamp: be.timestamp(),
-            value: match be.value() {
-                Some(v) => Some(v.to_vec()),
-                None => None,
-            },
         })
     }
 }
@@ -662,7 +660,6 @@ impl Cursor for BlockCursor {
                 next_offset,
                 key: _,
                 timestamp: _,
-                value: _,
             } => {
                 *next_offset = *offset;
             }
@@ -684,7 +681,6 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 key: _,
                 timestamp: _,
-                value: _,
             } => offset,
         };
 
@@ -716,7 +712,7 @@ impl Cursor for BlockCursor {
             self.next()?;
         }
         // Return the kvp for this offset.
-        Ok(self.key_value_pair())
+        self.key_value_pair()
     }
 
     fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
@@ -761,7 +757,6 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 ref mut key,
                 timestamp: _,
-                value: _,
             } => {
                 let mut ret = Vec::new();
                 std::mem::swap(&mut ret, key);
@@ -770,9 +765,9 @@ impl Cursor for BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key_value(&self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
         // Return the kvp for this offset.
-        Ok(self.key_value_pair())
+        self.key_value_pair()
     }
 }
 
@@ -962,7 +957,6 @@ mod tests {
             next_offset: 19,
             key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
         };
         let rhs = CursorPosition::Positioned {
             restart_idx: 0,
@@ -970,13 +964,12 @@ mod tests {
             next_offset: 19,
             key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
         };
         assert_eq!(lhs, rhs);
     }
 
     #[test]
-    fn extract_key_value() {
+    fn extract_key() {
         let bytes = &[
             // record
             66, /*8*/
@@ -1010,9 +1003,8 @@ mod tests {
             next_offset: 20,
             key: "E".into(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
         };
-        let got = BlockCursor::extract_key_value(&block, 0, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 0, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Positioned {
@@ -1021,13 +1013,12 @@ mod tests {
             next_offset: 39,
             key: "k".into(),
             timestamp: 4092481979873166344,
-            value: Some("".into()),
         };
-        let got = BlockCursor::extract_key_value(&block, 20, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 20, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Last;
-        let got = BlockCursor::extract_key_value(&block, 39, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 39, Vec::new()).unwrap();
         assert_eq!(exp, got);
     }
 }
@@ -1197,9 +1188,6 @@ mod guacamole {
                 next_offset: 518,
                 key: "g".into(),
                 timestamp: 10374159306796994843,
-                value: Some(
-                    "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".into()
-                ),
             },
             cursor.position
         );
@@ -1208,19 +1196,12 @@ mod guacamole {
         assert_eq!(<&str as Into<Buffer>>::into("k"), got.key);
         assert_eq!(4092481979873166344, got.timestamp);
         assert_eq!(
-            Some("xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".into()),
-            got.value
-        );
-        assert_eq!(
             CursorPosition::Positioned {
                 restart_idx: 1,
                 offset: 518,
                 next_offset: 601,
                 key: "k".into(),
                 timestamp: 4092481979873166344,
-                value: Some(
-                    "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".into()
-                ),
             },
             cursor.position
         );
@@ -1245,9 +1226,6 @@ mod guacamole {
                 next_offset: 684,
                 key: "t".into(),
                 timestamp: 7790837488841419319,
-                value: Some(
-                    "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()
-                ),
             },
             cursor.position
         );
