@@ -1,5 +1,6 @@
 use std::collections::btree_map::BTreeMap;
 use std::ops::Bound;
+use std::rc::Rc;
 
 use super::{check_key_len, check_table_size, check_value_len, compare_key, Cursor, Error, KeyValuePair};
 
@@ -44,13 +45,13 @@ impl Key {
 
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceTable {
-    entries: BTreeMap<Key, Option<Vec<u8>>>,
+    entries: Rc<BTreeMap<Key, Option<Vec<u8>>>>,
 }
 
 impl ReferenceTable {
     pub fn iterate(&self) -> ReferenceCursor {
         ReferenceCursor {
-            table: self.clone(),
+            entries: Rc::clone(&self.entries),
             position: TablePosition::default(),
         }
     }
@@ -60,13 +61,13 @@ impl ReferenceTable {
 
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceBuilder {
-    table: ReferenceTable,
+    entries: BTreeMap<Key, Option<Vec<u8>>>,
 }
 
 impl ReferenceBuilder {
     pub fn approximate_size(&self) -> usize {
         let mut size = 0;
-        for (key, value) in self.table.entries.iter() {
+        for (key, value) in self.entries.iter() {
             size += key.key.len()
                 + 8
                 + match value {
@@ -86,7 +87,7 @@ impl ReferenceBuilder {
             timestamp,
         };
         let value = value.to_vec();
-        self.table.entries.insert(key, Some(value));
+        self.entries.insert(key, Some(value));
         Ok(())
     }
 
@@ -97,12 +98,15 @@ impl ReferenceBuilder {
             key: key.to_vec(),
             timestamp,
         };
-        self.table.entries.insert(key, None);
+        self.entries.insert(key, None);
         Ok(())
     }
 
     pub fn seal(self) -> Result<ReferenceTable, Error> {
-        Ok(self.table)
+        let entries = self.entries;
+        Ok(ReferenceTable {
+            entries: Rc::new(entries),
+        })
     }
 }
 
@@ -126,7 +130,7 @@ impl Default for TablePosition {
 
 #[derive(Clone, Debug)]
 pub struct ReferenceCursor {
-    table: ReferenceTable,
+    entries: Rc<BTreeMap<Key, Option<Vec<u8>>>>,
     position: TablePosition,
 }
 
@@ -141,7 +145,6 @@ impl ReferenceCursor {
             timestamp: 0,
         };
         match self
-            .table
             .entries
             .range((Bound::Included(start), Bound::Included(limit)))
             .next()
@@ -176,7 +179,6 @@ impl Cursor for ReferenceCursor {
             timestamp,
         };
         match self
-            .table
             .entries
             .range((Bound::Included(target.clone()), Bound::Unbounded))
             .next()
@@ -205,7 +207,6 @@ impl Cursor for ReferenceCursor {
             TablePosition::Reverse { last_key } => Bound::Excluded(last_key.clone()),
         };
         match self
-            .table
             .entries
             .range((Bound::Included(Key::BOTTOM), bound))
             .rev()
@@ -240,7 +241,7 @@ impl Cursor for ReferenceCursor {
             TablePosition::Forward { last_key } => Bound::Excluded(last_key.clone()),
             TablePosition::Reverse { last_key } => Bound::Excluded(last_key.clone()),
         };
-        match self.table.entries.range((bound, Bound::Unbounded)).next() {
+        match self.entries.range((bound, Bound::Unbounded)).next() {
             Some(entry) => {
                 self.position = TablePosition::Forward {
                     last_key: entry.0.clone(),
