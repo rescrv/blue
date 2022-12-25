@@ -90,8 +90,8 @@ fn alphabet(test: &str, builder_opts: SSTBuilderOptions) -> SSTCursor {
 ///////////////////////////////////////////// Guacamole ////////////////////////////////////////////
 
 fn guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(test: &str) -> SSTBuilder {
-    let path: PathBuf = test.into();
-    remove_file(path.clone());
+    let path: PathBuf = (test.to_string() + ".sst").into();
+    remove_file(path.clone()).err();
     let builder = SSTBuilder::new(path, opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096()).unwrap();
     builder
 }
@@ -102,8 +102,8 @@ guacamole_tests! {
 }
 
 fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(test: &str) -> SSTBuilder {
-    let path: PathBuf = test.into();
-    remove_file(path.clone());
+    let path: PathBuf = (test.to_string() + ".sst").into();
+    remove_file(path.clone()).err();
     let builder = SSTBuilder::new(path, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096()).unwrap();
     builder
 }
