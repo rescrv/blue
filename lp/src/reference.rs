@@ -1,58 +1,20 @@
-use std::collections::btree_map::BTreeMap;
-use std::ops::Bound;
 use std::rc::Rc;
 
-use super::{check_key_len, check_table_size, check_value_len, compare_key, Cursor, Error, KeyValuePair};
-
-//////////////////////////////////////////////// Key ///////////////////////////////////////////////
-
-#[derive(Clone, Debug, Eq)]
-pub struct Key {
-    pub key: Vec<u8>,
-    pub timestamp: u64,
-}
-
-impl<'a> PartialEq for Key {
-    fn eq(&self, rhs: &Key) -> bool {
-        self.cmp(rhs) == std::cmp::Ordering::Equal
-    }
-}
-
-impl<'a> Ord for Key {
-    fn cmp(&self, rhs: &Key) -> std::cmp::Ordering {
-        let key_lhs = &self.key;
-        let key_rhs = &rhs.key;
-        let ts_lhs = self.timestamp;
-        let ts_rhs = rhs.timestamp;
-        compare_key(key_lhs, ts_lhs, key_rhs, ts_rhs)
-    }
-}
-
-impl<'a> PartialOrd for Key {
-    fn partial_cmp(&self, rhs: &Key) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl Key {
-    pub const BOTTOM: Key = Key {
-        key: Vec::new(),
-        timestamp: 0,
-    };
-}
+use super::{check_key_len, check_table_size, check_value_len, Cursor, Error, KeyValuePair};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceTable {
-    entries: Rc<BTreeMap<Key, Option<Vec<u8>>>>,
+    entries: Rc<Vec<KeyValuePair>>,
 }
 
 impl ReferenceTable {
     pub fn iterate(&self) -> ReferenceCursor {
         ReferenceCursor {
             entries: Rc::clone(&self.entries),
-            position: TablePosition::default(),
+            index: -1,
+            returned: true,
         }
     }
 }
@@ -61,68 +23,48 @@ impl ReferenceTable {
 
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceBuilder {
-    entries: BTreeMap<Key, Option<Vec<u8>>>,
+    entries: Vec<KeyValuePair>,
+    approximate_size: usize,
 }
 
 impl ReferenceBuilder {
     pub fn approximate_size(&self) -> usize {
-        let mut size = 0;
-        for (key, value) in self.entries.iter() {
-            size += key.key.len()
-                + 8
-                + match value {
-                    Some(v) => v.len(),
-                    None => 0,
-                };
-        }
-        size
+        self.approximate_size
     }
 
     pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
-        let key = Key {
-            key: key.to_vec(),
+        self.approximate_size += key.len() + 8 + value.len();
+        check_table_size(self.approximate_size)?;
+        let kvp = KeyValuePair {
+            key: key.into(),
             timestamp,
+            value: Some(value.into()),
         };
-        let value = value.to_vec();
-        self.entries.insert(key, Some(value));
+        self.entries.push(kvp);
         Ok(())
     }
 
     pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
-        let key = Key {
-            key: key.to_vec(),
+        self.approximate_size += key.len() + 8;
+        check_table_size(self.approximate_size)?;
+        let kvp = KeyValuePair {
+            key: key.into(),
             timestamp,
+            value: None,
         };
-        self.entries.insert(key, None);
+        self.entries.push(kvp);
         Ok(())
     }
 
     pub fn seal(self) -> Result<ReferenceTable, Error> {
-        let entries = self.entries;
+        let mut entries = self.entries;
+        entries.sort();
         Ok(ReferenceTable {
             entries: Rc::new(entries),
         })
-    }
-}
-
-/////////////////////////////////////////// TablePosition //////////////////////////////////////////
-
-#[derive(Clone, Debug)]
-enum TablePosition {
-    First,
-    Last,
-    Forward { last_key: Key },
-    Reverse { last_key: Key },
-}
-
-impl Default for TablePosition {
-    fn default() -> Self {
-        TablePosition::First
     }
 }
 
@@ -130,160 +72,66 @@ impl Default for TablePosition {
 
 #[derive(Clone, Debug)]
 pub struct ReferenceCursor {
-    entries: Rc<BTreeMap<Key, Option<Vec<u8>>>>,
-    position: TablePosition,
-}
-
-impl ReferenceCursor {
-    pub fn get(&mut self, key: &[u8], timestamp: u64) -> Result<Option<KeyValuePair>, Error> {
-        let start = Key {
-            key: key.to_vec(),
-            timestamp,
-        };
-        let limit = Key {
-            key: key.to_vec(),
-            timestamp: 0,
-        };
-        match self
-            .entries
-            .range((Bound::Included(start), Bound::Included(limit)))
-            .next()
-        {
-            Some(entry) => Ok(Some(KeyValuePair {
-                key: (&entry.0.key).into(),
-                timestamp: entry.0.timestamp,
-                value: match entry.1 {
-                    Some(x) => Some(x.into()),
-                    None => None,
-                },
-            })),
-            None => Ok(None),
-        }
-    }
+    entries: Rc<Vec<KeyValuePair>>,
+    index: isize,
+    returned: bool,
 }
 
 impl Cursor for ReferenceCursor {
     fn seek_to_first(&mut self) -> Result<(), Error> {
-        self.position = TablePosition::First;
+        self.index = -1;
+        self.returned = true;
         Ok(())
     }
 
     fn seek_to_last(&mut self) -> Result<(), Error> {
-        self.position = TablePosition::Last;
+        self.index = self.entries.len() as isize;
+        self.returned = true;
         Ok(())
     }
 
     fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        let target = Key {
-            key: key.to_vec(),
+        let target = KeyValuePair {
+            key: key.into(),
             timestamp,
+            value: None,
         };
-        match self
-            .entries
-            .range((Bound::Included(target.clone()), Bound::Unbounded))
-            .next()
-        {
-            Some(entry) => {
-                let should_prev = entry.0 == &target;
-                self.position = TablePosition::Forward { last_key: target };
-                if should_prev {
-                    self.prev()?;
-                }
-            }
-            None => {
-                self.position = TablePosition::Last;
-            }
-        };
+        self.index = match self.entries.binary_search(&target) {
+            Ok(index) => index,
+            Err(index) => index,
+        } as isize;
+        self.returned = false;
         Ok(())
     }
 
     fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        let bound = match &self.position {
-            TablePosition::First => {
-                return Ok(None);
-            }
-            TablePosition::Last => Bound::Unbounded,
-            TablePosition::Forward { last_key } => Bound::Excluded(last_key.clone()),
-            TablePosition::Reverse { last_key } => Bound::Excluded(last_key.clone()),
+        self.index = if self.returned {
+            self.index - 1
+        } else {
+            self.index - 1
         };
-        match self
-            .entries
-            .range((Bound::Included(Key::BOTTOM), bound))
-            .rev()
-            .next()
-        {
-            Some(entry) => {
-                self.position = TablePosition::Reverse {
-                    last_key: entry.0.clone(),
-                };
-                Ok(Some(KeyValuePair {
-                    key: (&entry.0.key).into(),
-                    timestamp: entry.0.timestamp,
-                    value: match entry.1 {
-                        Some(v) => Some(v.into()),
-                        None => None,
-                    },
-                }))
-            }
-            None => {
-                self.position = TablePosition::First;
-                Ok(None)
-            }
+        if self.index < 0 {
+            self.seek_to_first()?;
+            Ok(None)
+        } else {
+            self.returned = true;
+            Ok(Some(self.entries[self.index as usize].clone()))
         }
     }
 
     fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        let bound = match &self.position {
-            TablePosition::First => Bound::Excluded(Key::BOTTOM),
-            TablePosition::Last => {
-                return Ok(None);
-            }
-            TablePosition::Forward { last_key } => Bound::Excluded(last_key.clone()),
-            TablePosition::Reverse { last_key } => Bound::Excluded(last_key.clone()),
+        self.index = if self.returned {
+            self.index + 1
+        } else {
+            self.index
         };
-        match self.entries.range((bound, Bound::Unbounded)).next() {
-            Some(entry) => {
-                self.position = TablePosition::Forward {
-                    last_key: entry.0.clone(),
-                };
-                Ok(Some(KeyValuePair {
-                    key: (&entry.0.key).into(),
-                    timestamp: entry.0.timestamp,
-                    value: match entry.1 {
-                        Some(v) => Some(v.into()),
-                        None => None,
-                    },
-                }))
-            }
-            None => {
-                self.position = TablePosition::Last;
-                Ok(None)
-            }
+        if self.index as usize >= self.entries.len() {
+            self.seek_to_last()?;
+            Ok(None)
+        } else {
+            self.returned = true;
+            Ok(Some(self.entries[self.index as usize].clone()))
         }
-    }
-}
-
-#[cfg(test)]
-mod keys {
-    use super::*;
-
-    #[test]
-    fn cmp() {
-        let kvp1 = Key {
-            key: "key1".into(),
-            timestamp: 99,
-        };
-        let kvp2 = Key {
-            key: "key1".into(),
-            timestamp: 42,
-        };
-        let kvp3 = Key {
-            key: "key2".into(),
-            timestamp: 99,
-        };
-        assert!(kvp1 < kvp2);
-        assert!(kvp2 < kvp3);
-        assert!(kvp1 < kvp3);
     }
 }
 
@@ -339,6 +187,24 @@ mod guacamole {
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        let got = cursor.prev().unwrap();
+        let exp = KeyValuePair {
+            key: "E".into(),
+            timestamp: 17563921251225492277,
+            value: Some("".into()),
+        };
+        assert_eq!(Some(exp), got);
+        // Top of loop seeks to: "I"@13021764449837349261
+        let mut cursor = block.iterate();
+        cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        let got = cursor.next().unwrap();
+        let exp = KeyValuePair {
+            key: "I".into(),
+            timestamp: 3844377046565620216,
+            value: Some("".into()),
+        };
+        assert_eq!(Some(exp), got);
+        // Prev will move to E.
         let got = cursor.prev().unwrap();
         let exp = KeyValuePair {
             key: "E".into(),
