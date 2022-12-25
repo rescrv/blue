@@ -48,6 +48,12 @@ impl Buffer {
     }
 }
 
+impl Clone for Buffer {
+    fn clone(&self) -> Self {
+        self.as_ref().into()
+    }
+}
+
 impl Drop for Buffer {
     fn drop(&mut self) {
         let layout = layout(self.sz);

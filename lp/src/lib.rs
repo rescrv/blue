@@ -108,7 +108,7 @@ impl From<std::io::Error> for Error {
 
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyValuePair {
     pub key: Buffer,
     pub timestamp: u64,
