@@ -1,14 +1,38 @@
 extern crate lp;
 
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use guacamole::{Guac, Guacamole};
 use guacamole::strings;
 
 use lp::block::{Block, BlockBuilder, BlockCursor};
+use lp::buffer::Buffer;
 use lp::reference::ReferenceBuilder;
 use lp::sst::{SST, SSTBuilder, SSTCursor};
 use lp::{Builder, Cursor};
+
+////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
+
+#[derive(Debug)]
+pub struct BufferGuacamole {
+    pub sz: usize,
+}
+
+impl BufferGuacamole {
+    fn new(sz: usize) -> Self {
+        Self {
+            sz,
+        }
+    }
+}
+
+impl Guac<Buffer> for BufferGuacamole {
+    fn guacamole(&self, guac: &mut Guacamole) -> Buffer {
+        let mut buf = Buffer::new(self.sz);
+        guac.fill_bytes(buf.as_bytes_mut());
+        buf
+    }
+}
 
 /////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
 
@@ -36,11 +60,11 @@ impl Guac<u64> for TimestampGuacamole {
 
 //////////////////////////////////////////// KeyValuePut ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct KeyValuePut {
     pub key: String,
     pub timestamp: u64,
-    pub value: String,
+    pub value: Buffer,
 }
 
 /////////////////////////////////////// KeyValuePutGuacamole ///////////////////////////////////////
@@ -49,7 +73,7 @@ pub struct KeyValuePut {
 pub struct KeyValuePutGuacamole {
     pub key: KeyGuacamole,
     pub timestamp: TimestampGuacamole,
-    pub value: Box<dyn strings::StringGuacamole>,
+    pub value: BufferGuacamole,
 }
 
 impl Guac<KeyValuePut> for KeyValuePutGuacamole {
@@ -213,12 +237,7 @@ pub fn fuzzer<T, B, F>(
                 }),
             },
             timestamp: TimestampGuacamole::default(),
-            value: Box::new(strings::IndependentStrings {
-                length: Box::new(strings::ConstantLength {
-                    constant: config.value_bytes,
-                }),
-                select: Box::new(strings::RandomSelect {}),
-            }),
+            value: BufferGuacamole::new(config.value_bytes),
         },
         guacamole_del: KeyValueDelGuacamole {
             key: KeyGuacamole {
