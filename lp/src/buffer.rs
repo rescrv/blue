@@ -89,9 +89,7 @@ impl From<&[u8]> for Buffer {
     fn from(x: &[u8]) -> Self {
         let mut buf = Self::new(x.len());
         let bytes = buf.as_bytes_mut();
-        for i in 0..x.len() {
-            bytes[i] = x[i];
-        }
+        bytes.copy_from_slice(x);
         buf
     }
 }
@@ -100,9 +98,7 @@ impl From<Vec<u8>> for Buffer {
     fn from(v: Vec<u8>) -> Self {
         let mut buf = Self::new(v.len());
         let bytes = buf.as_bytes_mut();
-        for i in 0..v.len() {
-            bytes[i] = v[i];
-        }
+        bytes.copy_from_slice(&v);
         buf
     }
 }
@@ -111,9 +107,7 @@ impl From<&Vec<u8>> for Buffer {
     fn from(v: &Vec<u8>) -> Self {
         let mut buf = Self::new(v.len());
         let bytes = buf.as_bytes_mut();
-        for i in 0..v.len() {
-            bytes[i] = v[i];
-        }
+        bytes.copy_from_slice(&v);
         buf
     }
 }
@@ -123,9 +117,7 @@ impl From<&str> for Buffer {
         let sbytes = s.as_bytes();
         let mut buf = Self::new(sbytes.len());
         let bytes = buf.as_bytes_mut();
-        for i in 0..sbytes.len() {
-            bytes[i] = sbytes[i];
-        }
+        bytes.copy_from_slice(sbytes);
         buf
     }
 }
