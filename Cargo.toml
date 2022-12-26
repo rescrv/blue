@@ -13,3 +13,6 @@ members = [
     "sim",
     "util",
 ]
+
+[profile.release]
+debug = true
