@@ -137,6 +137,34 @@ impl PartialOrd for KeyValuePair {
     }
 }
 
+////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct KeyRef<'a> {
+    pub key: &'a [u8],
+    pub timestamp: u64,
+}
+
+impl<'a> Eq for KeyRef<'a> {}
+
+impl<'a> PartialEq for KeyRef<'a> {
+    fn eq(&self, rhs: &KeyRef) -> bool {
+        self.cmp(rhs) == std::cmp::Ordering::Equal
+    }
+}
+
+impl<'a> Ord for KeyRef<'a> {
+    fn cmp(&self, rhs: &KeyRef) -> std::cmp::Ordering {
+        compare_key(self.key, self.timestamp, rhs.key, rhs.timestamp)
+    }
+}
+
+impl<'a> PartialOrd for KeyRef<'a> {
+    fn partial_cmp(&self, rhs: &KeyRef) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
 ////////////////////////////////////////////// Builder /////////////////////////////////////////////
 
 pub trait Builder {
