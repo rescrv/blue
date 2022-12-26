@@ -1,4 +1,4 @@
-MAX_SIZE = 1 << 30
+MAX_SIZE = (1 << 30) - (1 << 24)
 TEMPLATE = '''            #[test]
             fn num_keys_{num_keys}_key_bytes_{key_bytes}_value_bytes_{value_bytes}_num_seeks_{num_seeks}_seek_distance_{seek_distance}_prev_probability_{prev_probability_str}() {{
                 let name = stringify!($name).to_string() + "::" + "num_keys_{num_keys}_key_bytes_{key_bytes}_value_bytes_{value_bytes}_num_seeks_{num_seeks}_seek_distance_{seek_distance}_prev_probability_{prev_probability_str}";
@@ -14,14 +14,14 @@ TEMPLATE = '''            #[test]
             }}
 '''
 
-for num_keys in (1, 10, 100, 1000, 10000):
+for num_keys in (1, 10, 10000):
     for key_bytes in (1, 16, 256, 4096, 65536):
         for value_bytes in (0, 1, 16, 256, 4096, 65536, 1048576, 16777216):
             if num_keys * (key_bytes + value_bytes) >= MAX_SIZE:
                 continue
             for num_seeks in (1000,):
                 for seek_distance in (10,):
-                    for prev_probability in (0.0, 0.125, 0.25, 0.5):
+                    for prev_probability in (0.0, 0.25, 0.5):
                         prev_probability_str = '{}'.format(prev_probability).replace('.', '_')
                         print(TEMPLATE.format(
                             num_keys=num_keys,
