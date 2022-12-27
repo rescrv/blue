@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "biometrics",
+    "buffertk",
     "clue",
     "databuf",
     "guacamole",
