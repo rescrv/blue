@@ -2,7 +2,7 @@ extern crate lp;
 
 use rand::{Rng, RngCore};
 
-use guacamole::{Guac, Guacamole};
+use guacamole::Guacamole;
 
 use armnod::ARMNOD;
 
@@ -25,9 +25,7 @@ impl BufferGuacamole {
             sz,
         }
     }
-}
 
-impl Guac<Buffer> for BufferGuacamole {
     fn guacamole(&self, guac: &mut Guacamole) -> Buffer {
         let mut buf = Buffer::new(self.sz);
         guac.fill_bytes(buf.as_bytes_mut());
@@ -46,7 +44,7 @@ pub struct KeyGuacamole {
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct TimestampGuacamole {}
 
-impl Guac<u64> for TimestampGuacamole {
+impl TimestampGuacamole {
     fn guacamole(&self, guac: &mut Guacamole) -> u64 {
         guac.gen()
     }
