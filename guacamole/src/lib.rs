@@ -2,8 +2,9 @@ extern crate rand;
 
 use rand::RngCore;
 
-pub mod strings;
 pub mod zipf;
+
+pub use zipf::Zipf;
 
 /////////////////////////////////////////////// mash ///////////////////////////////////////////////
 
@@ -134,6 +135,7 @@ pub fn mash(x: u64, output: &mut [u32; 16]) {
 ///////////////////////////////////////////// Guacamole ////////////////////////////////////////////
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 union MashOutput {
     bytes: [u8; 64],
     blocks: [u32; 16],
@@ -153,6 +155,7 @@ impl MashOutput {
     }
 }
 
+#[derive(Clone)]
 pub struct Guacamole {
     // we treat this like the nonce in the stream cipher
     nonce: u64,
@@ -235,6 +238,7 @@ impl RngCore for Guacamole {
 
 /////////////////////////////////////////////// Guac ///////////////////////////////////////////////
 
+// TODO(rescrv): Kill this trait.
 pub trait Guac<T> {
     fn guacamole(&self, guac: &mut Guacamole) -> T;
 }
