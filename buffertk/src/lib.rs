@@ -389,6 +389,37 @@ where
     }
 }
 
+/////////////////////////////////////////////// &[u8] //////////////////////////////////////////////
+
+impl Packable for &[u8] {
+    fn pack_sz(&self) -> usize {
+        let vsz: v64 = self.len().into();
+        vsz.pack_sz() + self.len()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let vsz: v64 = self.len().into();
+        let (prefix, suffix): (&mut [u8], &mut[u8]) =
+            out.split_at_mut(vsz.pack_sz());
+        vsz.pack(prefix);
+        suffix.copy_from_slice(self);
+    }
+}
+
+impl<'a> Unpackable<'a> for &'a [u8] {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (vsz, buf): (v64, &'b [u8]) = v64::unpack(buf)?;
+        let x: usize = vsz.into();
+        if x > buf.len() {
+            Err(Error::BufferTooShort {
+                required: x,
+                had: buf.len(),
+            })
+        } else {
+            Ok((&buf[0..x], &buf[x..]))
+        }
+    }
+}
 
 ////////////////////////////// Packable/Unpackable for n-tuple, n > 1 //////////////////////////////
 
@@ -628,5 +659,17 @@ mod tests {
             "human got u64 unpacker wrong?"
         );
         assert_eq!(&[] as &[u8], up.buf, "human got remaining buffer wrong?");
+    }
+
+    #[test]
+    fn pack_and_unpack_slice() {
+        let buf: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let pa = stack_pack(buf);
+        let exp: &[u8] = &[16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let got: &[u8] = &pa.to_vec();
+        assert_eq!(exp, got);
+        let mut up = Unpacker::new(exp);
+        let got: &[u8] = up.unpack().expect("unpack slice");
+        assert_eq!(buf, got);
     }
 }
