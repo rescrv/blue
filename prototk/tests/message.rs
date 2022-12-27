@@ -11,12 +11,12 @@ struct EmptyStruct {}
 fn empty_struct() {
     let s = EmptyStruct {};
     // test packing
-    let buf = prototk::stack_pack(s).to_vec();
+    let buf = buffertk::stack_pack(s).to_vec();
     let exp: &[u8] = &[];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let exp = EmptyStruct {};
     let got = up.unpack();
     assert_eq!(
@@ -50,12 +50,12 @@ fn named_struct() {
         z: -1,
     };
     // test packing
-    let buf = prototk::stack_pack(&s).to_vec();
+    let buf = buffertk::stack_pack(&s).to_vec();
     let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let exp = s.clone();
     let got = up.unpack();
     assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", s);
@@ -81,12 +81,12 @@ struct UnnamedStruct (
 fn unnamed_struct() {
     let u = UnnamedStruct(42, 3.14159, -1);
     // test packing
-    let buf = prototk::stack_pack(&u).to_vec();
+    let buf = buffertk::stack_pack(&u).to_vec();
     let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let exp = u.clone();
     let got = up.unpack();
     assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", u);
@@ -105,12 +105,12 @@ struct UnitStruct;
 fn unit_struct() {
     let u = UnitStruct{};
     // test packing
-    let buf = prototk::stack_pack(&u).to_vec();
+    let buf = buffertk::stack_pack(&u).to_vec();
     let exp: &[u8] = &[];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let exp = u.clone();
     let got = up.unpack();
     assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", u);
@@ -138,12 +138,12 @@ fn nested_struct() {
         },
     };
     // test packing
-    let buf = prototk::stack_pack(&n).to_vec();
+    let buf = buffertk::stack_pack(&n).to_vec();
     let exp: &[u8] = &[10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let exp = n.clone();
     let got = up.unpack();
     assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", n);
@@ -181,12 +181,12 @@ fn enum_one_of() {
         z: -1,
         });
     // test packing
-    let buf: Vec<u8> = prototk::stack_pack((&exp1, &exp2, &exp3)).to_vec();
+    let buf: Vec<u8> = buffertk::stack_pack((&exp1, &exp2, &exp3)).to_vec();
     let exp: &[u8] = &[8, 1, 16, 42, 26, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got1 = up.unpack().unwrap();
     assert_eq!(exp1, got1, "unpacker failed");
     let got2 = up.unpack().unwrap();
@@ -221,12 +221,12 @@ fn nested_bytes() {
         payload: &[42, 43, 44],
     };
     // test packing
-    let buf: Vec<u8> = prototk::stack_pack(&wb).to_vec();
+    let buf: Vec<u8> = buffertk::stack_pack(&wb).to_vec();
     let exp: &[u8] = &[10, 3, 42, 43, 44];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(wb, got, "unpacker failed");
     // test remainder
@@ -249,12 +249,12 @@ fn vector_integers() {
         payload: vec![42, 43, 44],
     };
     // test packing
-    let buf: Vec<u8> = prototk::stack_pack(&wb).to_vec();
+    let buf: Vec<u8> = buffertk::stack_pack(&wb).to_vec();
     let exp: &[u8] = &[8, 84, 8, 86, 8, 88];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(wb, got, "unpacker failed");
     // test remainder
@@ -283,12 +283,12 @@ fn vector_messages() {
         ],
     };
     // test packing
-    let buf: Vec<u8> = prototk::stack_pack(&vm).to_vec();
+    let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
     let exp: &[u8] = &[122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(vm, got, "unpacker failed");
     // test remainder
@@ -311,12 +311,12 @@ fn string_in_struct() {
         string: "hello world".to_string(),
     };
     // test packing
-    let buf: Vec<u8> = prototk::stack_pack(&sis).to_vec();
+    let buf: Vec<u8> = buffertk::stack_pack(&sis).to_vec();
     let exp: &[u8] = &[90, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(sis, got, "unpacker failed");
     // test remainder

@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
-use prototk::{stack_pack, Packable, Unpacker};
+use buffertk::{stack_pack, Packable, Unpacker};
+use prototk::Message;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};

@@ -2,13 +2,13 @@
 //! that focus on ease of use, code generation, or performance, prototk aims to expose every level
 //! of abstraction it has internally so that developers can use as much or as little as they wish.
 
-pub use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
-
 pub mod field_types;
 pub mod zigzag;
 
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
+
+use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -504,12 +504,12 @@ impl<'a, M: Message<'a>> FieldTypeAssigner for Vec<M> {
 
 // TODO(rescrv):  There's an extra clone type here because I couldn't do From/Into of
 // message<M:Message> to make it zero copy.  Get the macros up and revisit.
-pub trait Message<'a>: Clone + Default + Packable + Unpackable<'a> {
+pub trait Message<'a>: Clone + Default + buffertk::Packable + buffertk::Unpackable<'a> {
 }
 
 impl<'a, M> Message<'a> for &'a M
 where
     M: Message<'a>,
-    &'a M: Default + Packable + Unpackable<'a>,
+    &'a M: Default + buffertk::Packable + buffertk::Unpackable<'a>,
 {
 }

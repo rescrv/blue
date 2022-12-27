@@ -73,31 +73,35 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #exp_impl_generics ::prototk::Message<#lifetime> for #ty_name #ty_generics #where_clause {
         }
 
-        impl #impl_generics ::prototk::Packable for #ty_name #ty_generics #where_clause {
+        impl #impl_generics buffertk::Packable for #ty_name #ty_generics #where_clause {
             fn pack_sz(&self) -> usize {
-                use prototk::{FieldType,FieldTypeAssigner,Message,v64};
+                use buffertk::v64;
+                use prototk::{FieldType,FieldTypeAssigner,Message};
                 #pack_reqd_bytes
             }
 
             fn pack(&self, buf: &mut [u8]) {
-                use prototk::{FieldType,FieldTypeAssigner,Message,v64};
+                use buffertk::v64;
+                use prototk::{FieldType,FieldTypeAssigner,Message};
                 #pack_into_slice
             }
 
             fn stream<W: std::io::Write>(&self, writer: &mut W) -> std::result::Result<usize, std::io::Error> {
-                use prototk::{FieldType,FieldTypeAssigner,Message,v64};
+                use buffertk::v64;
+                use prototk::{FieldType,FieldTypeAssigner,Message};
                 #message_stream
             }
         }
 
-        impl #exp_impl_generics ::prototk::Unpackable<#lifetime> for #ty_name #ty_generics #where_clause {
+        impl #exp_impl_generics buffertk::Unpackable<#lifetime> for #ty_name #ty_generics #where_clause {
             type Error = prototk::Error;
 
             fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), prototk::Error>
                 where
                     'b: #lifetime,
             {
-                use prototk::{FieldType,FieldTypeAssigner,Message,v64};
+                use buffertk::v64;
+                use prototk::{FieldType,FieldTypeAssigner,Message};
                 #unpack
             }
         }
@@ -532,7 +536,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
     fn struct_snippet(&mut self, _ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         let call = &self.call;
         quote! {
-            let pa = prototk::stack_pack(());
+            let pa = buffertk::stack_pack(());
             #(#fields;)*
             pa.#call
         }
@@ -556,7 +560,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
                     tag,
                     std::marker::PhantomData::<prototk::field_types::#field_type>{},
                     v);
-                let pa = prototk::stack_pack(fta);
+                let pa = buffertk::stack_pack(fta);
                 pa.#call
             }
         }
@@ -597,7 +601,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         quote! {
             let mut ret: #ty_name = #ty_name::default();
-            let mut up = prototk::Unpacker::new(buf);
+            let mut up = buffertk::Unpacker::new(buf);
             while !up.is_empty() {
                 let tag: prototk::Tag = up.unpack()?;
                 let num: u32 = tag.field_number.into();
@@ -629,7 +633,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
 
     fn enum_snippet(&mut self, _ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream {
         quote! {
-            let mut up = prototk::Unpacker::new(buf);
+            let mut up = buffertk::Unpacker::new(buf);
             let tag: prototk::Tag = up.unpack()?;
             let num: u32 = tag.field_number.into();
             let wire_type: prototk::WireType = tag.wire_type;
