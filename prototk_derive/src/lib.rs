@@ -91,6 +91,8 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         impl #exp_impl_generics ::prototk::Unpackable<#lifetime> for #ty_name #ty_generics #where_clause {
+            type Error = prototk::Error;
+
             fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), prototk::Error>
                 where
                     'b: #lifetime,
@@ -596,7 +598,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote! {
             let mut ret: #ty_name = #ty_name::default();
             let mut up = prototk::Unpacker::new(buf);
-            while !up.empty() {
+            while !up.is_empty() {
                 let tag: prototk::Tag = up.unpack()?;
                 let num: u32 = tag.field_number.into();
                 match (num, tag.wire_type) {

@@ -3,8 +3,9 @@ use std::marker::{PhantomData, PhantomPinned};
 use std::mem::transmute;
 use std::pin::Pin;
 use std::ptr::NonNull;
+use std::rc::Rc;
 
-use super::{Buffer, Error, Unpackable, Unpacker};
+use super::{Buffer, Unpackable, Unpacker};
 
 ////////////////////////////////////////////// Backing /////////////////////////////////////////////
 
@@ -24,19 +25,31 @@ impl Backing for Vec<u8> {
     }
 }
 
+impl Backing for Rc<Vec<u8>> {
+    fn as_bytes(&self) -> &[u8] {
+        self.as_ref()
+    }
+}
+
 impl Backing for Buffer {
     fn as_bytes(&self) -> &[u8] {
         Buffer::as_bytes(self)
     }
 }
 
+impl Backing for Rc<Buffer> {
+    fn as_bytes(&self) -> &[u8] {
+        Buffer::as_bytes(self.as_ref())
+    }
+}
+
 ///////////////////////////////////////// ZeroCopyUnpacker /////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct ZeroCopyUnpacker<'a, B, V>
+pub struct ZeroCopyUnpacker<'a, B, E, V>
 where
     B: Backing,
-    V: Unpackable<'a> + 'a,
+    V: Unpackable<'a, Error=E> + 'a,
 {
     value: NonNull<V>,
     backing: B,
@@ -44,12 +57,12 @@ where
     _data: PhantomData<&'a mut u8>,
 }
 
-impl<'a, B, V> ZeroCopyUnpacker<'a, B, V>
+impl<'a, B, E, V> ZeroCopyUnpacker<'a, B, E, V>
 where
     B: Backing,
-    V: Unpackable<'a> + 'a,
+    V: Unpackable<'a, Error=E> + 'a,
 {
-    pub fn new(backing: B) -> Result<Pin<Box<Self>>, Error> {
+    pub fn new(backing: B) -> Result<Pin<Box<Self>>, E> {
         let zcu = ZeroCopyUnpacker {
             value: NonNull::dangling(),
             backing,
@@ -75,10 +88,10 @@ where
     }
 }
 
-impl<'a, B, V> Drop for ZeroCopyUnpacker<'a, B, V>
+impl<'a, B, E, V> Drop for ZeroCopyUnpacker<'a, B, E, V>
 where
     B: Backing,
-    V: Unpackable<'a> + 'a,
+    V: Unpackable<'a, Error=E> + 'a,
 {
     fn drop(&mut self) {
         unsafe {
@@ -115,6 +128,8 @@ mod tests {
     }
 
     impl<'a> Unpackable<'a> for TwoSlices<'a> {
+        type Error = Error;
+
         fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
             let mut up = Unpacker::new(buf);
             let x: &[u8] = up.unpack()?;
@@ -140,7 +155,7 @@ mod tests {
     #[test]
     fn two_slices() {
         let exp: &[u8] = &[8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15];
-        let zcu: Pin<Box<ZeroCopyUnpacker<&[u8], TwoSlices>>> = ZeroCopyUnpacker::new(exp).unwrap();
+        let zcu: Pin<Box<ZeroCopyUnpacker<&[u8], Error, TwoSlices>>> = ZeroCopyUnpacker::new(exp).unwrap();
         let zcu1: &TwoSlices = zcu.as_ref().wrapped_value();
         assert_eq!(X, zcu1.x);
         assert_eq!(Y, zcu1.y);

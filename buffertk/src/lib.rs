@@ -14,23 +14,12 @@ pub enum Error {
     BufferTooShort { required: usize, had: usize },
     /// A N-byte buffer is not N bytes.
     BufferWrongSize { required: usize, had: usize },
-    /// InvalidFieldNumber indicates that the field is not a user-assignable field.
-    InvalidFieldNumber {
-        field_number: u32,
-        what: &'static str,
-    },
-    /// UnhandledWireType inidcates that the wire type is not currently understood by prototk.
-    UnhandledWireType { wire_type: u32 },
-    /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge { tag: u64 },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
     VarintOverflow { bytes: usize },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
     UnsignedOverflow { value: u64 },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
     SignedOverflow { value: i64 },
-
-    // TODO(rescrv): custom error type so that apps can extend
 }
 
 impl std::fmt::Display for Error {
@@ -42,15 +31,6 @@ impl std::fmt::Display for Error {
             Error::BufferWrongSize { required, had } => {
                 write!(f, "buffer wrong size:  expected {}, had {}", required, had)
             }
-            Error::InvalidFieldNumber { field_number, what } => {
-                write!(f, "invalid field_number={}: {}", field_number, what)
-            }
-            Error::UnhandledWireType { wire_type } => write!(
-                f,
-                "wire_type={} not handled by this implementation",
-                wire_type
-            ),
-            Error::TagTooLarge { tag } => write!(f, "tag={} overflows 32-bits", tag),
             Error::VarintOverflow { bytes } => {
                 write!(f, "varint did not fit in space={} bytes", bytes)
             },
@@ -121,10 +101,12 @@ pub trait Packable {
 /// The format understood by `T:Unpackable` must correspond to the format serialized by
 /// `T:Packable`.
 pub trait Unpackable<'a>: Sized {
+    type Error;
+
     /// `unpack` attempts to return an Unpackable object stored in a prefix of `buf`.  The method
     /// returns the result and remaining unused buffer.  An error consumes an implementation-defined
     /// portion of the buffer, but should typically consume zero bytes.
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>;
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error>;
 }
 
 //////////////////////////////////////////// pack_helper ///////////////////////////////////////////
@@ -243,7 +225,7 @@ impl<'a> Unpacker<'a> {
         Self { buf }
     }
 
-    pub fn unpack<'b, T: Unpackable<'b>>(&mut self) -> Result<T, Error>
+    pub fn unpack<'b, E, T: Unpackable<'b, Error=E>>(&mut self) -> Result<T, E>
         where
         'a: 'b,
     {
@@ -290,6 +272,8 @@ macro_rules! packable_with_to_le_bytes {
         }
 
         impl<'a> Unpackable<'a> for $what {
+            type Error = Error;
+
             fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
                 const SZ: usize = std::mem::size_of::<$what>();
                 if buf.len() >= SZ {
@@ -338,6 +322,8 @@ macro_rules! packable_with_to_bits_to_le_bytes {
             }
         }
         impl<'a> Unpackable<'a> for $what {
+            type Error = Error;
+
             fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
                 const SZ: usize = std::mem::size_of::<$what>();
                 if buf.len() >= SZ {
@@ -360,6 +346,31 @@ macro_rules! packable_with_to_bits_to_le_bytes {
 
 packable_with_to_bits_to_le_bytes!(f32, u32);
 packable_with_to_bits_to_le_bytes!(f64, u64);
+
+//////////////////////////////////////////// length_free ///////////////////////////////////////////
+
+pub fn length_free<'a, P:Packable>(slice: &'a [P]) -> LengthFree<'a, P> {
+    LengthFree {
+        slice,
+    }
+}
+
+pub struct LengthFree<'a, P:Packable> {
+    slice: &'a [P],
+}
+
+impl<'a, P:Packable> Packable for LengthFree<'a, P> {
+    fn pack_sz(&self) -> usize {
+        self.slice.iter().map(|x| x.pack_sz()).sum()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let mut out = out;
+        for i in 0..self.slice.len() {
+            out = pack_helper(&self.slice[i], out);
+        }
+    }
+}
 
 ////////////////////////////////////////// LengthPrefixer //////////////////////////////////////////
 
@@ -408,6 +419,8 @@ impl Packable for &[u8] {
 }
 
 impl<'a> Unpackable<'a> for &'a [u8] {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (vsz, buf): (v64, &'b [u8]) = v64::unpack(buf)?;
         let x: usize = vsz.into();
@@ -435,6 +448,8 @@ macro_rules! impl_pack_unpack_tuple {
         }
 
         impl<'a> Unpackable<'a> for () {
+            type Error = Error;
+
             fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
                 Ok(((), buf))
             }
@@ -457,8 +472,10 @@ macro_rules! impl_pack_unpack_tuple {
         }
 
         #[allow(non_snake_case)]
-        impl<'a, $($name: Unpackable<'a> + 'a),+> Unpackable<'a> for ($($name,)+) {
-            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        impl<'a, ER, $($name: Unpackable<'a, Error=ER> + 'a),+> Unpackable<'a> for ($($name,)+) {
+            type Error = ER;
+
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
                 let mut up: Unpacker<'b> = Unpacker::new(buf);
                 $(let $name = up.unpack()?;)+
                 let rem: &'b [u8] = up.remain();
@@ -613,6 +630,13 @@ mod tests {
     }
 
     #[test]
+    fn length_free() {
+        let buf = &mut [0u8; 64];
+        let buf = stack_pack(super::length_free(&[0u8, 1u8, 2u8])).into_slice(buf);
+        assert_eq!([0, 1, 2], buf, "human got length_free wrong?");
+    }
+
+    #[test]
     fn stack_pack_into_slice() {
         let buf = &mut [0u8; 64];
         let buf = stack_pack(42u64).into_slice(buf);
@@ -645,15 +669,15 @@ mod tests {
     fn unpacker() {
         let buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let mut up = Unpacker::new(&buf);
-        let x = up.unpack::<()>();
+        let x = up.unpack::<Error, ()>();
         assert_eq!(Ok(()), x, "human got () unpacker wrong?");
-        let x = up.unpack::<u8>();
+        let x = up.unpack::<Error, u8>();
         assert_eq!(Ok(1u8), x, "human got u8 unpacker wrong?");
-        let x = up.unpack::<u16>();
+        let x = up.unpack::<Error, u16>();
         assert_eq!(Ok(770u16), x, "human got u16 unpacker wrong?");
-        let x = up.unpack::<u32>();
+        let x = up.unpack::<Error, u32>();
         assert_eq!(Ok(117835012u32), x, "human got u32 unpacker wrong?");
-        let x = up.unpack::<u64>();
+        let x = up.unpack::<Error, u64>();
         assert_eq!(
             Ok(1084818905618843912u64),
             x,

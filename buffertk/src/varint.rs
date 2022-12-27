@@ -196,6 +196,8 @@ impl Packable for v64 {
 }
 
 impl<'a> Unpackable<'a> for v64 {
+    type Error = Error;
+
     fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
         where
             'b: 'a,

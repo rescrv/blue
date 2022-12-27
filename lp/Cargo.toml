@@ -11,6 +11,7 @@ clap = "2.33"
 rand = "0.7"
 
 armnod = { path = "../armnod" }
+buffertk = { path = "../buffertk" }
 guacamole = { path = "../guacamole" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }

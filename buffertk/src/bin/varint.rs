@@ -1,4 +1,4 @@
-use prototk::Packable;
+use buffertk::Packable;
 
 fn main() {
     for argument in std::env::args().skip(1) {
@@ -9,10 +9,10 @@ fn main() {
                 continue;
             },
         };
-        let v: prototk::v64 = x.into();
+        let v: buffertk::v64 = x.into();
         let mut pirate = [0u8; 10];
         let pirate: &mut [u8] = &mut pirate;
-        let pa = prototk::stack_pack(v);
+        let pa = buffertk::stack_pack(v);
         pa.into_slice(pirate);
         println!("{:?}", &pirate[..pa.pack_sz()]);
     }

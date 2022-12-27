@@ -2,7 +2,8 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use prototk::{length_free, stack_pack, v64, Packable, Unpacker};
+use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
+
 use prototk_derive::Message;
 
 use super::{
@@ -140,8 +141,8 @@ impl Block {
             });
         }
         let mut up = Unpacker::new(&bytes.as_bytes()[bytes.len() - 4..]);
-        let num_restarts: u32 = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
+        let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| Error::UnpackError {
+            error: e.into(),
             context: "could not read last four bytes of block".to_string(),
         })?;
         let num_restarts: usize = num_restarts as usize;

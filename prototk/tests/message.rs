@@ -2,8 +2,6 @@ extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
-use prototk::Buffer;
-
 //////////////////////////////////////////// EmptyStruct ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
@@ -325,34 +323,4 @@ fn string_in_struct() {
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
-}
-
-////////////////////////////////////////////// buffer //////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Message, PartialEq,)]
-struct TestBuffer {
-    #[prototk(11, buffer)]
-    bytes: Buffer,
-}
-
-#[test]
-fn buffer_in_struct() {
-    let buffer = TestBuffer {
-        bytes: Buffer {
-            buf: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        },
-    };
-    // test packing
-    let buf: Vec<u8> = prototk::stack_pack(&buffer).to_vec();
-    let exp: &[u8] = &[90u8, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    let got = &buf;
-    assert_eq!(exp, got, "buffer did not match expectations");
-    // test unpacking
-    let mut up = prototk::Unpacker::new(exp);
-    let got = up.unpack().unwrap();
-    assert_eq!(buffer, got, "unpacker failed");
-    // test remainder
-    let exp: &[u8] = &[];
-    let rem: &[u8] = up.remain();
-    assert_eq!(exp, rem, "unpacker should not have remaining buffer");
 }

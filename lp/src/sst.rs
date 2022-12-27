@@ -101,8 +101,8 @@ impl SST {
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
         handle.read_exact_at(&mut buf, position)?;
         let mut up = Unpacker::new(&buf);
-        let final_block_offset: u64 = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
+        let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| Error::UnpackError {
+            error: e.into(),
             context: "parsing final block offset".to_string(),
         })?;
         // Read and parse the final block

@@ -7,6 +7,8 @@
 
 use std::convert::TryInto;
 
+use buffertk::{stack_pack, Packable, Unpackable, Unpacker};
+
 use super::*;
 
 /////////////////////////////////////////////// int32 //////////////////////////////////////////////
@@ -39,6 +41,8 @@ impl Packable for int32 {
 }
 
 impl<'a> Unpackable<'a> for int32 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i32 = v.try_into()?;
@@ -92,6 +96,8 @@ impl Packable for int64 {
 }
 
 impl<'a> Unpackable<'a> for int64 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = v.into();
@@ -145,6 +151,8 @@ impl Packable for uint32 {
 }
 
 impl<'a> Unpackable<'a> for uint32 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u32 = v.try_into()?;
@@ -198,6 +206,8 @@ impl Packable for uint64 {
 }
 
 impl<'a> Unpackable<'a> for uint64 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
@@ -251,6 +261,8 @@ impl Packable for sint32 {
 }
 
 impl<'a> Unpackable<'a> for sint32 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
@@ -322,6 +334,8 @@ impl Packable for sint64 {
 }
 
 impl<'a> Unpackable<'a> for sint64 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
@@ -387,6 +401,8 @@ impl Packable for Bool {
 }
 
 impl<'a> Unpackable<'a> for Bool {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
@@ -455,6 +471,8 @@ impl Packable for fixed32 {
 }
 
 impl<'a> Unpackable<'a> for fixed32 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = u32::unpack(buf)?;
         Ok((x.into(), buf))
@@ -505,6 +523,8 @@ impl Packable for fixed64 {
 }
 
 impl<'a> Unpackable<'a> for fixed64 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = u64::unpack(buf)?;
         Ok((x.into(), buf))
@@ -555,6 +575,8 @@ impl Packable for sfixed32 {
 }
 
 impl<'a> Unpackable<'a> for sfixed32 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = i32::unpack(buf)?;
         Ok((x.into(), buf))
@@ -605,6 +627,8 @@ impl Packable for sfixed64 {
 }
 
 impl<'a> Unpackable<'a> for sfixed64 {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = i64::unpack(buf)?;
         Ok((x.into(), buf))
@@ -655,6 +679,8 @@ impl Packable for float {
 }
 
 impl<'a> Unpackable<'a> for float {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = f32::unpack(buf)?;
         Ok((x.into(), buf))
@@ -705,6 +731,8 @@ impl Packable for double {
 }
 
 impl<'a> Unpackable<'a> for double {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (x, buf) = f64::unpack(buf)?;
         Ok((x.into(), buf))
@@ -753,6 +781,8 @@ impl<'a> Packable for bytes<'a> {
 }
 
 impl<'a> Unpackable<'a> for bytes<'a> {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
@@ -774,63 +804,6 @@ impl<'a> From<&'a [u8]> for bytes<'a> {
 impl<'a> From<&'a &'a [u8]> for bytes<'a> {
     fn from(x: &'a &'a [u8]) -> Self {
         Self(*x)
-    }
-}
-
-////////////////////////////////////////////// buffer //////////////////////////////////////////////
-
-pub struct buffer(Buffer);
-
-impl FieldType<'_> for buffer {
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
-
-    type NativeType = Buffer;
-
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-}
-
-impl Packable for buffer {
-    fn pack_sz(&self) -> usize {
-        let slice: &[u8] = &self.0.buf;
-        slice.pack_sz()
-    }
-
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        let slice: &[u8] = &self.0.buf;
-        slice.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for buffer {
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let mut up = Unpacker::new(buf);
-        let v: v64 = up.unpack()?;
-        let v: usize = v.into();
-        let rem = up.remain();
-        if rem.len() < v {
-            return Err(Error::BufferTooShort{ required: v, had: rem.len() });
-        }
-        let buf = Buffer {
-            buf: rem[..v].into(),
-        };
-        Ok((Self(buf), &rem[v..]))
-    }
-}
-
-impl<'a> From<&'a Buffer> for buffer {
-    fn from(x: &'a Buffer) -> Self {
-        Self(x.clone())
-    }
-}
-
-impl<'a> From<&'a [u8]> for buffer {
-    fn from(x: &'a [u8]) -> Self {
-        Self(Buffer {
-             buf: x.to_vec(),
-        })
     }
 }
 
@@ -862,6 +835,8 @@ impl<'a> Packable for string {
 }
 
 impl<'a> Unpackable<'a> for string {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
@@ -912,6 +887,8 @@ impl<'a> Packable for stringref<'a> {
 }
 
 impl<'a> Unpackable<'a> for stringref<'a> {
+    type Error = Error;
+
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
@@ -947,7 +924,11 @@ pub struct message<M> {
     msg: M,
 }
 
-impl<'a, M: Message<'a>> FieldType<'a> for message<M> {
+impl<'a, M: Message<'a>> FieldType<'a> for message<M>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
     const LENGTH_PREFIXED: bool = true;
 
@@ -958,7 +939,11 @@ impl<'a, M: Message<'a>> FieldType<'a> for message<M> {
     }
 }
 
-impl<'a, M: Message<'a>> Packable for message<M> {
+impl<'a, M: Message<'a>> Packable for message<M>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
     fn pack_sz(&self) -> usize {
         stack_pack(&self.msg).length_prefixed().pack_sz()
     }
@@ -968,19 +953,30 @@ impl<'a, M: Message<'a>> Packable for message<M> {
     }
 }
 
-impl<'a, M: Message<'a>> Unpackable<'a> for message<M> {
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+impl<'a, M: Message<'a>> Unpackable<'a> for message<M>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
+    type Error = M::Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
         let mut up = Unpacker::new(buf);
-        let v: v64 = up.unpack()?;
+        let v: v64 = match up.unpack() {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(e.into());
+            },
+        };
         let v: usize = v.into();
         let rem = up.remain();
         // TODO(rescrv): this pattern multiple times; try to move to Unpacker.
         if rem.len() < v {
-            return Err(Error::BufferTooShort{ required: v, had: rem.len() });
+            return Err(buffertk::Error::BufferTooShort{ required: v, had: rem.len() }.into());
         }
         let buf: &'b [u8] = &rem[..v];
         let rem: &'b [u8] = &rem[v..];
-        let (m, empty): (M, &'a [u8]) = <M as Unpackable>::unpack(buf)?;
+        let (m, empty): (M, &'a [u8]) = <M as Unpackable<'a>>::unpack(buf)?;
         // TODO(rescrv): assert is nasty
         assert_eq!(0, empty.len());
         Ok((Self::from(m), rem))
@@ -1006,7 +1002,11 @@ impl<'a, M: Message<'a>> From<&M> for message<M>
 
 /////////////////////////////////////////// Vec<message> ///////////////////////////////////////////
 
-impl<'a, M: Message<'a>> FieldType<'a> for message<Vec<M>> {
+impl<'a, M: Message<'a>> FieldType<'a> for message<Vec<M>>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
     const LENGTH_PREFIXED: bool = true;
 
@@ -1019,7 +1019,11 @@ impl<'a, M: Message<'a>> FieldType<'a> for message<Vec<M>> {
     }
 }
 
-impl<'a, M: Message<'a>> Packable for message<Vec<M>> {
+impl<'a, M: Message<'a>> Packable for message<Vec<M>>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
     fn pack_sz(&self) -> usize {
         assert_eq!(1, self.msg.len(), "assume vec always has exactly one M");
         self.msg[0].pack_sz()
@@ -1031,10 +1035,21 @@ impl<'a, M: Message<'a>> Packable for message<Vec<M>> {
     }
 }
 
-impl<'a, M: Message<'a>> Unpackable<'a> for message<Vec<M>> {
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+impl<'a, M: Message<'a>> Unpackable<'a> for message<Vec<M>>
+where
+    M: Unpackable<'a>,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
+    type Error = M::Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
         let mut up = Unpacker::new(buf);
-        let px: message<M> = up.unpack()?;
+        let px: message<M> = match up.unpack() {
+            Ok(x) => x,
+            Err(e) => {
+                return Err(e.into());
+            },
+        };
         Ok((Self {
             msg: vec![px.msg],
         }, up.remain()))
