@@ -4,6 +4,8 @@
 //! By convention the From<I> and Into<I> traits are implemented for all common integer types I.
 //! They will silently truncate and it is up to higher level code to unpack to full v64 and check
 //! for overflow when casting.
+#![allow(clippy::len_zero)]
+#![allow(clippy::from_over_into)]
 
 use super::Error;
 use super::Packable;
@@ -155,7 +157,7 @@ impl From<usize> for v64 {
     fn from(x: usize) -> v64 {
         // unwrap because we assume and test this is safe
         let x: u64 = x.try_into().unwrap();
-        v64 { x: x }
+        v64 { x }
     }
 }
 

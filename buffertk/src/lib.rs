@@ -131,7 +131,7 @@ pub trait Unpackable<'a>: Sized {
 /// `pack_helper` takes a Packable object and an `&mut [u8]` and does the work to serialize the
 /// packable into a prefix of the buffer.  The return value is the portion of the buffer that
 /// remains unfilled after this operation.
-pub fn pack_helper<'a, T: Packable>(t: T, buf: &'a mut [u8]) -> &'a mut [u8] {
+pub fn pack_helper<T: Packable>(t: T, buf: &mut [u8]) -> &mut [u8] {
     let sz: usize = t.pack_sz();
     assert!(sz <= buf.len(), "packers should never be given short space");
     t.pack(&mut buf[..sz]);
@@ -146,7 +146,7 @@ const EMPTY: () = ();
 pub fn stack_pack<'a, T: Packable + 'a>(t: T) -> StackPacker<'a, (), T> {
     StackPacker {
         prefix: &EMPTY,
-        t: t,
+        t,
     }
 }
 
@@ -251,8 +251,8 @@ impl<'a> Unpacker<'a> {
         Ok(t)
     }
 
-    pub fn empty(&self) -> bool {
-        self.buf.len() == 0
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
     }
 
     pub fn remain(&self) -> &'a [u8] {

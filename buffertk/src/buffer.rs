@@ -1,3 +1,5 @@
+#![allow(clippy::len_without_is_empty)]
+
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::cmp;
 use std::fmt;
@@ -93,7 +95,7 @@ impl From<Vec<u8>> for Buffer {
 impl From<&Vec<u8>> for Buffer {
     fn from(v: &Vec<u8>) -> Self {
         let mut buf = Self::new(v.len());
-        buf.as_bytes_mut().copy_from_slice(&v);
+        buf.as_bytes_mut().copy_from_slice(v);
         buf
     }
 }
@@ -137,7 +139,7 @@ impl PartialOrd for Buffer {
 // https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
 pub fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
     for (ai, bi) in a.iter().zip(b.iter()) {
-        match ai.cmp(&bi) {
+        match ai.cmp(bi) {
             cmp::Ordering::Equal => continue,
             ord => return ord,
         }
