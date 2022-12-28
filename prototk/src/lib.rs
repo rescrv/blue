@@ -120,11 +120,11 @@ impl WireType {
 
 //////////////////////////////////////////// FieldNumber ///////////////////////////////////////////
 
-const FIRST_FIELD_NUMBER: u32 = 1;
-const LAST_FIELD_NUMBER: u32 = (1 << 29) - 1;
+pub const FIRST_FIELD_NUMBER: u32 = 1;
+pub const LAST_FIELD_NUMBER: u32 = (1 << 29) - 1;
 
-const FIRST_RESERVED_FIELD_NUMBER: u32 = 19000;
-const LAST_RESERVED_FIELD_NUMBER: u32 = 19999;
+pub const FIRST_RESERVED_FIELD_NUMBER: u32 = 19000;
+pub const LAST_RESERVED_FIELD_NUMBER: u32 = 19999;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldNumber {
