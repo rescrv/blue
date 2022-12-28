@@ -26,6 +26,12 @@ impl<'a> FieldType<'a> for int32 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for int32 {
@@ -80,6 +86,12 @@ impl<'a> FieldType<'a> for int64 {
 
     fn into_native(self) -> Self::NativeType {
         self.x
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
     }
 }
 
@@ -136,6 +148,12 @@ impl<'a> FieldType<'a> for uint32 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for uint32 {
@@ -191,6 +209,12 @@ impl<'a> FieldType<'a> for uint64 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for uint64 {
@@ -245,6 +269,12 @@ impl<'a> FieldType<'a> for sint32 {
 
     fn into_native(self) -> Self::NativeType {
         self.x
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
     }
 }
 
@@ -319,6 +349,12 @@ impl<'a> FieldType<'a> for sint64 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for sint64 {
@@ -385,6 +421,12 @@ impl<'a> FieldType<'a> for Bool {
 
     fn into_native(self) -> Self::NativeType {
         self.b
+    }
+
+    fn from_native(b: Self::NativeType) -> Self {
+        Self {
+            b
+        }
     }
 }
 
@@ -458,6 +500,12 @@ impl<'a> FieldType<'a> for fixed32 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for fixed32 {
@@ -509,6 +557,12 @@ impl<'a> FieldType<'a> for fixed64 {
 
     fn into_native(self) -> Self::NativeType {
         self.x
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
     }
 }
 
@@ -562,6 +616,12 @@ impl<'a> FieldType<'a> for sfixed32 {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for sfixed32 {
@@ -613,6 +673,12 @@ impl<'a> FieldType<'a> for sfixed64 {
 
     fn into_native(self) -> Self::NativeType {
         self.x
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
     }
 }
 
@@ -666,6 +732,12 @@ impl<'a> FieldType<'a> for float {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for float {
@@ -718,6 +790,12 @@ impl<'a> FieldType<'a> for double {
     fn into_native(self) -> Self::NativeType {
         self.x
     }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            x
+        }
+    }
 }
 
 impl Packable for double {
@@ -767,6 +845,10 @@ impl<'a> FieldType<'a> for bytes<'a> {
 
     fn into_native(self) -> Self::NativeType {
         self.0
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
     }
 }
 
@@ -822,6 +904,12 @@ impl<'a> FieldType<'a> for string {
     fn into_native(self) -> Self::NativeType {
         self.s
     }
+
+    fn from_native(s: Self::NativeType) -> Self {
+        Self {
+            s
+        }
+    }
 }
 
 impl<'a> Packable for string {
@@ -873,6 +961,10 @@ impl<'a> FieldType<'a> for stringref<'a> {
 
     fn into_native(self) -> Self::NativeType {
         self.0
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
     }
 }
 
@@ -936,6 +1028,12 @@ where
 
     fn into_native(self) -> Self::NativeType {
         self.msg
+    }
+
+    fn from_native(msg: M) -> Self {
+        Self {
+            msg,
+        }
     }
 }
 
@@ -1016,6 +1114,12 @@ where
         assert_eq!(1, self.msg.len(), "assume vec always has exactly one M");
         let mut x = self;
         x.msg.pop().unwrap()
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self {
+            msg: vec![x],
+        }
     }
 }
 

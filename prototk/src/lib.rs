@@ -245,6 +245,7 @@ pub trait FieldType<'a>: Packable + Unpackable<'a> {
     type NativeType;
 
     fn into_native(self) -> Self::NativeType;
+    fn from_native(x: Self::NativeType) -> Self;
 
     fn assign<A: FieldTypeAssigner<NativeType=Self::NativeType>>(lhs: &mut A, x: Self::NativeType) {
         lhs.assign_field_type(x);
