@@ -19,8 +19,6 @@ pub enum Error {
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
     BufferTooShort { required: usize, had: usize },
-    /// A N-byte buffer is not N bytes.
-    BufferWrongSize { required: usize, had: usize },
     /// InvalidFieldNumber indicates that the field is not a user-assignable field.
     InvalidFieldNumber {
         field_number: u32,
@@ -45,9 +43,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::BufferTooShort { required, had } => {
                 write!(f, "buffer too short:  expected {}, had {}", required, had)
-            }
-            Error::BufferWrongSize { required, had } => {
-                write!(f, "buffer wrong size:  expected {}, had {}", required, had)
             }
             Error::InvalidFieldNumber { field_number, what } => {
                 write!(f, "invalid field_number={}: {}", field_number, what)
@@ -75,7 +70,6 @@ impl From<buffertk::Error> for Error {
     fn from(x: buffertk::Error) -> Self {
         match x {
             buffertk::Error::BufferTooShort { required, had } => Error::BufferTooShort { required, had },
-            buffertk::Error::BufferWrongSize { required, had } => Error::BufferWrongSize { required, had },
             buffertk::Error::VarintOverflow { bytes } => Error::VarintOverflow { bytes },
             buffertk::Error::UnsignedOverflow { value } => Error::UnsignedOverflow { value },
             buffertk::Error::SignedOverflow { value } => Error::SignedOverflow { value },

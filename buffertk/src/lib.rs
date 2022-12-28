@@ -12,8 +12,6 @@ pub enum Error {
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
     BufferTooShort { required: usize, had: usize },
-    /// A N-byte buffer is not N bytes.
-    BufferWrongSize { required: usize, had: usize },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
     VarintOverflow { bytes: usize },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
@@ -27,9 +25,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::BufferTooShort { required, had } => {
                 write!(f, "buffer too short:  expected {}, had {}", required, had)
-            }
-            Error::BufferWrongSize { required, had } => {
-                write!(f, "buffer wrong size:  expected {}, had {}", required, had)
             }
             Error::VarintOverflow { bytes } => {
                 write!(f, "varint did not fit in space={} bytes", bytes)
