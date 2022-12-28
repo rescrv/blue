@@ -130,31 +130,31 @@ macro_rules! generate_id {
 #[macro_export]
 macro_rules! generate_id_prototk {
     ($what:ident) => {
-        impl prototk::Packable for $what {
+        impl buffertk::Packable for $what {
             fn pack_sz(&self) -> usize {
                 let id_buf: &[u8] = &self.id;
-                prototk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).pack_sz()
+                buffertk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).pack_sz()
             }
 
             fn pack(&self, buf: &mut [u8]) {
                 let id_buf: &[u8] = &self.id;
-                prototk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).into_slice(buf);
+                buffertk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).into_slice(buf);
             }
         }
 
-        impl<'a> prototk::Unpackable<'a> for $what {
+        impl<'a> buffertk::Unpackable<'a> for $what {
+            type Error = prototk::Error;
+
             fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), prototk::Error> {
-                let mut up = prototk::Unpacker::new(buf);
-                let tag: prototk::v64 = up.unpack()?;
-                let v: prototk::v64 = up.unpack()?;
+                let mut up = buffertk::Unpacker::new(buf);
+                let tag: buffertk::v64 = up.unpack()?;
+                let v: buffertk::v64 = up.unpack()?;
                 let v: usize = v.into();
                 let rem = up.remain();
                 if rem.len() < v {
                     return Err(prototk::Error::BufferTooShort{ required: v, had: rem.len() });
                 }
-                if v != 16 {
-                    return Err(prototk::Error::BufferWrongSize{ required: 16, had: v });
-                }
+                // TODO(rescrv): Have an error if v != 16.
                 let id = $what {
                     id: rem[..16].try_into().unwrap(),
                 };
