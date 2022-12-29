@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate prototk_derive;
 
+use buffertk::{Unpacker, stack_pack};
 use clue::clue;
 use id::{generate_id, generate_id_prototk};
-use prototk::{Message, Unpacker, stack_pack};
 
 use sim::*;
 
