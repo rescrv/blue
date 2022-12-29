@@ -28,9 +28,7 @@ impl<'a> FieldType<'a> for int32 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -40,7 +38,7 @@ impl Packable for int32 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.x.into();
         v.pack(buf)
     }
@@ -58,17 +56,13 @@ impl<'a> Unpackable<'a> for int32 {
 
 impl From<i32> for int32 {
     fn from(x: i32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i32> for int32 {
     fn from(x: &i32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -89,9 +83,7 @@ impl<'a> FieldType<'a> for int64 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -101,7 +93,7 @@ impl Packable for int64 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.x.into();
         v.pack(buf)
     }
@@ -119,17 +111,13 @@ impl<'a> Unpackable<'a> for int64 {
 
 impl From<i64> for int64 {
     fn from(x: i64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i64> for int64 {
     fn from(x: &i64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -150,9 +138,7 @@ impl<'a> FieldType<'a> for uint32 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -162,7 +148,7 @@ impl Packable for uint32 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.x.into();
         v.pack(buf)
     }
@@ -180,17 +166,13 @@ impl<'a> Unpackable<'a> for uint32 {
 
 impl From<u32> for uint32 {
     fn from(x: u32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&u32> for uint32 {
     fn from(x: &u32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -211,9 +193,7 @@ impl<'a> FieldType<'a> for uint64 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -223,7 +203,7 @@ impl Packable for uint64 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.x.into();
         v.pack(buf)
     }
@@ -241,17 +221,13 @@ impl<'a> Unpackable<'a> for uint64 {
 
 impl From<u64> for uint64 {
     fn from(x: u64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&u64> for uint64 {
     fn from(x: &u64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -272,9 +248,7 @@ impl<'a> FieldType<'a> for sint32 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -284,7 +258,7 @@ impl Packable for sint32 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.into();
         v.pack(buf)
     }
@@ -297,10 +271,10 @@ impl<'a> Unpackable<'a> for sint32 {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
         let x: i32 = match x.try_into() {
-            Ok(x) => { x },
+            Ok(x) => x,
             Err(_) => {
-                return Err(Error::SignedOverflow{value:x});
-            },
+                return Err(Error::SignedOverflow { value: x });
+            }
         };
         Ok((x.into(), buf))
     }
@@ -308,17 +282,13 @@ impl<'a> Unpackable<'a> for sint32 {
 
 impl From<i32> for sint32 {
     fn from(x: i32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i32> for sint32 {
     fn from(x: &i32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -351,9 +321,7 @@ impl<'a> FieldType<'a> for sint64 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -363,7 +331,7 @@ impl Packable for sint64 {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.into();
         v.pack(buf)
     }
@@ -381,17 +349,13 @@ impl<'a> Unpackable<'a> for sint64 {
 
 impl From<i64> for sint64 {
     fn from(x: i64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i64> for sint64 {
     fn from(x: &i64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -424,9 +388,7 @@ impl<'a> FieldType<'a> for Bool {
     }
 
     fn from_native(b: Self::NativeType) -> Self {
-        Self {
-            b
-        }
+        Self { b }
     }
 }
 
@@ -436,7 +398,7 @@ impl Packable for Bool {
         v.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         let v: v64 = self.into();
         v.pack(buf)
     }
@@ -448,28 +410,20 @@ impl<'a> Unpackable<'a> for Bool {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
-        let b = if x == 0 {
-            false
-        } else {
-            true
-        };
+        let b = if x == 0 { false } else { true };
         Ok((b.into(), buf))
     }
 }
 
 impl From<bool> for Bool {
     fn from(b: bool) -> Self {
-        Self {
-            b,
-        }
+        Self { b }
     }
 }
 
 impl From<&bool> for Bool {
     fn from(b: &bool) -> Self {
-        Self {
-            b: *b,
-        }
+        Self { b: *b }
     }
 }
 
@@ -502,9 +456,7 @@ impl<'a> FieldType<'a> for fixed32 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -513,7 +465,7 @@ impl Packable for fixed32 {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -529,17 +481,13 @@ impl<'a> Unpackable<'a> for fixed32 {
 
 impl From<u32> for fixed32 {
     fn from(x: u32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&u32> for fixed32 {
     fn from(x: &u32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -560,9 +508,7 @@ impl<'a> FieldType<'a> for fixed64 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -571,7 +517,7 @@ impl Packable for fixed64 {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -587,17 +533,13 @@ impl<'a> Unpackable<'a> for fixed64 {
 
 impl From<u64> for fixed64 {
     fn from(x: u64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&u64> for fixed64 {
     fn from(x: &u64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -618,9 +560,7 @@ impl<'a> FieldType<'a> for sfixed32 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -629,7 +569,7 @@ impl Packable for sfixed32 {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -645,17 +585,13 @@ impl<'a> Unpackable<'a> for sfixed32 {
 
 impl From<i32> for sfixed32 {
     fn from(x: i32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i32> for sfixed32 {
     fn from(x: &i32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -676,9 +612,7 @@ impl<'a> FieldType<'a> for sfixed64 {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -687,7 +621,7 @@ impl Packable for sfixed64 {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -703,17 +637,13 @@ impl<'a> Unpackable<'a> for sfixed64 {
 
 impl From<i64> for sfixed64 {
     fn from(x: i64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&i64> for sfixed64 {
     fn from(x: &i64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -734,9 +664,7 @@ impl<'a> FieldType<'a> for float {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -745,7 +673,7 @@ impl Packable for float {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -761,17 +689,13 @@ impl<'a> Unpackable<'a> for float {
 
 impl From<f32> for float {
     fn from(x: f32) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&f32> for float {
     fn from(x: &f32) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -792,9 +716,7 @@ impl<'a> FieldType<'a> for double {
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            x
-        }
+        Self { x }
     }
 }
 
@@ -803,7 +725,7 @@ impl Packable for double {
         self.x.pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut[u8]) {
+    fn pack<'a>(&self, buf: &'a mut [u8]) {
         self.x.pack(buf)
     }
 }
@@ -819,17 +741,13 @@ impl<'a> Unpackable<'a> for double {
 
 impl From<f64> for double {
     fn from(x: f64) -> Self {
-        Self {
-            x,
-        }
+        Self { x }
     }
 }
 
 impl From<&f64> for double {
     fn from(x: &f64) -> Self {
-        Self {
-            x: *x,
-        }
+        Self { x: *x }
     }
 }
 
@@ -871,7 +789,10 @@ impl<'a> Unpackable<'a> for bytes<'a> {
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort{ required: v, had: rem.len() });
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
         }
         Ok((Self(&rem[..v]), &rem[v..]))
     }
@@ -906,9 +827,7 @@ impl<'a> FieldType<'a> for string {
     }
 
     fn from_native(s: Self::NativeType) -> Self {
-        Self {
-            s
-        }
+        Self { s }
     }
 }
 
@@ -931,21 +850,26 @@ impl<'a> Unpackable<'a> for string {
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort{ required: v, had: rem.len() });
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
         }
         let x: &'a [u8] = &rem[..v];
         let s: &'a str = match std::str::from_utf8(x) {
-            Ok(s) => { s },
-            Err(_) => { unimplemented!(); /* TODO(rescriva) */ },
+            Ok(s) => s,
+            Err(_) => {
+                unimplemented!(); /* TODO(rescriva) */
+            }
         };
         let s: String = String::from(s);
-        Ok((Self{s}, &rem[v..]))
+        Ok((Self { s }, &rem[v..]))
     }
 }
 
 impl From<&String> for string {
     fn from(s: &String) -> string {
-        string{s: s.to_string()}
+        string { s: s.to_string() }
     }
 }
 
@@ -987,12 +911,17 @@ impl<'a> Unpackable<'a> for stringref<'a> {
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort{ required: v, had: rem.len() });
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
         }
         let x: &'a [u8] = &rem[..v];
         let s: &'a str = match std::str::from_utf8(x) {
-            Ok(s) => { s },
-            Err(_) => { unimplemented!(); /* TODO(rescriva) */ },
+            Ok(s) => s,
+            Err(_) => {
+                unimplemented!(); /* TODO(rescriva) */
+            }
         };
         Ok((Self(s), &rem[v..]))
     }
@@ -1031,9 +960,7 @@ where
     }
 
     fn from_native(msg: M) -> Self {
-        Self {
-            msg,
-        }
+        Self { msg }
     }
 }
 
@@ -1064,13 +991,17 @@ where
             Ok(v) => v,
             Err(e) => {
                 return Err(e.into());
-            },
+            }
         };
         let v: usize = v.into();
         let rem = up.remain();
         // TODO(rescrv): this pattern multiple times; try to move to Unpacker.
         if rem.len() < v {
-            return Err(buffertk::Error::BufferTooShort{ required: v, had: rem.len() }.into());
+            return Err(buffertk::Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            }
+            .into());
         }
         let buf: &'b [u8] = &rem[..v];
         let rem: &'b [u8] = &rem[v..];
@@ -1083,18 +1014,13 @@ where
 
 impl<'a, M: Message<'a>> From<M> for message<M> {
     fn from(m: M) -> message<M> {
-        Self {
-            msg: m,
-        }
+        Self { msg: m }
     }
 }
 
-impl<'a, M: Message<'a>> From<&M> for message<M>
-{
+impl<'a, M: Message<'a>> From<&M> for message<M> {
     fn from(m: &M) -> message<M> {
-        Self {
-            msg: m.clone(),
-        }
+        Self { msg: m.clone() }
     }
 }
 
@@ -1117,9 +1043,7 @@ where
     }
 
     fn from_native(x: Self::NativeType) -> Self {
-        Self {
-            msg: vec![x],
-        }
+        Self { msg: vec![x] }
     }
 }
 
@@ -1152,24 +1076,19 @@ where
             Ok(x) => x,
             Err(e) => {
                 return Err(e.into());
-            },
+            }
         };
-        Ok((Self {
-            msg: vec![px.msg],
-        }, up.remain()))
+        Ok((Self { msg: vec![px.msg] }, up.remain()))
     }
 }
 
 impl<'a, M: Message<'a>> From<M> for message<Vec<M>> {
     fn from(m: M) -> message<Vec<M>> {
-        Self {
-            msg: vec![m],
-        }
+        Self { msg: vec![m] }
     }
 }
 
-impl<'a, M: Message<'a>> From<&M> for message<Vec<M>>
-{
+impl<'a, M: Message<'a>> From<&M> for message<Vec<M>> {
     fn from(m: &M) -> message<Vec<M>> {
         Self {
             msg: vec![m.clone()],
@@ -1181,8 +1100,8 @@ impl<'a, M: Message<'a>> From<&M> for message<Vec<M>>
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
     use crate::field_types::*;
+    use crate::*;
 
     #[test]
     fn int32() {
@@ -1380,10 +1299,8 @@ mod tests {
         let mut buf: [u8; 64] = [0u8; 64];
         let False = Bool::from(false);
         let True = Bool::from(true);
-        let exp = &[ 0, 1, ];
-        let buf = stack_pack(False)
-            .pack(True)
-            .into_slice(&mut buf);
+        let exp = &[0, 1];
+        let buf = stack_pack(False).pack(True).into_slice(&mut buf);
         assert_eq!(exp, buf, "packing Bool field failed");
         let mut up = Unpacker::new(buf);
         let False: Bool = up.unpack().unwrap();
@@ -1403,10 +1320,7 @@ mod tests {
             1, 0, 0, 0, 0, 0, 0, 0,
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
         ];
-        let buf = stack_pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
+        let buf = stack_pack(zero).pack(one).pack(max).into_slice(&mut buf);
         assert_eq!(exp, buf, "packing fixed64 field failed");
         let mut up = Unpacker::new(buf);
         let zero: fixed64 = up.unpack().unwrap();
@@ -1456,9 +1370,7 @@ mod tests {
     fn double() {
         let mut buf: [u8; 64] = [0u8; 64];
         let pi = double::from(3.14159);
-        let exp: &[u8] = &[
-            0x6e, 0x86, 0x1b, 0xf0, 0xf9, 0x21, 0x09, 0x40,
-        ];
+        let exp: &[u8] = &[0x6e, 0x86, 0x1b, 0xf0, 0xf9, 0x21, 0x09, 0x40];
         let buf = stack_pack(pi).into_slice(&mut buf);
         assert_eq!(exp, buf, "packing double field failed");
         let mut up = Unpacker::new(buf);
@@ -1559,7 +1471,9 @@ mod tests {
         const STRING: &str = "string \u{1F600}";
         let mut buf: [u8; 64] = [0u8; 64];
         let msg = stringref::from(STRING);
-        let exp: &[u8] = &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80];
+        let exp: &[u8] = &[
+            0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80,
+        ];
         let buf = stack_pack(msg).into_slice(&mut buf);
         assert_eq!(exp, buf, "packing stringref field failed");
         let mut up = Unpacker::new(buf);

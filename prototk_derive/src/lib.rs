@@ -9,7 +9,7 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use syn::spanned::Spanned;
-use syn::{parse_macro_input,DeriveInput};
+use syn::{parse_macro_input, DeriveInput};
 
 //////////////////////////////////////// #[derive(Message)] ////////////////////////////////////////
 
@@ -55,15 +55,15 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             .collect();
         let (ig, _, _) = generics.split_for_impl();
         exp_impl_generics = ig.into_token_stream();
-        lifetime = Some(quote!{'prototk});
+        lifetime = Some(quote! {'prototk});
     }
     // Generate the message code.
-    let mut message = PackMessageVisitor::new(quote!{stream(writer)}.into());
+    let mut message = PackMessageVisitor::new(quote! {stream(writer)}.into());
     let message_stream = message.visit(&ty_name, &input.data);
     // Generate the pack code.
-    let mut pack = PackMessageVisitor::new(quote!{pack_sz()}.into());
+    let mut pack = PackMessageVisitor::new(quote! {pack_sz()}.into());
     let pack_reqd_bytes = pack.visit(&ty_name, &input.data);
-    let mut pack = PackMessageVisitor::new(quote!{into_slice(buf);}.into());
+    let mut pack = PackMessageVisitor::new(quote! {into_slice(buf);}.into());
     let pack_into_slice = pack.visit(&ty_name, &input.data);
     // Generate the unpack code.
     let mut unpack = UnpackMessageVisitor::default();
@@ -118,29 +118,30 @@ fn find_lifetime_in_generics<T: ToTokens>(generics: &T) -> Option<TokenStream> {
             (TokenTree::Punct(x), TokenTree::Ident(ident)) => {
                 let ident = ident.clone();
                 if x.as_char() == '\'' {
-                    Some(quote!{ #x #ident })
+                    Some(quote! { #x #ident })
                 } else {
                     None
                 }
-            },
-            (_, _) => {
-                None
-            },
+            }
+            (_, _) => None,
         }
     } else {
         None
     }
 }
 
-fn find_lifetimes(impl_generics: &syn::ImplGenerics, ty_generics: &syn::TypeGenerics) -> Option<TokenStream> {
+fn find_lifetimes(
+    impl_generics: &syn::ImplGenerics,
+    ty_generics: &syn::TypeGenerics,
+) -> Option<TokenStream> {
     match find_lifetime_in_generics(ty_generics) {
-        Some(x) => { return Some(x); }
-        None => {
-            match find_lifetime_in_generics(impl_generics) {
-                Some(x) => { Some(x) }
-                None => { None },
-            }
+        Some(x) => {
+            return Some(x);
         }
+        None => match find_lifetime_in_generics(impl_generics) {
+            Some(x) => Some(x),
+            None => None,
+        },
     }
 }
 
@@ -288,14 +289,16 @@ fn validate_field_number(field_number: u64) {
 const META_PATH: &'static str = "prototk";
 const USAGE: &'static str = "macro helpers must take the form `prototk(field#, type)`";
 
-trait ProtoTKVisitor: StructVisitor<Output=TokenStream> + EnumVisitor<Output=TokenStream, VariantOutput=TokenStream> {
+trait ProtoTKVisitor:
+    StructVisitor<Output = TokenStream> + EnumVisitor<Output = TokenStream, VariantOutput = TokenStream>
+{
     fn visit(&mut self, ty_name: &syn::Ident, data: &syn::Data) -> TokenStream {
         match data {
             syn::Data::Struct(ref ds) => self.visit_struct(ty_name, ds),
             syn::Data::Enum(de) => self.visit_enum(ty_name, de),
             syn::Data::Union(_) => {
                 panic!("{}", "unions are not supported");
-            },
+            }
         }
     }
 
@@ -365,13 +368,7 @@ fn visit_attribute<V: ProtoTKVisitor>(
             validate_field_number(field_number.base10_parse().unwrap());
             let field_type = &field_type_tokens(field, field_type);
             let ctor = quote! { ctor };
-            Some(v.field_snippet(
-                &ctor,
-                field,
-                field_ident,
-                &field_number,
-                &field_type,
-            ))
+            Some(v.field_snippet(&ctor, field, field_ident, &field_number, &field_type))
         }
         _ => panic!("{}", USAGE),
     }
@@ -406,10 +403,8 @@ impl<V: ProtoTKVisitor> StructVisitor for V {
     ) -> TokenStream {
         let mut unrolled = Vec::new();
         for (index, ref field) in fields.unnamed.iter().enumerate() {
-            let field_ident = syn::LitInt::new(
-                &format!("{}", index),
-                proc_macro2::Span::call_site(),
-            );
+            let field_ident =
+                syn::LitInt::new(&format!("{}", index), proc_macro2::Span::call_site());
             let field_ident = &ToTokens::into_token_stream(&field_ident);
             for ref attr in field.attrs.iter() {
                 if let Some(x) = visit_attribute::<V>(ty_name, field, field_ident, attr, self) {
@@ -482,12 +477,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
                     let field_type = &field_type_tokens(field, field_type);
                     let variant_ident = &variant.ident;
                     let ctor = quote! { #ty_name :: #variant_ident };
-                    return self.variant_snippet(
-                        &ctor,
-                        variant,
-                        &field_number,
-                        &field_type,
-                    );
+                    return self.variant_snippet(&ctor, variant, &field_number, &field_type);
                 }
                 _ => panic!("{}", USAGE),
             }
@@ -505,9 +495,7 @@ struct PackMessageVisitor {
 
 impl PackMessageVisitor {
     fn new(call: TokenStream) -> Self {
-        Self {
-            call
-        }
+        Self { call }
     }
 }
 
@@ -578,7 +566,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
 /////////////////////////////////////// UnpackMessageVisitor ///////////////////////////////////////
 
 #[derive(Default)]
-struct UnpackMessageVisitor { }
+struct UnpackMessageVisitor {}
 
 impl ProtoTKVisitor for UnpackMessageVisitor {
     fn field_snippet(

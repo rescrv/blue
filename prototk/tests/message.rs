@@ -68,13 +68,10 @@ fn named_struct() {
 /////////////////////////////////////////// UnnamedStruct //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
-struct UnnamedStruct (
-    #[prototk(1, uint64)]
-    u64,
-    #[prototk(2, double)]
-    f64,
-    #[prototk(3, sint32)]
-    i32,
+struct UnnamedStruct(
+    #[prototk(1, uint64)] u64,
+    #[prototk(2, double)] f64,
+    #[prototk(3, sint32)] i32,
 );
 
 #[test]
@@ -103,7 +100,7 @@ struct UnitStruct;
 
 #[test]
 fn unit_struct() {
-    let u = UnitStruct{};
+    let u = UnitStruct {};
     // test packing
     let buf = buffertk::stack_pack(&u).to_vec();
     let exp: &[u8] = &[];
@@ -179,10 +176,12 @@ fn enum_one_of() {
         x: 42,
         y: 3.14159,
         z: -1,
-        });
+    });
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack((&exp1, &exp2, &exp3)).to_vec();
-    let exp: &[u8] = &[8, 1, 16, 42, 26, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[
+        8, 1, 16, 42, 26, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1,
+    ];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -209,9 +208,7 @@ struct WithBytes<'a> {
 
 impl<'a> Default for WithBytes<'a> {
     fn default() -> Self {
-        WithBytes {
-            payload: &[],
-        }
+        WithBytes { payload: &[] }
     }
 }
 
@@ -237,7 +234,7 @@ fn nested_bytes() {
 
 ////////////////////////////////////////////// Vectors /////////////////////////////////////////////
 
-#[derive(Clone,Debug,Default,Message,PartialEq)]
+#[derive(Clone, Debug, Default, Message, PartialEq)]
 struct WithVectors {
     #[prototk(1, sint64)]
     payload: Vec<i64>,
@@ -265,22 +262,20 @@ fn vector_integers() {
 
 ///////////////////////////////////////// VectorOfMesssages ////////////////////////////////////////
 
-#[derive(Clone,Debug,Default,Message,PartialEq,)]
+#[derive(Clone, Debug, Default, Message, PartialEq)]
 struct VectorOfMessages {
     #[prototk(15, message)]
-    messages: Vec<NamedStruct>
+    messages: Vec<NamedStruct>,
 }
 
 #[test]
 fn vector_messages() {
     let vm = VectorOfMessages {
-        messages: vec![
-            NamedStruct {
-                x: 42,
-                y: 3.14159,
-                z: -1,
-            },
-        ],
+        messages: vec![NamedStruct {
+            x: 42,
+            y: 3.14159,
+            z: -1,
+        }],
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
@@ -299,7 +294,7 @@ fn vector_messages() {
 
 ////////////////////////////////////////////// String //////////////////////////////////////////////
 
-#[derive(Clone,Debug,Default,Message,PartialEq,)]
+#[derive(Clone, Debug, Default, Message, PartialEq)]
 struct StringInStruct {
     #[prototk(11, string)]
     string: String,

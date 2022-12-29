@@ -34,7 +34,6 @@ pub enum Error {
     UnsignedOverflow { value: u64 },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
     SignedOverflow { value: i64 },
-
     // TODO(rescrv): custom error type so that apps can extend
 }
 
@@ -55,7 +54,7 @@ impl std::fmt::Display for Error {
             Error::TagTooLarge { tag } => write!(f, "tag={} overflows 32-bits", tag),
             Error::VarintOverflow { bytes } => {
                 write!(f, "varint did not fit in space={} bytes", bytes)
-            },
+            }
             Error::UnsignedOverflow { value } => {
                 write!(f, "unsigned integer cannot hold value={}", value)
             }
@@ -69,7 +68,9 @@ impl std::fmt::Display for Error {
 impl From<buffertk::Error> for Error {
     fn from(x: buffertk::Error) -> Self {
         match x {
-            buffertk::Error::BufferTooShort { required, had } => Error::BufferTooShort { required, had },
+            buffertk::Error::BufferTooShort { required, had } => {
+                Error::BufferTooShort { required, had }
+            }
             buffertk::Error::VarintOverflow { bytes } => Error::VarintOverflow { bytes },
             buffertk::Error::UnsignedOverflow { value } => Error::UnsignedOverflow { value },
             buffertk::Error::SignedOverflow { value } => Error::SignedOverflow { value },
@@ -247,7 +248,10 @@ pub trait FieldType<'a>: Packable + Unpackable<'a> {
     fn into_native(self) -> Self::NativeType;
     fn from_native(x: Self::NativeType) -> Self;
 
-    fn assign<A: FieldTypeAssigner<NativeType=Self::NativeType>>(lhs: &mut A, x: Self::NativeType) {
+    fn assign<A: FieldTypeAssigner<NativeType = Self::NativeType>>(
+        lhs: &mut A,
+        x: Self::NativeType,
+    ) {
         lhs.assign_field_type(x);
     }
 }
@@ -261,11 +265,7 @@ pub struct FieldTypePacker<'a, A, B> {
 
 impl<'a, A, B> FieldTypePacker<'a, A, B> {
     pub fn new(t: Tag, a: std::marker::PhantomData<A>, b: &'a B) -> Self {
-        Self {
-            t,
-            a,
-            b,
-        }
+        Self { t, a, b }
     }
 }
 
@@ -338,10 +338,10 @@ where
             let sz = px.pack_sz();
             if F::LENGTH_PREFIXED {
                 let prefix: v64 = sz.into();
-                let buf = &mut buffer[total_sz..total_sz+tag_sz+prefix.pack_sz()+sz];
+                let buf = &mut buffer[total_sz..total_sz + tag_sz + prefix.pack_sz() + sz];
                 stack_pack(&self.t).pack(prefix).pack(px).into_slice(buf);
             } else {
-                let buf = &mut buffer[total_sz..total_sz+tag_sz+sz];
+                let buf = &mut buffer[total_sz..total_sz + tag_sz + sz];
                 stack_pack(&self.t).pack(px).into_slice(buf);
             }
             total_sz += tag_sz + sz;
@@ -499,8 +499,7 @@ impl<'a, M: Message<'a>> FieldTypeAssigner for Vec<M> {
 
 // TODO(rescrv):  There's an extra clone type here because I couldn't do From/Into of
 // message<M:Message> to make it zero copy.  Get the macros up and revisit.
-pub trait Message<'a>: Clone + Default + buffertk::Packable + buffertk::Unpackable<'a> {
-}
+pub trait Message<'a>: Clone + Default + buffertk::Packable + buffertk::Unpackable<'a> {}
 
 impl<'a, M> Message<'a> for &'a M
 where
