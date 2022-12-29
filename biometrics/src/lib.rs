@@ -19,7 +19,7 @@ pub use sensors::TDigest;
 pub trait Sensor {
     type Reading;
 
-    fn what(&'static self) -> &'static str;
+    fn label(&'static self) -> &'static str;
     fn read(&'static self) -> Self::Reading;
     fn mark_registered(&'static self);
 }
@@ -288,7 +288,7 @@ impl Emitter for PlainTextEmitter {
     fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
             "{} {} {}",
-            counter.what(),
+            counter.label(),
             now,
             counter.read()
         ))
@@ -296,15 +296,15 @@ impl Emitter for PlainTextEmitter {
 
     fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), std::io::Error> {
         self.output
-            .write_fmt(format_args!("{} {} {}", gauge.what(), now, gauge.read()))
+            .write_fmt(format_args!("{} {} {}", gauge.label(), now, gauge.read()))
     }
 
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
-        let what = moments.what();
+        let label = moments.label();
         let moments = moments.read();
         self.output.write_fmt(format_args!(
             "{} {} {} {} {} {} {}",
-            what,
+            label,
             now,
             moments.n(),
             moments.mean(),

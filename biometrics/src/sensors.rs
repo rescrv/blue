@@ -8,15 +8,15 @@ use crate::{register_counter,register_gauge,register_moments, register_t_digest,
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
 pub struct Counter {
-    what: &'static str,
+    label: &'static str,
     count: AtomicU64,
     init: AtomicBool,
 }
 
 impl Counter {
-    pub const fn new(what: &'static str) -> Counter {
+    pub const fn new(label: &'static str) -> Counter {
         Counter {
-            what,
+            label,
             count: AtomicU64::new(0),
             init: AtomicBool::new(false),
         }
@@ -41,8 +41,8 @@ impl Sensor for Counter {
     type Reading = u64;
 
     #[inline(always)]
-    fn what(&'static self) -> &'static str {
-        self.what
+    fn label(&'static self) -> &'static str {
+        self.label
     }
 
     #[inline(always)]
@@ -78,15 +78,15 @@ impl std::hash::Hash for &'static Counter {
 const GAUGE_INIT: u64 = 0;
 
 pub struct Gauge {
-    what: &'static str,
+    label: &'static str,
     value: AtomicU64,
     init: AtomicBool,
 }
 
 impl Gauge {
-    pub const fn new(what: &'static str) -> Gauge {
+    pub const fn new(label: &'static str) -> Gauge {
         Gauge {
-            what,
+            label,
             value: AtomicU64::new(GAUGE_INIT),
             init: AtomicBool::new(false),
         }
@@ -106,8 +106,8 @@ impl Sensor for Gauge {
     type Reading = f64;
 
     #[inline(always)]
-    fn what(&'static self) -> &'static str {
-        self.what
+    fn label(&'static self) -> &'static str {
+        self.label
     }
 
     #[inline(always)]
@@ -142,15 +142,15 @@ impl std::hash::Hash for &'static Gauge {
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
 pub struct Moments {
-    what: &'static str,
+    label: &'static str,
     value: Mutex<moments::Moments>,
     init: AtomicBool,
 }
 
 impl Moments {
-    pub const fn new(what: &'static str) -> Self {
+    pub const fn new(label: &'static str) -> Self {
         Self {
-            what,
+            label,
             value: Mutex::new(moments::Moments::new()),
             init: AtomicBool::new(false),
         }
@@ -170,8 +170,8 @@ impl Sensor for Moments {
     type Reading = moments::Moments;
 
     #[inline(always)]
-    fn what(&'static self) -> &'static str {
-        self.what
+    fn label(&'static self) -> &'static str {
+        self.label
     }
 
     #[inline(always)]
@@ -206,15 +206,15 @@ impl std::hash::Hash for &'static Moments {
 ////////////////////////////////////////////// TDigest /////////////////////////////////////////////
 
 pub struct TDigest {
-    what: &'static str,
+    label: &'static str,
     value: Mutex<t_digest::TDigest>,
     init: AtomicBool,
 }
 
 impl TDigest {
-    pub const fn new(what: &'static str, delta: u64) -> Self {
+    pub const fn new(label: &'static str, delta: u64) -> Self {
         Self {
-            what,
+            label,
             init: AtomicBool::new(false),
             value: Mutex::new(t_digest::TDigest::new(delta)),
         }
@@ -234,8 +234,8 @@ impl Sensor for TDigest {
     type Reading = t_digest::TDigest;
 
     #[inline(always)]
-    fn what(&'static self) -> &'static str {
-        self.what
+    fn label(&'static self) -> &'static str {
+        self.label
     }
 
     #[inline(always)]
