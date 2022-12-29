@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use crate::moments;
 use crate::t_digest;
-use crate::{register_counter,register_gauge,register_moments, register_t_digest};
+use crate::{register_counter,register_gauge,register_moments, register_t_digest, Sensor};
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
@@ -23,11 +23,6 @@ impl Counter {
     }
 
     #[inline(always)]
-    pub fn what(&'static self) -> &'static str {
-        self.what
-    }
-
-    #[inline(always)]
     pub fn click(&'static self) {
         self.count(1)
     }
@@ -40,14 +35,23 @@ impl Counter {
         }
         self.count.fetch_add(x, Ordering::Relaxed);
     }
+}
+
+impl Sensor for Counter {
+    type Reading = u64;
 
     #[inline(always)]
-    pub fn read(&'static self) -> u64 {
+    fn what(&'static self) -> &'static str {
+        self.what
+    }
+
+    #[inline(always)]
+    fn read(&'static self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
 
     #[inline(always)]
-    pub fn mark_registered(&'static self) {
+    fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }
@@ -89,11 +93,6 @@ impl Gauge {
     }
 
     #[inline(always)]
-    pub fn what(&'static self) -> &'static str {
-        self.what
-    }
-
-    #[inline(always)]
     pub fn set(&'static self, x: f64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
@@ -101,15 +100,24 @@ impl Gauge {
         }
         self.value.store(x.to_bits(), Ordering::Relaxed);
     }
+}
+
+impl Sensor for Gauge {
+    type Reading = f64;
 
     #[inline(always)]
-    pub fn read(&'static self) -> f64 {
+    fn what(&'static self) -> &'static str {
+        self.what
+    }
+
+    #[inline(always)]
+    fn read(&'static self) -> f64 {
         let u = self.value.load(Ordering::Relaxed);
         f64::from_bits(u)
     }
 
     #[inline(always)]
-    pub fn mark_registered(&'static self) {
+    fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }
@@ -148,11 +156,6 @@ impl Moments {
         }
     }
 
-    #[inline(always)]
-    pub fn what(&'static self) -> &'static str {
-        self.what
-    }
-
     pub fn add(&'static self, x: f64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
@@ -161,13 +164,24 @@ impl Moments {
         let mut value = self.value.lock().unwrap();
         value.push(x);
     }
+}
 
-    pub fn read(&'static self) -> moments::Moments {
+impl Sensor for Moments {
+    type Reading = moments::Moments;
+
+    #[inline(always)]
+    fn what(&'static self) -> &'static str {
+        self.what
+    }
+
+    #[inline(always)]
+    fn read(&'static self) -> moments::Moments {
         let value = self.value.lock().unwrap();
         value.clone()
     }
 
-    pub fn mark_registered(&'static self) {
+    #[inline(always)]
+    fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }
@@ -206,11 +220,6 @@ impl TDigest {
         }
     }
 
-    #[inline(always)]
-    pub fn what(&'static self) -> &'static str {
-        self.what
-    }
-
     pub fn add(&'static self, point: f64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
@@ -219,13 +228,24 @@ impl TDigest {
         let mut value = self.value.lock().unwrap();
         value.add(point);
     }
+}
 
-    pub fn read(&'static self) -> t_digest::TDigest {
+impl Sensor for TDigest {
+    type Reading = t_digest::TDigest;
+
+    #[inline(always)]
+    fn what(&'static self) -> &'static str {
+        self.what
+    }
+
+    #[inline(always)]
+    fn read(&'static self) -> t_digest::TDigest {
         let value = self.value.lock().unwrap();
         value.clone()
     }
 
-    pub fn mark_registered(&'static self) {
+    #[inline(always)]
+    fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }

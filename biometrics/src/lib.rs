@@ -1,19 +1,86 @@
 use std::cell::RefCell;
-use std::collections::hash_set::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::time::{SystemTime,UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-pub mod sensors;
 pub mod moments;
+pub mod sensors;
 pub mod t_digest;
 
 pub use sensors::Counter;
 pub use sensors::Gauge;
 pub use sensors::Moments;
 pub use sensors::TDigest;
+
+////////////////////////////////////////////// Sensor //////////////////////////////////////////////
+
+pub trait Sensor {
+    type Reading;
+
+    fn what(&'static self) -> &'static str;
+    fn read(&'static self) -> Self::Reading;
+    fn mark_registered(&'static self);
+}
+
+////////////////////////////////////////// SensorRegistry //////////////////////////////////////////
+
+pub struct SensorRegistry<S: Sensor + 'static> {
+    sensors: Mutex<Vec<&'static S>>,
+    register: &'static Counter,
+    emit: &'static Counter,
+    err: &'static Counter,
+}
+
+impl<S: Sensor + 'static> SensorRegistry<S> {
+    pub fn new(register: &'static Counter, emit: &'static Counter, err: &'static Counter) -> Self {
+        Self {
+            sensors: Mutex::new(Vec::new()),
+            register,
+            emit,
+            err,
+        }
+    }
+
+    pub fn register(&self, sensor: &'static S) {
+        {
+            let mut sensors = self.sensors.lock().unwrap();
+            sensors.push(sensor);
+        }
+        self.register.click();
+        sensor.mark_registered();
+    }
+
+    pub fn emit<EM: Emitter<Error = ERR>, ERR>(
+        &self,
+        emitter: &mut EM,
+        emit: &dyn Fn(&mut EM, &'static S, f64) -> Result<(), ERR>,
+        now: &dyn Fn() -> f64
+    ) -> Result<(), ERR> {
+        let num_sensors = { self.sensors.lock().unwrap().len() };
+        let mut sensors: Vec<&'static S> = Vec::with_capacity(num_sensors);
+        {
+            let sensors_guard = self.sensors.lock().unwrap();
+            for s in sensors_guard.iter() {
+                sensors.push(s.clone());
+            }
+        }
+        let mut result = Ok(());
+        for sensor in sensors {
+            match emit(emitter, sensor, now()) {
+                Ok(_) => self.emit.click(),
+                Err(e) => {
+                    if let Ok(()) = result {
+                        result = Err(e);
+                    }
+                    self.err.click();
+                }
+            }
+        }
+        result
+    }
+}
 
 /////////////////////////////////////////// thread locals //////////////////////////////////////////
 
@@ -23,14 +90,12 @@ thread_local! {
 
 pub fn register_counter(counter: &'static Counter) -> bool {
     let mut result = false;
-    COLLECT.with(|f| {
-        match f.borrow().as_ref() {
-            Some(collector) => {
-                collector.register_counter(counter);
-                result = true
-            },
-            None => {},
+    COLLECT.with(|f| match f.borrow().as_ref() {
+        Some(collector) => {
+            collector.register_counter(counter);
+            result = true
         }
+        None => {}
     });
     if result {
         counter.mark_registered();
@@ -40,14 +105,12 @@ pub fn register_counter(counter: &'static Counter) -> bool {
 
 pub fn register_gauge(gauge: &'static Gauge) -> bool {
     let mut result = false;
-    COLLECT.with(|f| {
-        match f.borrow().as_ref() {
-            Some(collector) => {
-                collector.register_gauge(gauge);
-                result = true
-            },
-            None => {},
+    COLLECT.with(|f| match f.borrow().as_ref() {
+        Some(collector) => {
+            collector.register_gauge(gauge);
+            result = true
         }
+        None => {}
     });
     if result {
         gauge.mark_registered();
@@ -57,14 +120,12 @@ pub fn register_gauge(gauge: &'static Gauge) -> bool {
 
 pub fn register_moments(moments: &'static Moments) -> bool {
     let mut result = false;
-    COLLECT.with(|f| {
-        match f.borrow().as_ref() {
-            Some(collector) => {
-                collector.register_moments(moments);
-                result = true
-            },
-            None => {},
+    COLLECT.with(|f| match f.borrow().as_ref() {
+        Some(collector) => {
+            collector.register_moments(moments);
+            result = true
         }
+        None => {}
     });
     if result {
         moments.mark_registered();
@@ -74,14 +135,12 @@ pub fn register_moments(moments: &'static Moments) -> bool {
 
 pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
     let mut result = false;
-    COLLECT.with(|f| {
-        match f.borrow().as_ref() {
-            Some(collector) => {
-                collector.register_t_digest(t_digest);
-                result = true
-            },
-            None => {},
+    COLLECT.with(|f| match f.borrow().as_ref() {
+        Some(collector) => {
+            collector.register_t_digest(t_digest);
+            result = true
         }
+        None => {}
     });
     if result {
         t_digest.mark_registered();
@@ -92,10 +151,10 @@ pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
 
 pub struct Collector {
-    counters: Mutex<HashSet<&'static Counter>>,
-    gauges: Mutex<HashSet<&'static Gauge>>,
-    moments: Mutex<HashSet<&'static Moments>>,
-    t_digests: Mutex<HashSet<&'static TDigest>>,
+    counters: SensorRegistry<Counter>,
+    gauges: SensorRegistry<Gauge>,
+    moments: SensorRegistry<Moments>,
+    t_digests: SensorRegistry<TDigest>,
 }
 
 static COLLECTOR_REGISTER_THREAD: Counter = Counter::new("collector.register.thread");
@@ -113,10 +172,26 @@ static COLLECTOR_TIME_FAILURE: Counter = Counter::new("collector.time.failure");
 impl Collector {
     pub fn new() -> Rc<Self> {
         let collector = Self {
-            counters: Mutex::new(HashSet::new()),
-            gauges: Mutex::new(HashSet::new()),
-            moments: Mutex::new(HashSet::new()),
-            t_digests: Mutex::new(HashSet::new()),
+            counters: SensorRegistry::new(
+                &COLLECTOR_REGISTER_COUNTER,
+                &COLLECTOR_EMIT_COUNTER,
+                &COLLECTOR_EMIT_FAILURE,
+            ),
+            gauges: SensorRegistry::new(
+                &COLLECTOR_REGISTER_GAUGE,
+                &COLLECTOR_EMIT_GAUGE,
+                &COLLECTOR_EMIT_FAILURE,
+            ),
+            moments: SensorRegistry::new(
+                &COLLECTOR_REGISTER_MOMENTS,
+                &COLLECTOR_EMIT_MOMENTS,
+                &COLLECTOR_EMIT_FAILURE,
+            ),
+            t_digests: SensorRegistry::new(
+                &COLLECTOR_REGISTER_T_DIGEST,
+                &COLLECTOR_EMIT_T_DIGEST,
+                &COLLECTOR_EMIT_FAILURE,
+            ),
         };
         // Register counters with the collector.
         collector.register_counter(&COLLECTOR_REGISTER_THREAD);
@@ -130,8 +205,8 @@ impl Collector {
         collector.register_counter(&COLLECTOR_EMIT_T_DIGEST);
         collector.register_counter(&COLLECTOR_EMIT_FAILURE);
         collector.register_counter(&COLLECTOR_TIME_FAILURE);
-        // Return the collector with counters initialized.  They will not reassociate to any other
-        // collector.
+        // Return the collector with counters initialized.  All collectors will return the global
+        // counters.
         Rc::new(collector)
     }
 
@@ -142,139 +217,40 @@ impl Collector {
         });
     }
 
-    // Must saturate.
     pub fn register_counter(&self, counter: &'static Counter) {
-        let mut counters = self.counters.lock().unwrap();
-        counters.insert(counter);
-        COLLECTOR_REGISTER_COUNTER.click();
+        self.counters.register(counter);
     }
 
-    // Must saturate.
     pub fn register_gauge(&self, gauge: &'static Gauge) {
-        let mut gauges = self.gauges.lock().unwrap();
-        gauges.insert(gauge);
-        COLLECTOR_REGISTER_GAUGE.click();
+        self.gauges.register(gauge);
     }
 
-    // Must saturate.
     pub fn register_moments(&self, moments: &'static Moments) {
-        let mut momentss = self.moments.lock().unwrap();
-        momentss.insert(moments);
-        COLLECTOR_REGISTER_MOMENTS.click();
+        self.moments.register(moments);
     }
 
-    // Must saturate.
     pub fn register_t_digest(&self, t_digest: &'static TDigest) {
-        let mut t_digests = self.t_digests.lock().unwrap();
-        t_digests.insert(t_digest);
-        COLLECTOR_REGISTER_T_DIGEST.click();
+        self.t_digests.register(t_digest);
     }
 
-    pub fn emit(&self, emitter: &mut dyn Emitter) -> Result<(), std::io::Error> {
-        // counters
-        let num_counters = {
-            let counters = self.counters.lock().unwrap();
-            counters.len()
-        };
-        let mut counters: Vec<&'static Counter> = Vec::with_capacity(num_counters);
-        {
-            let counters_guard = self.counters.lock().unwrap();
-            for c in counters_guard.iter() {
-                counters.push(c.clone());
-            }
-        }
-        for counter in counters {
-            COLLECTOR_EMIT_COUNTER.click();
-            match emitter.emit_counter(counter, self.now_f64()) {
-                Ok(_) => {},
-                Err(_) => {
-                    // TODO(rescrv): Maybe not swallow errors.
-                    COLLECTOR_EMIT_FAILURE.click();
-                },
-            }
-        }
-
-        // gauges
-        let num_gauges = {
-            let gauges = self.gauges.lock().unwrap();
-            gauges.len()
-        };
-        let mut gauges: Vec<&'static Gauge> = Vec::with_capacity(num_gauges);
-        {
-            let gauges_guard = self.gauges.lock().unwrap();
-            for g in gauges_guard.iter() {
-                gauges.push(g.clone());
-            }
-        }
-        for gauge in gauges {
-            COLLECTOR_EMIT_GAUGE.click();
-            match emitter.emit_gauge(gauge, self.now_f64()) {
-                Ok(_) => {},
-                Err(_) => {
-                    // TODO(rescrv): Maybe not swallow errors.
-                    COLLECTOR_EMIT_FAILURE.click();
-                },
-            }
-        }
-
-        // moments
-        let num_moments = {
-            let gauges = self.gauges.lock().unwrap();
-            gauges.len()
-        };
-        let mut momentss: Vec<&'static Moments> = Vec::with_capacity(num_moments);
-        {
-            let moments_guard = self.moments.lock().unwrap();
-            for m in moments_guard.iter() {
-                momentss.push(m.clone());
-            }
-        }
-        for moments in momentss {
-            COLLECTOR_EMIT_MOMENTS.click();
-            match emitter.emit_moments(moments, self.now_f64()) {
-                Ok(_) => {},
-                Err(_) => {
-                    // TODO(rescrv): Maybe not swallow errors.
-                    COLLECTOR_EMIT_FAILURE.click();
-                },
-            }
-        }
-
-        // t_digests
-        let num_t_digests = {
-            let t_digests = self.t_digests.lock().unwrap();
-            t_digests.len()
-        };
-        let mut t_digests: Vec<&'static TDigest> = Vec::with_capacity(num_t_digests);
-        {
-            let t_digests_guard = self.t_digests.lock().unwrap();
-            for t in t_digests_guard.iter() {
-                t_digests.push(t.clone());
-            }
-        }
-        for t_digest in t_digests {
-            COLLECTOR_EMIT_T_DIGEST.click();
-            match emitter.emit_t_digest(t_digest, self.now_f64()) {
-                Ok(_) => {},
-                Err(_) => {
-                    // TODO(rescrv): Maybe not swallow errors.
-                    COLLECTOR_EMIT_FAILURE.click();
-                },
-            }
-        }
-
-        Ok(())
+    pub fn emit<EM: Emitter<Error = ERR>, ERR>(&self, emitter: &mut EM) -> Result<(), ERR> {
+        let result = Ok(());
+        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &|| { self.now() }));
+        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &|| { self.now() }));
+        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &|| { self.now() }));
+        let result = result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &|| { self.now() }));
+        result
     }
 
-    fn now_f64(&self) -> f64 {
+    fn now(&self) -> f64 {
         // TODO(rescrv):  Make this monotonic with std::time::Instant.
         let now = SystemTime::now().duration_since(UNIX_EPOCH);
         match now {
-            Ok(now) => { now.as_millis() as f64 },
+            Ok(now) => now.as_millis() as f64,
             Err(_) => {
                 COLLECTOR_TIME_FAILURE.click();
                 f64::NAN
-            },
+            }
         }
     }
 }
@@ -286,16 +262,18 @@ macro_rules! click {
     ($name:literal) => {
         static COUNTER: $crate::Counter = $crate::Counter::new($name);
         COUNTER.click();
-    }
+    };
 }
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
 pub trait Emitter {
-    fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), std::io::Error>;
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), std::io::Error>;
-    fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error>;
-    fn emit_t_digest(&mut self, t_digest: &'static TDigest, now: f64) -> Result<(), std::io::Error>;
+    type Error;
+
+    fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), Self::Error>;
+    fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), Self::Error>;
+    fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), Self::Error>;
+    fn emit_t_digest(&mut self, t_digest: &'static TDigest, now: f64) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -305,30 +283,40 @@ pub struct PlainTextEmitter {
 }
 
 impl Emitter for PlainTextEmitter {
+    type Error = std::io::Error;
+
     fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), std::io::Error> {
-        self.output.write_fmt(format_args!("{} {} {}", counter.what(), now, counter.read()))
+        self.output.write_fmt(format_args!(
+            "{} {} {}",
+            counter.what(),
+            now,
+            counter.read()
+        ))
     }
 
     fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), std::io::Error> {
-        self.output.write_fmt(format_args!("{} {} {}", gauge.what(), now, gauge.read()))
+        self.output
+            .write_fmt(format_args!("{} {} {}", gauge.what(), now, gauge.read()))
     }
 
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
         let what = moments.what();
         let moments = moments.read();
-        self.output.write_fmt(format_args!("{} {} {} {} {} {} {}",
-                                           what,
-                                           now,
-                                           moments.n(),
-                                           moments.mean(),
-                                           moments.variance(),
-                                           moments.skewness(),
-                                           moments.kurtosis()))
+        self.output.write_fmt(format_args!(
+            "{} {} {} {} {} {} {}",
+            what,
+            now,
+            moments.n(),
+            moments.mean(),
+            moments.variance(),
+            moments.skewness(),
+            moments.kurtosis()
+        ))
     }
 
     fn emit_t_digest(&mut self, _: &'static TDigest, _: f64) -> Result<(), std::io::Error> {
         // TODO(rescrv): Emit the t-digest.
-        Err(std::io::Error::from_raw_os_error(95/*ENOTSUP*/))
+        Err(std::io::Error::from_raw_os_error(95 /*ENOTSUP*/))
     }
 }
 
@@ -343,8 +331,6 @@ mod tests {
         let c: Rc<Collector> = Collector::new();
         c.register_with_thread();
         let mut x: Option<Rc<Collector>> = None;
-        COLLECT.with(|f| {
-            x = f.borrow().as_ref().cloned()
-        });
+        COLLECT.with(|f| x = f.borrow().as_ref().cloned());
     }
 }
