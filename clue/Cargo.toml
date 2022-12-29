@@ -7,5 +7,7 @@ edition = "2021"
 
 [dependencies]
 biometrics = { path = "../biometrics" }
+buffertk = { path = "../buffertk" }
 id = { path = "../id" }
+prototk = { path = "../prototk" }
 util = { path = "../util" }

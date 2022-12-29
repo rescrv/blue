@@ -1,28 +1,131 @@
+use std::backtrace::Backtrace;
 use std::cell::RefCell;
+use std::io::Write;
+use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
-use biometrics::{Counter,Moments};
+use biometrics::{click, Counter};
+
 use id::generate_id;
+
 use util::stopwatch::Stopwatch;
+
+use buffertk::stack_pack;
+
+use prototk::field_types::*;
+use prototk::{FieldNumber, FieldType, Tag};
+
+pub const TRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
+pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
+pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
 generate_id!{TraceID, "trace:"}
 
-/////////////////////////////////////////////// Clue ///////////////////////////////////////////////
+/////////////////////////////////////////////// Trace //////////////////////////////////////////////
 
-pub enum EnterOrExit {
-    Enter { buffer: Vec<u8> },
-    Exit { buffer: Vec<u8> },
+pub struct Trace {
+    id: Option<TraceID>,
+    proto: Vec<u8>,
+    human: String,
+    stopwatch: Option<Stopwatch>,
 }
 
-pub struct Clue<'a> {
-    pub id: TraceID,
-    pub node: u64,
-    pub file: &'a str,
-    pub line: u32,
-    pub what: &'a str,
-    pub data: EnterOrExit,
+impl Trace {
+    pub fn new() -> Self {
+        // If the id is None we won't record in the finish.
+        // The start call will take care of sampling.
+        let mut id = None;
+        TRACER.with(|t| {
+            id = t.borrow_mut().start();
+        });
+        Self::from_id(id)
+    }
+
+    pub fn force() -> Self {
+        Self::from_id(TraceID::generate())
+    }
+
+    fn from_id(id: Option<TraceID>) -> Self {
+        click!("clue.trace.instantiations");
+        let trace = Self {
+            id: id.clone(),
+            proto: Vec::new(),
+            human: String::default(),
+            stopwatch: None,
+        };
+        if let Some(trace_id) = id {
+            trace.with_context::<string>("trace_id", TRACE_FIELD_NUMBER, trace_id.human_readable())
+        } else {
+            trace
+        }
+    }
+
+    pub fn with_context<'a, F: FieldType<'a>>(self, field_name: &str, field_number: u32, field_value: F::NativeType) -> Self
+    where
+        F::NativeType: Clone + Display,
+    {
+        if self.id.is_none() {
+            click!("clue.trace.context_not_logged");
+            return self
+        }
+        self.with_protobuf::<F>(field_number, field_value.clone())
+            .with_human::<F::NativeType>(field_name, field_value)
+    }
+
+    pub fn with_human<'a, F: Display>(mut self, field_name: &str, field_value: F) -> Self {
+        if self.id.is_none() {
+            click!("clue.trace.human_not_logged");
+            return self
+        }
+        self.human += &format!("{} = {}\n", field_name, field_value);
+        self
+    }
+
+    pub fn with_protobuf<'a, F: FieldType<'a>>(mut self, field_number: u32, field_value: F::NativeType) -> Self {
+        if self.id.is_none() {
+            click!("clue.trace.protobuf_not_logged");
+            return self
+        }
+        let tag = Tag {
+            field_number: FieldNumber::must(field_number),
+            wire_type: F::WIRE_TYPE,
+        };
+        let field = F::from_native(field_value);
+        stack_pack(tag).pack(field).append_to_vec(&mut self.proto);
+        self
+    }
+
+    pub fn with_backtrace(self) -> Self {
+        if self.id.is_none() {
+            click!("clue.trace.backtrace_not_logged");
+            return self
+        }
+        click!("clue.trace.with_backtrace");
+        let backtrace = format!("{}", Backtrace::force_capture());
+        self.with_context::<string>("backtrace", BACKTRACE_FIELD_NUMBER, backtrace)
+    }
+
+    pub fn with_stopwatch(mut self) -> Self {
+        if self.id.is_none() {
+            click!("clue.trace.stopwatch_not_logged");
+            return self
+        }
+        click!("clue.trace.with_stopwatch");
+        self.stopwatch = Some(Stopwatch::new());
+        self
+    }
+
+    pub fn finish(mut self) {
+        if let Some(stopwatch) = &self.stopwatch {
+            let time_ms: f64 = stopwatch.since();
+            self = self.with_context::<double>("elapsed", STOPWATCH_FIELD_NUMBER, time_ms);
+        }
+        TRACER.with(|t| {
+            t.borrow_mut().finish(self);
+        });
+    }
 }
 
 ////////////////////////////////////////////// Tracer //////////////////////////////////////////////
@@ -33,206 +136,54 @@ thread_local! {
 
 struct Tracer {
     emitter: Option<Rc<dyn Emitter>>,
-    current_id: Option<TraceID>,
-    current_depth: u64,
-    current_node: u64,
 }
 
 impl Tracer {
+    pub fn start(&mut self) -> Option<TraceID> {
+        // TODO(rescrv): sampling
+        match TraceID::generate() {
+            Some(id) => Some(id),
+            None => {
+                click!("clue.trace.id_generate_failed");
+                Some(TraceID::default())
+            }
+        }
+    }
+
+    pub fn finish(&mut self, trace: Trace) {
+        if trace.id.is_none() {
+            click!("clue.trace.drop");
+            return;
+        }
+        let emitter = match &self.emitter {
+            Some(e) => e,
+            None => {
+                click!("clue.trace.drop.no_emitter");
+                return;
+            }
+        };
+        click!("clue.trace.emit");
+        emitter.emit(trace);
+    }
+
     const fn new() -> Self {
         Self {
             emitter: None,
-            current_id: None,
-            current_depth: 0,
-            current_node: 0,
         }
     }
 
     fn set_emitter(&mut self, emitter: Rc<dyn Emitter>) {
         self.emitter = Some(emitter);
     }
-
-    fn click_enter(&mut self) -> (TraceID, u64) {
-        let trace_id = if let Some(trace_id) = self.current_id {
-            self.current_depth += 1;
-            trace_id
-        } else {
-            let stopwatch = Stopwatch::new();
-            let trace_id = match TraceID::generate() {
-                Some(id) => id,
-                None => {
-                    TRACE_ID_FAIL.click();
-                    TraceID::default()
-                }
-            };
-            self.current_id = Some(trace_id.clone());
-            TRACE_ID_GENERATE_LATENCY.add(stopwatch.since());
-            self.current_depth = 1;
-            self.current_node += 1;
-            trace_id
-        };
-        (trace_id, self.current_node)
-    }
-
-    fn click_exit(&mut self) -> (TraceID, u64) {
-        self.current_node += 1;
-        self.current_depth -= 1;
-        let trace_id = match self.current_id {
-            Some(x) => x,
-            None => {
-                TRACE_ENTER_EXIT_MISMATCH.click();
-                TraceID::default()
-            },
-        };
-        let current_node = self.current_node;
-        if self.current_depth <= 0 {
-            self.current_id = None;
-            self.current_node = 0;
-        }
-        (trace_id, current_node)
-    }
-
-    fn emitter(&self) -> Option<Rc<dyn Emitter>> {
-        match self.emitter {
-            Some(ref x) => Some(Rc::clone(x)),
-            None => None,
-        }
-    }
-}
-
-/////////////////////////////////////////////// Trace //////////////////////////////////////////////
-
-static TRACE_INSTANTIATIONS: Counter = Counter::new("clue.trace.instantiations");
-static TRACE_ID_FAIL: Counter = Counter::new("clue.trace.id.not.random");
-static TRACE_DROPPED: Counter = Counter::new("clue.trace.dropped");
-static TRACE_EVAL_ENTER: Counter = Counter::new("clue.trace.enter.fn.eval");
-static TRACE_EVAL_EXIT: Counter = Counter::new("clue.trace.exit.fn.eval");
-static TRACE_ENTER_EXIT_MISMATCH: Counter = Counter::new("clue.trace.enter.exit.mismatch");
-
-static TRACE_ID_GENERATE_LATENCY: Moments = Moments::new("clue.trace.id.generate.latency");
-static ENTER_MOMENTS: Moments = Moments::new("clue.trace.enter.latency");
-static EXIT_MOMENTS: Moments = Moments::new("clue.trace.exit.latency");
-
-pub struct Trace<'a> {
-    file: &'static str,
-    line: u32,
-    what: &'static str,
-    tracer: Rc<RefCell<Tracer>>,
-    enter: Option<Box<dyn FnOnce() -> Vec<u8> + 'a>>,
-    exit: Option<Box<dyn FnOnce() -> Vec<u8> + 'a>>,
-    marker: std::marker::PhantomData<&'a u8>,
-}
-
-impl<'a> Trace<'a> {
-    pub fn new(file: &'static str, line: u32, what: &'static str) -> Self {
-        TRACE_INSTANTIATIONS.click();
-        let tracer: Rc<RefCell<Tracer>> = TRACER.with(|f| {
-            Rc::clone(&f)
-        });
-        Self {
-            file,
-            line,
-            what,
-            tracer: Rc::clone(&tracer),
-            enter: None,
-            exit: None,
-            marker: std::marker::PhantomData::default(),
-        }
-    }
-
-    pub fn enter_with(mut self, enter: Box<dyn FnOnce() -> Vec<u8> + 'a>) -> Self {
-        self.enter = Some(enter);
-        self
-    }
-
-    pub fn exit_with(mut self, exit: Box<dyn FnOnce() -> Vec<u8> + 'a>) -> Self {
-        self.exit = Some(exit);
-        self
-    }
-
-    pub fn enter(&mut self) {
-        let stopwatch = Stopwatch::new();
-        let (id, node) = self.tracer.borrow_mut().click_enter();
-        let mut clue = Clue {
-            id,
-            node,
-            file: self.file,
-            line: self.line,
-            what: self.what,
-            data: EnterOrExit::Enter { buffer: Vec::default() },
-        };
-        let emitter = self.tracer.borrow().emitter();
-        if let Some(ref emitter) = emitter {
-            if let Some(f) = self.enter.take() {
-                TRACE_EVAL_ENTER.click();
-                clue.data = EnterOrExit::Enter { buffer: f() };
-            }
-            emitter.emit(&clue);
-            ENTER_MOMENTS.add(stopwatch.since());
-        } else {
-            TRACE_DROPPED.click();
-        }
-    }
-
-    fn exit(&mut self) {
-        let stopwatch = Stopwatch::new();
-        let (id, node) = self.tracer.borrow_mut().click_exit();
-        let mut clue = Clue {
-            id,
-            node,
-            file: self.file,
-            line: self.line,
-            what: self.what,
-            data: EnterOrExit::Exit { buffer: Vec::default() },
-        };
-        let emitter = self.tracer.borrow().emitter();
-        if let Some(ref emitter) = emitter {
-            if let Some(f) = self.exit.take() {
-                TRACE_EVAL_EXIT.click();
-                clue.data = EnterOrExit::Exit { buffer: f() };
-            }
-            emitter.emit(&clue);
-            EXIT_MOMENTS.add(stopwatch.since());
-        } else {
-            TRACE_DROPPED.click();
-        }
-    }
-}
-
-impl<'a> Drop for Trace<'a> {
-    fn drop(&mut self) {
-        self.exit();
-    }
-}
-
-/////////////////////////////////////////////// clue ///////////////////////////////////////////////
-
-#[macro_export]
-macro_rules! clue {
-    ($name:literal) => {
-        let mut t = $crate::Trace::new(file!(), line!(), $name);
-        t.enter();
-    };
-    ($name:literal, $exit:expr) => {
-        let mut t = $crate::Trace::new(file!(), line!(), $name)
-            .exit_with(Box::new($exit));
-        t.enter();
-    };
-    ($name:literal, $enter:expr, $exit:expr) => {
-        let mut t = $crate::Trace::new(file!(), line!(), $name)
-            .enter_with(Box::new($enter))
-            .exit_with(Box::new($exit));
-        t.enter();
-    };
 }
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
 pub trait Emitter {
-    fn emit<'a>(&self, clue: &Clue<'a>);
+    fn emit(&self, trace: Trace);
 }
 
-pub fn register_emitter<E: 'static + Emitter>(emitter: E) {
+pub fn register_emitter<E: Emitter + 'static>(emitter: E) {
     TRACER.with(|t| {
         t.borrow_mut().set_emitter(Rc::new(emitter));
     });
@@ -240,16 +191,38 @@ pub fn register_emitter<E: 'static + Emitter>(emitter: E) {
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
 
-pub struct PlainTextEmitter {
+pub struct PlainTextEmitter<W: Write> {
+    fout: RefCell<W>,
 }
 
-impl Emitter for PlainTextEmitter {
-    fn emit<'a>(&self, clue: &Clue<'a>) {
-        let mode = match clue.data {
-            EnterOrExit::Enter { buffer: _ } => { "enter" },
-            EnterOrExit::Exit { buffer: _ } => { "exit" },
+impl<W: Write> PlainTextEmitter<W> {
+    pub fn new(fout: W) -> Self {
+        Self {
+            fout: RefCell::new(fout),
+        }
+    }
+}
+
+static CLUE_PLAINTEXT_NOT_WRITTEN: Counter = Counter::new("clue.plaintext.not_written");
+
+impl<W: Write> Emitter for PlainTextEmitter<W> {
+    fn emit(&self, trace: Trace) {
+        let trace_id = match trace.id {
+            Some(id) => id,
+            None => {
+                click!("clue.plaintext.dropped");
+                return;
+            },
         };
-        println!("{}:{}: {} {}", clue.file, clue.line, mode, clue.what);
+        let mut fout = self.fout.borrow_mut();
+        if let Err(e) = write!(fout, "TraceID: {} ===================================\n", trace_id.human_readable()) {
+            CLUE_PLAINTEXT_NOT_WRITTEN.click();
+            eprintln!("plaintext emitter failure: {}", e);
+        }
+        if let Err(e) = write!(fout, "{}\n", trace.human) {
+            CLUE_PLAINTEXT_NOT_WRITTEN.click();
+            eprintln!("plaintext emitter failure: {}", e);
+        }
     }
 }
 
@@ -260,42 +233,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let emitter = PlainTextEmitter{};
+    fn plaintext() {
+        let emitter = PlainTextEmitter::new(std::io::stdout());
         register_emitter(emitter);
-        let mut t = Trace::new(file!(), line!(), "clue.it_works1")
-            .enter_with(Box::new(|| "foo".as_bytes().to_vec()))
-            .exit_with(Box::new(|| "bar".as_bytes().to_vec()));
-        t.enter();
-        let mut t = Trace::new(file!(), line!(), "clue.it_works2");
-        t.enter();
-        let mut t = Trace::new(file!(), line!(), "clue.it_works3");
-        t.enter();
-    }
-
-    #[test]
-    fn macro_works() {
-        clue!{"macro.call1"};
-        clue!{"macro.call2", || { Vec::new() }};
-        clue!{"macro.call3", || { Vec::new() }, || { Vec::new() }};
-    }
-
-    #[test]
-    fn macro_closure() {
-        // Unfortunately we always have to move into a closure or deal with awkwardness.  Leave the
-        // surrounding boiler-plate for the rest of people.
-        let x = 5;
-        let y = 0.0;
-        clue!{"macro.closure", move || {
-            format!("x={} y={}", x, y).as_bytes().to_vec()
-        }};
-    }
-
-    #[test]
-    fn macro_move() {
-        let moved: Vec<u8> = Vec::new();
-        clue!{"macro.move", move || {
-            moved
-        }};
+        let trace = Trace::new()
+            .with_backtrace()
+            .with_stopwatch()
+            .with_context::<fixed64>("field_one", 1, 0x1eaff00dc0ffeeu64);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        trace.finish();
     }
 }
