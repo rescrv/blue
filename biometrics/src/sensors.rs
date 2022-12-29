@@ -1,9 +1,9 @@
-use std::fmt;
-use std::sync::atomic::{AtomicBool,AtomicU64};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use crate::moments;
-use crate::{register_counter,register_gauge,register_moments};
+use crate::t_digest;
+use crate::{register_counter,register_gauge,register_moments, register_t_digest};
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
@@ -23,38 +23,50 @@ impl Counter {
     }
 
     #[inline(always)]
-    pub fn what(&self) -> &'static str {
+    pub fn what(&'static self) -> &'static str {
         self.what
     }
 
     #[inline(always)]
-    pub fn click(&self) {
+    pub fn click(&'static self) {
         self.count(1)
     }
 
     #[inline(always)]
-    pub fn count(&self, x: u64) {
+    pub fn count(&'static self, x: u64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
-            self.init.store(register_counter(self as *const Counter), Ordering::Relaxed);
+            self.init.store(register_counter(self), Ordering::Relaxed);
         }
         self.count.fetch_add(x, Ordering::Relaxed);
     }
 
     #[inline(always)]
-    pub fn read(&self) -> u64 {
+    pub fn read(&'static self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
 
-    pub fn mark_registered(&self) {
+    #[inline(always)]
+    pub fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }
 
-impl fmt::Debug for Counter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "counter({})", self.read())
+impl Eq for &'static Counter {
+}
+
+impl PartialEq for &'static Counter {
+    fn eq(&self, rhs: &&'static Counter) -> bool {
+        *self as *const Counter == *rhs as *const Counter
     }
+}
+
+impl std::hash::Hash for &'static Counter {
+    fn hash<H>(&self, state: &mut H)
+        where H: std::hash::Hasher
+        {
+            (*self as *const Counter).hash(state)
+        }
 }
 
 /////////////////////////////////////////////// Gauge //////////////////////////////////////////////
@@ -77,112 +89,162 @@ impl Gauge {
     }
 
     #[inline(always)]
-    pub fn what(&self) -> &'static str {
+    pub fn what(&'static self) -> &'static str {
         self.what
     }
 
     #[inline(always)]
-    pub fn set(&self, x: f64) {
+    pub fn set(&'static self, x: f64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
-            self.init.store(register_gauge(self as *const Gauge), Ordering::Relaxed);
+            self.init.store(register_gauge(self), Ordering::Relaxed);
         }
         self.value.store(x.to_bits(), Ordering::Relaxed);
     }
 
     #[inline(always)]
-    pub fn read(&self) -> f64 {
+    pub fn read(&'static self) -> f64 {
         let u = self.value.load(Ordering::Relaxed);
         f64::from_bits(u)
     }
 
-    pub fn mark_registered(&self) {
+    #[inline(always)]
+    pub fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
 }
 
-impl fmt::Debug for Gauge {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "gauge({})", self.read())
+impl Eq for &'static Gauge {
+}
+
+impl PartialEq for &'static Gauge {
+    fn eq(&self, rhs: &&'static Gauge) -> bool {
+        *self as *const Gauge == *rhs as *const Gauge
     }
+}
+
+impl std::hash::Hash for &'static Gauge {
+    fn hash<H>(&self, state: &mut H)
+        where H: std::hash::Hasher
+        {
+            (*self as *const Gauge).hash(state)
+        }
 }
 
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
 pub struct Moments {
     what: &'static str,
-    spin: AtomicBool,
+    value: Mutex<moments::Moments>,
     init: AtomicBool,
-    value: moments::Moments,
 }
 
 impl Moments {
     pub const fn new(what: &'static str) -> Self {
         Self {
             what,
-            spin: AtomicBool::new(false),
+            value: Mutex::new(moments::Moments::new()),
             init: AtomicBool::new(false),
-            value: moments::Moments::new(),
         }
     }
 
     #[inline(always)]
-    pub fn what(&self) -> &'static str {
+    pub fn what(&'static self) -> &'static str {
         self.what
     }
 
-    pub fn add(&self, x: f64) {
+    pub fn add(&'static self, x: f64) {
         if !self.init.load(Ordering::Relaxed) {
             // This can race.  That is OK.
-            self.init.store(register_moments(self as *const Moments), Ordering::Relaxed);
+            self.init.store(register_moments(self), Ordering::Relaxed);
         }
-        self.lock();
-        self.ptr().push(x);
-        self.unlock();
+        let mut value = self.value.lock().unwrap();
+        value.push(x);
     }
 
-    pub fn read(&self) -> moments::Moments {
-        self.lock();
-        let value = self.value.clone();
-        self.unlock();
-        value
+    pub fn read(&'static self) -> moments::Moments {
+        let value = self.value.lock().unwrap();
+        value.clone()
     }
 
-    pub fn mark_registered(&self) {
+    pub fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
-    }
-
-    #[inline(always)]
-    fn lock(&self) {
-        loop {
-            match self.spin.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
-                Ok(_) => { break; }
-                Err(_) => { std::hint::spin_loop(); }
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn ptr(&self) -> &mut moments::Moments {
-        unsafe {
-            let p = self as *const Self;
-            let p = p as *mut Self;
-            &mut (*p).value
-        }
-    }
-
-    #[inline(always)]
-    fn unlock(&self) {
-        self.spin.store(false, Ordering::Release);
     }
 }
 
-impl fmt::Debug for Moments {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let moments = self.read();
-        write!(f, "moments({}, {}, {}, {}, {})",
-            moments.n, moments.m1, moments.m2, moments.m3, moments.m4)
+impl Eq for &'static Moments {
+}
+
+impl PartialEq for &'static Moments {
+    fn eq(&self, rhs: &&'static Moments) -> bool {
+        *self as *const Moments == *rhs as *const Moments
     }
+}
+
+impl std::hash::Hash for &'static Moments {
+    fn hash<H>(&self, state: &mut H)
+        where H: std::hash::Hasher
+        {
+            (*self as *const Moments).hash(state)
+        }
+}
+
+////////////////////////////////////////////// TDigest /////////////////////////////////////////////
+
+pub struct TDigest {
+    what: &'static str,
+    value: Mutex<t_digest::TDigest>,
+    init: AtomicBool,
+}
+
+impl TDigest {
+    pub const fn new(what: &'static str, delta: u64) -> Self {
+        Self {
+            what,
+            init: AtomicBool::new(false),
+            value: Mutex::new(t_digest::TDigest::new(delta)),
+        }
+    }
+
+    #[inline(always)]
+    pub fn what(&'static self) -> &'static str {
+        self.what
+    }
+
+    pub fn add(&'static self, point: f64) {
+        if !self.init.load(Ordering::Relaxed) {
+            // This can race.  That is OK.
+            self.init.store(register_t_digest(self), Ordering::Relaxed);
+        }
+        let mut value = self.value.lock().unwrap();
+        value.add(point);
+    }
+
+    pub fn read(&'static self) -> t_digest::TDigest {
+        let value = self.value.lock().unwrap();
+        value.clone()
+    }
+
+    pub fn mark_registered(&'static self) {
+        self.init.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Eq for &'static TDigest {
+}
+
+impl PartialEq for &'static TDigest {
+    fn eq(&self, rhs: &&'static TDigest) -> bool {
+        *self as *const TDigest == *rhs as *const TDigest
+    }
+}
+
+impl std::hash::Hash for &'static TDigest {
+    fn hash<H>(&self, state: &mut H)
+        where H: std::hash::Hasher
+        {
+            (*self as *const TDigest).hash(state)
+        }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -200,20 +262,18 @@ mod tests {
 
     #[test]
     fn counter_may_be_static() {
-        static COUNTER: Counter = Counter::new("counter.may.be.static");
-        println!("{:?}", COUNTER);
+        static _COUNTER: Counter = Counter::new("counter.may.be.static");
+        _COUNTER.click();
     }
 
     #[test]
     fn gauge_may_be_static() {
-        static GAUGE: Gauge = Gauge::new("gauge.may.be.static");
-        println!("{:?}", GAUGE);
+        static _GAUGE: Gauge = Gauge::new("gauge.may.be.static");
     }
 
     #[test]
     fn sync_moments_may_be_static() {
-        static MOMENTS: Moments = Moments::new("sync.moments.may.be.static");
-        println!("{:?}", MOMENTS);
+        static _MOMENTS: Moments = Moments::new("sync.moments.may.be.static");
     }
 
     #[test]
@@ -224,5 +284,10 @@ mod tests {
         MOMENTS.add(10.0);
         assert_eq!(MOMENTS.read().n(), 3);
         assert_eq!(MOMENTS.read().mean(), 5.0);
+    }
+
+    #[test]
+    fn sync_t_digest_may_be_static() {
+        static _T_DIGEST: TDigest = TDigest::new("sync.moments.may.be.static", 1000);
     }
 }

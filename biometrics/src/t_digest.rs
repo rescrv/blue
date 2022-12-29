@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::sync::Mutex;
 
 ///////////////////////////////////////////// Centroid /////////////////////////////////////////////
 
@@ -33,19 +32,19 @@ impl PartialOrd for Centroid {
 
 ////////////////////////////////////////////// TDigest /////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TDigest {
     delta: u64,
-    centroids: Mutex<Vec<Centroid>>,
-    buffer: Mutex<Vec<f64>>,
+    centroids: Vec<Centroid>,
+    buffer: Vec<f64>,
 }
 
 impl TDigest {
-    pub fn new(delta: u64) -> Self {
+    pub const fn new(delta: u64) -> Self {
         Self {
             delta,
-            centroids: Mutex::new(Vec::new()),
-            buffer: Mutex::new(Vec::new()),
+            centroids: Vec::new(),
+            buffer: Vec::new(),
         }
     }
 
@@ -53,25 +52,20 @@ impl TDigest {
         let centroids = TDigest::centroids_from_points(points);
         Self {
             delta,
-            centroids: Mutex::new(centroids),
-            buffer: Mutex::new(Vec::new()),
+            centroids,
+            buffer: Vec::new(),
         }
     }
 
-    pub fn add(&self, point: f64) {
+    pub fn add(&mut self, point: f64) {
         let mut compact = Vec::new();
-        {
-            let mut buffer = self.buffer.lock().unwrap();
-            buffer.push(point);
-            if buffer.len() > self.delta as usize {
-                std::mem::swap(&mut compact, &mut buffer);
-            }
+        self.buffer.push(point);
+        if self.buffer.len() > self.delta as usize {
+            std::mem::swap(&mut compact, &mut self.buffer);
         }
         if compact.len() > 0 {
             let to_merge = TDigest::centroids_from_points(compact);
-            let mut our_centroids = self.centroids.lock().unwrap();
-            let our_centroids: &mut Vec<Centroid> = &mut our_centroids;
-            TDigest::merge_centroids(self.delta, our_centroids, &to_merge);
+            TDigest::merge_centroids(self.delta, &mut self.centroids, &to_merge);
         }
     }
 
