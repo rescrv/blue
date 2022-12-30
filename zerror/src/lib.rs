@@ -34,7 +34,7 @@ impl<E: Clone + Debug + Display> ZError<E> {
         Self {
             error,
             proto: proto,
-            human: "".to_owned(),
+            human: String::default(),
             source: None,
         }
         .with_backtrace()
