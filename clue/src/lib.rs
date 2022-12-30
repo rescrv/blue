@@ -15,9 +15,10 @@ use buffertk::stack_pack;
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldType, Tag};
 
-pub const TRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
+pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
 pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
+pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 5;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
@@ -33,22 +34,14 @@ pub struct Trace {
 }
 
 impl Trace {
-    pub fn new() -> Self {
+    pub fn new(label: &str) -> Self {
+        click!("clue.trace.instantiations");
         // If the id is None we won't record in the finish.
         // The start call will take care of sampling.
         let mut id = None;
         TRACER.with(|t| {
             id = t.borrow_mut().start();
         });
-        Self::from_id(id)
-    }
-
-    pub fn force() -> Self {
-        Self::from_id(TraceID::generate())
-    }
-
-    fn from_id(id: Option<TraceID>) -> Self {
-        click!("clue.trace.instantiations");
         let trace = Self {
             id: id.clone(),
             proto: Vec::new(),
@@ -56,9 +49,10 @@ impl Trace {
             stopwatch: None,
         };
         if let Some(trace_id) = id {
-            trace.with_context::<string>("trace_id", TRACE_FIELD_NUMBER, trace_id.human_readable())
+            trace.with_context::<stringref>("label", LABEL_FIELD_NUMBER, label)
+                .with_context::<string>("trace_id", TRACE_ID_FIELD_NUMBER, trace_id.human_readable())
         } else {
-            trace
+            trace.with_context::<stringref>("label", LABEL_FIELD_NUMBER, label)
         }
     }
 
@@ -236,7 +230,7 @@ mod tests {
     fn plaintext() {
         let emitter = PlainTextEmitter::new(std::io::stdout());
         register_emitter(emitter);
-        let trace = Trace::new()
+        let trace = Trace::new("test")
             .with_backtrace()
             .with_stopwatch()
             .with_context::<fixed64>("field_one", 1, 0x1eaff00dc0ffeeu64);
