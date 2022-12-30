@@ -4,10 +4,11 @@ use rand::{Rng, RngCore};
 
 use guacamole::Guacamole;
 
+use buffertk::Buffer;
+
 use armnod::ARMNOD;
 
 use lp::block::{Block, BlockBuilder, BlockCursor};
-use lp::buffer::Buffer;
 use lp::reference::ReferenceBuilder;
 use lp::sst::{SST, SSTBuilder, SSTCursor};
 use lp::{Builder, Cursor};

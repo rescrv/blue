@@ -5,13 +5,12 @@ extern crate prototk_derive;
 use std::cmp;
 use std::cmp::Ordering;
 
+use buffertk::Buffer;
+
 pub mod block;
-pub mod buffer;
 pub mod file_manager;
 pub mod reference;
 pub mod sst;
-
-pub use buffer::Buffer;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
