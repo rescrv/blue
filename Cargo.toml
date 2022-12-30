@@ -2,6 +2,7 @@
 members = [
     "armnod",
     "biometrics",
+    "bloom",
     "buffertk",
     "clue",
     "databuf",
