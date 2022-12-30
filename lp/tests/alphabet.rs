@@ -6,65 +6,72 @@ macro_rules! alphabet_tests {
     $(
         #[cfg(test)]
         mod $name {
-            use lp::{Cursor, KeyValuePair};
+            use lp::{Cursor, KeyValueRef};
 
             #[test]
             fn step_the_alphabet_forward() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_forward"));
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // C
-                let exp = KeyValuePair {
-                    key: "C".into(),
+                let exp = KeyValueRef {
+                    key: "C".as_bytes(),
                     timestamp: 0,
-                    value: Some("c".into()),
+                    value: Some("c".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // D-W
                 for _ in 0..20 {
-                    let _got = iter.next().unwrap().unwrap();
+                    iter.next().unwrap();
                 }
                 // X
-                let exp = KeyValuePair {
-                    key: "X".into(),
+                let exp = KeyValueRef {
+                    key: "X".as_bytes(),
                     timestamp: 0,
-                    value: Some("x".into()),
+                    value: Some("x".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Last
-                let got = iter.next().unwrap();
+                iter.next().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
             }
 
@@ -73,59 +80,66 @@ macro_rules! alphabet_tests {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_reverse"));
                 iter.seek_to_last().unwrap();
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // X
-                let exp = KeyValuePair {
-                    key: "X".into(),
+                let exp = KeyValueRef {
+                    key: "X".as_bytes(),
                     timestamp: 0,
-                    value: Some("x".into()),
+                    value: Some("x".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // W-D
                 for _ in 0..20 {
-                    let _got = iter.prev().unwrap().unwrap();
+                    iter.prev().unwrap();
                 }
                 // C
-                let exp = KeyValuePair {
-                    key: "C".into(),
+                let exp = KeyValueRef {
+                    key: "C".as_bytes(),
                     timestamp: 0,
-                    value: Some("c".into()),
+                    value: Some("c".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.prev().unwrap().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Last
-                let got = iter.prev().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
             }
 
@@ -134,12 +148,13 @@ macro_rules! alphabet_tests {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_at"));
                 iter.seek("@".as_bytes(), 0).unwrap();
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
             }
 
@@ -148,15 +163,17 @@ macro_rules! alphabet_tests {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_z"));
                 iter.seek("Z".as_bytes(), 0).unwrap();
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.next().unwrap().unwrap();
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
                 assert_eq!(exp, got);
                 // Last
-                let got = iter.next().unwrap();
+                iter.next().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
             }
 
@@ -164,53 +181,59 @@ macro_rules! alphabet_tests {
             fn two_steps_forward_one_step_reverse() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::two_steps_forward_one_step_reverse"));
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // C
-                let exp = KeyValuePair {
-                    key: "C".into(),
+                let exp = KeyValueRef {
+                    key: "C".as_bytes(),
                     timestamp: 0,
-                    value: Some("c".into()),
+                    value: Some("c".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // D-W
                 for _ in 0..21 {
                     iter.next().unwrap();
@@ -218,86 +241,98 @@ macro_rules! alphabet_tests {
                     iter.prev().unwrap();
                 }
                 // X
-                let exp = KeyValuePair {
-                    key: "X".into(),
+                let exp = KeyValueRef {
+                    key: "X".as_bytes(),
                     timestamp: 0,
-                    value: Some("x".into()),
+                    value: Some("x".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // X
-                let exp = KeyValuePair {
-                    key: "X".into(),
+                let exp = KeyValueRef {
+                    key: "X".as_bytes(),
                     timestamp: 0,
-                    value: Some("x".into()),
+                    value: Some("x".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Last
-                let got = iter.next().unwrap();
+                iter.next().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Last
-                let got = iter.next().unwrap();
+                iter.next().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // Last
-                let got = iter.next().unwrap();
+                iter.next().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
             }
 
             #[test]
@@ -305,53 +340,59 @@ macro_rules! alphabet_tests {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::two_steps_reverse_one_step_forward"));
                 iter.seek_to_last().unwrap();
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Z
-                let exp = KeyValuePair {
-                    key: "Z".into(),
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
                     timestamp: 0,
-                    value: Some("z".into()),
+                    value: Some("z".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // X
-                let exp = KeyValuePair {
-                    key: "X".into(),
+                let exp = KeyValueRef {
+                    key: "X".as_bytes(),
                     timestamp: 0,
-                    value: Some("x".into()),
+                    value: Some("x".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // Y
-                let exp = KeyValuePair {
-                    key: "Y".into(),
+                let exp = KeyValueRef {
+                    key: "Y".as_bytes(),
                     timestamp: 0,
-                    value: Some("y".into()),
+                    value: Some("y".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // W-D
                 for _ in 0..21 {
                     iter.prev().unwrap();
@@ -359,86 +400,98 @@ macro_rules! alphabet_tests {
                     iter.next().unwrap();
                 }
                 // C
-                let exp = KeyValuePair {
-                    key: "C".into(),
+                let exp = KeyValueRef {
+                    key: "C".as_bytes(),
                     timestamp: 0,
-                    value: Some("c".into()),
+                    value: Some("c".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // C
-                let exp = KeyValuePair {
-                    key: "C".into(),
+                let exp = KeyValueRef {
+                    key: "C".as_bytes(),
                     timestamp: 0,
-                    value: Some("c".into()),
+                    value: Some("c".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // B
-                let exp = KeyValuePair {
-                    key: "B".into(),
+                let exp = KeyValueRef {
+                    key: "B".as_bytes(),
                     timestamp: 0,
-                    value: Some("b".into()),
+                    value: Some("b".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.prev().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // First
-                let got = iter.prev().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
                 // First
-                let got = iter.prev().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // First
-                let got = iter.prev().unwrap();
+                iter.prev().unwrap();
+                let got = iter.value();
                 assert_eq!(None, got);
                 // A
-                let exp = KeyValuePair {
-                    key: "A".into(),
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
                     timestamp: 0,
-                    value: Some("a".into()),
+                    value: Some("a".as_bytes()),
                 };
-                let got = iter.next().unwrap();
-                assert_eq!(Some(exp), got);
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
             }
         }
     )*

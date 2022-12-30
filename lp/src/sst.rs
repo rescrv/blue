@@ -3,13 +3,12 @@ use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
 use buffertk::{stack_pack, Packable, Unpacker};
-use prototk::Message;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Builder, Cursor, Error, KeyValuePair,
+    minimal_successor_key, Builder, Cursor, Error, KeyValueRef,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -424,7 +423,8 @@ impl SSTCursor {
     }
 
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
-        let kvp = match self.meta_iter.prev()? {
+        self.meta_iter.prev()?;
+        let kvp = match self.meta_iter.value() {
             Some(kvp) => { kvp },
             None => {
                 self.seek_to_first()?;
@@ -435,7 +435,8 @@ impl SSTCursor {
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
-        let kvp = match self.meta_iter.next()? {
+        self.meta_iter.next()?;
+        let kvp = match self.meta_iter.value() {
             Some(kvp) => { kvp },
             None => {
                 self.seek_to_last()?;
@@ -445,8 +446,8 @@ impl SSTCursor {
         SSTCursor::metadata_from_kvp(kvp)
     }
 
-    fn metadata_from_kvp(kvp: KeyValuePair) -> Result<Option<BlockMetadata>, Error> {
-        let value = match kvp.value {
+    fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
+        let value = match kvr.value {
             Some(v) => { v },
             None => {
                 return Err(Error::Corruption {
@@ -454,7 +455,7 @@ impl SSTCursor {
                 });
             },
         };
-        let mut up = Unpacker::new(value.as_bytes());
+        let mut up = Unpacker::new(value);
         let metadata: BlockMetadata = up.unpack().map_err(|e| Error::UnpackError {
             error: e,
             context: "parsing block metadata".to_string(),
@@ -491,13 +492,12 @@ impl Cursor for SSTCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_prev()? {
                 Some(m) => { m },
                 None => {
-                    self.seek_to_first()?;
-                    return Ok(None);
+                    return self.seek_to_first();
                 },
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
@@ -507,8 +507,9 @@ impl Cursor for SSTCursor {
         }
         assert!(self.block_iter.is_some());
         let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        match block_iter.prev()? {
-            Some(kvp) => { Ok(Some(kvp)) },
+        block_iter.prev()?;
+        match block_iter.value() {
+            Some(_) => { Ok(()) },
             None => {
                 self.block_iter = None;
                 self.prev()
@@ -516,13 +517,12 @@ impl Cursor for SSTCursor {
         }
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn next(&mut self) -> Result<(), Error> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_next()? {
                 Some(m) => { m },
                 None => {
-                    self.seek_to_last()?;
-                    return Ok(None);
+                    return self.seek_to_last();
                 },
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
@@ -532,12 +532,20 @@ impl Cursor for SSTCursor {
         }
         assert!(self.block_iter.is_some());
         let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        match block_iter.next()? {
-            Some(kvp) => { Ok(Some(kvp)) },
+        block_iter.next()?;
+        match block_iter.value() {
+            Some(_) => { Ok(()) },
             None => {
                 self.block_iter = None;
                 self.next()
             }
+        }
+    }
+
+    fn value(&self) -> Option<KeyValueRef> {
+        match &self.block_iter {
+            Some(iter) => iter.value(),
+            None => None,
         }
     }
 }

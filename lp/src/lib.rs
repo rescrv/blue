@@ -105,37 +105,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyValuePair {
-    pub key: Buffer,
-    pub timestamp: u64,
-    pub value: Option<Buffer>,
-}
-
-impl Eq for KeyValuePair {}
-
-impl PartialEq for KeyValuePair {
-    fn eq(&self, rhs: &KeyValuePair) -> bool {
-        self.cmp(rhs) == std::cmp::Ordering::Equal
-    }
-}
-
-impl Ord for KeyValuePair {
-    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let key_lhs: &[u8] = self.key.as_bytes();
-        let key_rhs: &[u8] = rhs.key.as_bytes();
-        compare_key(key_lhs, self.timestamp, key_rhs, rhs.timestamp)
-    }
-}
-
-impl PartialOrd for KeyValuePair {
-    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
 #[derive(Clone, Debug)]
@@ -164,6 +133,129 @@ impl<'a> PartialOrd for KeyRef<'a> {
     }
 }
 
+impl<'a> From<&'a KeyValuePair> for KeyRef<'a> {
+    fn from(kvp: &'a KeyValuePair) -> KeyRef<'a> {
+        Self {
+            key: kvp.key.as_bytes(),
+            timestamp: kvp.timestamp,
+        }
+    }
+}
+
+impl<'a, 'b: 'a> From<&'a KeyValueRef<'b>> for KeyRef<'a> {
+    fn from(kvr: &'a KeyValueRef<'b>) -> KeyRef<'a> {
+        Self {
+            key: kvr.key,
+            timestamp: kvr.timestamp,
+        }
+    }
+}
+
+//////////////////////////////////////////// KeyValueRef ///////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct KeyValueRef<'a> {
+    pub key: &'a [u8],
+    pub timestamp: u64,
+    pub value: Option<&'a [u8]>,
+}
+
+impl<'a> Eq for KeyValueRef<'a> {}
+
+impl<'a> PartialEq for KeyValueRef<'a> {
+    fn eq(&self, rhs: &KeyValueRef) -> bool {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.eq(&rhs)
+    }
+}
+
+impl<'a> Ord for KeyValueRef<'a> {
+    fn cmp(&self, rhs: &KeyValueRef) -> std::cmp::Ordering {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.cmp(&rhs)
+    }
+}
+
+impl<'a> PartialOrd for KeyValueRef<'a> {
+    fn partial_cmp(&self, rhs: &KeyValueRef) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
+    fn from(kvp: &'a KeyValuePair) -> KeyValueRef<'a> {
+        Self {
+            key: kvp.key.as_bytes(),
+            timestamp: kvp.timestamp,
+            value: match &kvp.value {
+                Some(v) => Some(v.as_bytes()),
+                None => None,
+            }
+        }
+    }
+}
+
+/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct KeyValuePair {
+    pub key: Buffer,
+    pub timestamp: u64,
+    pub value: Option<Buffer>,
+}
+
+impl KeyValuePair {
+    pub fn from_key_value_ref<'a>(kvr: &KeyValueRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: match kvr.value {
+                Some(x) => Some(x.into()),
+                None => None,
+            },
+        }
+    }
+}
+
+impl Eq for KeyValuePair {}
+
+impl PartialEq for KeyValuePair {
+    fn eq(&self, rhs: &KeyValuePair) -> bool {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.eq(&rhs)
+    }
+}
+
+impl Ord for KeyValuePair {
+    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.cmp(&rhs)
+    }
+}
+
+impl PartialOrd for KeyValuePair {
+    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
+    fn from(kvr: KeyValueRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: match kvr.value {
+                Some(v) => Some(v.into()),
+                None => None,
+            },
+        }
+    }
+}
+
 ////////////////////////////////////////////// Builder /////////////////////////////////////////////
 
 pub trait Builder {
@@ -184,8 +276,9 @@ pub trait Cursor {
     fn seek_to_last(&mut self) -> Result<(), Error>;
     fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error>;
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error>;
+    fn prev(&mut self) -> Result<(), Error>;
+    fn next(&mut self) -> Result<(), Error>;
+    fn value(&self) -> Option<KeyValueRef>;
 }
 
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
@@ -272,21 +365,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn key_value_pair_ordering() {
-        let kvp1 = KeyValuePair {
-            key: "key1".into(),
+    fn key_ref_ordering() {
+        let kvp1 = KeyRef {
+            key: "key1".as_bytes(),
             timestamp: 42,
-            value: Some("value".into()),
         };
-        let kvp2 = KeyValuePair {
-            key: "key1".into(),
+        let kvp2 = KeyRef {
+            key: "key1".as_bytes(),
             timestamp: 84,
-            value: Some("value".into()),
         };
-        let kvp3 = KeyValuePair {
-            key: "key2".into(),
+        let kvp3 = KeyRef {
+            key: "key2".as_bytes(),
             timestamp: 99,
-            value: Some("value".into()),
         };
         assert!(kvp2 < kvp1);
         assert!(kvp3 > kvp2);

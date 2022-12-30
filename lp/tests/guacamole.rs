@@ -6,8 +6,6 @@ use guacamole::Guacamole;
 
 use buffertk::Buffer;
 
-use armnod::ARMNOD;
-
 use lp::block::{Block, BlockBuilder, BlockCursor};
 use lp::reference::ReferenceBuilder;
 use lp::sst::{SST, SSTBuilder, SSTCursor};
@@ -34,12 +32,6 @@ impl BufferGuacamole {
     }
 }
 
-/////////////////////////////////////////// KeyGuacamole ///////////////////////////////////////////
-
-pub struct KeyGuacamole {
-    pub key: ARMNOD,
-}
-
 //////////////////////////////////////// TimestampGuacamole ////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -55,7 +47,7 @@ impl TimestampGuacamole {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct KeyValuePut {
-    pub key: String,
+    pub key: Buffer,
     pub timestamp: u64,
     pub value: Buffer,
 }
@@ -63,7 +55,7 @@ pub struct KeyValuePut {
 /////////////////////////////////////// KeyValuePutGuacamole ///////////////////////////////////////
 
 pub struct KeyValuePutGuacamole {
-    pub key: KeyGuacamole,
+    pub key: BufferGuacamole,
     pub timestamp: TimestampGuacamole,
     pub value: BufferGuacamole,
 }
@@ -71,7 +63,7 @@ pub struct KeyValuePutGuacamole {
 impl KeyValuePutGuacamole {
     fn guacamole(&mut self, guac: &mut Guacamole) -> KeyValuePut {
         KeyValuePut {
-            key: self.key.key.choose(guac).unwrap(),
+            key: self.key.guacamole(guac),
             timestamp: self.timestamp.guacamole(guac),
             value: self.value.guacamole(guac),
         }
@@ -80,23 +72,23 @@ impl KeyValuePutGuacamole {
 
 //////////////////////////////////////////// KeyValueDel ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct KeyValueDel {
-    pub key: String,
+    pub key: Buffer,
     pub timestamp: u64,
 }
 
 /////////////////////////////////////// KeyValueDelGuacamole ///////////////////////////////////////
 
 pub struct KeyValueDelGuacamole {
-    pub key: KeyGuacamole,
+    pub key: BufferGuacamole,
     pub timestamp: TimestampGuacamole,
 }
 
 impl KeyValueDelGuacamole {
     fn guacamole(&mut self, guac: &mut Guacamole) -> KeyValueDel {
         KeyValueDel {
-            key: self.key.key.choose(guac).unwrap(),
+            key: self.key.guacamole(guac),
             timestamp: self.timestamp.guacamole(guac),
         }
     }
@@ -218,16 +210,12 @@ pub fn fuzzer<T, B, F>(
         weight_put: 0.99,
         weight_del: 0.01,
         guacamole_put: KeyValuePutGuacamole {
-            key: KeyGuacamole {
-                key: ARMNOD::random(config.key_bytes as u32),
-            },
+            key: BufferGuacamole::new(config.key_bytes),
             timestamp: TimestampGuacamole::default(),
             value: BufferGuacamole::new(config.value_bytes),
         },
         guacamole_del: KeyValueDelGuacamole {
-            key: KeyGuacamole {
-                key: ARMNOD::random(config.key_bytes as u32),
-            },
+            key: BufferGuacamole::new(config.key_bytes),
             timestamp: TimestampGuacamole::default(),
         },
     };
@@ -251,7 +239,8 @@ pub fn fuzzer<T, B, F>(
     let mut builder = new_table(name);
     let mut iter = kvs.iterate();
     loop {
-        let x = iter.next().unwrap();
+        iter.next().unwrap();
+        let x = iter.value();
         if x.is_none() {
             break;
         }
@@ -259,22 +248,20 @@ pub fn fuzzer<T, B, F>(
         match x.value {
             Some(ref v) => {
                 builder
-                    .put(x.key.as_bytes(), x.timestamp, v.as_bytes())
+                    .put(x.key, x.timestamp, v)
                     .unwrap();
             }
             None => {
-                builder.del(x.key.as_bytes(), x.timestamp).unwrap();
+                builder.del(x.key, x.timestamp).unwrap();
             }
         };
     }
     let table = builder.seal().unwrap();
     // Now seek randomly and compare the key-value store and the builder.
-    let mut key_gen = KeyGuacamole {
-        key: ARMNOD::random(config.key_bytes as u32),
-    };
+    let key_gen = BufferGuacamole::new(config.key_bytes);
     let ts_gen = TimestampGuacamole {};
     for _ in 0..config.num_seeks {
-        let key: String = key_gen.key.choose(&mut guac).unwrap();
+        let key: Buffer = key_gen.guacamole(&mut guac);
         let ts: u64 = ts_gen.guacamole(&mut guac);
         iter.seek(key.as_bytes(), ts).unwrap();
         let mut cursor = table.iterate();
@@ -282,12 +269,16 @@ pub fn fuzzer<T, B, F>(
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
             let (exp, got) = if will_do_prev {
-                let exp = iter.prev().unwrap();
-                let got = cursor.prev().unwrap();
+                iter.prev().unwrap();
+                cursor.prev().unwrap();
+                let exp = iter.value();
+                let got = cursor.value();
                 (exp, got)
             } else {
-                let exp = iter.next().unwrap();
-                let got = cursor.next().unwrap();
+                iter.next().unwrap();
+                cursor.next().unwrap();
+                let exp = iter.value();
+                let got = cursor.value();
                 (exp, got)
             };
             match (exp, got) {

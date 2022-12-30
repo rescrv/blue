@@ -8,7 +8,7 @@ use prototk_derive::Message;
 
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, Buffer, Builder, Cursor, Error,
-    KeyRef, KeyValuePair,
+    KeyRef, KeyValueRef,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -494,62 +494,6 @@ impl BlockCursor {
         self.key_ref()
     }
 
-    fn advance(&mut self) -> Result<(), Error> {
-        // We start with the first block.
-        if let CursorPosition::First = self.position {
-            self.seek_restart(0)?;
-            return Ok(());
-        }
-
-        // We always return None for the next of Last.
-        if let CursorPosition::Last = self.position {
-            return Ok(());
-        }
-
-        // Hit up against the end, make it a Last.
-        let offset = self.next_offset();
-        if offset >= self.block.restarts_boundary {
-            self.position = CursorPosition::Last;
-            return Ok(());
-        }
-
-        // We are jumping to the next block, so use seek_restart.
-        if self.restart_idx() + 1 < self.block.num_restarts
-            && self.block.restart_point(self.restart_idx() + 1) <= offset
-        {
-            self.seek_restart(self.restart_idx() + 1)?;
-            return Ok(())
-        }
-
-        // We are positioned.
-        if !self.position.is_positioned() {
-            return Err(Error::LogicError {
-                context: "next was not positioned, but made it to here.".to_string(),
-            });
-        }
-
-        // Extract the key from self.position.
-        let prev_key = match self.position {
-            CursorPosition::First => Vec::new(),
-            CursorPosition::Last => Vec::new(),
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset: _,
-                next_offset: _,
-                ref mut key,
-                timestamp: _,
-            } => {
-                let mut ret = Vec::new();
-                std::mem::swap(&mut ret, key);
-                ret
-            }
-        };
-
-        // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
-        Ok(())
-    }
-
     fn key_ref(&self) -> Result<Option<KeyRef>, Error> {
         match &self.position {
             CursorPosition::First => Ok(None),
@@ -564,37 +508,6 @@ impl BlockCursor {
                 Ok(Some(KeyRef {
                     key: key,
                     timestamp: *timestamp,
-                }))
-            },
-        }
-    }
-
-    // Return the key-value pair associated with the current position.
-    fn key_value_pair(&self) -> Result<Option<KeyValuePair>, Error> {
-        match &self.position {
-            CursorPosition::First => Ok(None),
-            CursorPosition::Last => Ok(None),
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset,
-                next_offset: _,
-                key,
-                timestamp,
-            } => {
-                // Parse the value from the block entry.
-                let bytes = self.block.bytes.as_bytes();
-                let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
-                let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
-                    error: e,
-                    context: format!("could not unpack key-value pair at offset={}", offset),
-                })?;
-                Ok(Some(KeyValuePair {
-                    key: key.into(),
-                    timestamp: *timestamp,
-                    value: match be.value() {
-                        Some(v) => Some(v.into()),
-                        None => None,
-                    },
                 }))
             },
         }
@@ -718,8 +631,7 @@ impl Cursor for BlockCursor {
         let mut kref = Some(kref);
         while let Some(x) = kref {
             if compare_key(key, timestamp, x.key, x.timestamp).is_gt() {
-                // TODO(rescrv): use advance() and key_ref().
-                self.advance()?;
+                self.next()?;
                 kref = self.key_ref()?;
             } else {
                 break;
@@ -746,11 +658,11 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         // We won't go past here.
         let target_next_offset = match self.position {
             CursorPosition::First => {
-                return Ok(None);
+                return Ok(());
             }
             CursorPosition::Last => self.block.restarts_boundary,
             CursorPosition::Positioned {
@@ -765,7 +677,7 @@ impl Cursor for BlockCursor {
         // Boundary condition
         if target_next_offset <= 0 {
             self.position = CursorPosition::First;
-            return Ok(None);
+            return Ok(());
         }
 
         // Step to the correct restart point.  If this is the first value in a restart point, set
@@ -787,16 +699,91 @@ impl Cursor for BlockCursor {
         // Seek and scan.
         self.seek_restart(restart_idx)?;
         while self.next_offset() < target_next_offset {
-            self.advance()?;
+            self.next()?;
         }
-        // Return the kvp for this offset.
-        self.key_value_pair()
+        Ok(())
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
-        self.advance()?;
-        // Return the kvp for this offset.
-        self.key_value_pair()
+    fn next(&mut self) -> Result<(), Error> {
+        // We start with the first block.
+        if let CursorPosition::First = self.position {
+            self.seek_restart(0)?;
+            return Ok(());
+        }
+
+        // We always return None for the next of Last.
+        if let CursorPosition::Last = self.position {
+            return Ok(());
+        }
+
+        // Hit up against the end, make it a Last.
+        let offset = self.next_offset();
+        if offset >= self.block.restarts_boundary {
+            self.position = CursorPosition::Last;
+            return Ok(());
+        }
+
+        // We are jumping to the next block, so use seek_restart.
+        if self.restart_idx() + 1 < self.block.num_restarts
+            && self.block.restart_point(self.restart_idx() + 1) <= offset
+        {
+            self.seek_restart(self.restart_idx() + 1)?;
+            return Ok(());
+        }
+
+        // We are positioned.
+        if !self.position.is_positioned() {
+            return Err(Error::LogicError {
+                context: "next was not positioned, but made it to here.".to_string(),
+            });
+        }
+
+        // Extract the key from self.position.
+        let prev_key = match self.position {
+            CursorPosition::First => Vec::new(),
+            CursorPosition::Last => Vec::new(),
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset: _,
+                ref mut key,
+                timestamp: _,
+            } => {
+                let mut ret = Vec::new();
+                std::mem::swap(&mut ret, key);
+                ret
+            }
+        };
+
+        // Setup the position correctly and return what we see.
+        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
+        Ok(())
+    }
+
+    fn value(&self) -> Option<KeyValueRef> {
+        match &self.position {
+            CursorPosition::First => None,
+            CursorPosition::Last => None,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset,
+                next_offset: _,
+                key,
+                timestamp,
+            } => {
+                // Parse the value from the block entry.
+                let bytes = self.block.bytes.as_bytes();
+                let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
+                let be: BlockEntry = up.unpack().expect("already parsed this block with extract_key; corruption");
+                Some(KeyValueRef {
+                    key: &key,
+                    timestamp: *timestamp,
+                    value: be.value(),
+                })
+            },
+        }
+
+
     }
 }
 
@@ -965,8 +952,9 @@ mod tests {
         let target = "jqCIzIbU";
         cursor.seek(target.as_bytes(), u64::max_value()).unwrap();
         let key: Buffer = key.into();
-        let kvp = cursor.next().unwrap().unwrap();
-        assert_eq!(key.as_bytes(), kvp.key.as_bytes());
+        cursor.next().unwrap();
+        let kvp = cursor.value().unwrap();
+        assert_eq!(key.as_bytes(), kvp.key);
         assert_eq!(timestamp, kvp.timestamp);
     }
 
@@ -1054,6 +1042,7 @@ mod tests {
 
 #[cfg(test)]
 mod guacamole {
+    use super::super::KeyValueRef;
     use super::*;
 
     #[test]
@@ -1118,7 +1107,8 @@ mod guacamole {
                 panic!("cursor should seek to the end: {:?}", cursor.position)
             }
         };
-        let got = cursor.next().unwrap();
+        cursor.next().unwrap();
+        let got = cursor.value();
         assert_eq!(None, got);
     }
 
@@ -1203,11 +1193,12 @@ mod guacamole {
         let mut cursor = block.iterate();
         cursor.seek("d".as_bytes(), u64::max_value()).unwrap();
         // Next to g
-        let got = cursor.next().unwrap().unwrap();
-        assert_eq!(<&str as Into<Buffer>>::into("g"), got.key);
+        cursor.next().unwrap();
+        let got = cursor.value().unwrap();
+        assert_eq!("g".as_bytes(), got.key);
         assert_eq!(10374159306796994843, got.timestamp);
         assert_eq!(
-            Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".into()),
+            Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes()),
             got.value
         );
         assert_eq!(
@@ -1221,8 +1212,9 @@ mod guacamole {
             cursor.position
         );
         // Next to k
-        let got = cursor.next().unwrap().unwrap();
-        assert_eq!(<&str as Into<Buffer>>::into("k"), got.key);
+        cursor.next().unwrap();
+        let got = cursor.value().unwrap();
+        assert_eq!("k".as_bytes(), got.key);
         assert_eq!(4092481979873166344, got.timestamp);
         assert_eq!(
             CursorPosition::Positioned {
@@ -1235,17 +1227,18 @@ mod guacamole {
             cursor.position
         );
         // Next to t
-        let got = cursor.next().unwrap().unwrap();
-        let exp = KeyValuePair {
-            key: "t".into(),
+        cursor.next().unwrap();
+        let got = cursor.value().unwrap();
+        let exp = KeyValueRef {
+            key: "t".as_bytes(),
             timestamp: 7790837488841419319,
-            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
         };
         assert_eq!(exp, got);
-        assert_eq!(<&str as Into<Buffer>>::into("t"), got.key);
+        assert_eq!("t".as_bytes(), got.key);
         assert_eq!(7790837488841419319, got.timestamp);
         assert_eq!(
-            Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
+            Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
             got.value
         );
         assert_eq!(
@@ -1340,15 +1333,16 @@ mod guacamole {
         // Top of loop seeks to: Key { key: "d" }
         let mut cursor = block.iterate();
         cursor.seek("d".as_bytes(), u64::max_value()).unwrap();
-        let _got = cursor.next().unwrap();
-        let _got = cursor.next().unwrap();
-        let got = cursor.next().unwrap();
-        let exp = KeyValuePair {
-            key: "t".into(),
+        cursor.next().unwrap();
+        cursor.next().unwrap();
+        cursor.next().unwrap();
+        let got = cursor.value().unwrap();
+        let exp = KeyValueRef {
+            key: "t".as_bytes(),
             timestamp: 7790837488841419319,
-            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".into()),
+            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
         };
-        assert_eq!(Some(exp), got);
+        assert_eq!(exp, got);
     }
 
     #[test]
@@ -1747,15 +1741,16 @@ mod guacamole {
         // Top of loop seeks to: Key { key: "6" }
         let mut cursor = block.iterate();
         cursor.seek("6".as_bytes(), u64::max_value()).unwrap();
-        let _got = cursor.next().unwrap();
-        let _got = cursor.next().unwrap();
-        let got = cursor.next().unwrap();
-        let exp = KeyValuePair {
-            key: "8".into(),
+        cursor.next().unwrap();
+        cursor.next().unwrap();
+        cursor.next().unwrap();
+        let got = cursor.value().unwrap();
+        let exp = KeyValueRef {
+            key: "8".as_bytes(),
             timestamp: 13191224295862555992,
-            value: Some("".into()),
+            value: Some("".as_bytes()),
         };
-        assert_eq!(Some(exp), got);
+        assert_eq!(exp, got);
     }
 
     #[test]
@@ -1807,12 +1802,13 @@ mod guacamole {
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
-        let got = cursor.prev().unwrap();
-        let exp = KeyValuePair {
-            key: "E".into(),
+        cursor.prev().unwrap();
+        let got = cursor.value().unwrap();
+        let exp = KeyValueRef {
+            key: "E".as_bytes(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
+            value: Some("".as_bytes()),
         };
-        assert_eq!(Some(exp), got);
+        assert_eq!(exp, got);
     }
 }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use super::{check_key_len, check_table_size, check_value_len, Cursor, Error, KeyValuePair};
+use super::{check_key_len, check_table_size, check_value_len, Cursor, Error, KeyValuePair, KeyValueRef};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
@@ -104,33 +104,40 @@ impl Cursor for ReferenceCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         self.index = if self.returned {
             self.index - 1
         } else {
             self.index - 1
         };
         if self.index < 0 {
-            self.seek_to_first()?;
-            Ok(None)
+            self.seek_to_first()
         } else {
             self.returned = true;
-            Ok(Some(self.entries[self.index as usize].clone()))
+            Ok(())
         }
     }
 
-    fn next(&mut self) -> Result<Option<KeyValuePair>, Error> {
+    fn next(&mut self) -> Result<(), Error> {
         self.index = if self.returned {
             self.index + 1
         } else {
             self.index
         };
         if self.index as usize >= self.entries.len() {
-            self.seek_to_last()?;
-            Ok(None)
+            self.seek_to_last()
         } else {
             self.returned = true;
-            Ok(Some(self.entries[self.index as usize].clone()))
+            Ok(())
+        }
+    }
+
+    fn value(&self) -> Option<KeyValueRef> {
+        if self.index < 0 || self.index as usize >= self.entries.len() {
+            None
+        } else {
+            let kvp = &self.entries[self.index as usize];
+            Some(KeyValueRef::from(kvp))
         }
     }
 }
@@ -143,7 +150,8 @@ mod tables {
     fn empty() {
         let table = ReferenceBuilder::default().seal().unwrap();
         let mut iter = table.iterate();
-        let got = iter.next().unwrap();
+        iter.next().unwrap();
+        let got = iter.value();
         assert_eq!(None, got);
     }
 }
@@ -187,29 +195,32 @@ mod guacamole {
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
-        let got = cursor.prev().unwrap();
-        let exp = KeyValuePair {
-            key: "E".into(),
+        cursor.prev().unwrap();
+        let got = cursor.value();
+        let exp = KeyValueRef {
+            key: "E".as_bytes(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
+            value: Some("".as_bytes()),
         };
         assert_eq!(Some(exp), got);
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
         cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
-        let got = cursor.next().unwrap();
-        let exp = KeyValuePair {
-            key: "I".into(),
+        cursor.next().unwrap();
+        let got = cursor.value();
+        let exp = KeyValueRef {
+            key: "I".as_bytes(),
             timestamp: 3844377046565620216,
-            value: Some("".into()),
+            value: Some("".as_bytes()),
         };
         assert_eq!(Some(exp), got);
         // Prev will move to E.
-        let got = cursor.prev().unwrap();
-        let exp = KeyValuePair {
-            key: "E".into(),
+        cursor.prev().unwrap();
+        let got = cursor.value();
+        let exp = KeyValueRef {
+            key: "E".as_bytes(),
             timestamp: 17563921251225492277,
-            value: Some("".into()),
+            value: Some("".as_bytes()),
         };
         assert_eq!(Some(exp), got);
     }
