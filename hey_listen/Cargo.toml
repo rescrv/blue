@@ -9,6 +9,6 @@ edition = "2021"
 rand = "0.7"
 
 biometrics = { path = "../biometrics" }
-
+clue = { path = "../clue" }
+id = { path = "../id" }
 prototk = { path = "../prototk" }
-prototk_derive = { path = "../prototk_derive" }
