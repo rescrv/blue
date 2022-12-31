@@ -67,10 +67,12 @@ fn hash_to_state(hash: &[u8; SETSUM_BYTES]) -> [u32; SETSUM_COLUMNS] {
     item_state
 }
 
-/// Translate a single item into the internal representation of a setsum.
-fn item_to_state(item: &[u8]) -> [u32; SETSUM_COLUMNS] {
+/// Translate an item comprised of multiple vectors to a setsum.
+fn item_vectored_to_state(item: &[&[u8]]) -> [u32; SETSUM_COLUMNS] {
     let mut hasher = Sha256::default();
-    hasher.update(item);
+    for piece in item {
+        hasher.update(piece);
+    }
     let mut hash_bytes = hasher.finalize();
     let hash_bytes: &mut [u8; SETSUM_BYTES] = hash_bytes.as_mut();
     hash_to_state(hash_bytes)
@@ -88,7 +90,13 @@ impl Setsum {
     /// Inserts a new item into the multi-set.  If the item was already inserted, it will be
     /// inserted again.
     pub fn insert(&mut self, item: &[u8]) {
-        let item_state = item_to_state(item);
+        let item: &[&[u8]] = &[item];
+        self.insert_vectored(item);
+    }
+
+    /// Vectored version of insert.
+    pub fn insert_vectored(&mut self, item: &[&[u8]]) {
+        let item_state = item_vectored_to_state(item);
         self.state = add_state(self.state, item_state);
     }
 
@@ -97,7 +105,13 @@ impl Setsum {
     /// one insert of the item.  Multiple placeholders can accrue and all will be removed before the
     /// set matches a set in which the item was inserted.
     pub fn remove(&mut self, item: &[u8]) {
-        let item_state = item_to_state(item);
+        let item: &[&[u8]] = &[item];
+        self.remove_vectored(item);
+    }
+
+    /// Vectored version of remove.
+    pub fn remove_vectored(&mut self, item: &[&[u8]]) {
+        let item_state = item_vectored_to_state(item);
         let item_state = invert_state(item_state);
         self.state = add_state(self.state, item_state);
     }
@@ -223,7 +237,7 @@ mod tests {
             0x42c4b0e3, 0x141cfc98, 0xc8f4fb9a, 0x24b96f99, 0xe441ae27, 0x4c939b64, 0x1b9995a4,
             0x55b85278,
         ];
-        let returned: [u32; SETSUM_COLUMNS] = item_to_state(&[]);
+        let returned: [u32; SETSUM_COLUMNS] = item_vectored_to_state(&[]);
         assert_eq!(expected, returned)
     }
 
