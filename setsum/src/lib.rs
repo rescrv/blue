@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 
 /// The number of bytes in the digest of both the hash used by setsum and the output
 /// of setsum.
-const SETSUM_BYTES: usize = 32;
+pub const SETSUM_BYTES: usize = 32;
 /// The number of bytes per column.  This should evenly divide the number of bytes.  This number is
 /// implicitly wound through the code in its use of u32 to store columns as it's the number of bytes
 /// used to store a u32.
