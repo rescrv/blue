@@ -319,3 +319,37 @@ fn string_in_struct() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
+
+///////////////////////////////////////////// 32 bytes /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, PartialEq)]
+struct Bytes32 {
+    #[prototk(11, bytes32)]
+    buffer: [u8; 32],
+}
+
+#[test]
+fn bytes32() {
+    let b32 = Bytes32 {
+        buffer: [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ],
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&b32).to_vec();
+    let exp: &[u8] = &[
+        90, 32, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+        23, 24, 25, 26, 27, 28, 29, 30, 31,
+    ];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(b32, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}

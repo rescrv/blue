@@ -810,6 +810,77 @@ impl<'a> From<&'a &'a [u8]> for bytes<'a> {
     }
 }
 
+/////////////////////////////////////////////// bytes //////////////////////////////////////////////
+
+pub struct bytes32([u8; 32]);
+
+impl<'a> FieldType<'a> for bytes32 {
+    const WIRE_TYPE: WireType = WireType::LengthDelimited;
+    const LENGTH_PREFIXED: bool = true;
+
+    type NativeType = [u8; 32];
+
+    fn into_native(self) -> Self::NativeType {
+        self.0
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl Packable for bytes32 {
+    fn pack_sz(&self) -> usize {
+        let b: &[u8] = &self.0;
+        b.pack_sz()
+    }
+
+    fn pack<'b>(&self, buf: &'b mut [u8]) {
+        let b: &[u8] = &self.0;
+        b.pack(buf)
+    }
+}
+
+impl<'a> Unpackable<'a> for bytes32 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let mut up = Unpacker::new(buf);
+        let v: v64 = up.unpack()?;
+        let v: usize = v.into();
+        let rem = up.remain();
+        if rem.len() < v {
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
+        }
+        if v < 32 {
+            return Err(Error::BufferTooShort {
+                required: 32,
+                had: v.into(),
+            });
+        }
+        let mut ret = [0u8; 32];
+        for i in 0..32 {
+            ret[i] = rem[i];
+        }
+        Ok((Self(ret), &rem[v..]))
+    }
+}
+
+impl From<[u8; 32]> for bytes32 {
+    fn from(x: [u8; 32]) -> Self {
+        Self(x)
+    }
+}
+
+impl From<&[u8; 32]> for bytes32 {
+    fn from(x: &[u8; 32]) -> Self {
+        Self(x.clone())
+    }
+}
+
 ///////////////////////////////////////////// string ////////////////////////////////////////////
 
 pub struct string {

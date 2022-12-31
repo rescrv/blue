@@ -277,6 +277,7 @@ impl FieldTypePackable for u32 {}
 impl FieldTypePackable for u64 {}
 impl FieldTypePackable for f32 {}
 impl FieldTypePackable for f64 {}
+impl<'a> FieldTypePackable for [u8; 32] {}
 impl<'a> FieldTypePackable for &'a [u8] {}
 impl<'a> FieldTypePackable for &'a str {}
 impl<'a> FieldTypePackable for String {}
@@ -403,6 +404,14 @@ impl FieldTypeAssigner for f64 {
     type NativeType = f64;
 
     fn assign_field_type(&mut self, x: f64) {
+        *self = x;
+    }
+}
+
+impl<'a> FieldTypeAssigner for [u8; 32] {
+    type NativeType = [u8; 32];
+
+    fn assign_field_type(&mut self, x: [u8; 32]) {
         *self = x;
     }
 }
