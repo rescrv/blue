@@ -9,6 +9,7 @@ use buffertk::Buffer;
 
 pub mod block;
 pub mod file_manager;
+pub mod merging_cursor;
 pub mod reference;
 pub mod sst;
 

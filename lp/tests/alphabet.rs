@@ -11,6 +11,8 @@ macro_rules! alphabet_tests {
             #[test]
             fn step_the_alphabet_forward() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_forward"));
+                iter.seek_to_first().unwrap();
+                assert_eq!(None, iter.value());
                 // A
                 let exp = KeyValueRef {
                     key: "A".as_bytes(),
@@ -79,6 +81,7 @@ macro_rules! alphabet_tests {
             fn step_the_alphabet_reverse() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_reverse"));
                 iter.seek_to_last().unwrap();
+                assert_eq!(None, iter.value());
                 // Z
                 let exp = KeyValueRef {
                     key: "Z".as_bytes(),
@@ -141,6 +144,38 @@ macro_rules! alphabet_tests {
                 iter.prev().unwrap();
                 let got = iter.value();
                 assert_eq!(None, got);
+            }
+
+            #[test]
+            fn seek_to_first() {
+                let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_first"));
+                iter.seek_to_first().unwrap();
+                assert_eq!(None, iter.value());
+                // A
+                let exp = KeyValueRef {
+                    key: "A".as_bytes(),
+                    timestamp: 0,
+                    value: Some("a".as_bytes()),
+                };
+                iter.next().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
+            }
+
+            #[test]
+            fn seek_to_last() {
+                let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_last"));
+                iter.seek_to_last().unwrap();
+                assert_eq!(None, iter.value());
+                // Z
+                let exp = KeyValueRef {
+                    key: "Z".as_bytes(),
+                    timestamp: 0,
+                    value: Some("z".as_bytes()),
+                };
+                iter.prev().unwrap();
+                let got = iter.value().unwrap();
+                assert_eq!(exp, got);
             }
 
             #[test]
