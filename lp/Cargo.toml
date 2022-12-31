@@ -16,3 +16,4 @@ buffertk = { path = "../buffertk" }
 guacamole = { path = "../guacamole" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
+setsum = { path = "../setsum" }

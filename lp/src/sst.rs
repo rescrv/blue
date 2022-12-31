@@ -6,6 +6,8 @@ use crc32c;
 
 use buffertk::{stack_pack, Packable, Unpacker};
 
+use setsum::Setsum;
+
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
@@ -81,12 +83,15 @@ struct FinalBlock {
     index_block: BlockMetadata,
     // #[prototk(17, message)]
     // filter_block: BlockMetadata,
+    #[prototk(19, bytes32)]
+    setsum: [u8; 32],
+    // NOTE(rescrv): If adding a field, update the constant for max size.
+    // This must be the final field of the struct.
     #[prototk(18, fixed64)]
     final_block_offset: u64,
-    // NOTE(rescrv): If adding a field, update the constant for max size.
 }
 
-const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8;
+const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8 + 2 + setsum::SETSUM_BYTES;
 
 //////////////////////////////////////////////// SST ///////////////////////////////////////////////
 
@@ -254,6 +259,8 @@ pub struct SSTBuilder {
     // The index that trails the file.  Written on seal.
     bytes_written: usize,
     index_block: BlockBuilder,
+    // The checksum of the file.
+    setsum: Setsum,
     // Output information.
     output: File,
     path: PathBuf,
@@ -273,6 +280,7 @@ impl SSTBuilder {
             block_start_offset: 0,
             bytes_written: 0,
             index_block: BlockBuilder::new(BlockBuilderOptions::default()),
+            setsum: Setsum::default(),
             output,
             path,
         })
@@ -374,6 +382,7 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.put(key, timestamp, value)?;
+        self.setsum.insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
         self.assign_last_key(key, timestamp);
         Ok(())
     }
@@ -384,6 +393,7 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.del(key, timestamp)?;
+        self.setsum.insert_vectored(&[&[9], key, &timestamp.to_le_bytes(), &[]]);
         self.assign_last_key(key, timestamp);
         Ok(())
     }
@@ -412,6 +422,7 @@ impl Builder for SSTBuilder {
                 crc32c,
             },
             final_block_offset: builder.bytes_written as u64,
+            setsum: builder.setsum.digest(),
         };
         let pa = stack_pack(final_block);
         builder.bytes_written += pa.stream(&mut builder.output)?;
