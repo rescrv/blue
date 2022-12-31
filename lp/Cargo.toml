@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 clap = "2.33"
+crc32c = "0.6"
 rand = "0.7"
 
 armnod = { path = "../armnod" }

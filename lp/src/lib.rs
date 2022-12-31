@@ -85,6 +85,11 @@ pub enum Error {
         error: prototk::Error,
         context: String,
     },
+    CRC32CFailure {
+        start: u64,
+        limit: u64,
+        crc32c: u32,
+    },
     Corruption {
         context: String,
     },
@@ -540,6 +545,57 @@ mod tests {
             let exp: &[u8] = &[0xff, 0xff, 0xff];
             assert_eq!(exp, &key);
             assert_eq!(6, timestamp);
+        }
+    }
+
+    mod crc32c {
+        // Tests of crc32c borrowed from the LevelDB library.  Used to track upstream.
+        //
+        // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+        // Use of this source code is governed by a BSD-style license that can be
+        // found in the LICENSE file. See the AUTHORS file for names of contributors.
+
+
+        #[test]
+        fn standard_results() {
+            // Test copied directly from LevelDB.
+            // From rfc3720 section B.4.
+
+            let buf: [u8; 32] = [0u8; 32];
+            assert_eq!(0x8a9136aa, crc32c::crc32c(&buf));
+
+            let buf: [u8; 32] = [0xffu8; 32];
+            assert_eq!(0x62a8ab43, crc32c::crc32c(&buf));
+
+            let mut buf: [u8; 32] = [0; 32];
+            for i in 0..32 {
+                buf[i] = i as u8;
+            }
+            assert_eq!(0x46dd794e, crc32c::crc32c(&buf));
+
+            for i in 0..32 {
+                buf[i] = 31 - i as u8;
+            }
+            assert_eq!(0x113fdb5c, crc32c::crc32c(&buf));
+
+            let data: [u8; 48] = [
+                0x01, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x14,
+                0x00, 0x00, 0x00, 0x18, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ];
+            assert_eq!(0xd9963a56, crc32c::crc32c(&data));
+        }
+
+        #[test]
+        fn values() {
+            assert_ne!(crc32c::crc32c("a".as_bytes()), crc32c::crc32c("foo".as_bytes()));
+        }
+
+        #[test]
+        fn extends() {
+            assert_eq!(crc32c::crc32c("hello world".as_bytes()),
+                crc32c::crc32c_append(crc32c::crc32c("hello ".as_bytes()), "world".as_bytes()));
         }
     }
 }

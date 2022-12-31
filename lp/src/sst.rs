@@ -2,6 +2,8 @@ use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
+use crc32c;
+
 use buffertk::{stack_pack, Packable, Unpacker};
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
@@ -16,18 +18,29 @@ use super::{
 #[derive(Clone, Debug, Message)]
 enum SSTEntry<'a> {
     #[prototk(10, bytes)]
-    NOP(&'a [u8]),
-    #[prototk(11, bytes)]
     PlainBlock(&'a [u8]),
-    // #[prototk(12, bytes)]
+    // #[prototk(11, bytes)]
     // ZstdBlock(&'a [u8]),
-    #[prototk(13, bytes)]
+    #[prototk(12, bytes)]
     FinalBlock(&'a [u8]),
+}
+
+impl<'a> SSTEntry<'a> {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            SSTEntry::PlainBlock(x) => x,
+            SSTEntry::FinalBlock(x) => x,
+        }
+    }
+
+    fn crc32c(&self) -> u32 {
+        crc32c::crc32c(self.bytes())
+    }
 }
 
 impl<'a> Default for SSTEntry<'a> {
     fn default() -> Self {
-        Self::NOP(&[])
+        Self::PlainBlock(&[])
     }
 }
 
@@ -35,14 +48,16 @@ impl<'a> Default for SSTEntry<'a> {
 
 #[derive(Clone, Debug, Default, Message)]
 struct BlockMetadata {
-    #[prototk(14, uint64)]
+    #[prototk(13, uint64)]
     start: u64,
-    #[prototk(15, uint64)]
+    #[prototk(14, uint64)]
     limit: u64,
+    #[prototk(15, fixed32)]
+    crc32c: u32,
     // NOTE(rescrv): If adding a field, update the constant for max size.
 }
 
-const BLOCK_METADATA_MAX_SZ: usize = 22;
+const BLOCK_METADATA_MAX_SZ: usize = 27;
 
 impl BlockMetadata {
     fn sanity_check(&self) -> Result<(), Error> {
@@ -146,12 +161,14 @@ impl SST {
             error: e,
             context: "parsing table entry".to_string(),
         })?;
+        if table_entry.crc32c() != block_metadata.crc32c {
+            return Err(Error::CRC32CFailure {
+                start: block_metadata.start,
+                limit: block_metadata.limit,
+                crc32c: block_metadata.crc32c,
+            });
+        }
         match table_entry {
-            SSTEntry::NOP(_) => {
-                Err(Error::Corruption {
-                    context: "file has a NOP block".to_string(),
-                })
-            },
             SSTEntry::PlainBlock(bytes) => {
                 Ok(Block::new(bytes.into())?)
             },
@@ -305,6 +322,7 @@ impl SSTBuilder {
         let bytes = block.as_bytes();
         let mut scratch = Vec::new();
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
+        block_metadata.crc32c = entry.crc32c();
         let pa = stack_pack(entry);
         self.bytes_written += pa.stream(&mut self.output)?;
         // Prepare the block metadata.
@@ -382,6 +400,7 @@ impl Builder for SSTBuilder {
         let index_block_start = builder.bytes_written;
         let bytes = index_block.as_bytes();
         let entry = SSTEntry::PlainBlock(bytes);
+        let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
         builder.bytes_written += pa.stream(&mut builder.output)?;
         let index_block_limit = builder.bytes_written;
@@ -390,6 +409,7 @@ impl Builder for SSTBuilder {
             index_block: BlockMetadata {
                 start: index_block_start as u64,
                 limit: index_block_limit as u64,
+                crc32c,
             },
             final_block_offset: builder.bytes_written as u64,
         };
