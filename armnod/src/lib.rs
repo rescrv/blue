@@ -173,6 +173,7 @@ pub const CHAR_SET_DEFAULT: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR
 
 pub trait CharacterChooser {
     fn which_char(&mut self, guac: &mut Guacamole) -> char;
+    fn whole_string(&mut self, bytes: &mut [u8]) -> String;
 }
 
 ////////////////////////////////////////// CharSetChooser //////////////////////////////////////////
@@ -206,6 +207,14 @@ impl CharacterChooser for CharSetChooser {
         guac.fill_bytes(&mut byte);
         self.chars[byte[0] as usize]
     }
+
+    fn whole_string(&mut self, bytes: &mut [u8]) -> String {
+        let mut string = String::with_capacity(bytes.len());
+        for i in 0..bytes.len() {
+            string.push(self.chars[bytes[i] as usize]);
+        }
+        string
+    }
 }
 
 ////////////////////////////////////////////// ARMNOD //////////////////////////////////////////////
@@ -215,6 +224,7 @@ pub struct ARMNOD {
     pub string: Box<dyn SeedChooser>,
     pub length: Box<dyn LengthChooser>,
     pub characters: Box<dyn CharacterChooser>,
+    pub buffer: Vec<u8>,
 }
 
 impl ARMNOD {
@@ -226,6 +236,7 @@ impl ARMNOD {
             string,
             length,
             characters,
+            buffer: Vec::new(),
         }
     }
 
@@ -239,10 +250,9 @@ impl ARMNOD {
 
     fn choose_seeded(&mut self, guac: &mut Guacamole) -> Option<String> {
         let length = self.length.how_long(guac) as usize;
-        let mut string = String::with_capacity(length);
-        for _ in 0..length {
-            string.push(self.characters.which_char(guac));
-        }
+        self.buffer.resize(length, 0);
+        guac.fill_bytes(&mut self.buffer);
+        let string = self.characters.whole_string(&mut self.buffer);
         Some(string)
     }
 }

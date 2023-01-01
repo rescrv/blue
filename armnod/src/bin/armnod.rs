@@ -1,3 +1,5 @@
+use std::io::{BufWriter, Write};
+
 use clap::{App, Arg};
 
 use guacamole::Guacamole;
@@ -181,11 +183,14 @@ fn main() {
         string: string_chooser,
         length: length_chooser,
         characters,
+        buffer: Vec::new(),
     };
     let mut guac = Guacamole::default();
+    // Buffer stdout
+    let mut fout = BufWriter::new(std::io::stdout());
     for _ in 0..n {
         match armnod.choose(&mut guac) {
-            Some(x) => { println!("{}", x); }
+            Some(x) => { write!(fout, "{}\n", x).unwrap(); }
             None => break,
         }
     }
