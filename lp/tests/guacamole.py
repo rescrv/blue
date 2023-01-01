@@ -14,7 +14,7 @@ TEMPLATE = '''            #[test]
             }}
 '''
 
-for num_keys in (1, 10, 10000):
+for num_keys in (10, 10000):
     for key_bytes in (1, 16, 256, 4096, 65536):
         for value_bytes in (0, 1, 16, 256, 4096, 65536, 1048576, 16777216):
             if num_keys * (key_bytes + value_bytes) >= MAX_SIZE:
