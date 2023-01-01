@@ -104,6 +104,9 @@ fn main() {
 
     // parse
     let args = app.get_matches();
+    // parse n first so that it can be altered by cardinality
+    let n = args.value_of("n").unwrap_or("1000");
+    let mut n = n.parse::<u64>().expect("could not parse n");
     // seeding
     let chooser = args.value_of("chooser-mode").unwrap_or("random");
     let string_chooser = if chooser == "random" {
@@ -113,10 +116,15 @@ fn main() {
         let cardinality = cardinality.parse::<u64>().expect("could not parse cardinality");
         set_chooser(cardinality)
     } else if chooser == "set-once" {
+        let cardinality_default = format!("{}", n);
+        let cardinality = args.value_of("cardinality").unwrap_or(&cardinality_default);
+        let cardinality = cardinality.parse::<u64>().expect("could not parse cardinality");
+        let cardinality_default = format!("{}", cardinality);
         let set_once_begin = args.value_of("set-once-begin").unwrap_or("0");
         let set_once_begin = set_once_begin.parse::<u64>().expect("could not parse set-once-begin");
-        let set_once_end = args.value_of("set-once-end").unwrap_or("1000");
+        let set_once_end = args.value_of("set-once-end").unwrap_or(&cardinality_default);
         let set_once_end = set_once_end.parse::<u64>().expect("could not parse set-once-end");
+        n = set_once_end - set_once_begin;
         assert!(set_once_begin <= set_once_end, "begin must be <= than end");
         set_chooser_once(set_once_begin, set_once_end)
     } else if chooser == "set-zipf" {
@@ -174,8 +182,6 @@ fn main() {
         length: length_chooser,
         characters,
     };
-    let n = args.value_of("n").unwrap_or("1000");
-    let n = n.parse::<u64>().expect("could not parse n") as usize;
     let mut guac = Guacamole::default();
     for _ in 0..n {
         match armnod.choose(&mut guac) {
