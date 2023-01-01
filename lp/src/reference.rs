@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use super::{check_key_len, check_table_size, check_value_len, Cursor, Error, KeyValuePair, KeyValueRef};
+use super::{
+    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValuePair,
+    KeyValueRef, TableMetadata,
+};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
@@ -18,6 +21,31 @@ impl ReferenceTable {
         }
     }
 }
+
+impl TableMetadata for ReferenceTable {
+    fn first_key(&self) -> KeyRef {
+        if self.entries.is_empty() {
+            KeyRef {
+                key: "".as_bytes(),
+                timestamp: 0,
+            }
+        } else {
+            (&self.entries[0]).into()
+        }
+    }
+
+    fn last_key(&self) -> KeyRef {
+        if self.entries.is_empty() {
+            KeyRef {
+                key: "".as_bytes(),
+                timestamp: 0,
+            }
+        } else {
+            (&self.entries[self.entries.len() - 1]).into()
+        }
+    }
+}
+
 
 ///////////////////////////////////////// ReferenceBuilder /////////////////////////////////////////
 
@@ -141,6 +169,14 @@ impl Cursor for ReferenceCursor {
         }
     }
 }
+
+impl From<ReferenceTable> for ReferenceCursor {
+    fn from(table: ReferenceTable) -> Self {
+        table.iterate()
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
 mod tables {

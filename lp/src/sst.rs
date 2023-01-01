@@ -580,3 +580,9 @@ impl Cursor for SSTCursor {
         }
     }
 }
+
+impl From<SST> for SSTCursor {
+    fn from(table: SST) -> Self {
+        Self::new(table)
+    }
+}

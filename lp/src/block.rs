@@ -787,6 +787,12 @@ impl Cursor for BlockCursor {
     }
 }
 
+impl From<Block> for BlockCursor {
+    fn from(table: Block) -> Self {
+        Self::new(table)
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]

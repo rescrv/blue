@@ -11,6 +11,7 @@ pub mod block;
 pub mod file_manager;
 pub mod merging_cursor;
 pub mod reference;
+pub mod sequence_cursor;
 pub mod sst;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -273,6 +274,13 @@ pub trait Builder {
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
 
     fn seal(self) -> Result<Self::Sealed, Error>;
+}
+
+/////////////////////////////////////////// TableMetadata //////////////////////////////////////////
+
+pub trait TableMetadata {
+    fn first_key(&self) -> KeyRef;
+    fn last_key(&self) -> KeyRef;
 }
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
