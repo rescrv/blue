@@ -4,11 +4,13 @@ extern crate prototk_derive;
 
 use std::cmp;
 use std::cmp::Ordering;
+use std::path::PathBuf;
 
 use buffertk::Buffer;
 
 pub mod block;
 pub mod file_manager;
+pub mod lsm;
 pub mod merging_cursor;
 pub mod reference;
 pub mod sequence_cursor;
@@ -93,10 +95,19 @@ pub enum Error {
         limit: u64,
         crc32c: u32,
     },
+    LockNotObtained {
+        path: PathBuf,
+    },
+    DuplicateSST {
+        what: String,
+    },
     Corruption {
         context: String,
     },
     LogicError {
+        context: String,
+    },
+    SystemError {
         context: String,
     },
     IoError {

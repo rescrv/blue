@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::Write;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -99,6 +100,8 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8 + 2 + setsum
 pub struct SST {
     // The file backing the table.
     handle: FileHandle,
+    // The final block of the table.
+    final_block: FinalBlock,
     // SST metadata.
     index_block: Block,
 }
@@ -152,12 +155,21 @@ impl SST {
         let index_block = SST::load_block(&handle, &final_block.index_block)?;
         Ok(Self {
             handle,
+            final_block,
             index_block,
         })
     }
 
     pub fn iterate(&self) -> SSTCursor {
         SSTCursor::new(self.clone())
+    }
+
+    pub fn setsum(&self) -> String {
+        let mut setsum = String::with_capacity(68);
+        for i in 0..self.final_block.setsum.len() {
+            write!(&mut setsum, "{:02x}", self.final_block.setsum[i]).expect("unable to write to string");
+        }
+        setsum
     }
 
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
@@ -193,6 +205,7 @@ impl SST {
 
 ///////////////////////////////////////// BlockCompression /////////////////////////////////////////
 
+#[derive(Clone)]
 pub enum BlockCompression {
     NoCompression,
 }
@@ -210,6 +223,7 @@ impl BlockCompression {
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
+#[derive(Clone)]
 pub struct SSTBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,
