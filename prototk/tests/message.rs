@@ -2,6 +2,8 @@ extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
+use buffertk::Buffer;
+
 //////////////////////////////////////////// EmptyStruct ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
@@ -348,6 +350,49 @@ fn bytes32() {
     let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(b32, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
+////////////////////////////////////////////// Buffer //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Message, PartialEq)]
+struct BufferMessage {
+    #[prototk(11, buffer)]
+    buffer: Buffer,
+}
+
+impl Default for BufferMessage {
+    fn default() -> Self {
+        Self {
+            buffer: Buffer::new(0),
+        }
+    }
+}
+
+#[test]
+fn buffer_message() {
+    let bytes: &[u8] = &[
+        0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
+    ];
+    let bufmsg = BufferMessage {
+        buffer: bytes.into(),
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&bufmsg).to_vec();
+    let exp: &[u8] = &[
+        90, 32, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+        23, 24, 25, 26, 27, 28, 29, 30, 31,
+    ];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got: BufferMessage = up.unpack().unwrap();
+    assert_eq!(bufmsg, got, "unpacker failed");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();

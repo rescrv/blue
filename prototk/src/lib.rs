@@ -8,7 +8,7 @@ pub mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
+use buffertk::{stack_pack, v64, Buffer, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -279,6 +279,7 @@ impl FieldTypePackable for f32 {}
 impl FieldTypePackable for f64 {}
 impl<'a> FieldTypePackable for [u8; 32] {}
 impl<'a> FieldTypePackable for &'a [u8] {}
+impl<'a> FieldTypePackable for Buffer {}
 impl<'a> FieldTypePackable for &'a str {}
 impl<'a> FieldTypePackable for String {}
 impl<'a, M: Message<'a>> FieldTypePackable for M {}
@@ -420,6 +421,14 @@ impl<'a> FieldTypeAssigner for &'a [u8] {
     type NativeType = &'a [u8];
 
     fn assign_field_type(&mut self, x: &'a [u8]) {
+        *self = x;
+    }
+}
+
+impl<'a> FieldTypeAssigner for Buffer {
+    type NativeType = Buffer;
+
+    fn assign_field_type(&mut self, x: Buffer) {
         *self = x;
     }
 }

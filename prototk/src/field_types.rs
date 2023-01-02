@@ -7,7 +7,7 @@
 
 use std::convert::TryInto;
 
-use buffertk::{stack_pack, Packable, Unpackable, Unpacker};
+use buffertk::{stack_pack, Buffer, Packable, Unpackable, Unpacker};
 
 use super::*;
 
@@ -810,7 +810,7 @@ impl<'a> From<&'a &'a [u8]> for bytes<'a> {
     }
 }
 
-/////////////////////////////////////////////// bytes //////////////////////////////////////////////
+////////////////////////////////////////////// bytes32 /////////////////////////////////////////////
 
 pub struct bytes32([u8; 32]);
 
@@ -877,6 +877,68 @@ impl From<[u8; 32]> for bytes32 {
 
 impl From<&[u8; 32]> for bytes32 {
     fn from(x: &[u8; 32]) -> Self {
+        Self(x.clone())
+    }
+}
+
+////////////////////////////////////////////// buffer //////////////////////////////////////////////
+
+pub struct buffer(Buffer);
+
+impl<'a> FieldType<'a> for buffer {
+    const WIRE_TYPE: WireType = WireType::LengthDelimited;
+    const LENGTH_PREFIXED: bool = true;
+
+    type NativeType = Buffer;
+
+    fn into_native(self) -> Self::NativeType {
+        self.0
+    }
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl Packable for buffer {
+    fn pack_sz(&self) -> usize {
+        let as_bytes: &[u8] = self.0.as_ref();
+        as_bytes.pack_sz()
+    }
+
+    fn pack<'b>(&self, buf: &'b mut [u8]) {
+        let as_bytes: &[u8] = self.0.as_ref();
+        as_bytes.pack(buf)
+    }
+}
+
+impl<'a> Unpackable<'a> for buffer {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let mut up = Unpacker::new(buf);
+        let v: v64 = up.unpack()?;
+        let v: usize = v.into();
+        let rem = up.remain();
+        if rem.len() < v {
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
+        }
+        let buf: Buffer = rem[..v].into();
+        Ok((Self(buf), &rem[v..]))
+    }
+}
+
+impl<'a> From<Buffer> for buffer {
+    fn from(x: Buffer) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> From<&Buffer> for buffer {
+    fn from(x: &Buffer) -> Self {
         Self(x.clone())
     }
 }
@@ -1172,7 +1234,6 @@ impl<'a, M: Message<'a>> From<&M> for message<Vec<M>> {
 #[cfg(test)]
 mod tests {
     use crate::field_types::*;
-    use crate::*;
 
     #[test]
     fn int32() {
