@@ -12,6 +12,7 @@ pub mod block;
 pub mod file_manager;
 pub mod lsm;
 pub mod merging_cursor;
+pub mod pruning_cursor;
 pub mod reference;
 pub mod sequence_cursor;
 pub mod sst;
