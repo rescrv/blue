@@ -21,8 +21,9 @@ pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
 
 // NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
 // but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
-// general pattern is that the block will exceed this size by up to one key-value pair.
-pub const TABLE_FULL_SIZE: usize = 1usize << 30; /* 1GiB */
+// general pattern is that the block will exceed this size by up to one key-value pair, so subtract
+// some slop.  64MiB is overkill, but will last for awhile.
+pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
 
 fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
