@@ -126,6 +126,11 @@ impl SST {
             context: "parsing final block offset".to_string(),
         })?;
         // Read and parse the final block
+        if file_sz < final_block_offset {
+            return Err(Error::Corruption {
+                context: format!("final block offset reported at {}, but file is {} bytes", final_block_offset, file_sz),
+            });
+        }
         let size_of_final_block = position + 8 - (final_block_offset);
         buf.resize(size_of_final_block as usize, 0);
         handle.read_exact_at(&mut buf, final_block_offset)?;
