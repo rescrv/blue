@@ -33,7 +33,7 @@ fn main() {
     let fin = BufReader::new(fin);
     // setup sst out
     let opts = SSTBuilderOptions::default();
-    let mut sst = SSTBuilder::new(output.into(), opts).expect("could not open sst");
+    let mut sst = SSTBuilder::new(output, opts).expect("could not open sst");
 
     for line in fin.lines() {
         let line = &line.expect("could not parse line");

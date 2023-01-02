@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crc32c;
 
@@ -267,11 +267,11 @@ pub struct SSTBuilder {
 }
 
 impl SSTBuilder {
-    pub fn new(path: PathBuf, options: SSTBuilderOptions) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(path: P, options: SSTBuilderOptions) -> Result<Self, Error> {
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(path.clone())?;
+            .open(path.as_ref().to_path_buf())?;
         Ok(SSTBuilder {
             options,
             last_key: Vec::new(),
@@ -282,7 +282,7 @@ impl SSTBuilder {
             index_block: BlockBuilder::new(BlockBuilderOptions::default()),
             setsum: Setsum::default(),
             output,
-            path,
+            path: path.as_ref().to_path_buf(),
         })
     }
 
