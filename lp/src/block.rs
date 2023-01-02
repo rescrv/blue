@@ -7,8 +7,8 @@ use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk_derive::Message;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Buffer, Builder, Cursor, Error,
-    KeyRef, KeyValueRef,
+    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Buffer, Builder,
+    Cursor, Error, KeyRef, KeyValueRef,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -555,7 +555,7 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
             return Err(Error::Corruption {
@@ -579,7 +579,7 @@ impl Cursor for BlockCursor {
                     .into());
                 }
             };
-            match compare_key(key, timestamp, kvp.key, kvp.timestamp) {
+            match compare_bytes(key, kvp.key) {
                 Ordering::Less => {
                     // left     mid     right
                     // |--------|-------|
@@ -590,7 +590,7 @@ impl Cursor for BlockCursor {
                     // left     mid     right
                     // |--------|-------|
                     //          |
-                    left = mid;
+                    right = mid - 1;
                 }
                 Ordering::Greater => {
                     // left     mid     right
@@ -622,7 +622,7 @@ impl Cursor for BlockCursor {
         };
 
         // Check for the case where all keys are bigger.
-        if compare_key(key, timestamp, kref.key, kref.timestamp).is_lt() {
+        if compare_bytes(key, kref.key).is_lt() {
             self.position = CursorPosition::First;
             return Ok(());
         }
@@ -630,7 +630,7 @@ impl Cursor for BlockCursor {
         // Scan until we find the key.
         let mut kref = Some(kref);
         while let Some(x) = kref {
-            if compare_key(key, timestamp, x.key, x.timestamp).is_gt() {
+            if compare_bytes(key, x.key).is_gt() {
                 self.next()?;
                 kref = self.key_ref()?;
             } else {
@@ -937,9 +937,7 @@ mod tests {
         assert_eq!(exp, got);
 
         let mut cursor = block.iterate();
-        cursor
-            .seek(&[106, 113, 67, 73, 122, 73, 98, 85], u64::max_value())
-            .unwrap();
+        cursor.seek(&[106, 113, 67, 73, 122, 73, 98, 85]).unwrap();
     }
 
     #[test]
@@ -956,7 +954,7 @@ mod tests {
 
         let mut cursor = block.iterate();
         let target = "jqCIzIbU";
-        cursor.seek(target.as_bytes(), u64::max_value()).unwrap();
+        cursor.seek(target.as_bytes()).unwrap();
         let key: Buffer = key.into();
         cursor.next().unwrap();
         let kvp = cursor.value().unwrap();
@@ -1106,7 +1104,7 @@ mod guacamole {
                 panic!("cursor should always init to head: {:?}", cursor.position)
             }
         };
-        cursor.seek("t".as_bytes(), u64::max_value()).unwrap();
+        cursor.seek("t".as_bytes()).unwrap();
         match cursor.position {
             CursorPosition::Last => {}
             _ => {
@@ -1197,7 +1195,7 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "d" }
         let mut cursor = block.iterate();
-        cursor.seek("d".as_bytes(), u64::max_value()).unwrap();
+        cursor.seek("d".as_bytes()).unwrap();
         // Next to g
         cursor.next().unwrap();
         let got = cursor.value().unwrap();
@@ -1340,7 +1338,7 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "d" }
         let mut cursor = block.iterate();
-        cursor.seek("d".as_bytes(), u64::max_value()).unwrap();
+        cursor.seek("d".as_bytes()).unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
@@ -1434,7 +1432,7 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "u" }
         let mut cursor = block.iterate();
-        cursor.seek("u".as_bytes(), u64::max_value()).unwrap();
+        cursor.seek("u".as_bytes()).unwrap();
     }
 
     #[test]
@@ -1750,7 +1748,7 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "6" }
         let mut cursor = block.iterate();
-        cursor.seek("6".as_bytes(), u64::max_value()).unwrap();
+        cursor.seek("6".as_bytes()).unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
@@ -1807,11 +1805,11 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: "d"@4793296426793138773
         let mut cursor = block.iterate();
-        cursor.seek("d".as_bytes(), 4793296426793138773).unwrap();
+        cursor.seek("d".as_bytes()).unwrap();
         let _got = cursor.next().unwrap();
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
-        cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        cursor.seek("I".as_bytes()).unwrap();
         cursor.prev().unwrap();
         let got = cursor.value().unwrap();
         let exp = KeyValueRef {

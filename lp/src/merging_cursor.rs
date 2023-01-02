@@ -129,10 +129,10 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
-            cursor.seek(key, timestamp)?;
+            cursor.seek(key)?;
         }
         self.heapify();
         Ok(())

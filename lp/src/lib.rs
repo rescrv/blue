@@ -300,7 +300,7 @@ pub trait TableMetadata {
 pub trait Cursor {
     fn seek_to_first(&mut self) -> Result<(), Error>;
     fn seek_to_last(&mut self) -> Result<(), Error>;
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
 
     fn prev(&mut self) -> Result<(), Error>;
     fn next(&mut self) -> Result<(), Error>;

@@ -252,13 +252,11 @@ where
     let table = builder.seal().unwrap();
     // Now seek randomly and compare the key-value store and the builder.
     let key_gen = BufferGuacamole::new(config.key_bytes);
-    let ts_gen = TimestampGuacamole {};
     for _ in 0..config.num_seeks {
         let key: Buffer = key_gen.guacamole(&mut guac);
-        let ts: u64 = ts_gen.guacamole(&mut guac);
-        iter.seek(key.as_bytes(), ts).unwrap();
+        iter.seek(key.as_bytes()).unwrap();
         let mut cursor = table.iterate();
-        cursor.seek(key.as_bytes(), ts).unwrap();
+        cursor.seek(key.as_bytes()).unwrap();
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
             let (exp, got) = if will_do_prev {

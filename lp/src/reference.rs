@@ -117,10 +117,10 @@ impl Cursor for ReferenceCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         let target = KeyValuePair {
             key: key.into(),
-            timestamp,
+            timestamp: u64::max_value(),
             value: None,
         };
         self.index = match self.entries.binary_search(&target) {
@@ -229,7 +229,7 @@ mod guacamole {
         let block = builder.seal().unwrap();
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
-        cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        cursor.seek("I".as_bytes()).unwrap();
         cursor.prev().unwrap();
         let got = cursor.value();
         let exp = KeyValueRef {
@@ -240,7 +240,7 @@ mod guacamole {
         assert_eq!(Some(exp), got);
         // Top of loop seeks to: "I"@13021764449837349261
         let mut cursor = block.iterate();
-        cursor.seek("I".as_bytes(), 13021764449837349261).unwrap();
+        cursor.seek("I".as_bytes()).unwrap();
         cursor.next().unwrap();
         let got = cursor.value();
         let exp = KeyValueRef {

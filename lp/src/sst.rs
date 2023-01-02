@@ -624,8 +624,8 @@ impl Cursor for SSTCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        self.meta_iter.seek(key, timestamp)?;
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+        self.meta_iter.seek(key)?;
         let metadata = match self.meta_next()? {
             Some(m) => m,
             None => {
@@ -634,7 +634,7 @@ impl Cursor for SSTCursor {
         };
         let block = SST::load_block(&self.table.handle, &metadata)?;
         let mut block_iter = block.iterate();
-        block_iter.seek(key, timestamp)?;
+        block_iter.seek(key)?;
         self.block_iter = Some(block_iter);
         Ok(())
     }

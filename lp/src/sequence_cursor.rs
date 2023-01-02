@@ -48,11 +48,14 @@ where
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         if self.tables.len() <= 1 {
-            return self.cursor.seek(key, timestamp);
+            return self.cursor.seek(key);
         }
-        let kref = KeyRef { key, timestamp };
+        let kref = KeyRef {
+            key,
+            timestamp: u64::max_value(),
+        };
         let mut left = 0usize;
         let mut right = self.tables.len() - 1;
 
@@ -66,7 +69,7 @@ where
         }
 
         self.reposition(left);
-        self.cursor.seek(key, timestamp)
+        self.cursor.seek(key)
     }
 
     fn prev(&mut self) -> Result<(), Error> {

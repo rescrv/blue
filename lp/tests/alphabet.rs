@@ -181,7 +181,7 @@ macro_rules! alphabet_tests {
             #[test]
             fn seek_to_at() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_at"));
-                iter.seek("@".as_bytes(), 0).unwrap();
+                iter.seek("@".as_bytes()).unwrap();
                 // A
                 let exp = KeyValueRef {
                     key: "A".as_bytes(),
@@ -196,7 +196,7 @@ macro_rules! alphabet_tests {
             #[test]
             fn seek_to_z() {
                 let mut iter = $alphabet(&(stringify!($name).to_string() + "::seek_to_z"));
-                iter.seek("Z".as_bytes(), 0).unwrap();
+                iter.seek("Z".as_bytes()).unwrap();
                 // Z
                 let exp = KeyValueRef {
                     key: "Z".as_bytes(),
