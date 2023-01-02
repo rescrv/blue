@@ -12,7 +12,8 @@ mod guacamole;
 
 ////////////////////////////////////////////// Options /////////////////////////////////////////////
 
-fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096() -> SSTBuilderOptions {
+fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(
+) -> SSTBuilderOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(1)
         .key_value_pairs_restart_interval(1);
@@ -22,7 +23,8 @@ fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed
         .target_block_size(4096)
 }
 
-fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096() -> SSTBuilderOptions {
+fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(
+) -> SSTBuilderOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(512)
         .key_value_pairs_restart_interval(16);
@@ -32,7 +34,8 @@ fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompres
         .target_block_size(4096)
 }
 
-fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536() -> SSTBuilderOptions {
+fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536(
+) -> SSTBuilderOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(512)
         .key_value_pairs_restart_interval(16);
@@ -44,7 +47,9 @@ fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompres
 
 ////////////////////////////////////////// Alphabet Tests //////////////////////////////////////////
 
-fn alphabet_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(test: &str) -> SSTCursor {
+fn alphabet_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(
+    test: &str,
+) -> SSTCursor {
     alphabet(test, opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096())
 }
 
@@ -53,7 +58,9 @@ alphabet_tests! {
         crate::alphabet_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096,
 }
 
-fn alphabet_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(test: &str) -> SSTCursor {
+fn alphabet_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(
+    test: &str,
+) -> SSTCursor {
     alphabet(test, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096())
 }
 
@@ -99,7 +106,9 @@ fn alphabet(test: &str, builder_opts: SSTBuilderOptions) -> SSTCursor {
 
 ///////////////////////////////////////////// Guacamole ////////////////////////////////////////////
 
-fn guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(test: &str) -> SSTBuilder {
+fn guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(
+    test: &str,
+) -> SSTBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
     let builder = SSTBuilder::new(path, opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096()).unwrap();
@@ -111,7 +120,9 @@ guacamole_tests! {
         crate::guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096,
 }
 
-fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(test: &str) -> SSTBuilder {
+fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(
+    test: &str,
+) -> SSTBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
     let builder = SSTBuilder::new(path, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096()).unwrap();
@@ -123,7 +134,9 @@ guacamole_tests! {
         crate::guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096,
 }
 
-fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536(test: &str) -> SSTBuilder {
+fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536(
+    test: &str,
+) -> SSTBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
     let builder = SSTBuilder::new(path, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536()).unwrap();

@@ -22,7 +22,9 @@ fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16() -> Bloc
 
 ////////////////////////////////////////// Alphabet Tests //////////////////////////////////////////
 
-fn alphabet_opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1(_: &str) -> BlockCursor {
+fn alphabet_opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1(
+    _: &str,
+) -> BlockCursor {
     alphabet(opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1())
 }
 
@@ -31,7 +33,9 @@ alphabet_tests! {
         crate::alphabet_opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1,
 }
 
-fn alphabet_opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16(_: &str) -> BlockCursor {
+fn alphabet_opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16(
+    _: &str,
+) -> BlockCursor {
     alphabet(opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16())
 }
 
@@ -82,7 +86,9 @@ guacamole_tests! {
         crate::guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1,
 }
 
-fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16(_: &str) -> BlockBuilder {
+fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16(
+    _: &str,
+) -> BlockBuilder {
     BlockBuilder::new(opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16())
 }
 

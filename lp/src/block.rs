@@ -141,10 +141,12 @@ impl Block {
             });
         }
         let mut up = Unpacker::new(&bytes.as_bytes()[bytes.len() - 4..]);
-        let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| Error::UnpackError {
-            error: e.into(),
-            context: "could not read last four bytes of block".to_string(),
-        })?;
+        let num_restarts: u32 = up
+            .unpack()
+            .map_err(|e: buffertk::Error| Error::UnpackError {
+                error: e.into(),
+                context: "could not read last four bytes of block".to_string(),
+            })?;
         let num_restarts: usize = num_restarts as usize;
         // Footer size.
         // |tag 10|v64 of num bytes|packed num_restarts u32s|tag 11|fixed32 capstone|
@@ -504,12 +506,10 @@ impl BlockCursor {
                 next_offset: _,
                 key,
                 timestamp,
-            } => {
-                Ok(Some(KeyRef {
-                    key: key,
-                    timestamp: *timestamp,
-                }))
-            },
+            } => Ok(Some(KeyRef {
+                key: key,
+                timestamp: *timestamp,
+            })),
         }
     }
 
@@ -774,16 +774,16 @@ impl Cursor for BlockCursor {
                 // Parse the value from the block entry.
                 let bytes = self.block.bytes.as_bytes();
                 let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
-                let be: BlockEntry = up.unpack().expect("already parsed this block with extract_key; corruption");
+                let be: BlockEntry = up
+                    .unpack()
+                    .expect("already parsed this block with extract_key; corruption");
                 Some(KeyValueRef {
                     key: &key,
                     timestamp: *timestamp,
                     value: be.value(),
                 })
-            },
+            }
         }
-
-
     }
 }
 
@@ -1238,7 +1238,9 @@ mod guacamole {
         let exp = KeyValueRef {
             key: "t".as_bytes(),
             timestamp: 7790837488841419319,
-            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
+            value: Some(
+                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
+            ),
         };
         assert_eq!(exp, got);
         assert_eq!("t".as_bytes(), got.key);
@@ -1346,7 +1348,9 @@ mod guacamole {
         let exp = KeyValueRef {
             key: "t".as_bytes(),
             timestamp: 7790837488841419319,
-            value: Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
+            value: Some(
+                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
+            ),
         };
         assert_eq!(exp, got);
     }

@@ -68,13 +68,17 @@ impl State {
             return;
         }
         let (path, file) = match self.files[fd].take() {
-            Some((path, file)) => { (path, file) },
-            None => { panic!("fd={} not managed by FileManager", fd); },
+            Some((path, file)) => (path, file),
+            None => {
+                panic!("fd={} not managed by FileManager", fd);
+            }
         };
         assert_eq!(file.as_raw_fd(), fd as c_int);
         let names_fd = match self.names.remove(&path) {
-            Some(names_fd) => { names_fd },
-            None => { panic!("path={} not managed by FileManager", path.to_string_lossy()); }
+            Some(names_fd) => names_fd,
+            None => {
+                panic!("path={} not managed by FileManager", path.to_string_lossy());
+            }
         };
         assert_eq!(fd, names_fd);
     }
@@ -135,7 +139,7 @@ impl FileManager {
         }
         // Open the file
         let file = match open(path.clone()) {
-            Ok(file) => { file },
+            Ok(file) => file,
             Err(e) => {
                 {
                     let mut state = self.state.lock().unwrap();
@@ -143,7 +147,7 @@ impl FileManager {
                 }
                 self.wake_opening.notify_all();
                 return Err(e.into());
-            },
+            }
         };
         let fd = file.as_raw_fd() as usize;
         // Setup the file as a managed file.
@@ -190,7 +194,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
 pub fn open(path: PathBuf) -> Result<File, Error> {
     // Open the file
     let file = match File::open(path.clone()) {
-        Ok(file) => { file },
+        Ok(file) => file,
         Err(e) => {
             return Err(e.into());
         }
@@ -214,8 +218,5 @@ pub fn open_without_manager(path: PathBuf) -> Result<FileHandle, Error> {
     state.files.resize(fd + 1, None);
     state.files[fd] = Some((path, Arc::clone(&file)));
     let state = Arc::new(Mutex::new(state));
-    Ok(FileHandle {
-        file,
-        state,
-    })
+    Ok(FileHandle { file, state })
 }

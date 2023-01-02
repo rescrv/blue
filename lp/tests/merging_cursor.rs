@@ -1,7 +1,7 @@
 extern crate lp;
 
-use lp::reference::ReferenceBuilder;
 use lp::merging_cursor::MergingCursor;
+use lp::reference::ReferenceBuilder;
 use lp::Cursor;
 
 mod alphabet;

@@ -1,8 +1,8 @@
 use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use util::lockfile::Lockfile;
 
@@ -10,7 +10,7 @@ use buffertk::{stack_pack, Unpacker};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
-use super::sst::{SST, SSTBuilder, SSTBuilderOptions, SSTMetadata};
+use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
 
 //////////////////////////////////////////// LSMOptions ////////////////////////////////////////////
@@ -59,7 +59,9 @@ impl LSMTree {
             Lockfile::lock(lockfile_path.clone())?
         };
         if lockfile.is_none() {
-            return Err(Error::LockNotObtained { path: lockfile_path });
+            return Err(Error::LockNotObtained {
+                path: lockfile_path,
+            });
         }
         let lockfile = lockfile.unwrap();
         // FileManager.
@@ -85,11 +87,12 @@ impl LSMTree {
 
     pub fn ingest_ssts<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), Error> {
         // Make a directory into which all files will be linked.
-        let ingest_time = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| {
-            Error::SystemError {
+        let ingest_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::SystemError {
                 context: "system clock before UNIX epoch".to_string(),
-            }
-        })?.as_secs_f64();
+            })?
+            .as_secs_f64();
         let ingest_root = self.root.join(format!("ingest:{}", ingest_time));
         create_dir(&ingest_root)?;
         let mut ssts = Vec::new();
@@ -108,9 +111,12 @@ impl LSMTree {
         }
         // Create one file that will be linked into meta.  Swizzling this file is what gives us a
         // form of atomicity.
-        ssts.sort_by(|lhs, rhs| { compare_bytes(lhs.0.as_bytes(), rhs.0.as_bytes()) });
+        ssts.sort_by(|lhs, rhs| compare_bytes(lhs.0.as_bytes(), rhs.0.as_bytes()));
         let meta_basename = format!("meta.{}.sst", ingest_time);
-        let mut meta = SSTBuilder::new(ingest_root.join(&meta_basename), self.options.meta_options.clone())?;
+        let mut meta = SSTBuilder::new(
+            ingest_root.join(&meta_basename),
+            self.options.meta_options.clone(),
+        )?;
         for (setsum, _, metadata) in ssts.iter() {
             let pa = stack_pack(metadata);
             meta.put(setsum.as_bytes(), ingest_time as u64, &pa.to_vec())?;
@@ -123,20 +129,21 @@ impl LSMTree {
             // Intentionally error if the hard_link already exists.
             let err = hard_link(ingested, target);
             match err {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(err) => {
                     if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(Error::DuplicateSST {
-                            what: sst.clone(),
-                        });
+                        return Err(Error::DuplicateSST { what: sst.clone() });
                     } else {
                         return Err(err.into());
                     }
-                },
+                }
             }
         }
         // Move the metadata
-        let meta_path = self.root.join("meta").join(&format!("{}.{}.sst", meta.setsum(), ingest_time));
+        let meta_path =
+            self.root
+                .join("meta")
+                .join(&format!("{}.{}.sst", meta.setsum(), ingest_time));
         hard_link(ingest_root.join(&meta_basename), meta_path)?;
         // Unlink the ingest directory last.
         for (_, sst, _) in ssts.iter() {
@@ -170,10 +177,11 @@ impl LSMTree {
                 }
             };
             let mut up = Unpacker::new(value.value.unwrap_or(&[]));
-            let metadata: SSTMetadata = up.unpack().map_err(|_| {
-                Error::Corruption {
-                    context: format!("{} is corrupted in metadata", String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string())),
-                }
+            let metadata: SSTMetadata = up.unpack().map_err(|_| Error::Corruption {
+                context: format!(
+                    "{} is corrupted in metadata",
+                    String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string())
+                ),
             })?;
             metadatas.push(metadata);
         }

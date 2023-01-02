@@ -41,7 +41,8 @@ fn main() {
         if split.len() != 2 {
             panic!("Invalid line: {}", line);
         }
-        sst.put(split[0].as_bytes(), 0, split[1].as_bytes()).expect("could not put key-value pair");
+        sst.put(split[0].as_bytes(), 0, split[1].as_bytes())
+            .expect("could not put key-value pair");
     }
 
     sst.seal().expect("could not seal the sst");

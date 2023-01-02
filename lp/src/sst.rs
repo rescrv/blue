@@ -12,8 +12,8 @@ use setsum::Setsum;
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
-    MAX_KEY_LEN, check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Builder, Cursor, Error, KeyValueRef,
+    check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
+    minimal_successor_key, Builder, Cursor, Error, KeyValueRef, MAX_KEY_LEN,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -165,14 +165,19 @@ impl SST {
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
         handle.read_exact_at(&mut buf, position)?;
         let mut up = Unpacker::new(&buf);
-        let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| Error::UnpackError {
-            error: e.into(),
-            context: "parsing final block offset".to_string(),
-        })?;
+        let final_block_offset: u64 =
+            up.unpack()
+                .map_err(|e: buffertk::Error| Error::UnpackError {
+                    error: e.into(),
+                    context: "parsing final block offset".to_string(),
+                })?;
         // Read and parse the final block
         if file_sz < final_block_offset {
             return Err(Error::Corruption {
-                context: format!("final block offset reported at {}, but file is {} bytes", final_block_offset, file_sz),
+                context: format!(
+                    "final block offset reported at {}, but file is {} bytes",
+                    final_block_offset, file_sz
+                ),
             });
         }
         let size_of_final_block = position + 8 - (final_block_offset);
@@ -208,7 +213,8 @@ impl SST {
     pub fn setsum(&self) -> String {
         let mut setsum = String::with_capacity(68);
         for i in 0..self.final_block.setsum.len() {
-            write!(&mut setsum, "{:02x}", self.final_block.setsum[i]).expect("unable to write to string");
+            write!(&mut setsum, "{:02x}", self.final_block.setsum[i])
+                .expect("unable to write to string");
         }
         setsum
     }
@@ -220,21 +226,15 @@ impl SST {
         cursor.next()?;
         let kvr = cursor.value();
         let first_key = match kvr {
-            Some(kvr) => {
-                Buffer::from(kvr.key)
-            },
-            None => {
-                Buffer::new(0)
-            }
+            Some(kvr) => Buffer::from(kvr.key),
+            None => Buffer::new(0),
         };
         // Last key.
         cursor.seek_to_last()?;
         cursor.prev()?;
         let kvr = cursor.value();
         let last_key = match kvr {
-            Some(kvr) => {
-                Buffer::from(kvr.key)
-            }
+            Some(kvr) => Buffer::from(kvr.key),
             None => {
                 let mut buf = Buffer::new(MAX_KEY_LEN);
                 for i in 0..MAX_KEY_LEN {
@@ -272,14 +272,10 @@ impl SST {
             });
         }
         match table_entry {
-            SSTEntry::PlainBlock(bytes) => {
-                Ok(Block::new(bytes.into())?)
-            },
-            SSTEntry::FinalBlock(_) => {
-                Err(Error::Corruption {
-                    context: "tried loading final block".to_string(),
-                })
-            }
+            SSTEntry::PlainBlock(bytes) => Ok(Block::new(bytes.into())?),
+            SSTEntry::FinalBlock(_) => Err(Error::Corruption {
+                context: "tried loading final block".to_string(),
+            }),
         }
     }
 }
@@ -493,7 +489,8 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.put(key, timestamp, value)?;
-        self.setsum.insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
+        self.setsum
+            .insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
         self.assign_last_key(key, timestamp);
         Ok(())
     }
@@ -504,7 +501,8 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.del(key, timestamp)?;
-        self.setsum.insert_vectored(&[&[9], key, &timestamp.to_le_bytes(), &[]]);
+        self.setsum
+            .insert_vectored(&[&[9], key, &timestamp.to_le_bytes(), &[]]);
         self.assign_last_key(key, timestamp);
         Ok(())
     }
@@ -574,11 +572,11 @@ impl SSTCursor {
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
         self.meta_iter.prev()?;
         let kvp = match self.meta_iter.value() {
-            Some(kvp) => { kvp },
+            Some(kvp) => kvp,
             None => {
                 self.seek_to_first()?;
                 return Ok(None);
-            },
+            }
         };
         SSTCursor::metadata_from_kvp(kvp)
     }
@@ -586,23 +584,23 @@ impl SSTCursor {
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
         self.meta_iter.next()?;
         let kvp = match self.meta_iter.value() {
-            Some(kvp) => { kvp },
+            Some(kvp) => kvp,
             None => {
                 self.seek_to_last()?;
                 return Ok(None);
-            },
+            }
         };
         SSTCursor::metadata_from_kvp(kvp)
     }
 
     fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
         let value = match kvr.value {
-            Some(v) => { v },
+            Some(v) => v,
             None => {
                 return Err(Error::Corruption {
                     context: "meta block has null value".to_string(),
                 });
-            },
+            }
         };
         let mut up = Unpacker::new(value);
         let metadata: BlockMetadata = up.unpack().map_err(|e| Error::UnpackError {
@@ -629,10 +627,10 @@ impl Cursor for SSTCursor {
     fn seek(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         self.meta_iter.seek(key, timestamp)?;
         let metadata = match self.meta_next()? {
-            Some(m) => { m },
+            Some(m) => m,
             None => {
                 return self.seek_to_last();
-            },
+            }
         };
         let block = SST::load_block(&self.table.handle, &metadata)?;
         let mut block_iter = block.iterate();
@@ -644,10 +642,10 @@ impl Cursor for SSTCursor {
     fn prev(&mut self) -> Result<(), Error> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_prev()? {
-                Some(m) => { m },
+                Some(m) => m,
                 None => {
                     return self.seek_to_first();
-                },
+                }
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
             let mut block_iter = block.iterate();
@@ -658,7 +656,7 @@ impl Cursor for SSTCursor {
         let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
         block_iter.prev()?;
         match block_iter.value() {
-            Some(_) => { Ok(()) },
+            Some(_) => Ok(()),
             None => {
                 self.block_iter = None;
                 self.prev()
@@ -669,10 +667,10 @@ impl Cursor for SSTCursor {
     fn next(&mut self) -> Result<(), Error> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_next()? {
-                Some(m) => { m },
+                Some(m) => m,
                 None => {
                     return self.seek_to_last();
-                },
+                }
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
             let mut block_iter = block.iterate();
@@ -683,7 +681,7 @@ impl Cursor for SSTCursor {
         let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
         block_iter.next()?;
         match block_iter.value() {
-            Some(_) => { Ok(()) },
+            Some(_) => Ok(()),
             None => {
                 self.block_iter = None;
                 self.next()

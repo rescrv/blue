@@ -2,7 +2,7 @@ use super::{Cursor, Error, KeyRef, KeyValueRef, TableMetadata};
 
 ////////////////////////////////////////// SequenceCursor //////////////////////////////////////////
 
-pub struct SequenceCursor<T: TableMetadata, C: Cursor> 
+pub struct SequenceCursor<T: TableMetadata, C: Cursor>
 where
     C: From<T>,
 {
@@ -52,10 +52,7 @@ where
         if self.tables.len() <= 1 {
             return self.cursor.seek(key, timestamp);
         }
-        let kref = KeyRef {
-            key,
-            timestamp,
-        };
+        let kref = KeyRef { key, timestamp };
         let mut left = 0usize;
         let mut right = self.tables.len() - 1;
 

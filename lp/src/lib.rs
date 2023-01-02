@@ -211,7 +211,7 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
             value: match &kvp.value {
                 Some(v) => Some(v.as_bytes()),
                 None => None,
-            }
+            },
         }
     }
 }
@@ -357,7 +357,7 @@ fn divide_keys(
         assert!(key_rhs.len() > shared);
         assert!(key_lhs[shared] < key_rhs[shared]);
         assert!(key_lhs[shared] < 0xff);
-        d_key.extend_from_slice(&key_lhs[0..shared+1]);
+        d_key.extend_from_slice(&key_lhs[0..shared + 1]);
         d_key[shared] = key_lhs[shared] + 1;
         d_timestamp = 0;
     } else {
@@ -576,7 +576,6 @@ mod tests {
         // Use of this source code is governed by a BSD-style license that can be
         // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-
         #[test]
         fn standard_results() {
             // Test copied directly from LevelDB.
@@ -610,13 +609,18 @@ mod tests {
 
         #[test]
         fn values() {
-            assert_ne!(crc32c::crc32c("a".as_bytes()), crc32c::crc32c("foo".as_bytes()));
+            assert_ne!(
+                crc32c::crc32c("a".as_bytes()),
+                crc32c::crc32c("foo".as_bytes())
+            );
         }
 
         #[test]
         fn extends() {
-            assert_eq!(crc32c::crc32c("hello world".as_bytes()),
-                crc32c::crc32c_append(crc32c::crc32c("hello ".as_bytes()), "world".as_bytes()));
+            assert_eq!(
+                crc32c::crc32c("hello world".as_bytes()),
+                crc32c::crc32c_append(crc32c::crc32c("hello ".as_bytes()), "world".as_bytes())
+            );
         }
     }
 }

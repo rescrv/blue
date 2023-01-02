@@ -8,7 +8,7 @@ use buffertk::Buffer;
 
 use lp::block::{Block, BlockBuilder, BlockCursor};
 use lp::reference::ReferenceBuilder;
-use lp::sst::{SST, SSTBuilder, SSTCursor};
+use lp::sst::{SSTBuilder, SSTCursor, SST};
 use lp::{Builder, Cursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
@@ -20,9 +20,7 @@ pub struct BufferGuacamole {
 
 impl BufferGuacamole {
     fn new(sz: usize) -> Self {
-        Self {
-            sz,
-        }
+        Self { sz }
     }
 
     fn guacamole(&self, guac: &mut Guacamole) -> Buffer {
@@ -135,7 +133,7 @@ pub trait TableTrait<'a> {
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
 
-pub trait TableBuilderTrait<'a>: Builder<Sealed=Self::Table> {
+pub trait TableBuilderTrait<'a>: Builder<Sealed = Self::Table> {
     type Table: TableTrait<'a>;
 }
 
@@ -188,18 +186,15 @@ impl Default for FuzzerConfig {
             num_keys: 1000,
             num_seeks: 1000,
             seek_distance: 10,
-            prev_probability: 0.01
+            prev_probability: 0.01,
         }
     }
 }
 
 ////////////////////////////////////////////// fuzzer //////////////////////////////////////////////
 
-pub fn fuzzer<T, B, F>(
-    name: &str,
-    config: FuzzerConfig,
-    new_table: F,
-) where
+pub fn fuzzer<T, B, F>(name: &str, config: FuzzerConfig, new_table: F)
+where
     for<'a> T: TableTrait<'a>,
     for<'a> B: TableBuilderTrait<'a, Table = T>,
     F: Fn(&str) -> B,
@@ -247,9 +242,7 @@ pub fn fuzzer<T, B, F>(
         let x = x.unwrap();
         match x.value {
             Some(ref v) => {
-                builder
-                    .put(x.key, x.timestamp, v)
-                    .unwrap();
+                builder.put(x.key, x.timestamp, v).unwrap();
             }
             None => {
                 builder.del(x.key, x.timestamp).unwrap();

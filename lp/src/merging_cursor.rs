@@ -14,26 +14,25 @@ impl Comparator {
         let rhs_value = rhs.value();
         match (self, lhs_value, rhs_value) {
             // We're comparing two positioned cursors.
-            (Comparator::Forward, Some(lhs), Some(rhs)) => { lhs < rhs },
+            (Comparator::Forward, Some(lhs), Some(rhs)) => lhs < rhs,
             // lhs is not at the end.  rhs is at the end.
-            (Comparator::Forward, Some(_), None) => { true },
+            (Comparator::Forward, Some(_), None) => true,
             // lhs is at the end.  rhs is not at the end.
-            (Comparator::Forward, None, Some(_)) => { false },
+            (Comparator::Forward, None, Some(_)) => false,
             // Both are at the end.  Neither strictly less than the other.
-            (Comparator::Forward, None, None) => { false },
+            (Comparator::Forward, None, None) => false,
 
             // We're comparing two positioned cursors.
-            (Comparator::Reverse, Some(lhs), Some(rhs)) => { lhs > rhs },
+            (Comparator::Reverse, Some(lhs), Some(rhs)) => lhs > rhs,
             // lhs is not at the beginning.  rhs is at the beginning.
-            (Comparator::Reverse, Some(_), None) => { true },
+            (Comparator::Reverse, Some(_), None) => true,
             // lhs is at the beginning.  rhs is not at the beginning.
-            (Comparator::Reverse, None, Some(_)) => { false },
+            (Comparator::Reverse, None, Some(_)) => false,
             // Both are at the beginning.  Neither strictly greater than the other.
-            (Comparator::Reverse, None, None) => { false },
+            (Comparator::Reverse, None, None) => false,
         }
     }
 }
-
 
 /////////////////////////////////////////// MergingCursor //////////////////////////////////////////
 
@@ -82,12 +81,18 @@ impl MergingCursor {
                 break;
             } else if child_rhs >= self.cursors.len() {
                 child_lhs
-            } else if self.comparator.is_less(&self.cursors[child_lhs], &self.cursors[child_rhs]) {
+            } else if self
+                .comparator
+                .is_less(&self.cursors[child_lhs], &self.cursors[child_rhs])
+            {
                 child_lhs
             } else {
                 child_rhs
             };
-            if self.comparator.is_less(&self.cursors[index], &self.cursors[child]) {
+            if self
+                .comparator
+                .is_less(&self.cursors[index], &self.cursors[child])
+            {
                 break;
             } else {
                 self.cursors.swap(index, child);

@@ -46,7 +46,6 @@ impl TableMetadata for ReferenceTable {
     }
 }
 
-
 ///////////////////////////////////////// ReferenceBuilder /////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
