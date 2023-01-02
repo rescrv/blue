@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use crc32c;
 
-use buffertk::{stack_pack, Packable, Unpacker};
+use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
 use setsum::Setsum;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
+    MAX_KEY_LEN, check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
     minimal_successor_key, Builder, Cursor, Error, KeyValueRef,
 };
 
@@ -86,13 +86,54 @@ struct FinalBlock {
     // filter_block: BlockMetadata,
     #[prototk(19, bytes32)]
     setsum: [u8; 32],
+    #[prototk(20, uint64)]
+    smallest_timestamp: u64,
+    #[prototk(21, uint64)]
+    biggest_timestamp: u64,
     // NOTE(rescrv): If adding a field, update the constant for max size.
     // This must be the final field of the struct.
     #[prototk(18, fixed64)]
     final_block_offset: u64,
 }
 
-const FINAL_BLOCK_MAX_SZ: usize = 2 + BLOCK_METADATA_MAX_SZ + 2 + 8 + 2 + setsum::SETSUM_BYTES;
+#[rustfmt::skip]
+const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ
+                                + 2 + 1 + setsum::SETSUM_BYTES
+                                + 2 + 10
+                                + 2 + 10
+                                + 2 + 8;
+
+//////////////////////////////////////////// SSTMetadata ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Message)]
+pub struct SSTMetadata {
+    #[prototk(1, bytes32)]
+    setsum: [u8; 32],
+    #[prototk(2, buffer)]
+    first_key: Buffer,
+    #[prototk(3, buffer)]
+    last_key: Buffer,
+    #[prototk(4, uint64)]
+    smallest_timestamp: u64,
+    #[prototk(5, uint64)]
+    biggest_timestamp: u64,
+}
+
+impl Default for SSTMetadata {
+    fn default() -> Self {
+        let mut last_key = Buffer::new(MAX_KEY_LEN);
+        for i in 0..MAX_KEY_LEN {
+            last_key.as_mut()[i] = 0xffu8;
+        }
+        Self {
+            setsum: [0u8; 32],
+            first_key: Buffer::new(0),
+            last_key,
+            smallest_timestamp: 0,
+            biggest_timestamp: u64::max_value(),
+        }
+    }
+}
 
 //////////////////////////////////////////////// SST ///////////////////////////////////////////////
 
@@ -170,6 +211,46 @@ impl SST {
             write!(&mut setsum, "{:02x}", self.final_block.setsum[i]).expect("unable to write to string");
         }
         setsum
+    }
+
+    pub fn metadata(&self) -> Result<SSTMetadata, Error> {
+        let mut cursor = self.iterate();
+        // First key.
+        cursor.seek_to_first()?;
+        cursor.next()?;
+        let kvr = cursor.value();
+        let first_key = match kvr {
+            Some(kvr) => {
+                Buffer::from(kvr.key)
+            },
+            None => {
+                Buffer::new(0)
+            }
+        };
+        // Last key.
+        cursor.seek_to_last()?;
+        cursor.prev()?;
+        let kvr = cursor.value();
+        let last_key = match kvr {
+            Some(kvr) => {
+                Buffer::from(kvr.key)
+            }
+            None => {
+                let mut buf = Buffer::new(MAX_KEY_LEN);
+                for i in 0..MAX_KEY_LEN {
+                    buf.as_mut()[i] = 0xffu8;
+                }
+                buf
+            }
+        };
+        // Metadata
+        Ok(SSTMetadata {
+            setsum: self.final_block.setsum,
+            first_key,
+            last_key,
+            smallest_timestamp: self.final_block.smallest_timestamp,
+            biggest_timestamp: self.final_block.biggest_timestamp,
+        })
     }
 
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
@@ -280,6 +361,9 @@ pub struct SSTBuilder {
     index_block: BlockBuilder,
     // The checksum of the file.
     setsum: Setsum,
+    // Timestamps seen.
+    smallest_timestamp: u64,
+    biggest_timestamp: u64,
     // Output information.
     output: File,
     path: PathBuf,
@@ -300,6 +384,8 @@ impl SSTBuilder {
             bytes_written: 0,
             index_block: BlockBuilder::new(BlockBuilderOptions::default()),
             setsum: Setsum::default(),
+            smallest_timestamp: u64::max_value(),
+            biggest_timestamp: 0,
             output,
             path: path.as_ref().to_path_buf(),
         })
@@ -322,6 +408,12 @@ impl SSTBuilder {
         self.last_key.truncate(0);
         self.last_key.extend_from_slice(key);
         self.last_timestamp = timestamp;
+        if self.smallest_timestamp > timestamp {
+            self.smallest_timestamp = timestamp;
+        }
+        if self.biggest_timestamp < timestamp {
+            self.biggest_timestamp = timestamp;
+        }
     }
 
     fn start_new_block(&mut self) -> Result<(), Error> {
@@ -433,6 +525,11 @@ impl Builder for SSTBuilder {
         let pa = stack_pack(entry);
         builder.bytes_written += pa.stream(&mut builder.output)?;
         let index_block_limit = builder.bytes_written;
+        // Update timestamps if nothing written
+        if builder.smallest_timestamp > builder.biggest_timestamp {
+            builder.smallest_timestamp = 0;
+            builder.biggest_timestamp = 0;
+        }
         // Our final_block
         let final_block = FinalBlock {
             index_block: BlockMetadata {
@@ -442,6 +539,8 @@ impl Builder for SSTBuilder {
             },
             final_block_offset: builder.bytes_written as u64,
             setsum: builder.setsum.digest(),
+            smallest_timestamp: builder.smallest_timestamp,
+            biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
         builder.bytes_written += pa.stream(&mut builder.output)?;

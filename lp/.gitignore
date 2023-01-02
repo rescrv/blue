@@ -3,4 +3,5 @@
 /*.sst
 # specific files
 /Cargo.lock
+/lsm/
 /target/
