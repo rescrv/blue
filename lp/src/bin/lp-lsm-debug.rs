@@ -1,14 +1,22 @@
-use std::env::args;
+use clap::{App, Arg};
 
 use lp::lsm::{LSMOptions, LSMTree};
 
 fn main() {
-    let args: Vec<String> = args().collect();
-    if args.len() != 2 {
-        eprintln!("lp-lsm-debug [lsm tree location]");
-        std::process::exit(-1);
-    }
+    let app = App::new("lp-lsm-debug")
+        .version("0.1.0")
+        .about("Ingest a set of SSTs into an LSM tree.");
+    let app = app.arg(
+        Arg::with_name("lsm")
+            .long("lsm")
+            .takes_value(true)
+            .help("Path to the lsm tree."));
+
+    // parse
+    let args = app.get_matches();
+    let tree = args.value_of("lsm").unwrap_or("lsm");
+
     let opts = LSMOptions::default();
-    let tree = LSMTree::open(opts, args[1].clone()).expect("could not open LSM tree");
+    let tree = LSMTree::open(opts, tree).expect("could not open LSM tree");
     tree.debug_dump();
 }
