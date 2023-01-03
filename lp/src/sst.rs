@@ -108,15 +108,35 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ
 #[derive(Clone, Debug, Message)]
 pub struct SSTMetadata {
     #[prototk(1, bytes32)]
-    setsum: [u8; 32],
+    pub setsum: [u8; 32],
     #[prototk(2, buffer)]
-    first_key: Buffer,
+    pub first_key: Buffer,
     #[prototk(3, buffer)]
-    last_key: Buffer,
+    pub last_key: Buffer,
     #[prototk(4, uint64)]
-    smallest_timestamp: u64,
+    pub smallest_timestamp: u64,
     #[prototk(5, uint64)]
-    biggest_timestamp: u64,
+    pub biggest_timestamp: u64,
+}
+
+impl SSTMetadata {
+    // TODO(rescrv): dedupe with the other implementations.
+    pub fn setsum(&self) -> String {
+        let mut setsum = String::with_capacity(68);
+        for i in 0..self.setsum.len() {
+            write!(&mut setsum, "{:02x}", self.setsum[i])
+                .expect("unable to write to string");
+        }
+        setsum
+    }
+
+    pub fn first_key_escaped(&self) -> String {
+        String::from_utf8(self.first_key.as_bytes().iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap()
+    }
+
+    pub fn last_key_escaped(&self) -> String {
+        String::from_utf8(self.last_key.as_bytes().iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap()
+    }
 }
 
 impl Default for SSTMetadata {

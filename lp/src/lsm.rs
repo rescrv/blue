@@ -10,6 +10,7 @@ use buffertk::{stack_pack, Unpacker};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
+use super::pruning_cursor::PruningCursor;
 use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
 
@@ -35,6 +36,7 @@ impl Default for LSMOptions {
 
 #[derive(Default)]
 struct State {
+    metadata_files: Vec<PathBuf>,
     sst_metadata: Vec<SSTMetadata>,
 }
 
@@ -158,19 +160,22 @@ impl LSMTree {
         // We will hold the lock for the entirety of this call to synchronize all calls to the lsm
         // tree.  Everything else should grab the state and then grab the tree behind the Arc.
         let mut state = self.state.lock().unwrap();
-        let mut iters: Vec<Box<dyn Cursor>> = Vec::new();
+        let mut metadata_files = Vec::new();
+        let mut cursors: Vec<Box<dyn Cursor>> = Vec::new();
         for meta in read_dir(self.root.join("meta"))? {
             let meta = meta?;
+            metadata_files.push(meta.path());
             let file = self.file_manager.open(meta.path())?;
             let sst = SST::from_file_handle(file)?;
-            iters.push(Box::new(sst.iterate()));
+            cursors.push(Box::new(sst.iterate()));
         }
-        let mut iter = MergingCursor::new(iters)?;
-        iter.seek_to_first()?;
+        let cursor = MergingCursor::new(cursors)?;
+        let mut cursor = PruningCursor::new(cursor, u64::max_value())?;
+        cursor.seek_to_first()?;
         let mut metadatas = Vec::new();
         loop {
-            iter.next()?;
-            let value = match iter.value() {
+            cursor.next()?;
+            let value = match cursor.value() {
                 Some(v) => v,
                 None => {
                     break;
@@ -185,7 +190,25 @@ impl LSMTree {
             })?;
             metadatas.push(metadata);
         }
+        state.metadata_files = metadata_files;
         state.sst_metadata = metadatas;
         Ok(())
+    }
+
+    pub fn debug_dump(&self) {
+        let state = self.state.lock().unwrap();
+        for meta in read_dir(self.root.join("meta")).expect("could not read dir") {
+            let meta = meta.expect("could not read dirent");
+            println!("metadata sst {}", meta.path().display());
+        }
+        for metadata in state.sst_metadata.iter() {
+            println!("sst {} first_key=\"{}\", last_key=\"{}\" smallest_timestamp={} biggest_timestamp={}",
+                metadata.setsum(),
+                metadata.first_key_escaped(),
+                metadata.last_key_escaped(),
+                metadata.smallest_timestamp,
+                metadata.biggest_timestamp,
+            );
+        }
     }
 }
