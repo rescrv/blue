@@ -1,3 +1,5 @@
+use zerror::ZError;
+
 use super::{Cursor, Error, KeyRef, KeyValueRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
@@ -42,7 +44,7 @@ pub struct MergingCursor {
 }
 
 impl MergingCursor {
-    pub fn new(cursors: Vec<Box<dyn Cursor>>) -> Result<Self, Error> {
+    pub fn new(cursors: Vec<Box<dyn Cursor>>) -> Result<Self, ZError<Error>> {
         let mut cursor = Self {
             comparator: Comparator::Forward,
             cursors,
@@ -103,7 +105,7 @@ impl MergingCursor {
 }
 
 impl Cursor for MergingCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_first()?;
@@ -116,7 +118,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
         self.comparator = Comparator::Reverse;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_last()?;
@@ -129,7 +131,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek(key)?;
@@ -138,7 +140,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), ZError<Error>> {
         if self.comparator == Comparator::Forward {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K <= C.value() && prev(C) < K
@@ -154,7 +156,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), ZError<Error>> {
         if self.comparator == Comparator::Reverse {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K >= C.value() && next(C) > K

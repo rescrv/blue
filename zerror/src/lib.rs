@@ -174,6 +174,21 @@ impl AsZError for std::io::Error {
     }
 }
 
+//////////////////////////////////////////// FromIOError ///////////////////////////////////////////
+
+pub trait FromIOError<T, E: Debug + Display> {
+    fn from_io(self) -> Result<T, ZError<E>>;
+}
+
+impl<T, E: Debug + Display + From<std::io::Error>> FromIOError<T, E> for Result<T, std::io::Error> {
+    fn from_io(self) -> Result<T, ZError<E>> {
+        match self {
+            Ok(x) => Ok(x),
+            Err(e) => Err(ZError::new(E::from(e))),
+        }
+    }
+}
+
 //////////////////////////////////////////// ZErrorTrait ///////////////////////////////////////////
 
 pub trait ZErrorTrait {

@@ -4,9 +4,16 @@ extern crate prototk_derive;
 
 use std::cmp;
 use std::cmp::Ordering;
+use std::fmt::{Debug, Display, Formatter};
 use std::path::PathBuf;
 
 use buffertk::Buffer;
+
+use biometrics::Counter;
+
+use hey_listen::{HeyListen, Stationary};
+
+use zerror::ZError;
 
 pub mod block;
 pub mod file_manager;
@@ -16,6 +23,34 @@ pub mod pruning_cursor;
 pub mod reference;
 pub mod sequence_cursor;
 pub mod sst;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static LOGIC_ERROR: Counter = Counter::new("lp.logic_error");
+static LOGIC_ERROR_MONITOR: Stationary = Stationary::new("lp.logic_error", &LOGIC_ERROR);
+
+static CORRUPTION: Counter = Counter::new("lp.corruption");
+static CORRUPTION_MONITOR: Stationary = Stationary::new("lp.corruption", &CORRUPTION);
+
+static KEY_TOO_LARGE: Counter = Counter::new("lp.error.key_too_large");
+static KEY_TOO_LARGE_MONITOR: Stationary = Stationary::new("lp.error.key_too_large", &KEY_TOO_LARGE);
+
+static VALUE_TOO_LARGE: Counter = Counter::new("lp.error.value_too_large");
+static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("lp.error.value_too_large", &VALUE_TOO_LARGE);
+
+static TABLE_FULL: Counter = Counter::new("lp.error.table_full");
+static TABLE_FULL_MONITOR: Stationary = Stationary::new("lp.error.table_full", &TABLE_FULL);
+
+pub fn register_monitors(hey_listen: &mut HeyListen) {
+    hey_listen.register_stationary(&LOGIC_ERROR_MONITOR);
+    hey_listen.register_stationary(&CORRUPTION_MONITOR);
+    hey_listen.register_stationary(&KEY_TOO_LARGE_MONITOR);
+    hey_listen.register_stationary(&VALUE_TOO_LARGE_MONITOR);
+    hey_listen.register_stationary(&TABLE_FULL_MONITOR);
+
+    file_manager::register_monitors(hey_listen);
+    lsm::register_monitors(hey_listen);
+}
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -28,34 +63,40 @@ pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
 // some slop.  64MiB is overkill, but will last for awhile.
 pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
 
-fn check_key_len(key: &[u8]) -> Result<(), Error> {
+fn check_key_len(key: &[u8]) -> Result<(), ZError<Error>> {
     if key.len() > MAX_KEY_LEN {
-        Err(Error::KeyTooLarge {
+        KEY_TOO_LARGE.click();
+        let zerr = ZError::new(Error::KeyTooLarge {
             length: key.len(),
             limit: MAX_KEY_LEN,
-        })
+        });
+        Err(zerr)
     } else {
         Ok(())
     }
 }
 
-fn check_value_len(value: &[u8]) -> Result<(), Error> {
+fn check_value_len(value: &[u8]) -> Result<(), ZError<Error>> {
     if value.len() > MAX_VALUE_LEN {
-        Err(Error::ValueTooLarge {
+        VALUE_TOO_LARGE.click();
+        let zerr = ZError::new(Error::ValueTooLarge {
             length: value.len(),
             limit: MAX_VALUE_LEN,
-        })
+        });
+        Err(zerr)
     } else {
         Ok(())
     }
 }
 
-fn check_table_size(size: usize) -> Result<(), Error> {
+fn check_table_size(size: usize) -> Result<(), ZError<Error>> {
     if size >= TABLE_FULL_SIZE {
-        Err(Error::TableFull {
+        TABLE_FULL.click();
+        let zerr = ZError::new(Error::TableFull {
             size,
             limit: TABLE_FULL_SIZE,
-        })
+        });
+        Err(zerr)
     } else {
         Ok(())
     }
@@ -111,7 +152,7 @@ pub enum Error {
     SystemError {
         context: String,
     },
-    IoError {
+    IOError {
         what: std::io::Error,
     },
     TooManyOpenFiles {
@@ -119,9 +160,16 @@ pub enum Error {
     },
 }
 
+impl Display for Error {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // TODO(rescrv): Don't be so debug-lazy.
+        write!(fmt, "{:?}", self)
+    }
+}
+
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
-        Error::IoError { what }
+        Error::IOError { what }
     }
 }
 
@@ -283,10 +331,10 @@ pub trait Builder {
 
     fn approximate_size(&self) -> usize;
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>>;
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>>;
 
-    fn seal(self) -> Result<Self::Sealed, Error>;
+    fn seal(self) -> Result<Self::Sealed, ZError<Error>>;
 }
 
 /////////////////////////////////////////// TableMetadata //////////////////////////////////////////
@@ -299,12 +347,13 @@ pub trait TableMetadata {
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 pub trait Cursor {
-    fn seek_to_first(&mut self) -> Result<(), Error>;
-    fn seek_to_last(&mut self) -> Result<(), Error>;
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
+    fn seek_to_first(&mut self) -> Result<(), ZError<Error>>;
+    fn seek_to_last(&mut self) -> Result<(), ZError<Error>>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>>;
 
-    fn prev(&mut self) -> Result<(), Error>;
-    fn next(&mut self) -> Result<(), Error>;
+    fn prev(&mut self) -> Result<(), ZError<Error>>;
+    fn next(&mut self) -> Result<(), ZError<Error>>;
+
     fn key(&self) -> Option<KeyRef>;
     fn value(&self) -> Option<KeyValueRef>;
 }

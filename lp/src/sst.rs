@@ -7,14 +7,18 @@ use crc32c;
 
 use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
+use prototk::field_types::*;
+
+use zerror::{FromIOError, ZError, ZErrorTrait};
+
 use setsum::Setsum;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Builder, Cursor, Error, KeyRef, KeyValueRef, MAX_KEY_LEN,
-    TABLE_FULL_SIZE,
+    minimal_successor_key, Builder, Cursor, Error, KeyRef, KeyValueRef, CORRUPTION, LOGIC_ERROR,
+    MAX_KEY_LEN, TABLE_FULL_SIZE,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -64,14 +68,14 @@ struct BlockMetadata {
 const BLOCK_METADATA_MAX_SZ: usize = 27;
 
 impl BlockMetadata {
-    fn sanity_check(&self) -> Result<(), Error> {
+    fn sanity_check(&self) -> Result<(), ZError<Error>> {
         if self.start >= self.limit {
-            return Err(Error::Corruption {
-                context: format!(
-                    "block_metadata.start={} >= block_metadata.limit={}",
-                    self.start, self.limit
-                ),
-            });
+            let zerr = ZError::new(Error::Corruption {
+                context: "block_metadata.start >= block_metadata.limit".to_string(),
+            })
+            .with_context::<uint64>("self.start", 1, self.start as u64)
+            .with_context::<uint64>("self.limit", 2, self.limit as u64);
+            return Err(zerr);
         }
         Ok(())
     }
@@ -125,18 +129,31 @@ impl SSTMetadata {
     pub fn setsum(&self) -> String {
         let mut setsum = String::with_capacity(68);
         for i in 0..self.setsum.len() {
-            write!(&mut setsum, "{:02x}", self.setsum[i])
-                .expect("unable to write to string");
+            write!(&mut setsum, "{:02x}", self.setsum[i]).expect("unable to write to string");
         }
         setsum
     }
 
     pub fn first_key_escaped(&self) -> String {
-        String::from_utf8(self.first_key.as_bytes().iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap()
+        String::from_utf8(
+            self.first_key
+                .as_bytes()
+                .iter()
+                .flat_map(|b| std::ascii::escape_default(*b))
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap()
     }
 
     pub fn last_key_escaped(&self) -> String {
-        String::from_utf8(self.last_key.as_bytes().iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap()
+        String::from_utf8(
+            self.last_key
+                .as_bytes()
+                .iter()
+                .flat_map(|b| std::ascii::escape_default(*b))
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap()
     }
 }
 
@@ -169,55 +186,67 @@ pub struct SST {
 }
 
 impl SST {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ZError<Error>> {
         let handle = open_without_manager(path.as_ref().to_path_buf())?;
         SST::from_file_handle(handle)
     }
 
-    pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
+    pub fn from_file_handle(handle: FileHandle) -> Result<Self, ZError<Error>> {
         // Read and parse the final block's offset
         let file_sz = handle.size()?;
         if file_sz < 8 {
-            return Err(Error::Corruption {
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
                 context: "file has fewer than eight bytes".to_string(),
             });
+            return Err(zerr);
         }
         let position = file_sz - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
         handle.read_exact_at(&mut buf, position)?;
         let mut up = Unpacker::new(&buf);
-        let final_block_offset: u64 =
-            up.unpack()
-                .map_err(|e: buffertk::Error| Error::UnpackError {
-                    error: e.into(),
-                    context: "parsing final block offset".to_string(),
-                })?;
+        let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
+                error: e.into(),
+                context: "parsing final block offset".to_string(),
+            })
+        })?;
         // Read and parse the final block
         if file_sz < final_block_offset {
-            return Err(Error::Corruption {
-                context: format!(
-                    "final block offset reported at {}, but file is {} bytes",
-                    final_block_offset, file_sz
-                ),
-            });
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
+                context: "final block offset is larger than file size".to_string(),
+            })
+            .with_context::<uint64>("final_block_offset", 1, final_block_offset)
+            .with_context::<uint64>("file_size", 2, file_sz);
+            return Err(zerr);
         }
         let size_of_final_block = position + 8 - (final_block_offset);
         buf.resize(size_of_final_block as usize, 0);
         handle.read_exact_at(&mut buf, final_block_offset)?;
         let mut up = Unpacker::new(&buf);
-        let final_block: FinalBlock = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
-            context: "parsing final block".to_string(),
+        let final_block: FinalBlock = up.unpack().map_err(|e| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
+                error: e,
+                context: "parsing final block".to_string(),
+            })
         })?;
         final_block.index_block.sanity_check()?;
         // Check that the final block's metadata is sane.
         if final_block.index_block.limit > final_block_offset {
-            return Err(Error::Corruption {
-                context: format!(
-                    "index_block runs past final_block_offset={} limit={}",
-                    final_block_offset, final_block.index_block.limit
-                ),
-            });
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
+                context: "index_block runs past final_block_offset".to_string(),
+            })
+            .with_context::<uint64>("final_block_offset", 1, final_block_offset as u64)
+            .with_context::<uint64>(
+                "index_block_limit",
+                2,
+                final_block.index_block.limit as u64,
+            );
+            return Err(zerr);
         }
         let index_block = SST::load_block(&handle, &final_block.index_block)?;
         Ok(Self {
@@ -240,7 +269,7 @@ impl SST {
         setsum
     }
 
-    pub fn metadata(&self) -> Result<SSTMetadata, Error> {
+    pub fn metadata(&self) -> Result<SSTMetadata, ZError<Error>> {
         let mut cursor = self.iterate();
         // First key.
         cursor.seek_to_first()?;
@@ -274,29 +303,40 @@ impl SST {
         })
     }
 
-    fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
+    fn load_block(
+        file: &FileHandle,
+        block_metadata: &BlockMetadata,
+    ) -> Result<Block, ZError<Error>> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
         let mut buf: Vec<u8> = Vec::with_capacity(amt);
         buf.resize(amt, 0);
         file.read_exact_at(&mut buf, block_metadata.start)?;
         let mut up = Unpacker::new(&buf);
-        let table_entry: SSTEntry = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
-            context: "parsing table entry".to_string(),
+        let table_entry: SSTEntry = up.unpack().map_err(|e| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
+                error: e,
+                context: "parsing table entry".to_string(),
+            })
         })?;
         if table_entry.crc32c() != block_metadata.crc32c {
-            return Err(Error::CRC32CFailure {
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::CRC32CFailure {
                 start: block_metadata.start,
                 limit: block_metadata.limit,
                 crc32c: block_metadata.crc32c,
             });
+            return Err(zerr);
         }
         match table_entry {
             SSTEntry::PlainBlock(bytes) => Ok(Block::new(bytes.into())?),
-            SSTEntry::FinalBlock(_) => Err(Error::Corruption {
-                context: "tried loading final block".to_string(),
-            }),
+            SSTEntry::FinalBlock(_) => {
+                CORRUPTION.click();
+                Err(ZError::new(Error::Corruption {
+                    context: "tried loading final block".to_string(),
+                }))
+            }
         }
     }
 }
@@ -387,11 +427,13 @@ pub struct SSTBuilder {
 }
 
 impl SSTBuilder {
-    pub fn new<P: AsRef<Path>>(path: P, options: SSTBuilderOptions) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(path: P, options: SSTBuilderOptions) -> Result<Self, ZError<Error>> {
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(path.as_ref().to_path_buf())?;
+            .open(path.as_ref().to_path_buf())
+            .from_io()
+            .with_context::<stringref>("open", 1, &path.as_ref().to_string_lossy())?;
         Ok(SSTBuilder {
             options,
             last_key: Vec::new(),
@@ -408,14 +450,14 @@ impl SSTBuilder {
         })
     }
 
-    fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
-            Err(Error::SortOrder {
+            Err(ZError::new(Error::SortOrder {
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
                 new_timestamp: timestamp,
-            })
+            }))
         } else {
             Ok(())
         }
@@ -433,22 +475,24 @@ impl SSTBuilder {
         }
     }
 
-    fn start_new_block(&mut self) -> Result<(), Error> {
+    fn start_new_block(&mut self) -> Result<(), ZError<Error>> {
         if !self.block_builder.is_none() {
-            return Err(Error::LogicError {
+            LOGIC_ERROR.click();
+            return Err(ZError::new(Error::LogicError {
                 context: "called start_new_block() when block_builder is not None".to_string(),
-            });
+            }));
         }
         self.block_builder = Some(BlockBuilder::new(self.options.block_options.clone()));
         self.block_start_offset = self.bytes_written;
         Ok(())
     }
 
-    fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         if !self.block_builder.is_some() {
-            return Err(Error::LogicError {
+            LOGIC_ERROR.click();
+            return Err(ZError::new(Error::LogicError {
                 context: "self.block_builder.is_none()".to_string(),
-            });
+            }));
         }
         // Metadata for the block.
         let mut block_metadata = BlockMetadata::default();
@@ -460,7 +504,7 @@ impl SSTBuilder {
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         block_metadata.crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        self.bytes_written += pa.stream(&mut self.output)?;
+        self.bytes_written += pa.stream(&mut self.output).from_io()?;
         // Prepare the block metadata.
         block_metadata.limit = self.bytes_written as u64;
         block_metadata.sanity_check()?;
@@ -474,7 +518,11 @@ impl SSTBuilder {
             .put(&dividing_key, dividing_timestamp, &value)
     }
 
-    fn get_block(&mut self, key: &[u8], timestamp: u64) -> Result<&mut BlockBuilder, Error> {
+    fn get_block(
+        &mut self,
+        key: &[u8],
+        timestamp: u64,
+    ) -> Result<&mut BlockBuilder, ZError<Error>> {
         if self.block_builder.is_none() {
             self.start_new_block()?;
         } else {
@@ -503,7 +551,7 @@ impl Builder for SSTBuilder {
         sum
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>> {
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
@@ -516,7 +564,7 @@ impl Builder for SSTBuilder {
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
         self.enforce_sort_order(key, timestamp)?;
@@ -528,7 +576,7 @@ impl Builder for SSTBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<SST, Error> {
+    fn seal(self) -> Result<SST, ZError<Error>> {
         let mut builder = self;
         // Flush the block we have.
         if builder.block_builder.is_some() {
@@ -542,7 +590,7 @@ impl Builder for SSTBuilder {
         let entry = SSTEntry::PlainBlock(bytes);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
+        builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
         let index_block_limit = builder.bytes_written;
         // Update timestamps if nothing written
         if builder.smallest_timestamp > builder.biggest_timestamp {
@@ -562,10 +610,10 @@ impl Builder for SSTBuilder {
             biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
+        builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
         // fsync
-        builder.output.sync_all()?;
-        Ok(SST::new(builder.path)?)
+        builder.output.sync_all().from_io()?;
+        SST::new(builder.path)
     }
 }
 
@@ -590,7 +638,7 @@ impl SSTMultiBuilder {
         }
     }
 
-    fn get_builder(&mut self) -> Result<&mut SSTBuilder, Error> {
+    fn get_builder(&mut self) -> Result<&mut SSTBuilder, ZError<Error>> {
         if self.builder.is_some() {
             if self.builder.as_mut().unwrap().approximate_size() >= TABLE_FULL_SIZE {
                 let builder = self.builder.take().unwrap();
@@ -611,25 +659,25 @@ impl Builder for SSTMultiBuilder {
 
     fn approximate_size(&self) -> usize {
         match &self.builder {
-            Some(b) => { b.approximate_size() },
-            None => { 0 },
+            Some(b) => b.approximate_size(),
+            None => 0,
         }
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>> {
         self.get_builder()?.put(key, timestamp, value)
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         self.get_builder()?.del(key, timestamp)
     }
 
-    fn seal(mut self) -> Result<(), Error> {
+    fn seal(mut self) -> Result<(), ZError<Error>> {
         let builder = match self.builder.take() {
-            Some(b) => { b },
+            Some(b) => b,
             None => {
                 return Ok(());
-            },
+            }
         };
         builder.seal()?;
         Ok(())
@@ -657,7 +705,7 @@ impl SSTCursor {
         }
     }
 
-    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, ZError<Error>> {
         self.meta_iter.prev()?;
         let kvp = match self.meta_iter.value() {
             Some(kvp) => kvp,
@@ -669,7 +717,7 @@ impl SSTCursor {
         SSTCursor::metadata_from_kvp(kvp)
     }
 
-    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, ZError<Error>> {
         self.meta_iter.next()?;
         let kvp = match self.meta_iter.value() {
             Some(kvp) => kvp,
@@ -681,38 +729,42 @@ impl SSTCursor {
         SSTCursor::metadata_from_kvp(kvp)
     }
 
-    fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
+    fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, ZError<Error>> {
         let value = match kvr.value {
             Some(v) => v,
             None => {
-                return Err(Error::Corruption {
+                CORRUPTION.click();
+                return Err(ZError::new(Error::Corruption {
                     context: "meta block has null value".to_string(),
-                });
+                }));
             }
         };
         let mut up = Unpacker::new(value);
-        let metadata: BlockMetadata = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
-            context: "parsing block metadata".to_string(),
+        let metadata: BlockMetadata = up.unpack().map_err(|e| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
+                error: e,
+                context: "parsing block metadata".to_string(),
+            })
         })?;
         Ok(Some(metadata))
     }
 }
 
 impl Cursor for SSTCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
         self.meta_iter.seek_to_first()?;
         self.block_iter = None;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
         self.meta_iter.seek_to_last()?;
         self.block_iter = None;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
         self.meta_iter.seek(key)?;
         let metadata = match self.meta_next()? {
             Some(m) => m,
@@ -727,7 +779,7 @@ impl Cursor for SSTCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), ZError<Error>> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_prev()? {
                 Some(m) => m,
@@ -752,7 +804,7 @@ impl Cursor for SSTCursor {
         }
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), ZError<Error>> {
         if self.block_iter.is_none() {
             let metadata = match self.meta_next()? {
                 Some(m) => m,

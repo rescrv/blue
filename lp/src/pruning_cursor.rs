@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 
+use zerror::ZError;
+
 use super::{compare_bytes, Cursor, Error, KeyRef, KeyValueRef};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
@@ -11,7 +13,7 @@ pub struct PruningCursor<C: Cursor> {
 }
 
 impl<C: Cursor> PruningCursor<C> {
-    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, Error> {
+    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, ZError<Error>> {
         cursor.seek_to_first()?;
         Ok(Self {
             cursor,
@@ -33,22 +35,22 @@ impl<C: Cursor> PruningCursor<C> {
 }
 
 impl<C: Cursor> Cursor for PruningCursor<C> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
         self.skip_key = None;
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
         self.skip_key = None;
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
         self.skip_key = None;
         self.cursor.seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), ZError<Error>> {
         if self.key().is_none() {
             self.skip_key = None;
         }
@@ -103,9 +105,10 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
             let kvr = match self.value() {
                 Some(kvr) => kvr,
                 None => {
-                    return Err(Error::LogicError {
+                    let zerr = ZError::new(Error::LogicError {
                         context: "should be positioned at some key with a value".to_string(),
                     });
+                    return Err(zerr);
                 },
             };
             assert!(kvr.timestamp <= self.timestamp);
@@ -121,7 +124,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
         }
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), ZError<Error>> {
         loop {
             self.cursor.next()?;
             let kvr = match self.value() {

@@ -8,11 +8,31 @@ use util::lockfile::Lockfile;
 
 use buffertk::{stack_pack, Unpacker};
 
+use prototk::field_types::*;
+
+use biometrics::Counter;
+
+use hey_listen::{HeyListen, Stationary};
+
+use clue::Trace;
+
+use zerror::{FromIOError, ZError, ZErrorTrait};
+
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
 use super::pruning_cursor::PruningCursor;
 use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static LOCK_NOT_OBTAINED: Counter = Counter::new("lp.lsm.lock_not_obtained");
+static LOCK_NOT_OBTAINED_MONITOR: Stationary =
+    Stationary::new("lp.lsm.lock_not_obtained", &LOCK_NOT_OBTAINED);
+
+pub fn register_monitors(hey_listen: &mut HeyListen) {
+    hey_listen.register_stationary(&LOCK_NOT_OBTAINED_MONITOR);
+}
 
 //////////////////////////////////////////// LSMOptions ////////////////////////////////////////////
 
@@ -51,31 +71,50 @@ pub struct LSMTree {
 }
 
 impl LSMTree {
-    pub fn open<P: AsRef<Path>>(options: LSMOptions, path: P) -> Result<LSMTree, Error> {
-        let path: PathBuf = path.as_ref().canonicalize()?;
+    pub fn open<P: AsRef<Path>>(options: LSMOptions, path: P) -> Result<LSMTree, ZError<Error>> {
+        let path: PathBuf = path
+            .as_ref()
+            .canonicalize()
+            .from_io()
+            .with_context::<stringref>("path", 1, &path.as_ref().to_string_lossy())?;
         // Deal with the lockfile first.
         let lockfile_path = path.join("LOCKFILE");
         let lockfile = if options.wait_for_lock {
-            Lockfile::wait(lockfile_path.clone())?
+            Lockfile::wait(lockfile_path.clone())
+                .from_io()
+                .with_context::<stringref>("path", 1, &lockfile_path.to_string_lossy())
+                .with_backtrace()?
         } else {
-            Lockfile::lock(lockfile_path.clone())?
+            Lockfile::lock(lockfile_path.clone())
+                .from_io()
+                .with_context::<stringref>("path", 1, &lockfile_path.to_string_lossy())
+                .with_backtrace()?
         };
         if lockfile.is_none() {
-            return Err(Error::LockNotObtained {
+            LOCK_NOT_OBTAINED.click();
+            let zerr = ZError::new(Error::LockNotObtained {
                 path: lockfile_path,
             });
+            return Err(zerr);
         }
         let lockfile = lockfile.unwrap();
         // FileManager.
         let file_manager = FileManager::new(options.max_open_files);
         // Create the correct directories, or at least make sure they exist.
         if !path.join("sst").is_dir() {
-            create_dir(path.join("sst"))?;
+            create_dir(path.join("sst"))
+                .from_io()
+                .with_context::<stringref>("sst", 2, &path.join("sst").to_string_lossy())?;
         }
         if !path.join("meta").is_dir() {
-            create_dir(path.join("meta"))?;
+            create_dir(path.join("meta"))
+                .from_io()
+                .with_context::<stringref>("meta", 3, &path.join("meta").to_string_lossy())?;
         }
         // LSMTree.
+        Trace::new("lp.lsm.open")
+            .with_context::<stringref>("path", 1, &path.to_string_lossy())
+            .finish();
         let lsm = LSMTree {
             root: path,
             options,
@@ -87,16 +126,19 @@ impl LSMTree {
         Ok(lsm)
     }
 
-    pub fn ingest_ssts<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), Error> {
+    pub fn ingest_ssts<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>> {
         // Make a directory into which all files will be linked.
         let ingest_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::SystemError {
-                context: "system clock before UNIX epoch".to_string(),
+            .map_err(|e| {
+                ZError::new(Error::SystemError {
+                    context: "system clock before UNIX epoch".to_string(),
+                })
+                .wrap_error(Box::new(e))
             })?
             .as_secs_f64();
         let ingest_root = self.root.join(format!("ingest:{}", ingest_time));
-        create_dir(&ingest_root)?;
+        create_dir(&ingest_root).from_io()?;
         let mut ssts = Vec::new();
         // For each SST, hardlink it into the ingest root.
         for path in paths {
@@ -108,7 +150,7 @@ impl LSMTree {
             // Hard-link the file into place.
             let filename = setsum_str.clone() + ".sst";
             let target = ingest_root.join(&filename);
-            hard_link(path.as_ref(), target)?;
+            hard_link(path.as_ref(), target).from_io()?;
             ssts.push((setsum_str, filename, metadata));
         }
         // Create one file that will be linked into meta.  Swizzling this file is what gives us a
@@ -134,9 +176,9 @@ impl LSMTree {
                 Ok(_) => {}
                 Err(err) => {
                     if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(Error::DuplicateSST { what: sst.clone() });
+                        return Err(ZError::new(Error::DuplicateSST { what: sst.clone() }));
                     } else {
-                        return Err(err.into());
+                        return Err(ZError::new(err.into()));
                     }
                 }
             }
@@ -146,24 +188,24 @@ impl LSMTree {
             self.root
                 .join("meta")
                 .join(&format!("{}.{}.sst", meta.setsum(), ingest_time));
-        hard_link(ingest_root.join(&meta_basename), meta_path)?;
+        hard_link(ingest_root.join(&meta_basename), meta_path).from_io()?;
         // Unlink the ingest directory last.
         for (_, sst, _) in ssts.iter() {
-            remove_file(ingest_root.join(&sst))?;
+            remove_file(ingest_root.join(&sst)).from_io()?;
         }
-        remove_file(ingest_root.join(&meta_basename))?;
-        remove_dir(ingest_root)?;
+        remove_file(ingest_root.join(&meta_basename)).from_io()?;
+        remove_dir(ingest_root).from_io()?;
         self.reload_from_disk()
     }
 
-    pub fn reload_from_disk(&self) -> Result<(), Error> {
+    pub fn reload_from_disk(&self) -> Result<(), ZError<Error>> {
         // We will hold the lock for the entirety of this call to synchronize all calls to the lsm
         // tree.  Everything else should grab the state and then grab the tree behind the Arc.
         let mut state = self.state.lock().unwrap();
         let mut metadata_files = Vec::new();
         let mut cursors: Vec<Box<dyn Cursor>> = Vec::new();
-        for meta in read_dir(self.root.join("meta"))? {
-            let meta = meta?;
+        for meta in read_dir(self.root.join("meta")).from_io()? {
+            let meta = meta.from_io()?;
             metadata_files.push(meta.path());
             let file = self.file_manager.open(meta.path())?;
             let sst = SST::from_file_handle(file)?;
@@ -182,11 +224,15 @@ impl LSMTree {
                 }
             };
             let mut up = Unpacker::new(value.value.unwrap_or(&[]));
-            let metadata: SSTMetadata = up.unpack().map_err(|_| Error::Corruption {
-                context: format!(
-                    "{} is corrupted in metadata",
-                    String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string())
-                ),
+            let metadata: SSTMetadata = up.unpack().map_err(|_| {
+                ZError::new(Error::Corruption {
+                    context: "key is corrupted in metadata".to_string(),
+                })
+                .with_context::<stringref>(
+                    "key",
+                    1,
+                    &String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string()),
+                )
             })?;
             metadatas.push(metadata);
         }

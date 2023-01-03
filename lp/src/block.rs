@@ -4,11 +4,14 @@ use std::rc::Rc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 
+use prototk::field_types::*;
 use prototk_derive::Message;
 
+use zerror::{ZError, ZErrorTrait};
+
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Buffer, Builder,
-    Cursor, Error, KeyRef, KeyValueRef,
+    LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
+    Buffer, Builder, Cursor, Error, KeyRef, KeyValueRef,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -129,24 +132,25 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(bytes: Buffer) -> Result<Self, Error> {
+    pub fn new(bytes: Buffer) -> Result<Self, ZError<Error>> {
         // Load num_restarts.
         let bytes = Rc::new(bytes);
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
-            return Err(Error::BlockTooSmall {
+            return Err(ZError::new(Error::BlockTooSmall {
                 length: bytes.len(),
                 required: 4,
-            });
+            }));
         }
         let mut up = Unpacker::new(&bytes.as_bytes()[bytes.len() - 4..]);
-        let num_restarts: u32 = up
-            .unpack()
-            .map_err(|e: buffertk::Error| Error::UnpackError {
+        let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
                 error: e.into(),
                 context: "could not read last four bytes of block".to_string(),
-            })?;
+            })
+        })?;
         let num_restarts: usize = num_restarts as usize;
         // Footer size.
         // |tag 10|v64 of num bytes|packed num_restarts u32s|tag 11|fixed32 capstone|
@@ -270,7 +274,7 @@ impl BlockBuilder {
     }
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
-    fn append<'a>(&mut self, be: BlockEntry<'a>) -> Result<(), Error> {
+    fn append<'a>(&mut self, be: BlockEntry<'a>) -> Result<(), ZError<Error>> {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
@@ -289,14 +293,14 @@ impl BlockBuilder {
         Ok(())
     }
 
-    fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
-            Err(Error::SortOrder {
+            Err(ZError::new(Error::SortOrder {
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
                 new_timestamp: timestamp,
-            })
+            }))
         } else {
             Ok(())
         }
@@ -310,7 +314,7 @@ impl Builder for BlockBuilder {
         self.buffer.len() + 16 + self.restarts.len() * 4
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>> {
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
@@ -326,7 +330,7 @@ impl Builder for BlockBuilder {
         self.append(be)
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
         self.enforce_sort_order(key, timestamp)?;
@@ -340,7 +344,7 @@ impl Builder for BlockBuilder {
         self.append(be)
     }
 
-    fn seal(self) -> Result<Block, Error> {
+    fn seal(self) -> Result<Block, ZError<Error>> {
         // Append each restart.
         // NOTE(rescrv):  If this changes, change approximate_size above.
         let restarts = length_free(&self.restarts);
@@ -453,23 +457,25 @@ impl BlockCursor {
     }
 
     // Make self.position be of type CursorPosition::Positioned and fill in the fields.
-    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef>, Error> {
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef>, ZError<Error>> {
         if restart_idx >= self.block.num_restarts {
-            return Err(Error::LogicError {
-                context: format!(
-                    "restart_idx={} exceeds num_restarts={}",
-                    restart_idx, self.block.num_restarts
-                ),
-            });
+            LOGIC_ERROR.click();
+            let zerr = ZError::new(Error::LogicError {
+                context: "restart_idx exceeds num_restarts".to_string(),
+            })
+            .with_context::<uint64>("restart_idx", 1, restart_idx as u64)
+            .with_context::<uint64>("num_restarts", 2, self.block.num_restarts as u64);
+            return Err(zerr);
         }
         let offset = self.block.restart_point(restart_idx);
         if offset >= self.block.restarts_boundary {
-            return Err(Error::Corruption {
-                context: format!(
-                    "offset={} exceeds restarts_boundary={}",
-                    offset, self.block.restarts_boundary
-                ),
-            });
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
+                context: "offset exceeds restarts_boundary".to_string(),
+            })
+            .with_context::<uint64>("offset", 1, offset as u64)
+            .with_context::<uint64>("restarts_boundary", 2, self.block.restarts_boundary as u64);
+            return Err(zerr);
         }
 
         // Extract the key from self.position.
@@ -496,7 +502,7 @@ impl BlockCursor {
         self.key_ref()
     }
 
-    fn key_ref(&self) -> Result<Option<KeyRef>, Error> {
+    fn key_ref(&self) -> Result<Option<KeyRef>, ZError<Error>> {
         match &self.position {
             CursorPosition::First => Ok(None),
             CursorPosition::Last => Ok(None),
@@ -517,7 +523,7 @@ impl BlockCursor {
         block: &Block,
         offset: usize,
         mut key: Vec<u8>,
-    ) -> Result<CursorPosition, Error> {
+    ) -> Result<CursorPosition, ZError<Error>> {
         // Check for overrun.
         if offset >= block.restarts_boundary {
             return Ok(CursorPosition::Last);
@@ -525,9 +531,13 @@ impl BlockCursor {
         // Parse the key-value pair.
         let bytes = block.bytes.as_bytes();
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
-        let be: BlockEntry = up.unpack().map_err(|e| Error::UnpackError {
-            error: e,
-            context: format!("could not unpack key-value pair at offset={}", offset),
+        let be: BlockEntry = up.unpack().map_err(|e| {
+            CORRUPTION.click();
+            ZError::new(Error::UnpackError {
+                error: e,
+                context: "could not unpack key-value pair at offset".to_string(),
+            })
+            .with_context::<uint64>("offset", 1, offset as u64)
         })?;
         let next_offset = block.restarts_boundary - up.remain().len();
         let restart_idx = block.restart_for_offset(offset);
@@ -545,23 +555,24 @@ impl BlockCursor {
 }
 
 impl Cursor for BlockCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
         self.position = CursorPosition::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
         self.position = CursorPosition::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
-            return Err(Error::Corruption {
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
                 context: "a block with 0 restarts".to_string(),
-            }
-            .into());
+            });
+            return Err(zerr);
         }
 
         // Binary search to the correct restart point.
@@ -573,10 +584,12 @@ impl Cursor for BlockCursor {
             let kvp = match self.seek_restart(mid)? {
                 Some(x) => x,
                 None => {
-                    return Err(Error::Corruption {
-                        context: format!("restart point={} returned no key-value pair.", mid),
-                    }
-                    .into());
+                    CORRUPTION.click();
+                    let zerr = ZError::new(Error::Corruption {
+                        context: "restart point returned no key-value pair".to_string(),
+                    })
+                    .with_context::<uint64>("restart_point", 1, mid as u64);
+                    return Err(zerr);
                 }
             };
             match compare_bytes(key, kvp.key) {
@@ -603,9 +616,13 @@ impl Cursor for BlockCursor {
 
         // Sanity check the outcome of the binary search.
         if left != right {
-            return Err(Error::Corruption {
-                context: format!("binary_search (left={}) != (right={})", left, right),
-            });
+            CORRUPTION.click();
+            let zerr = ZError::new(Error::Corruption {
+                context: "binary_search left != right".to_string(),
+            })
+            .with_context::<uint64>("left", 1, left as u64)
+            .with_context::<uint64>("right", 2, right as u64);
+            return Err(zerr)
         }
 
         // We position at the left restart point
@@ -615,9 +632,12 @@ impl Cursor for BlockCursor {
         let kref = match self.seek_restart(left)? {
             Some(x) => x,
             None => {
-                return Err(Error::Corruption {
-                    context: format!("restart point={} returned no key-value pair.", left),
-                });
+                CORRUPTION.click();
+                let zerr = ZError::new(Error::Corruption {
+                    context: "restart point returned no key-value pair".to_string(),
+                })
+                .with_context::<uint64>("restart_point", 1, left as u64);
+                return Err(zerr);
             }
         };
 
@@ -658,7 +678,7 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), ZError<Error>> {
         // We won't go past here.
         let target_next_offset = match self.position {
             CursorPosition::First => {
@@ -687,9 +707,11 @@ impl Cursor for BlockCursor {
             || target_next_offset <= self.block.restart_point(current_restart_idx)
         {
             if current_restart_idx == 0 {
-                return Err(Error::LogicError {
+                LOGIC_ERROR.click();
+                let zerr = ZError::new(Error::LogicError {
                     context: "tried taking the -1st restart_idx".to_string(),
                 });
+                return Err(zerr);
             }
             current_restart_idx - 1
         } else {
@@ -697,14 +719,16 @@ impl Cursor for BlockCursor {
         };
 
         // Seek and scan.
-        self.seek_restart(restart_idx)?;
+        self.seek_restart(restart_idx)
+            .with_context::<uint64>("restart_idx", 1, restart_idx as u64)?;
         while self.next_offset() < target_next_offset {
-            self.next()?;
+            self.next()
+                .with_context::<uint64>("target_next_offset", 1, target_next_offset as u64)?;
         }
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), ZError<Error>> {
         // We start with the first block.
         if let CursorPosition::First = self.position {
             self.seek_restart(0)?;
@@ -733,9 +757,11 @@ impl Cursor for BlockCursor {
 
         // We are positioned.
         if !self.position.is_positioned() {
-            return Err(Error::LogicError {
+            LOGIC_ERROR.click();
+            let zerr = ZError::new(Error::LogicError {
                 context: "next was not positioned, but made it to here.".to_string(),
             });
+            return Err(zerr);
         }
 
         // Extract the key from self.position.
@@ -756,7 +782,8 @@ impl Cursor for BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)
+            .with_context::<uint64>("offset", 3, offset as u64)?;
         Ok(())
     }
 
@@ -770,12 +797,10 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 key,
                 timestamp,
-            } => {
-                Some(KeyRef {
-                    key: &key,
-                    timestamp: *timestamp,
-                })
-            }
+            } => Some(KeyRef {
+                key: &key,
+                timestamp: *timestamp,
+            }),
         }
     }
 
