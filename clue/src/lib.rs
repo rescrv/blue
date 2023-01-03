@@ -129,6 +129,15 @@ impl Trace {
             t.borrow_mut().finish(self);
         });
     }
+
+    pub fn panic<S: AsRef<str>>(self, message: S) -> ! {
+        let panic_extras = self.human.clone();
+        self.finish();
+        TRACER.with(|t| {
+            t.borrow_mut().flush();
+        });
+        panic!("{}\n{}", message.as_ref(), panic_extras);
+    }
 }
 
 ////////////////////////////////////////////// Tracer //////////////////////////////////////////////
@@ -169,6 +178,18 @@ impl Tracer {
         emitter.emit(trace);
     }
 
+    pub fn flush(&mut self) {
+        let emitter = match &self.emitter {
+            Some(e) => e,
+            None => {
+                click!("clue.trace.flush.no_emitter");
+                return;
+            }
+        };
+        click!("clue.trace.flush");
+        emitter.flush();
+    }
+
     const fn new() -> Self {
         Self {
             emitter: None,
@@ -184,6 +205,7 @@ impl Tracer {
 
 pub trait Emitter {
     fn emit(&self, trace: Trace);
+    fn flush(&self);
 }
 
 pub fn register_emitter<E: Emitter + 'static>(emitter: E) {
@@ -226,6 +248,10 @@ impl<W: Write> Emitter for PlainTextEmitter<W> {
             CLUE_PLAINTEXT_NOT_WRITTEN.click();
             eprintln!("plaintext emitter failure: {}", e);
         }
+    }
+
+    fn flush(&self) {
+        // Intentionally do nothing.
     }
 }
 
