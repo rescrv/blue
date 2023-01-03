@@ -168,8 +168,8 @@ pub struct SST {
 }
 
 impl SST {
-    pub fn new(path: PathBuf) -> Result<Self, Error> {
-        let handle = open_without_manager(path)?;
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let handle = open_without_manager(path.as_ref().to_path_buf())?;
         SST::from_file_handle(handle)
     }
 
