@@ -15,10 +15,10 @@ use buffertk::stack_pack;
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldType, Tag};
 
-pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
-pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
-pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 5;
+pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
+pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 5;
+pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 6;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
