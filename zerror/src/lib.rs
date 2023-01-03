@@ -90,6 +90,10 @@ impl<E: Debug + Display> ZError<E> {
         self.human += "\n";
         self
     }
+
+    pub fn to_proto(&self) -> Vec<u8> {
+        self.proto.clone()
+    }
 }
 
 impl<E: Clone + Debug + Display> ZError<E> {
