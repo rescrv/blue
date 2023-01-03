@@ -13,7 +13,7 @@ use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
-    minimal_successor_key, Builder, Cursor, Error, KeyValueRef, MAX_KEY_LEN,
+    minimal_successor_key, Builder, Cursor, Error, KeyRef, KeyValueRef, MAX_KEY_LEN,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -706,6 +706,13 @@ impl Cursor for SSTCursor {
                 self.block_iter = None;
                 self.next()
             }
+        }
+    }
+
+    fn key(&self) -> Option<KeyRef> {
+        match &self.block_iter {
+            Some(iter) => iter.key(),
+            None => None,
         }
     }
 

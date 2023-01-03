@@ -1,4 +1,4 @@
-use super::{Cursor, Error, KeyValueRef};
+use super::{Cursor, Error, KeyRef, KeyValueRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
 
@@ -10,9 +10,9 @@ enum Comparator {
 
 impl Comparator {
     fn is_less(&self, lhs: &Box<dyn Cursor>, rhs: &Box<dyn Cursor>) -> bool {
-        let lhs_value = lhs.value();
-        let rhs_value = rhs.value();
-        match (self, lhs_value, rhs_value) {
+        let lhs_key = lhs.key();
+        let rhs_key = rhs.key();
+        match (self, lhs_key, rhs_key) {
             // We're comparing two positioned cursors.
             (Comparator::Forward, Some(lhs), Some(rhs)) => lhs < rhs,
             // lhs is not at the end.  rhs is at the end.
@@ -168,6 +168,14 @@ impl Cursor for MergingCursor {
             self.percolate_down(0);
         }
         Ok(())
+    }
+
+    fn key(&self) -> Option<KeyRef> {
+        if !self.cursors.is_empty() {
+            self.cursors[0].key()
+        } else {
+            None
+        }
     }
 
     fn value(&self) -> Option<KeyValueRef> {

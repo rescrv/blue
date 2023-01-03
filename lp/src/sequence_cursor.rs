@@ -98,6 +98,10 @@ where
         Ok(())
     }
 
+    fn key(&self) -> Option<KeyRef> {
+        self.cursor.key()
+    }
+
     fn value(&self) -> Option<KeyValueRef> {
         self.cursor.value()
     }

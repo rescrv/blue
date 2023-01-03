@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::{compare_bytes, Cursor, Error, KeyValueRef};
+use super::{compare_bytes, Cursor, Error, KeyRef, KeyValueRef};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
@@ -21,7 +21,7 @@ impl<C: Cursor> PruningCursor<C> {
     }
 
     fn set_skip_key(&mut self) {
-        match self.value() {
+        match self.key() {
             Some(v) => {
                 self.skip_key = Some(v.key.to_vec());
             },
@@ -49,21 +49,21 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
     }
 
     fn prev(&mut self) -> Result<(), Error> {
-        if self.value().is_none() {
+        if self.key().is_none() {
             self.skip_key = None;
         }
         loop {
             // Skip the set skip key.
             self.cursor.prev()?;
             while self.skip_key.is_some() {
-                let kvr = match self.value() {
-                    Some(kvr) => kvr,
+                let kr = match self.key() {
+                    Some(kr) => kr,
                     None => {
                         self.skip_key = None;
                         return Ok(());
                     },
                 };
-                if compare_bytes(self.skip_key.as_ref().unwrap(), kvr.key) != Ordering::Equal {
+                if compare_bytes(self.skip_key.as_ref().unwrap(), kr.key) != Ordering::Equal {
                     self.skip_key = None;
                 } else {
                     self.cursor.prev()?;
@@ -71,28 +71,28 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
             }
             // This is the key we want to investigate.
             // Find the largest timestamp less than self.timestamp for this key.
-            let kvr = match self.value() {
-                Some(kvr) => kvr,
+            let kr = match self.key() {
+                Some(kr) => kr,
                 None => {
                     self.skip_key = None;
                     return Ok(());
                 },
             };
-            let target_key = kvr.key.to_vec();
+            let target_key = kr.key.to_vec();
             // Loop until we overrun and then reverse by one.
             loop {
                 // We will step prev, and call next() when we overrun.
                 // Unfortunately it's the only way that I see.
                 self.cursor.prev()?;
-                let kvr = match self.value() {
+                let kr = match self.key() {
                     Some(kvr) => kvr,
                     None => {
                         self.cursor.next()?;
                         break;
                     }
                 };
-                if kvr.timestamp > self.timestamp
-                    || compare_bytes(kvr.key, &target_key) != Ordering::Equal
+                if kr.timestamp > self.timestamp
+                    || compare_bytes(kr.key, &target_key) != Ordering::Equal
                 {
                     self.cursor.next()?;
                     break;
@@ -139,6 +139,10 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                 return Ok(());
             }
         }
+    }
+
+    fn key(&self) -> Option<KeyRef> {
+        self.cursor.key()
     }
 
     fn value(&self) -> Option<KeyValueRef> {

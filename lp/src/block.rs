@@ -760,6 +760,25 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
+    fn key(&self) -> Option<KeyRef> {
+        match &self.position {
+            CursorPosition::First => None,
+            CursorPosition::Last => None,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset: _,
+                next_offset: _,
+                key,
+                timestamp,
+            } => {
+                Some(KeyRef {
+                    key: &key,
+                    timestamp: *timestamp,
+                })
+            }
+        }
+    }
+
     fn value(&self) -> Option<KeyValueRef> {
         match &self.position {
             CursorPosition::First => None,

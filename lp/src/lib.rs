@@ -305,6 +305,7 @@ pub trait Cursor {
 
     fn prev(&mut self) -> Result<(), Error>;
     fn next(&mut self) -> Result<(), Error>;
+    fn key(&self) -> Option<KeyRef>;
     fn value(&self) -> Option<KeyValueRef>;
 }
 

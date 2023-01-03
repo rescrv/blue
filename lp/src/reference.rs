@@ -159,6 +159,15 @@ impl Cursor for ReferenceCursor {
         }
     }
 
+    fn key(&self) -> Option<KeyRef> {
+        if self.index < 0 || self.index as usize >= self.entries.len() {
+            None
+        } else {
+            let kvp = &self.entries[self.index as usize];
+            Some(KeyRef::from(kvp))
+        }
+    }
+
     fn value(&self) -> Option<KeyValueRef> {
         if self.index < 0 || self.index as usize >= self.entries.len() {
             None
