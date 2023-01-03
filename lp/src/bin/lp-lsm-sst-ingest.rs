@@ -5,7 +5,7 @@ use lp::lsm::{LSMOptions, LSMTree};
 fn main() {
     let args: Vec<String> = args().collect();
     if args.len() < 2 {
-        eprintln!("lsm-sst-ingest [lsm tree location] [sst] ...");
+        eprintln!("lp-lsm-sst-ingest [lsm tree location] [sst] ...");
         std::process::exit(-1);
     }
     let lsm = &args[1];
