@@ -14,6 +14,7 @@ use super::file_manager::{open_without_manager, FileHandle};
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
     minimal_successor_key, Builder, Cursor, Error, KeyRef, KeyValueRef, MAX_KEY_LEN,
+    TABLE_FULL_SIZE,
 };
 
 ///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
@@ -302,7 +303,7 @@ impl SST {
 
 ///////////////////////////////////////// BlockCompression /////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BlockCompression {
     NoCompression,
 }
@@ -320,7 +321,7 @@ impl BlockCompression {
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SSTBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,
@@ -565,6 +566,73 @@ impl Builder for SSTBuilder {
         // fsync
         builder.output.sync_all()?;
         Ok(SST::new(builder.path)?)
+    }
+}
+
+////////////////////////////////////////// SSTMultiBuilder /////////////////////////////////////////
+
+pub struct SSTMultiBuilder {
+    prefix: String,
+    suffix: String,
+    counter: u64,
+    options: SSTBuilderOptions,
+    builder: Option<SSTBuilder>,
+}
+
+impl SSTMultiBuilder {
+    pub fn new(prefix: String, suffix: String, options: SSTBuilderOptions) -> Self {
+        Self {
+            prefix,
+            suffix,
+            counter: 0,
+            options,
+            builder: None,
+        }
+    }
+
+    fn get_builder(&mut self) -> Result<&mut SSTBuilder, Error> {
+        if self.builder.is_some() {
+            if self.builder.as_mut().unwrap().approximate_size() >= TABLE_FULL_SIZE {
+                let builder = self.builder.take().unwrap();
+                builder.seal()?;
+                return self.get_builder();
+            }
+            return Ok(self.builder.as_mut().unwrap());
+        }
+        let path = PathBuf::from(format!("{}{}{}", self.prefix, self.counter, self.suffix));
+        self.counter += 1;
+        self.builder = Some(SSTBuilder::new(path, self.options.clone())?);
+        Ok(self.builder.as_mut().unwrap())
+    }
+}
+
+impl Builder for SSTMultiBuilder {
+    type Sealed = ();
+
+    fn approximate_size(&self) -> usize {
+        match &self.builder {
+            Some(b) => { b.approximate_size() },
+            None => { 0 },
+        }
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        self.get_builder()?.put(key, timestamp, value)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        self.get_builder()?.del(key, timestamp)
+    }
+
+    fn seal(mut self) -> Result<(), Error> {
+        let builder = match self.builder.take() {
+            Some(b) => { b },
+            None => {
+                return Ok(());
+            },
+        };
+        builder.seal()?;
+        Ok(())
     }
 }
 
