@@ -15,7 +15,7 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{FromIOError, ZError, ZErrorTrait};
+use zerror::{FromIOError, ZError, ZErrorResult};
 
 use super::{LOGIC_ERROR, Error};
 

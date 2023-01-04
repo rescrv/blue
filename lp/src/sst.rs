@@ -9,7 +9,7 @@ use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
 use prototk::field_types::*;
 
-use zerror::{FromIOError, ZError, ZErrorTrait};
+use zerror::{FromIOError, ZError, ZErrorResult};
 
 use setsum::Setsum;
 

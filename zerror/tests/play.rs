@@ -2,7 +2,7 @@ use std::fs::File;
 
 use prototk::field_types::*;
 
-use zerror::{ZErrorTrait};
+use zerror::ZErrorResult;
 
 #[test]
 fn dev_zero() {

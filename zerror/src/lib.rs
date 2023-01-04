@@ -189,9 +189,9 @@ impl<T, E: Debug + Display + From<std::io::Error>> FromIOError<T, E> for Result<
     }
 }
 
-//////////////////////////////////////////// ZErrorTrait ///////////////////////////////////////////
+/////////////////////////////////////////// ZErrorResult ///////////////////////////////////////////
 
-pub trait ZErrorTrait {
+pub trait ZErrorResult {
     type Error;
 
     fn wrap_zerror<E: Clone + Debug + Display + 'static>(self, wrapped: ZError<E>) -> Self::Error;
@@ -220,7 +220,7 @@ pub trait ZErrorTrait {
     fn with_backtrace(self) -> Self::Error;
 }
 
-impl<T, E: Debug + Display> ZErrorTrait for Result<T, ZError<E>> {
+impl<T, E: Debug + Display> ZErrorResult for Result<T, ZError<E>> {
     type Error = Result<T, ZError<E>>;
 
     fn wrap_zerror<F: Clone + Debug + Display + 'static>(self, wrapped: ZError<F>) -> Self::Error {
@@ -286,7 +286,7 @@ impl<T, E: Debug + Display> ZErrorTrait for Result<T, ZError<E>> {
     }
 }
 
-impl<T> ZErrorTrait for Result<T, std::io::Error> {
+impl<T> ZErrorResult for Result<T, std::io::Error> {
     type Error = Result<T, ZError<std::io::Error>>;
 
     fn wrap_zerror<F: Clone + Debug + Display + 'static>(self, wrapped: ZError<F>) -> Self::Error {

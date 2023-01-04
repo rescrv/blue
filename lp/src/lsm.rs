@@ -17,7 +17,7 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{FromIOError, ZError, ZErrorTrait};
+use zerror::{FromIOError, ZError, ZErrorResult};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
