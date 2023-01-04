@@ -114,7 +114,7 @@ impl LSMTree {
         }
         // LSMTree.
         Trace::new("lp.lsm.open")
-            .with_context::<stringref>("path", 1, &path.to_string_lossy())
+            .with_context::<1, stringref>("path", &path.to_string_lossy())
             .finish();
         let lsm = LSMTree {
             root: path,

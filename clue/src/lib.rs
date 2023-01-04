@@ -58,14 +58,14 @@ impl Trace {
             stopwatch: None,
         };
         if let Some(trace_id) = id {
-            trace.with_context::<stringref>("label", LABEL_FIELD_NUMBER, label)
-                .with_context::<string>("trace_id", TRACE_ID_FIELD_NUMBER, trace_id.human_readable())
+            trace.with_context::<LABEL_FIELD_NUMBER, stringref>("label", label)
+                .with_context::<TRACE_ID_FIELD_NUMBER, string>("trace_id", trace_id.human_readable())
         } else {
-            trace.with_context::<stringref>("label", LABEL_FIELD_NUMBER, label)
+            trace.with_context::<LABEL_FIELD_NUMBER, stringref>("label", label)
         }
     }
 
-    pub fn with_context<'a, F: FieldType<'a>>(self, field_name: &str, field_number: u32, field_value: F::NativeType) -> Self
+    pub fn with_context<'a, const N: u32, F: FieldType<'a>>(self, field_name: &str, field_value: F::NativeType) -> Self
     where
         F::NativeType: Clone + Display,
     {
@@ -73,7 +73,7 @@ impl Trace {
             click!("clue.trace.context_not_logged");
             return self
         }
-        self.with_protobuf::<F>(field_number, field_value.clone())
+        self.with_protobuf::<N, F>(field_value.clone())
             .with_human::<F::NativeType>(field_name, field_value)
     }
 
@@ -86,13 +86,13 @@ impl Trace {
         self
     }
 
-    pub fn with_protobuf<'a, F: FieldType<'a>>(mut self, field_number: u32, field_value: F::NativeType) -> Self {
+    pub fn with_protobuf<'a, const N: u32, F: FieldType<'a>>(mut self, field_value: F::NativeType) -> Self {
         if self.id.is_none() {
             click!("clue.trace.protobuf_not_logged");
             return self
         }
         let tag = Tag {
-            field_number: FieldNumber::must(field_number),
+            field_number: FieldNumber::must(N),
             wire_type: F::WIRE_TYPE,
         };
         let field = F::from_native(field_value);
@@ -107,7 +107,7 @@ impl Trace {
         }
         click!("clue.trace.with_backtrace");
         let backtrace = format!("{}", Backtrace::force_capture());
-        self.with_context::<string>("backtrace", BACKTRACE_FIELD_NUMBER, backtrace)
+        self.with_context::<BACKTRACE_FIELD_NUMBER, string>("backtrace", backtrace)
     }
 
     pub fn with_stopwatch(mut self) -> Self {
@@ -123,7 +123,7 @@ impl Trace {
     pub fn finish(mut self) {
         if let Some(stopwatch) = &self.stopwatch {
             let time_ms: f64 = stopwatch.since();
-            self = self.with_context::<double>("elapsed", STOPWATCH_FIELD_NUMBER, time_ms);
+            self = self.with_context::<STOPWATCH_FIELD_NUMBER, double>("elapsed", time_ms);
         }
         TRACER.with(|t| {
             t.borrow_mut().finish(self);
@@ -268,7 +268,7 @@ mod tests {
         let trace = Trace::new("test")
             .with_backtrace()
             .with_stopwatch()
-            .with_context::<fixed64>("field_one", 1, 0x1eaff00dc0ffeeu64);
+            .with_context::<1, fixed64>("field_one", 0x1eaff00dc0ffeeu64);
         std::thread::sleep(std::time::Duration::from_millis(250));
         trace.finish();
     }

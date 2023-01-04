@@ -42,8 +42,8 @@ impl FileHandle {
         let state = self.state.lock().unwrap();
         if let Some((path, _)) = &state.files[fd] {
             Trace::new("lp.open_file")
-                .with_context::<stringref>("path", 1, &path.to_string_lossy())
-                .with_context::<int32>("fd", 2, self.file.as_raw_fd())
+                .with_context::<1, stringref>("path", &path.to_string_lossy())
+                .with_context::<2, int32>("fd", self.file.as_raw_fd())
                 .finish();
             return Ok(path.clone());
         } else {
@@ -94,29 +94,29 @@ impl State {
         assert!(fd >= 0);
         if self.files.len() <= fd as usize {
             Trace::new("unmanaged fd")
-                .with_context::<int32>("fd", 2, fd)
-                .with_context::<uint64>("self.files.len()", 3, self.files.len() as u64)
+                .with_context::<2, int32>("fd", fd)
+                .with_context::<3, uint64>("self.files.len()", self.files.len() as u64)
                 .panic(format!("self.files.len() <= fd"));
         }
         let (path, file) = match self.files[fd as usize].take() {
             Some((path, file)) => (path, file),
             None => {
                 Trace::new("unmanaged fd")
-                    .with_context::<int32>("fd", 2, fd)
+                    .with_context::<2, int32>("fd", fd)
                     .panic(format!("self.file[{}] is None", fd));
             }
         };
         if file.as_raw_fd() != fd {
             Trace::new("mismanaged fd")
-                .with_context::<int32>("fd", 2, fd)
-                .with_context::<int32>("file.as_raw_fd()", 3, file.as_raw_fd())
+                .with_context::<2, int32>("fd", fd)
+                .with_context::<3, int32>("file.as_raw_fd()", file.as_raw_fd())
                 .panic(format!("file.as_raw_fd() != fd"));
         }
         match self.names.remove(&path) {
             Some(_) => {},
             None => {
                 Trace::new("missing fd")
-                    .with_context::<stringref>("path", 1, &path.to_string_lossy())
+                    .with_context::<1, stringref>("path", &path.to_string_lossy())
                     .panic("path missing from names map".to_string());
             }
         };
