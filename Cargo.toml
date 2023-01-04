@@ -4,6 +4,7 @@ members = [
     "biometrics",
     "bloom",
     "buffertk",
+    "cache",
     "clue",
     "databuf",
     "guacamole",
@@ -14,6 +15,7 @@ members = [
     "prototk_derive",
     "setsum",
     "sim",
+    "tiny_lfu",
     "util",
     "zerror",
 ]
