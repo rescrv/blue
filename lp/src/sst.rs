@@ -256,7 +256,7 @@ impl SST {
         })
     }
 
-    pub fn iterate(&self) -> SSTCursor {
+    pub fn cursor(&self) -> SSTCursor {
         SSTCursor::new(self.clone())
     }
 
@@ -270,7 +270,7 @@ impl SST {
     }
 
     pub fn metadata(&self) -> Result<SSTMetadata, ZError<Error>> {
-        let mut cursor = self.iterate();
+        let mut cursor = self.cursor();
         // First key.
         cursor.seek_to_first()?;
         cursor.next()?;
@@ -688,26 +688,26 @@ impl Builder for SSTMultiBuilder {
 
 pub struct SSTCursor {
     table: SST,
-    // The position in the table.  When meta_iter is at its extremes, block_iter is None.
-    // Otherwise, block_iter is positioned at the block referred to by the most recent
-    // KVP-returning call to meta_iter.
-    meta_iter: BlockCursor,
-    block_iter: Option<BlockCursor>,
+    // The position in the table.  When meta_cursor is at its extremes, block_cursor is None.
+    // Otherwise, block_cursor is positioned at the block referred to by the most recent
+    // KVP-returning call to meta_cursor.
+    meta_cursor: BlockCursor,
+    block_cursor: Option<BlockCursor>,
 }
 
 impl SSTCursor {
     fn new(table: SST) -> Self {
-        let meta_iter = table.index_block.iterate();
+        let meta_cursor = table.index_block.cursor();
         Self {
             table,
-            meta_iter,
-            block_iter: None,
+            meta_cursor,
+            block_cursor: None,
         }
     }
 
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, ZError<Error>> {
-        self.meta_iter.prev()?;
-        let kvp = match self.meta_iter.value() {
+        self.meta_cursor.prev()?;
+        let kvp = match self.meta_cursor.value() {
             Some(kvp) => kvp,
             None => {
                 self.seek_to_first()?;
@@ -718,8 +718,8 @@ impl SSTCursor {
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, ZError<Error>> {
-        self.meta_iter.next()?;
-        let kvp = match self.meta_iter.value() {
+        self.meta_cursor.next()?;
+        let kvp = match self.meta_cursor.value() {
             Some(kvp) => kvp,
             None => {
                 self.seek_to_last()?;
@@ -753,19 +753,19 @@ impl SSTCursor {
 
 impl Cursor for SSTCursor {
     fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
-        self.meta_iter.seek_to_first()?;
-        self.block_iter = None;
+        self.meta_cursor.seek_to_first()?;
+        self.block_cursor = None;
         Ok(())
     }
 
     fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
-        self.meta_iter.seek_to_last()?;
-        self.block_iter = None;
+        self.meta_cursor.seek_to_last()?;
+        self.block_cursor = None;
         Ok(())
     }
 
     fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
-        self.meta_iter.seek(key)?;
+        self.meta_cursor.seek(key)?;
         let metadata = match self.meta_next()? {
             Some(m) => m,
             None => {
@@ -773,14 +773,14 @@ impl Cursor for SSTCursor {
             }
         };
         let block = SST::load_block(&self.table.handle, &metadata)?;
-        let mut block_iter = block.iterate();
-        block_iter.seek(key)?;
-        self.block_iter = Some(block_iter);
+        let mut block_cursor = block.cursor();
+        block_cursor.seek(key)?;
+        self.block_cursor = Some(block_cursor);
         Ok(())
     }
 
     fn prev(&mut self) -> Result<(), ZError<Error>> {
-        if self.block_iter.is_none() {
+        if self.block_cursor.is_none() {
             let metadata = match self.meta_prev()? {
                 Some(m) => m,
                 None => {
@@ -788,24 +788,24 @@ impl Cursor for SSTCursor {
                 }
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
-            let mut block_iter = block.iterate();
-            block_iter.seek_to_last()?;
-            self.block_iter = Some(block_iter);
+            let mut block_cursor = block.cursor();
+            block_cursor.seek_to_last()?;
+            self.block_cursor = Some(block_cursor);
         }
-        assert!(self.block_iter.is_some());
-        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        block_iter.prev()?;
-        match block_iter.value() {
+        assert!(self.block_cursor.is_some());
+        let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
+        block_cursor.prev()?;
+        match block_cursor.value() {
             Some(_) => Ok(()),
             None => {
-                self.block_iter = None;
+                self.block_cursor = None;
                 self.prev()
             }
         }
     }
 
     fn next(&mut self) -> Result<(), ZError<Error>> {
-        if self.block_iter.is_none() {
+        if self.block_cursor.is_none() {
             let metadata = match self.meta_next()? {
                 Some(m) => m,
                 None => {
@@ -813,32 +813,32 @@ impl Cursor for SSTCursor {
                 }
             };
             let block = SST::load_block(&self.table.handle, &metadata)?;
-            let mut block_iter = block.iterate();
-            block_iter.seek_to_first()?;
-            self.block_iter = Some(block_iter);
+            let mut block_cursor = block.cursor();
+            block_cursor.seek_to_first()?;
+            self.block_cursor = Some(block_cursor);
         }
-        assert!(self.block_iter.is_some());
-        let block_iter: &mut BlockCursor = self.block_iter.as_mut().unwrap();
-        block_iter.next()?;
-        match block_iter.value() {
+        assert!(self.block_cursor.is_some());
+        let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
+        block_cursor.next()?;
+        match block_cursor.value() {
             Some(_) => Ok(()),
             None => {
-                self.block_iter = None;
+                self.block_cursor = None;
                 self.next()
             }
         }
     }
 
     fn key(&self) -> Option<KeyRef> {
-        match &self.block_iter {
-            Some(iter) => iter.key(),
+        match &self.block_cursor {
+            Some(cursor) => cursor.key(),
             None => None,
         }
     }
 
     fn value(&self) -> Option<KeyValueRef> {
-        match &self.block_iter {
-            Some(iter) => iter.value(),
+        match &self.block_cursor {
+            Some(cursor) => cursor.value(),
             None => None,
         }
     }

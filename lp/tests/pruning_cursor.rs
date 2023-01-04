@@ -33,7 +33,7 @@ fn pruning_cursor_no_pruning(_: &str) -> PruningCursor<ReferenceCursor> {
     builder.put("X".as_bytes(), 0, "x".as_bytes()).unwrap();
     builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
-    PruningCursor::new(builder.seal().unwrap().iterate(), 10).unwrap()
+    PruningCursor::new(builder.seal().unwrap().cursor(), 10).unwrap()
 }
 
 alphabet_tests! {
@@ -120,7 +120,7 @@ fn pruning_cursor_deleted_extras(_: &str) -> PruningCursor<ReferenceCursor> {
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
     builder.del("ZZ".as_bytes(), 1).unwrap();
     builder.put("ZZ".as_bytes(), 0, "zz".as_bytes()).unwrap();
-    PruningCursor::new(builder.seal().unwrap().iterate(), 10).unwrap()
+    PruningCursor::new(builder.seal().unwrap().cursor(), 10).unwrap()
 }
 
 alphabet_tests! {
@@ -181,7 +181,7 @@ fn pruning_cursor_snapshot_cutoff(_: &str) -> PruningCursor<ReferenceCursor> {
     builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
     builder.put("Z".as_bytes(), 7, "z7".as_bytes()).unwrap();
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
-    PruningCursor::new(builder.seal().unwrap().iterate(), 5).unwrap()
+    PruningCursor::new(builder.seal().unwrap().cursor(), 5).unwrap()
 }
 
 alphabet_tests! {
@@ -242,7 +242,7 @@ fn pruning_cursor_tombstone_above_snapshot(_: &str) -> PruningCursor<ReferenceCu
     builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
     builder.del("Z".as_bytes(), 7).unwrap();
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
-    PruningCursor::new(builder.seal().unwrap().iterate(), 5).unwrap()
+    PruningCursor::new(builder.seal().unwrap().cursor(), 5).unwrap()
 }
 
 alphabet_tests! {

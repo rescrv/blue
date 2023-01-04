@@ -1,3 +1,4 @@
+use std::collections::hash_set::HashSet;
 use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -209,7 +210,7 @@ impl LSMTree {
             metadata_files.push(meta.path());
             let file = self.file_manager.open(meta.path())?;
             let sst = SST::from_file_handle(file)?;
-            cursors.push(Box::new(sst.iterate()));
+            cursors.push(Box::new(sst.cursor()));
         }
         let cursor = MergingCursor::new(cursors)?;
         let mut cursor = PruningCursor::new(cursor, u64::max_value())?;
@@ -243,18 +244,38 @@ impl LSMTree {
 
     pub fn debug_dump(&self) {
         let state = self.state.lock().unwrap();
+        println!("[metadata]");
         for meta in read_dir(self.root.join("meta")).expect("could not read dir") {
             let meta = meta.expect("could not read dirent");
             println!("metadata sst {}", meta.path().display());
         }
+
+        println!("\n[cached ssts]");
+        let mut cached_ssts = HashSet::new();
         for metadata in state.sst_metadata.iter() {
-            println!("sst {} first_key=\"{}\", last_key=\"{}\" smallest_timestamp={} biggest_timestamp={}",
+            println!("{}.sst first_key=\"{}\", last_key=\"{}\" smallest_timestamp={} biggest_timestamp={}",
                 metadata.setsum(),
                 metadata.first_key_escaped(),
                 metadata.last_key_escaped(),
                 metadata.smallest_timestamp,
                 metadata.biggest_timestamp,
             );
+            cached_ssts.insert(metadata.setsum() + ".sst");
+        }
+
+        println!("\n[ssts not loaded into memory]");
+        for sst in read_dir(self.root.join("sst")).expect("could not read dir") {
+            let name = sst.expect("could not understand dirent").file_name().into_string().expect("could not read OsString");
+            if !cached_ssts.contains(&name) {
+                println!("{}", name);
+            }
+        }
+
+        println!("\n[ssts not present on disk]");
+        for sst in cached_ssts.iter() {
+            if !self.root.join("sst").join(sst).exists() {
+                println!("{}", sst);
+            }
         }
     }
 }

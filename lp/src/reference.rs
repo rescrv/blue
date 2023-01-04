@@ -15,7 +15,7 @@ pub struct ReferenceTable {
 }
 
 impl ReferenceTable {
-    pub fn iterate(&self) -> ReferenceCursor {
+    pub fn cursor(&self) -> ReferenceCursor {
         ReferenceCursor {
             entries: Rc::clone(&self.entries),
             index: -1,
@@ -182,7 +182,7 @@ impl Cursor for ReferenceCursor {
 
 impl From<ReferenceTable> for ReferenceCursor {
     fn from(table: ReferenceTable) -> Self {
-        table.iterate()
+        table.cursor()
     }
 }
 
@@ -195,9 +195,9 @@ mod tables {
     #[test]
     fn empty() {
         let table = ReferenceBuilder::default().seal().unwrap();
-        let mut iter = table.iterate();
-        iter.next().unwrap();
-        let got = iter.value();
+        let mut cursor = table.cursor();
+        cursor.next().unwrap();
+        let got = cursor.value();
         assert_eq!(None, got);
     }
 }
@@ -239,7 +239,7 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("I".as_bytes()).unwrap();
         cursor.prev().unwrap();
         let got = cursor.value();
@@ -250,7 +250,7 @@ mod guacamole {
         };
         assert_eq!(Some(exp), got);
         // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("I".as_bytes()).unwrap();
         cursor.next().unwrap();
         let got = cursor.value();

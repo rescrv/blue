@@ -99,7 +99,7 @@ fn alphabet(test: &str, builder_opts: SSTBuilderOptions) -> SSTCursor {
     builder.put("X".as_bytes(), 0, "x".as_bytes()).unwrap();
     builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
-    let cursor = builder.seal().unwrap().iterate();
+    let cursor = builder.seal().unwrap().cursor();
     remove_file(path).unwrap();
     cursor
 }

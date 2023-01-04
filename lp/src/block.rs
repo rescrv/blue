@@ -173,7 +173,7 @@ impl Block {
         self.bytes.as_bytes()
     }
 
-    pub fn iterate(&self) -> BlockCursor {
+    pub fn cursor(&self) -> BlockCursor {
         BlockCursor::new(self.clone())
     }
 
@@ -980,7 +980,7 @@ mod tests {
         let got = block.bytes.as_bytes();
         assert_eq!(exp, got);
 
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek(&[106, 113, 67, 73, 122, 73, 98, 85]).unwrap();
     }
 
@@ -996,7 +996,7 @@ mod tests {
             .unwrap();
         let block = block.seal().unwrap();
 
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         let target = "jqCIzIbU";
         cursor.seek(target.as_bytes()).unwrap();
         let key: Buffer = key.into();
@@ -1141,7 +1141,7 @@ mod guacamole {
         let bytes: &[u8] = block.bytes.as_bytes();
         assert_eq!(exp, bytes);
 
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         match cursor.position {
             CursorPosition::First => {}
             _ => {
@@ -1238,7 +1238,7 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "d" }
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("d".as_bytes()).unwrap();
         // Next to g
         cursor.next().unwrap();
@@ -1381,7 +1381,7 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "d" }
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("d".as_bytes()).unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
@@ -1475,7 +1475,7 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "u" }
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("u".as_bytes()).unwrap();
     }
 
@@ -1791,7 +1791,7 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: Key { key: "6" }
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("6".as_bytes()).unwrap();
         cursor.next().unwrap();
         cursor.next().unwrap();
@@ -1848,11 +1848,11 @@ mod guacamole {
             .unwrap();
         let block = builder.seal().unwrap();
         // Top of loop seeks to: "d"@4793296426793138773
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("d".as_bytes()).unwrap();
         let _got = cursor.next().unwrap();
         // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.iterate();
+        let mut cursor = block.cursor();
         cursor.seek("I".as_bytes()).unwrap();
         cursor.prev().unwrap();
         let got = cursor.value().unwrap();

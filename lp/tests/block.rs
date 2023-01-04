@@ -72,7 +72,7 @@ fn alphabet(opts: BlockBuilderOptions) -> BlockCursor {
     builder.put("X".as_bytes(), 0, "x".as_bytes()).unwrap();
     builder.put("Y".as_bytes(), 0, "y".as_bytes()).unwrap();
     builder.put("Z".as_bytes(), 0, "z".as_bytes()).unwrap();
-    builder.seal().unwrap().iterate()
+    builder.seal().unwrap().cursor()
 }
 
 ///////////////////////////////////////////// Guacamole ////////////////////////////////////////////

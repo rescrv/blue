@@ -128,7 +128,7 @@ pub trait TableTrait<'a> {
     type Builder: TableBuilderTrait<'a, Table = Self>;
     type Cursor: Cursor;
 
-    fn iterate(&self) -> Self::Cursor;
+    fn cursor(&self) -> Self::Cursor;
 }
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
@@ -143,8 +143,8 @@ impl<'a> TableTrait<'a> for Block {
     type Builder = BlockBuilder;
     type Cursor = BlockCursor;
 
-    fn iterate(&self) -> Self::Cursor {
-        Block::iterate(self)
+    fn cursor(&self) -> Self::Cursor {
+        Block::cursor(self)
     }
 }
 
@@ -158,8 +158,8 @@ impl<'a> TableTrait<'a> for SST {
     type Builder = SSTBuilder;
     type Cursor = SSTCursor;
 
-    fn iterate(&self) -> Self::Cursor {
-        SST::iterate(self)
+    fn cursor(&self) -> Self::Cursor {
+        SST::cursor(self)
     }
 }
 
@@ -232,10 +232,10 @@ where
     let kvs = builder.seal().unwrap();
     // Create a new builder using the keys in the key-value store.
     let mut builder = new_table(name);
-    let mut iter = kvs.iterate();
+    let mut ref_cursor = kvs.cursor();
     loop {
-        iter.next().unwrap();
-        let x = iter.value();
+        ref_cursor.next().unwrap();
+        let x = ref_cursor.value();
         if x.is_none() {
             break;
         }
@@ -254,21 +254,21 @@ where
     let key_gen = BufferGuacamole::new(config.key_bytes);
     for _ in 0..config.num_seeks {
         let key: Buffer = key_gen.guacamole(&mut guac);
-        iter.seek(key.as_bytes()).unwrap();
-        let mut cursor = table.iterate();
+        ref_cursor.seek(key.as_bytes()).unwrap();
+        let mut cursor = table.cursor();
         cursor.seek(key.as_bytes()).unwrap();
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
             let (exp, got) = if will_do_prev {
-                iter.prev().unwrap();
+                ref_cursor.prev().unwrap();
                 cursor.prev().unwrap();
-                let exp = iter.value();
+                let exp = ref_cursor.value();
                 let got = cursor.value();
                 (exp, got)
             } else {
-                iter.next().unwrap();
+                ref_cursor.next().unwrap();
                 cursor.next().unwrap();
-                let exp = iter.value();
+                let exp = ref_cursor.value();
                 let got = cursor.value();
                 (exp, got)
             };

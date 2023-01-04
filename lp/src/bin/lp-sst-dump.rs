@@ -18,7 +18,7 @@ fn main() {
     let ssts: Vec<_> = args.values_of("sst").unwrap().collect();
     for sst in ssts {
         let sst = SST::new(sst).expect("could not open sst");
-        let mut cursor = sst.iterate();
+        let mut cursor = sst.cursor();
         cursor.seek_to_first().expect("could not seek to first");
         cursor.next().expect("cursor::next");
         while cursor.value().is_some() {
