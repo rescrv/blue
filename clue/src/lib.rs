@@ -13,7 +13,8 @@ use util::stopwatch::Stopwatch;
 use buffertk::stack_pack;
 
 use prototk::field_types::*;
-use prototk::{FieldNumber, FieldType, Tag};
+use prototk::{FieldHelper, FieldNumber, FieldType, Tag};
+use prototk::Builder as ProtoTKBuilder;
 
 use zerror::ZError;
 
@@ -30,7 +31,7 @@ generate_id!{TraceID, "trace:"}
 
 pub struct Trace {
     id: Option<TraceID>,
-    proto: Vec<u8>,
+    proto: ProtoTKBuilder,
     human: String,
     stopwatch: Option<Stopwatch>,
 }
@@ -38,7 +39,7 @@ pub struct Trace {
 impl Trace {
     pub fn from_zerr<E: Debug + Display>(label: &str, zerr: &ZError<E>) -> Self {
         let mut trace = Trace::new(label);
-        trace.proto.extend_from_slice(&zerr.to_proto());
+        trace.proto.append(&zerr.to_proto());
         trace.human += &format!("from zerror:\n{}\n", zerr);
         trace
     }
@@ -53,7 +54,7 @@ impl Trace {
         });
         let trace = Self {
             id: id.clone(),
-            proto: Vec::new(),
+            proto: ProtoTKBuilder::default(),
             human: String::default(),
             stopwatch: None,
         };
@@ -67,7 +68,8 @@ impl Trace {
 
     pub fn with_context<'a, const N: u32, F: FieldType<'a>>(self, field_name: &str, field_value: F::NativeType) -> Self
     where
-        F::NativeType: Clone + Display,
+        F: FieldType<'a> + 'a,
+        F::NativeType: Clone + Display + FieldHelper<'a, F> + 'a,
     {
         if self.id.is_none() {
             click!("clue.trace.context_not_logged");
@@ -86,17 +88,16 @@ impl Trace {
         self
     }
 
-    pub fn with_protobuf<'a, const N: u32, F: FieldType<'a>>(mut self, field_value: F::NativeType) -> Self {
+    pub fn with_protobuf<'a, const N: u32, F>(mut self, field_value: F::NativeType) -> Self
+    where
+        F: FieldType<'a> + 'a,
+        F::NativeType: FieldHelper<'a, F> + 'a,
+    {
         if self.id.is_none() {
             click!("clue.trace.protobuf_not_logged");
             return self
         }
-        let tag = Tag {
-            field_number: FieldNumber::must(N),
-            wire_type: F::WIRE_TYPE,
-        };
-        let field = F::from_native(field_value);
-        stack_pack(tag).pack(field).append_to_vec(&mut self.proto);
+        self.proto.push::<N, F>(field_value);
         self
     }
 

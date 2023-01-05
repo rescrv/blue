@@ -8,7 +8,7 @@ pub mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use buffertk::{v64, Packable, Unpackable, Unpacker};
+use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -318,3 +318,31 @@ impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> Packable for FieldPacker<'
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
 pub trait Message<'a>: Default + buffertk::Packable + buffertk::Unpackable<'a> {}
+
+////////////////////////////////////////////// Builder /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct Builder {
+    buffer: Vec<u8>,
+}
+
+impl Builder {
+    pub fn push<'a, const N: u32, T>(&mut self, field_value: T::NativeType) -> &mut Self
+    where
+        T: FieldType<'a> + 'a,
+        T::NativeType: FieldHelper<'a, T> + 'a,
+    {
+        let tag = Tag {
+            field_number: FieldNumber::must(N),
+            wire_type: T::WIRE_TYPE,
+        };
+        let packer = FieldPacker::new(tag, &field_value, std::marker::PhantomData::<&T>);
+        stack_pack(packer).append_to_vec(&mut self.buffer);
+        self
+    }
+
+    pub fn append(&mut self, buffer: &[u8]) -> &mut Self {
+        self.buffer.extend_from_slice(buffer);
+        self
+    }
+}
