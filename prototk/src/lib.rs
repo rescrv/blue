@@ -289,14 +289,14 @@ impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> f
 
 //////////////////////////////////////////// FieldPacker ///////////////////////////////////////////
 
-pub struct FieldPacker<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> {
+pub struct FieldPacker<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> {
     tag: Tag,
-    field_value: &'a F,
-    _phantom: std::marker::PhantomData<T>,
+    field_value: &'b F,
+    _phantom: std::marker::PhantomData<&'a T>,
 }
 
-impl<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, T, F> {
-    pub fn new(tag: Tag, field_value: &'a F, field_type: std::marker::PhantomData<T>) -> Self {
+impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, 'b, T, F> {
+    pub fn new(tag: Tag, field_value: &'b F, field_type: std::marker::PhantomData<&'a T>) -> Self {
         Self {
             tag,
             field_value,
@@ -305,7 +305,7 @@ impl<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, T, F> {
     }
 }
 
-impl<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> Packable for FieldPacker<'a, T, F> {
+impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> Packable for FieldPacker<'a, 'b, T, F> {
     fn pack_sz(&self) -> usize {
         FieldHelper::prototk_pack_sz(&self.tag, self.field_value)
     }

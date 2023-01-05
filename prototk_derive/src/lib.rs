@@ -514,7 +514,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
                 wire_type: prototk::field_types::#field_type::WIRE_TYPE,
             };
             let fp = prototk::FieldPacker::new(tag, &self.#field_ident,
-                std::marker::PhantomData::<prototk::field_types::#field_type>{});
+                std::marker::PhantomData::<&prototk::field_types::#field_type>{});
             let pa = pa.pack(fp);
         }
     }
@@ -543,7 +543,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
                     wire_type: prototk::field_types::#field_type::WIRE_TYPE,
                 };
                 let fp = prototk::FieldPacker::new(tag, v,
-                    std::marker::PhantomData::<prototk::field_types::#field_type>{});
+                    std::marker::PhantomData::<&prototk::field_types::#field_type>{});
                 let pa = buffertk::stack_pack(fp);
                 pa.#call
             }
