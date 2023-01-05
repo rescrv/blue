@@ -7,6 +7,7 @@ members = [
     "cache",
     "clue",
     "databuf",
+    "derive_util",
     "guacamole",
     "hey_listen",
     "id",
