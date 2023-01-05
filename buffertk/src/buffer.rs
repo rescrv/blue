@@ -46,6 +46,12 @@ impl Clone for Buffer {
     }
 }
 
+impl Default for Buffer {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
