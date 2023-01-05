@@ -76,19 +76,19 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics buffertk::Packable for #ty_name #ty_generics #where_clause {
             fn pack_sz(&self) -> usize {
                 use buffertk::v64;
-                use prototk::{FieldType,FieldTypeAssigner,Message};
+                use prototk::{FieldHelper, FieldType, Message};
                 #pack_reqd_bytes
             }
 
             fn pack(&self, buf: &mut [u8]) {
                 use buffertk::v64;
-                use prototk::{FieldType,FieldTypeAssigner,Message};
+                use prototk::{FieldHelper, FieldType, Message};
                 #pack_into_slice
             }
 
             fn stream<W: std::io::Write>(&self, writer: &mut W) -> std::result::Result<usize, std::io::Error> {
                 use buffertk::v64;
-                use prototk::{FieldType,FieldTypeAssigner,Message};
+                use prototk::{FieldHelper, FieldType, Message};
                 #message_stream
             }
         }
@@ -101,7 +101,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     'b: #lifetime,
             {
                 use buffertk::v64;
-                use prototk::{FieldType,FieldTypeAssigner,Message};
+                use prototk::{FieldHelper, FieldType, Message};
                 #unpack
             }
         }
@@ -513,11 +513,9 @@ impl ProtoTKVisitor for PackMessageVisitor {
                 field_number: prototk::FieldNumber::must(#field_number),
                 wire_type: prototk::field_types::#field_type::WIRE_TYPE,
             };
-            let fta = prototk::FieldTypePacker::new(
-                tag,
-                std::marker::PhantomData::<prototk::field_types::#field_type>{},
-                &self.#field_ident);
-            let pa = pa.pack(fta);
+            let fp = prototk::FieldPacker::new(tag, &self.#field_ident,
+                std::marker::PhantomData::<prototk::field_types::#field_type>{});
+            let pa = pa.pack(fp);
         }
     }
 
@@ -544,11 +542,9 @@ impl ProtoTKVisitor for PackMessageVisitor {
                     field_number: prototk::FieldNumber::must(#field_number),
                     wire_type: prototk::field_types::#field_type::WIRE_TYPE,
                 };
-                let fta = prototk::FieldTypePacker::new(
-                    tag,
-                    std::marker::PhantomData::<prototk::field_types::#field_type>{},
-                    v);
-                let pa = buffertk::stack_pack(fta);
+                let fp = prototk::FieldPacker::new(tag, v,
+                    std::marker::PhantomData::<prototk::field_types::#field_type>{});
+                let pa = buffertk::stack_pack(fp);
                 pa.#call
             }
         }
@@ -579,9 +575,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { field.span() =>
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
-                // TODO(rescrv):  I'd perfer to have option to skip/ignore error
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
-                ret.#field_ident.assign_field_type(tmp.into_native());
+                FieldHelper::prototk_convert_field(tmp, &mut ret.#field_ident);
             }
         }
     }
@@ -614,7 +609,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote_spanned! { variant.span() =>
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
-                Ok((#ctor(tmp.into_native()), up.remain()))
+                Ok((#ctor(FieldHelper::prototk_convert_variant(tmp)), up.remain()))
             }
         }
     }

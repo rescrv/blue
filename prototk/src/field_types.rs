@@ -7,15 +7,14 @@
 
 use std::convert::TryInto;
 
-use buffertk::{stack_pack, Buffer, Packable, Unpackable, Unpacker};
+use buffertk::{stack_pack, Buffer, Unpackable, Unpacker};
 
 use super::*;
 
 /////////////////////////////////////////////// int32 //////////////////////////////////////////////
 
-pub struct int32 {
-    x: i32,
-}
+#[derive(Clone, Debug, Default)]
+pub struct int32(i32);
 
 impl<'a> FieldType<'a> for int32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -23,24 +22,28 @@ impl<'a> FieldType<'a> for int32 {
 
     type NativeType = i32;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for int32 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.x.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, int32> for i32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.x.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: int32, out: &'b mut Self) where 'a: 'b, {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: int32) -> Self {
+        proto.0
     }
 }
 
@@ -50,27 +53,14 @@ impl<'a> Unpackable<'a> for int32 {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i32 = v.try_into()?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<i32> for int32 {
-    fn from(x: i32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&i32> for int32 {
-    fn from(x: &i32) -> Self {
-        Self { x: *x }
+        Ok((int32(x), buf))
     }
 }
 
 /////////////////////////////////////////////// int64 //////////////////////////////////////////////
 
-pub struct int64 {
-    x: i64,
-}
+#[derive(Clone, Debug, Default)]
+pub struct int64(i64);
 
 impl<'a> FieldType<'a> for int64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -78,24 +68,28 @@ impl<'a> FieldType<'a> for int64 {
 
     type NativeType = i64;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for int64 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.x.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, int64> for i64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.x.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: int64, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: int64) -> Self {
+        proto.0
     }
 }
 
@@ -105,27 +99,14 @@ impl<'a> Unpackable<'a> for int64 {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = v.into();
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<i64> for int64 {
-    fn from(x: i64) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&i64> for int64 {
-    fn from(x: &i64) -> Self {
-        Self { x: *x }
+        Ok((int64(x), buf))
     }
 }
 
 ////////////////////////////////////////////// uint32 //////////////////////////////////////////////
 
-pub struct uint32 {
-    x: u32,
-}
+#[derive(Clone, Debug, Default)]
+pub struct uint32(u32);
 
 impl<'a> FieldType<'a> for uint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -133,24 +114,28 @@ impl<'a> FieldType<'a> for uint32 {
 
     type NativeType = u32;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for uint32 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.x.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, uint32> for u32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.x.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: uint32, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: uint32) -> Self {
+        proto.0
     }
 }
 
@@ -160,27 +145,14 @@ impl<'a> Unpackable<'a> for uint32 {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u32 = v.try_into()?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<u32> for uint32 {
-    fn from(x: u32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&u32> for uint32 {
-    fn from(x: &u32) -> Self {
-        Self { x: *x }
+        Ok((uint32(x), buf))
     }
 }
 
 ////////////////////////////////////////////// uint64 //////////////////////////////////////////////
 
-pub struct uint64 {
-    x: u64,
-}
+#[derive(Clone, Debug, Default)]
+pub struct uint64(u64);
 
 impl<'a> FieldType<'a> for uint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -188,24 +160,28 @@ impl<'a> FieldType<'a> for uint64 {
 
     type NativeType = u64;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for uint64 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.x.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, uint64> for u64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.x.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(*field);
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: uint64, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: uint64) -> Self {
+        proto.0
     }
 }
 
@@ -215,27 +191,14 @@ impl<'a> Unpackable<'a> for uint64 {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<u64> for uint64 {
-    fn from(x: u64) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&u64> for uint64 {
-    fn from(x: &u64) -> Self {
-        Self { x: *x }
+        Ok((uint64(x), buf))
     }
 }
 
 ////////////////////////////////////////////// sint32 //////////////////////////////////////////////
 
-pub struct sint32 {
-    x: i32,
-}
+#[derive(Clone, Debug, Default)]
+pub struct sint32(i32);
 
 impl<'a> FieldType<'a> for sint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -243,24 +206,28 @@ impl<'a> FieldType<'a> for sint32 {
 
     type NativeType = i32;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for sint32 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, sint32> for i32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(zigzag(*field as i64));
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(zigzag(*field as i64));
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: sint32, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: sint32) -> Self {
+        proto.0
     }
 }
 
@@ -276,39 +243,14 @@ impl<'a> Unpackable<'a> for sint32 {
                 return Err(Error::SignedOverflow { value: x });
             }
         };
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<i32> for sint32 {
-    fn from(x: i32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&i32> for sint32 {
-    fn from(x: &i32) -> Self {
-        Self { x: *x }
-    }
-}
-
-impl From<&sint32> for v64 {
-    fn from(x: &sint32) -> v64 {
-        zigzag(x.x as i64).into()
-    }
-}
-
-impl From<sint32> for v64 {
-    fn from(x: sint32) -> v64 {
-        zigzag(x.x as i64).into()
+        Ok((sint32(x), buf))
     }
 }
 
 ////////////////////////////////////////////// sint64 //////////////////////////////////////////////
 
-pub struct sint64 {
-    x: i64,
-}
+#[derive(Clone, Debug, Default)]
+pub struct sint64(i64);
 
 impl<'a> FieldType<'a> for sint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -316,24 +258,28 @@ impl<'a> FieldType<'a> for sint64 {
 
     type NativeType = i64;
 
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
+        Self(x)
     }
 }
 
-impl Packable for sint64 {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, sint64> for i64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(zigzag(*field));
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(zigzag(*field));
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: sint64, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: sint64) -> Self {
+        proto.0
     }
 }
 
@@ -343,39 +289,272 @@ impl<'a> Unpackable<'a> for sint64 {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
-        Ok((x.into(), buf))
+        Ok((sint64(x), buf))
     }
 }
 
-impl From<i64> for sint64 {
-    fn from(x: i64) -> Self {
-        Self { x }
+////////////////////////////////////////////// fixed32 //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct fixed32(u32);
+
+impl<'a> FieldType<'a> for fixed32 {
+    const WIRE_TYPE: WireType = WireType::ThirtyTwo;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = u32;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
     }
 }
 
-impl From<&i64> for sint64 {
-    fn from(x: &i64) -> Self {
-        Self { x: *x }
+impl<'a> FieldHelper<'a, fixed32> for u32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: fixed32, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: fixed32) -> Self {
+        proto.0
     }
 }
 
-impl From<&sint64> for v64 {
-    fn from(x: &sint64) -> v64 {
-        zigzag(x.x as i64).into()
+impl<'a> Unpackable<'a> for fixed32 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = u32::unpack(buf)?;
+        Ok((fixed32(x), buf))
     }
 }
 
-impl From<sint64> for v64 {
-    fn from(x: sint64) -> v64 {
-        zigzag(x.x as i64).into()
+////////////////////////////////////////////// fixed64 //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct fixed64(u64);
+
+impl<'a> FieldType<'a> for fixed64 {
+    const WIRE_TYPE: WireType = WireType::SixtyFour;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = u64;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> FieldHelper<'a, fixed64> for u64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: fixed64, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: fixed64) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> Unpackable<'a> for fixed64 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = u64::unpack(buf)?;
+        Ok((fixed64(x), buf))
+    }
+}
+
+///////////////////////////////////////////// sfixed32 //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct sfixed32(i32);
+
+impl<'a> FieldType<'a> for sfixed32 {
+    const WIRE_TYPE: WireType = WireType::ThirtyTwo;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = i32;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> FieldHelper<'a, sfixed32> for i32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: sfixed32, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: sfixed32) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> Unpackable<'a> for sfixed32 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = i32::unpack(buf)?;
+        Ok((sfixed32(x), buf))
+    }
+}
+
+///////////////////////////////////////////// sfixed64 //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct sfixed64(i64);
+
+impl<'a> FieldType<'a> for sfixed64 {
+    const WIRE_TYPE: WireType = WireType::SixtyFour;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = i64;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> FieldHelper<'a, sfixed64> for i64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: sfixed64, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: sfixed64) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> Unpackable<'a> for sfixed64 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = i64::unpack(buf)?;
+        Ok((sfixed64(x), buf))
+    }
+}
+
+/////////////////////////////////////////////// float //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct float(f32);
+
+impl<'a> FieldType<'a> for float {
+    const WIRE_TYPE: WireType = WireType::SixtyFour;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = f32;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> FieldHelper<'a, float> for f32 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: float, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: float) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> Unpackable<'a> for float {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = f32::unpack(buf)?;
+        Ok((float(x), buf))
+    }
+}
+
+////////////////////////////////////////////// double //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct double(f64);
+
+impl<'a> FieldType<'a> for double {
+    const WIRE_TYPE: WireType = WireType::SixtyFour;
+    const LENGTH_PREFIXED: bool = false;
+
+    type NativeType = f64;
+
+    fn from_native(x: Self::NativeType) -> Self {
+        Self(x)
+    }
+}
+
+impl<'a> FieldHelper<'a, double> for f64 {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: double, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: double) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> Unpackable<'a> for double {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let (x, buf) = f64::unpack(buf)?;
+        Ok((double(x), buf))
     }
 }
 
 /////////////////////////////////////////////// Bool ///////////////////////////////////////////////
 
-pub struct Bool {
-    b: bool,
-}
+#[derive(Clone, Debug, Default)]
+pub struct Bool(bool);
 
 impl<'a> FieldType<'a> for Bool {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -383,24 +562,28 @@ impl<'a> FieldType<'a> for Bool {
 
     type NativeType = bool;
 
-    fn into_native(self) -> Self::NativeType {
-        self.b
-    }
-
     fn from_native(b: Self::NativeType) -> Self {
-        Self { b }
+        Self(b)
     }
 }
 
-impl Packable for Bool {
-    fn pack_sz(&self) -> usize {
-        let v: v64 = self.into();
-        v.pack_sz()
+impl<'a> FieldHelper<'a, Bool> for bool {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let v: v64 = v64::from(if *field { 1 } else { 0 });
+        stack_pack(tag).pack(v).pack_sz()
     }
 
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        let v: v64 = self.into();
-        v.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let v: v64 = v64::from(if *field { 1 } else { 0 });
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: Bool, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: Bool) -> Self {
+        proto.0
     }
 }
 
@@ -410,349 +593,14 @@ impl<'a> Unpackable<'a> for Bool {
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
-        let b = if x == 0 { false } else { true };
-        Ok((b.into(), buf))
-    }
-}
-
-impl From<bool> for Bool {
-    fn from(b: bool) -> Self {
-        Self { b }
-    }
-}
-
-impl From<&bool> for Bool {
-    fn from(b: &bool) -> Self {
-        Self { b: *b }
-    }
-}
-
-impl From<&Bool> for v64 {
-    fn from(b: &Bool) -> v64 {
-        if b.b { 1 } else { 0 }.into()
-    }
-}
-
-impl From<Bool> for v64 {
-    fn from(b: Bool) -> v64 {
-        if b.b { 1 } else { 0 }.into()
-    }
-}
-
-////////////////////////////////////////////// fixed32 //////////////////////////////////////////////
-
-pub struct fixed32 {
-    x: u32,
-}
-
-impl<'a> FieldType<'a> for fixed32 {
-    const WIRE_TYPE: WireType = WireType::ThirtyTwo;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = u32;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for fixed32 {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for fixed32 {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = u32::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<u32> for fixed32 {
-    fn from(x: u32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&u32> for fixed32 {
-    fn from(x: &u32) -> Self {
-        Self { x: *x }
-    }
-}
-
-////////////////////////////////////////////// fixed64 //////////////////////////////////////////////
-
-pub struct fixed64 {
-    x: u64,
-}
-
-impl<'a> FieldType<'a> for fixed64 {
-    const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = u64;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for fixed64 {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for fixed64 {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = u64::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<u64> for fixed64 {
-    fn from(x: u64) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&u64> for fixed64 {
-    fn from(x: &u64) -> Self {
-        Self { x: *x }
-    }
-}
-
-///////////////////////////////////////////// sfixed32 //////////////////////////////////////////////
-
-pub struct sfixed32 {
-    x: i32,
-}
-
-impl<'a> FieldType<'a> for sfixed32 {
-    const WIRE_TYPE: WireType = WireType::ThirtyTwo;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = i32;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for sfixed32 {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for sfixed32 {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = i32::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<i32> for sfixed32 {
-    fn from(x: i32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&i32> for sfixed32 {
-    fn from(x: &i32) -> Self {
-        Self { x: *x }
-    }
-}
-
-///////////////////////////////////////////// sfixed64 //////////////////////////////////////////////
-
-pub struct sfixed64 {
-    x: i64,
-}
-
-impl<'a> FieldType<'a> for sfixed64 {
-    const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = i64;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for sfixed64 {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for sfixed64 {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = i64::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<i64> for sfixed64 {
-    fn from(x: i64) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&i64> for sfixed64 {
-    fn from(x: &i64) -> Self {
-        Self { x: *x }
-    }
-}
-
-/////////////////////////////////////////////// float //////////////////////////////////////////////
-
-pub struct float {
-    x: f32,
-}
-
-impl<'a> FieldType<'a> for float {
-    const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = f32;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for float {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for float {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = f32::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<f32> for float {
-    fn from(x: f32) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&f32> for float {
-    fn from(x: &f32) -> Self {
-        Self { x: *x }
-    }
-}
-
-////////////////////////////////////////////// double //////////////////////////////////////////////
-
-pub struct double {
-    x: f64,
-}
-
-impl<'a> FieldType<'a> for double {
-    const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
-
-    type NativeType = f64;
-
-    fn into_native(self) -> Self::NativeType {
-        self.x
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { x }
-    }
-}
-
-impl Packable for double {
-    fn pack_sz(&self) -> usize {
-        self.x.pack_sz()
-    }
-
-    fn pack<'a>(&self, buf: &'a mut [u8]) {
-        self.x.pack(buf)
-    }
-}
-
-impl<'a> Unpackable<'a> for double {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let (x, buf) = f64::unpack(buf)?;
-        Ok((x.into(), buf))
-    }
-}
-
-impl From<f64> for double {
-    fn from(x: f64) -> Self {
-        Self { x }
-    }
-}
-
-impl From<&f64> for double {
-    fn from(x: &f64) -> Self {
-        Self { x: *x }
+        let b = x != 0;
+        Ok((Bool(b), buf))
     }
 }
 
 /////////////////////////////////////////////// bytes //////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 pub struct bytes<'a>(&'a [u8]);
 
 impl<'a> FieldType<'a> for bytes<'a> {
@@ -761,22 +609,26 @@ impl<'a> FieldType<'a> for bytes<'a> {
 
     type NativeType = &'a [u8];
 
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
         Self(x)
     }
 }
 
-impl<'a> Packable for bytes<'a> {
-    fn pack_sz(&self) -> usize {
-        self.0.pack_sz()
+impl<'a> FieldHelper<'a, bytes<'a>> for &'a [u8] {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(field).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        self.0.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
+        proto.0
     }
 }
 
@@ -798,20 +650,9 @@ impl<'a> Unpackable<'a> for bytes<'a> {
     }
 }
 
-impl<'a> From<&'a [u8]> for bytes<'a> {
-    fn from(x: &'a [u8]) -> Self {
-        Self(x)
-    }
-}
-
-impl<'a> From<&'a &'a [u8]> for bytes<'a> {
-    fn from(x: &'a &'a [u8]) -> Self {
-        Self(*x)
-    }
-}
-
 ////////////////////////////////////////////// bytes32 /////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 pub struct bytes32([u8; 32]);
 
 impl<'a> FieldType<'a> for bytes32 {
@@ -820,24 +661,28 @@ impl<'a> FieldType<'a> for bytes32 {
 
     type NativeType = [u8; 32];
 
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
         Self(x)
     }
 }
 
-impl Packable for bytes32 {
-    fn pack_sz(&self) -> usize {
-        let b: &[u8] = &self.0;
-        b.pack_sz()
+impl<'a> FieldHelper<'a, bytes32> for [u8; 32] {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let b: &[u8] = &*field;
+        stack_pack(tag).pack(b).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        let b: &[u8] = &self.0;
-        b.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let b: &[u8] = &*field;
+        stack_pack(tag).pack(b).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: bytes32, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: bytes32) -> Self {
+        proto.0
     }
 }
 
@@ -869,20 +714,9 @@ impl<'a> Unpackable<'a> for bytes32 {
     }
 }
 
-impl From<[u8; 32]> for bytes32 {
-    fn from(x: [u8; 32]) -> Self {
-        Self(x)
-    }
-}
-
-impl From<&[u8; 32]> for bytes32 {
-    fn from(x: &[u8; 32]) -> Self {
-        Self(x.clone())
-    }
-}
-
 ////////////////////////////////////////////// buffer //////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 pub struct buffer(Buffer);
 
 impl<'a> FieldType<'a> for buffer {
@@ -891,24 +725,28 @@ impl<'a> FieldType<'a> for buffer {
 
     type NativeType = Buffer;
 
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
         Self(x)
     }
 }
 
-impl Packable for buffer {
-    fn pack_sz(&self) -> usize {
-        let as_bytes: &[u8] = self.0.as_ref();
-        as_bytes.pack_sz()
+impl<'a> FieldHelper<'a, buffer> for Buffer {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let b: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(b).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        let as_bytes: &[u8] = self.0.as_ref();
-        as_bytes.pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let b: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(b).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: buffer, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: buffer) -> Self {
+        proto.0
     }
 }
 
@@ -931,23 +769,10 @@ impl<'a> Unpackable<'a> for buffer {
     }
 }
 
-impl<'a> From<Buffer> for buffer {
-    fn from(x: Buffer) -> Self {
-        Self(x)
-    }
-}
-
-impl<'a> From<&Buffer> for buffer {
-    fn from(x: &Buffer) -> Self {
-        Self(x.clone())
-    }
-}
-
 ///////////////////////////////////////////// string ////////////////////////////////////////////
 
-pub struct string {
-    s: String,
-}
+#[derive(Clone, Debug, Default)]
+pub struct string(String);
 
 impl<'a> FieldType<'a> for string {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -955,22 +780,28 @@ impl<'a> FieldType<'a> for string {
 
     type NativeType = String;
 
-    fn into_native(self) -> Self::NativeType {
-        self.s
-    }
-
     fn from_native(s: Self::NativeType) -> Self {
-        Self { s }
+        Self(s)
     }
 }
 
-impl<'a> Packable for string {
-    fn pack_sz(&self) -> usize {
-        self.s.as_bytes().pack_sz()
+impl<'a> FieldHelper<'a, string> for String {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        self.s.as_bytes().pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: string, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: string) -> Self {
+        proto.0
     }
 }
 
@@ -992,23 +823,18 @@ impl<'a> Unpackable<'a> for string {
         let s: &'a str = match std::str::from_utf8(x) {
             Ok(s) => s,
             Err(_) => {
-                unimplemented!(); /* TODO(rescriva) */
+                todo!();
             }
         };
         let s: String = String::from(s);
-        Ok((Self { s }, &rem[v..]))
-    }
-}
-
-impl From<&String> for string {
-    fn from(s: &String) -> string {
-        string { s: s.to_string() }
+        Ok((Self(s), &rem[v..]))
     }
 }
 
 ///////////////////////////////////////////// stringref ////////////////////////////////////////////
 
-pub struct stringref<'a>(&'a str);
+#[derive(Clone, Debug, Default)]
+pub struct stringref<'a>(pub &'a str);
 
 impl<'a> FieldType<'a> for stringref<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -1016,22 +842,28 @@ impl<'a> FieldType<'a> for stringref<'a> {
 
     type NativeType = &'a str;
 
-    fn into_native(self) -> Self::NativeType {
-        self.0
-    }
-
     fn from_native(x: Self::NativeType) -> Self {
         Self(x)
     }
 }
 
-impl<'a> Packable for stringref<'a> {
-    fn pack_sz(&self) -> usize {
-        self.0.as_bytes().pack_sz()
+impl<'a> FieldHelper<'a, stringref<'a>> for &'a str {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        self.0.as_bytes().pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: stringref<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: stringref<'a>) -> Self {
+        proto.0
     }
 }
 
@@ -1053,34 +885,21 @@ impl<'a> Unpackable<'a> for stringref<'a> {
         let s: &'a str = match std::str::from_utf8(x) {
             Ok(s) => s,
             Err(_) => {
-                unimplemented!(); /* TODO(rescriva) */
+                todo!();
             }
         };
         Ok((Self(s), &rem[v..]))
     }
 }
 
-impl<'a> From<&'a str> for stringref<'a> {
-    fn from(s: &'a str) -> stringref<'a> {
-        stringref(s)
-    }
-}
-
-impl<'a> From<&&'a str> for stringref<'a> {
-    fn from(s: &&'a str) -> stringref<'a> {
-        stringref(*s)
-    }
-}
-
 ////////////////////////////////////////////// message /////////////////////////////////////////////
 
-pub struct message<M> {
-    msg: M,
-}
+#[derive(Clone, Debug, Default)]
+pub struct message<M>(M);
 
-impl<'a, M: Message<'a>> FieldType<'a> for message<M>
+impl<'a, M> FieldType<'a> for message<M>
 where
-    M: Unpackable<'a>,
+    M: Message<'a>,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -1088,32 +907,36 @@ where
 
     type NativeType = M;
 
-    fn into_native(self) -> Self::NativeType {
-        self.msg
-    }
-
     fn from_native(msg: M) -> Self {
-        Self { msg }
+        Self(msg)
     }
 }
 
-impl<'a, M: Message<'a>> Packable for message<M>
+impl<'a, M> FieldHelper<'a, message<M>> for M
 where
-    M: Unpackable<'a>,
+    M: Message<'a>,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
-    fn pack_sz(&self) -> usize {
-        stack_pack(&self.msg).length_prefixed().pack_sz()
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        stack_pack(tag).pack(stack_pack(field).length_prefixed()).pack_sz()
     }
 
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        stack_pack(&self.msg).length_prefixed().pack(buf)
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        stack_pack(tag).pack(stack_pack(field).length_prefixed()).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: message<M>, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: message<M>) -> Self {
+        proto.0
     }
 }
 
-impl<'a, M: Message<'a>> Unpackable<'a> for message<M>
+impl<'a, M> Unpackable<'a> for message<M>
 where
-    M: Unpackable<'a>,
+    M: Message<'a>,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     type Error = M::Error;
@@ -1141,91 +964,7 @@ where
         let (m, empty): (M, &'a [u8]) = <M as Unpackable<'a>>::unpack(buf)?;
         // TODO(rescrv): assert is nasty
         assert_eq!(0, empty.len());
-        Ok((Self::from(m), rem))
-    }
-}
-
-impl<'a, M: Message<'a>> From<M> for message<M> {
-    fn from(m: M) -> message<M> {
-        Self { msg: m }
-    }
-}
-
-impl<'a, M: Message<'a>> From<&M> for message<M> {
-    fn from(m: &M) -> message<M> {
-        Self { msg: m.clone() }
-    }
-}
-
-/////////////////////////////////////////// Vec<message> ///////////////////////////////////////////
-
-impl<'a, M: Message<'a>> FieldType<'a> for message<Vec<M>>
-where
-    M: Unpackable<'a>,
-    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
-{
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
-
-    type NativeType = M;
-
-    fn into_native(self) -> Self::NativeType {
-        assert_eq!(1, self.msg.len(), "assume vec always has exactly one M");
-        let mut x = self;
-        x.msg.pop().unwrap()
-    }
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self { msg: vec![x] }
-    }
-}
-
-impl<'a, M: Message<'a>> Packable for message<Vec<M>>
-where
-    M: Unpackable<'a>,
-    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
-{
-    fn pack_sz(&self) -> usize {
-        assert_eq!(1, self.msg.len(), "assume vec always has exactly one M");
-        self.msg[0].pack_sz()
-    }
-
-    fn pack<'b>(&self, buf: &'b mut [u8]) {
-        assert_eq!(1, self.msg.len(), "assume vec always has exactly one M");
-        self.msg[0].pack(buf);
-    }
-}
-
-impl<'a, M: Message<'a>> Unpackable<'a> for message<Vec<M>>
-where
-    M: Unpackable<'a>,
-    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
-{
-    type Error = M::Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let mut up = Unpacker::new(buf);
-        let px: message<M> = match up.unpack() {
-            Ok(x) => x,
-            Err(e) => {
-                return Err(e.into());
-            }
-        };
-        Ok((Self { msg: vec![px.msg] }, up.remain()))
-    }
-}
-
-impl<'a, M: Message<'a>> From<M> for message<Vec<M>> {
-    fn from(m: M) -> message<Vec<M>> {
-        Self { msg: vec![m] }
-    }
-}
-
-impl<'a, M: Message<'a>> From<&M> for message<Vec<M>> {
-    fn from(m: &M) -> message<Vec<M>> {
-        Self {
-            msg: vec![m.clone()],
-        }
+        Ok((Self(m), rem))
     }
 }
 
@@ -1233,384 +972,221 @@ impl<'a, M: Message<'a>> From<&M> for message<Vec<M>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use crate::field_types::*;
+
+    // expect is the body of the field, including length prefix if necessary.
+    fn helper_test<'a, T, H>(value: H, expect: &'a [u8])
+    where
+        T: Clone + FieldType<'a>,
+        H: Debug + Default + Eq + FieldHelper<'a, T>,
+    {
+        // tag
+        let tag = Tag {
+            field_number: FieldNumber::must(1),
+            wire_type: T::WIRE_TYPE,
+        };
+        // pack_sz
+        assert_eq!(1 + expect.len(), <H as FieldHelper<'a, T>>::prototk_pack_sz(&tag, &value));
+        // pack
+        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
+        output.resize(1 + expect.len(), 0);
+        <H as FieldHelper<'a, T>>::prototk_pack(&tag, &value, &mut output);
+        assert_eq!(expect, &output[1..]);
+        // unpack
+        let mut up = Unpacker::new(expect);
+        let unpacked: T = match up.unpack() {
+            Ok(x) => x,
+            Err(_) => { panic!("up.unpack() failed"); }
+        };
+        let mut field: H = H::default();
+        FieldHelper::<T>::prototk_convert_field(unpacked.clone(), &mut field);
+        assert_eq!(value, field);
+        let variant: H = FieldHelper::<'a, T>::prototk_convert_variant(unpacked);
+        assert_eq!(value, variant);
+    }
 
     #[test]
     fn int32() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = int32::from(i32::min_value());
-        let neg = int32::from(-1);
-        let zero = int32::from(0);
-        let one = int32::from(1);
-        let max = int32::from(i32::max_value());
-        let exp = &[
-            0x80, 0x80, 0x80, 0x80, 0xf8, 0xff, 0xff, 0xff, 0xff, 1,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1,
-            0,
-            1,
-            0xff, 0xff, 0xff, 0xff, 0x07,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing int32 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: int32 = up.unpack().unwrap();
-        let neg: int32 = up.unpack().unwrap();
-        let zero: int32 = up.unpack().unwrap();
-        let one: int32 = up.unpack().unwrap();
-        let max: int32 = up.unpack().unwrap();
-        assert_eq!(i32::min_value(), min.into_native());
-        assert_eq!(-1i32, neg.into_native());
-        assert_eq!(0i32, zero.into_native());
-        assert_eq!(1i32, one.into_native());
-        assert_eq!(i32::max_value(), max.into_native());
+        helper_test::<int32, i32>(i32::min_value(), &[0x80, 0x80, 0x80, 0x80, 0xf8, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<int32, i32>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<int32, i32>(0, &[0]);
+        helper_test::<int32, i32>(1, &[1]);
+        helper_test::<int32, i32>(i32::max_value(), &[0xff, 0xff, 0xff, 0xff, 0x07]);
     }
 
     #[test]
     fn int64() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = int64::from(i64::min_value());
-        let neg = int64::from(-1);
-        let zero = int64::from(0);
-        let one = int64::from(1);
-        let max = int64::from(i64::max_value());
-        let exp = &[
-            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1,
-            0,
-            1,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing int64 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: int64 = up.unpack().unwrap();
-        let neg: int64 = up.unpack().unwrap();
-        let zero: int64 = up.unpack().unwrap();
-        let one: int64 = up.unpack().unwrap();
-        let max: int64 = up.unpack().unwrap();
-        assert_eq!(i64::min_value(), min.into_native());
-        assert_eq!(-1i64, neg.into_native());
-        assert_eq!(0i64, zero.into_native());
-        assert_eq!(1i64, one.into_native());
-        assert_eq!(i64::max_value(), max.into_native());
+        helper_test::<int64, i64>(i64::min_value(), &[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1]);
+        helper_test::<int64, i64>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<int64, i64>(0, &[0]);
+        helper_test::<int64, i64>(1, &[1]);
+        helper_test::<int64, i64>(i64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]);
     }
 
     #[test]
     fn uint32() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let zero = uint32::from(0);
-        let one = uint32::from(1);
-        let max = uint32::from(u32::max_value());
-        let exp = &[
-            0,
-            1,
-            0xff, 0xff, 0xff, 0xff, 0x0f,
-        ];
-        let buf = stack_pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing uint32 field failed");
-        let mut up = Unpacker::new(buf);
-        let zero: uint32 = up.unpack().unwrap();
-        let one: uint32 = up.unpack().unwrap();
-        let max: uint32 = up.unpack().unwrap();
-        assert_eq!(0u32, zero.into_native());
-        assert_eq!(1u32, one.into_native());
-        assert_eq!(u32::max_value(), max.into_native());
+        helper_test::<uint32, u32>(0, &[0]);
+        helper_test::<uint32, u32>(1, &[1]);
+        helper_test::<uint32, u32>(u32::max_value(), &[0xff, 0xff, 0xff, 0xff, 0x0f]);
     }
 
     #[test]
     fn uint64() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let zero = uint64::from(0);
-        let one = uint64::from(1);
-        let max = uint64::from(u64::max_value());
-        let exp = &[
-            0,
-            1,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1,
-        ];
-        let buf = stack_pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing uint64 field failed");
-        let mut up = Unpacker::new(buf);
-        let zero: uint64 = up.unpack().unwrap();
-        let one: uint64 = up.unpack().unwrap();
-        let max: uint64 = up.unpack().unwrap();
-        assert_eq!(0u64, zero.into_native());
-        assert_eq!(1u64, one.into_native());
-        assert_eq!(u64::max_value(), max.into_native());
+        helper_test::<uint64, u64>(0, &[0]);
+        helper_test::<uint64, u64>(1, &[1]);
+        helper_test::<uint64, u64>(u64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
     }
 
     #[test]
     fn sint32() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = sint32::from(i32::min_value());
-        let neg = sint32::from(-1);
-        let zero = sint32::from(0);
-        let one = sint32::from(1);
-        let max = sint32::from(i32::max_value());
-        let exp = &[
-            0xff, 0xff, 0xff, 0xff, 0x0f,
-            1,
-            0,
-            2,
-            0xfe, 0xff, 0xff, 0xff, 0x0f,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing sint32 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: sint32 = up.unpack().unwrap();
-        let neg: sint32 = up.unpack().unwrap();
-        let zero: sint32 = up.unpack().unwrap();
-        let one: sint32 = up.unpack().unwrap();
-        let max: sint32 = up.unpack().unwrap();
-        assert_eq!(i32::min_value(), min.into_native());
-        assert_eq!(-1i32, neg.into_native());
-        assert_eq!(0i32, zero.into_native());
-        assert_eq!(1i32, one.into_native());
-        assert_eq!(i32::max_value(), max.into_native());
+        helper_test::<sint32, i32>(i32::min_value(), &[0xff, 0xff, 0xff, 0xff, 0x0f]);
+        helper_test::<sint32, i32>(-1, &[1]);
+        helper_test::<sint32, i32>(0, &[0]);
+        helper_test::<sint32, i32>(1, &[2]);
+        helper_test::<sint32, i32>(i32::max_value(), &[0xfe, 0xff, 0xff, 0xff, 0x0f]);
     }
 
     #[test]
     fn sint64() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = sint64::from(i64::min_value());
-        let neg = sint64::from(-1);
-        let zero = sint64::from(0);
-        let one = sint64::from(1);
-        let max = sint64::from(i64::max_value());
-        let exp = &[
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1,
-            1,
-            0,
-            2,
-            0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing sint64 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: sint64 = up.unpack().unwrap();
-        let neg: sint64 = up.unpack().unwrap();
-        let zero: sint64 = up.unpack().unwrap();
-        let one: sint64 = up.unpack().unwrap();
-        let max: sint64 = up.unpack().unwrap();
-        assert_eq!(i64::min_value(), min.into_native());
-        assert_eq!(-1i64, neg.into_native());
-        assert_eq!(0i64, zero.into_native());
-        assert_eq!(1i64, one.into_native());
-        assert_eq!(i64::max_value(), max.into_native());
+        helper_test::<sint64, i64>(i64::min_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<sint64, i64>(-1, &[1]);
+        helper_test::<sint64, i64>(0, &[0]);
+        helper_test::<sint64, i64>(1, &[2]);
+        helper_test::<sint64, i64>(i64::max_value(), &[0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+    }
+
+    #[test]
+    fn fixed32() {
+        helper_test::<fixed32, u32>(0, &[0, 0, 0, 0]);
+        helper_test::<fixed32, u32>(1, &[1, 0, 0, 0]);
+        helper_test::<fixed32, u32>(u32::max_value(), &[0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn fixed64() {
+        helper_test::<fixed64, u64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
+        helper_test::<fixed64, u64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
+        helper_test::<fixed64, u64>(u64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn sfixed32() {
+        helper_test::<sfixed32, i32>(i32::min_value(), &[0, 0, 0, 0x80]);
+        helper_test::<sfixed32, i32>(-1, &[0xff, 0xff, 0xff, 0xff]);
+        helper_test::<sfixed32, i32>(0, &[0, 0, 0, 0]);
+        helper_test::<sfixed32, i32>(1, &[1, 0, 0, 0]);
+        helper_test::<sfixed32, i32>(i32::max_value(), &[0xff, 0xff, 0xff, 0x7f]);
+    }
+
+    #[test]
+    fn sfixed64() {
+        helper_test::<sfixed64, i64>(i64::min_value(), &[0, 0, 0, 0, 0, 0, 0, 0x80]);
+        helper_test::<sfixed64, i64>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        helper_test::<sfixed64, i64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
+        helper_test::<sfixed64, i64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
+        helper_test::<sfixed64, i64>(i64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]);
+    }
+
+    #[test]
+    fn float() {
+        let value = 3.14159;
+        let expect = &[0xd0, 0x0f, 0x49, 0x40];
+
+        // tag
+        let tag = Tag {
+            field_number: FieldNumber::must(1),
+            wire_type: float::WIRE_TYPE,
+        };
+        // pack_sz
+        assert_eq!(1 + expect.len(), FieldHelper::<float>::prototk_pack_sz(&tag, &value));
+        // pack
+        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
+        output.resize(1 + expect.len(), 0);
+        FieldHelper::<float>::prototk_pack(&tag, &value, &mut output);
+        assert_eq!(expect, &output[1..]);
+        // unpack
+        let mut up = Unpacker::new(expect);
+        let unpacked: float = match up.unpack() {
+            Ok(x) => x,
+            Err(_) => { panic!("up.unpack() failed"); }
+        };
+        let mut field: f32 = f32::default();
+        FieldHelper::<float>::prototk_convert_field(unpacked.clone(), &mut field);
+        assert!(field * 0.9999 < value && field * 1.0001 > value);
+        let variant: f32 = FieldHelper::<float>::prototk_convert_variant(unpacked);
+        assert!(variant * 0.9999 < value && variant * 1.0001 > value);
+    }
+
+    #[test]
+    fn double() {
+        let value = 3.14159;
+        let expect = &[0x6e, 0x86, 0x1b, 0xf0, 0xf9, 0x21, 0x09, 0x40];
+
+        // tag
+        let tag = Tag {
+            field_number: FieldNumber::must(1),
+            wire_type: double::WIRE_TYPE,
+        };
+        // pack_sz
+        assert_eq!(1 + expect.len(), FieldHelper::<double>::prototk_pack_sz(&tag, &value));
+        // pack
+        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
+        output.resize(1 + expect.len(), 0);
+        FieldHelper::<double>::prototk_pack(&tag, &value, &mut output);
+        assert_eq!(expect, &output[1..]);
+        // unpack
+        let mut up = Unpacker::new(expect);
+        let unpacked: double = match up.unpack() {
+            Ok(x) => x,
+            Err(_) => { panic!("up.unpack() failed"); }
+        };
+        let mut field: f64 = f64::default();
+        FieldHelper::<double>::prototk_convert_field(unpacked.clone(), &mut field);
+        assert!(field * 0.9999 < value && field * 1.0001 > value);
+        let variant: f64 = FieldHelper::<double>::prototk_convert_variant(unpacked);
+        assert!(variant * 0.9999 < value && variant * 1.0001 > value);
     }
 
     #[test]
     #[allow(non_snake_case)]
     fn Bool() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let False = Bool::from(false);
-        let True = Bool::from(true);
-        let exp = &[0, 1];
-        let buf = stack_pack(False).pack(True).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing Bool field failed");
-        let mut up = Unpacker::new(buf);
-        let False: Bool = up.unpack().unwrap();
-        let True: Bool = up.unpack().unwrap();
-        assert_eq!(false, False.into_native());
-        assert_eq!(true, True.into_native());
-    }
-
-    #[test]
-    fn fixed64() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let zero = fixed64::from(0);
-        let one = fixed64::from(1);
-        let max = fixed64::from(u64::max_value());
-        let exp = &[
-            0, 0, 0, 0, 0, 0, 0, 0,
-            1, 0, 0, 0, 0, 0, 0, 0,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        ];
-        let buf = stack_pack(zero).pack(one).pack(max).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing fixed64 field failed");
-        let mut up = Unpacker::new(buf);
-        let zero: fixed64 = up.unpack().unwrap();
-        let one: fixed64 = up.unpack().unwrap();
-        let max: fixed64 = up.unpack().unwrap();
-        assert_eq!(0u64, zero.into_native());
-        assert_eq!(1u64, one.into_native());
-        assert_eq!(u64::max_value(), max.into_native());
-    }
-
-    #[test]
-    fn sfixed64() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = sfixed64::from(i64::min_value());
-        let neg = sfixed64::from(-1);
-        let zero = sfixed64::from(0);
-        let one = sfixed64::from(1);
-        let max = sfixed64::from(i64::max_value());
-        let exp: &[u8] = &[
-            0, 0, 0, 0, 0, 0, 0, 0x80,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0, 0, 0, 0, 0, 0, 0, 0,
-            1, 0, 0, 0, 0, 0, 0, 0,
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing sfixed64 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: sfixed64 = up.unpack().unwrap();
-        let neg: sfixed64 = up.unpack().unwrap();
-        let zero: sfixed64 = up.unpack().unwrap();
-        let one: sfixed64 = up.unpack().unwrap();
-        let max: sfixed64 = up.unpack().unwrap();
-        assert_eq!(i64::min_value(), min.into_native());
-        assert_eq!(-1i64, neg.into_native());
-        assert_eq!(0i64, zero.into_native());
-        assert_eq!(1i64, one.into_native());
-        assert_eq!(i64::max_value(), max.into_native());
-    }
-
-    #[test]
-    fn double() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let pi = double::from(3.14159);
-        let exp: &[u8] = &[0x6e, 0x86, 0x1b, 0xf0, 0xf9, 0x21, 0x09, 0x40];
-        let buf = stack_pack(pi).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing double field failed");
-        let mut up = Unpacker::new(buf);
-        let pi: double = up.unpack().unwrap();
-        assert_eq!(3.14159, pi.into_native());
-    }
-
-    #[test]
-    fn fixed32() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let zero = fixed32::from(0);
-        let one = fixed32::from(1);
-        let max = fixed32::from(u32::max_value());
-        let exp = &[
-            0, 0, 0, 0,
-            1, 0, 0, 0,
-            0xff, 0xff, 0xff, 0xff,
-        ];
-        let buf = stack_pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing fixed32 field failed");
-        let mut up = Unpacker::new(buf);
-        let zero: fixed32 = up.unpack().unwrap();
-        let one: fixed32 = up.unpack().unwrap();
-        let max: fixed32 = up.unpack().unwrap();
-        assert_eq!(0u32, zero.into_native());
-        assert_eq!(1u32, one.into_native());
-        assert_eq!(u32::max_value(), max.into_native());
-    }
-
-    #[test]
-    fn sfixed32() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let min = sfixed32::from(i32::min_value());
-        let neg = sfixed32::from(-1);
-        let zero = sfixed32::from(0);
-        let one = sfixed32::from(1);
-        let max = sfixed32::from(i32::max_value());
-        let exp: &[u8] = &[
-            0, 0, 0, 0x80,
-            0xff, 0xff, 0xff, 0xff,
-            0, 0, 0, 0,
-            1, 0, 0, 0,
-            0xff, 0xff, 0xff, 0x7f,
-        ];
-        let buf = stack_pack(min)
-            .pack(neg)
-            .pack(zero)
-            .pack(one)
-            .pack(max)
-            .into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing sfixed32 field failed");
-        let mut up = Unpacker::new(buf);
-        let min: sfixed32 = up.unpack().unwrap();
-        let neg: sfixed32 = up.unpack().unwrap();
-        let zero: sfixed32 = up.unpack().unwrap();
-        let one: sfixed32 = up.unpack().unwrap();
-        let max: sfixed32 = up.unpack().unwrap();
-        assert_eq!(i32::min_value(), min.into_native());
-        assert_eq!(-1i32, neg.into_native());
-        assert_eq!(0i32, zero.into_native());
-        assert_eq!(1i32, one.into_native());
-        assert_eq!(i32::max_value(), max.into_native());
-    }
-
-    #[test]
-    fn float() {
-        let mut buf: [u8; 64] = [0u8; 64];
-        let pi = float::from(3.14159);
-        let exp: &[u8] = &[
-            0xd0, 0x0f, 0x49, 0x40,
-        ];
-        let buf = stack_pack(pi).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing float field failed");
-        let mut up = Unpacker::new(buf);
-        let pi: float = up.unpack().unwrap();
-        assert_eq!(3.14159f32, pi.into_native());
+        helper_test::<Bool, bool>(false, &[0]);
+        helper_test::<Bool, bool>(true, &[1]);
     }
 
     #[test]
     fn bytes() {
-        const BYTES: &[u8] = &[0xff, 0x00];
-        let mut buf: [u8; 64] = [0u8; 64];
-        let msg = bytes::from(BYTES);
-        let exp: &[u8] = &[0x2, 0xff, 0x00];
-        let buf = stack_pack(msg).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing bytes field failed");
-        let mut up = Unpacker::new(buf);
-        let msg: bytes = up.unpack().unwrap();
-        let msg: &[u8] = msg.into_native();
-        assert_eq!(BYTES, msg);
+        helper_test::<bytes, &[u8]>(&[0xff, 0x00], &[0x2, 0xff, 0x00]);
+    }
+
+    #[test]
+    fn bytes32() {
+        let mut input: Vec<u8> = Vec::new();
+        let mut expect: Vec<u8> = Vec::new();
+        expect.push(32);
+        for i in 0..32 {
+            input.push(i);
+            expect.push(i);
+        }
+        helper_test::<bytes, &[u8]>(&input, &expect);
+    }
+
+    #[test]
+    fn buffer() {
+        let buf: &[u8] = &[0u8, 1, 2, 3, 4, 5, 6, 7];
+        let buf: Buffer = Buffer::from(buf);
+        helper_test::<buffer, Buffer>(buf, &[8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn string() {
+        helper_test::<string, String>("string \u{1F600}".to_owned(), &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
     }
 
     #[test]
     fn stringref() {
-        const STRING: &str = "string \u{1F600}";
-        let mut buf: [u8; 64] = [0u8; 64];
-        let msg = stringref::from(STRING);
-        let exp: &[u8] = &[
-            0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80,
-        ];
-        let buf = stack_pack(msg).into_slice(&mut buf);
-        assert_eq!(exp, buf, "packing stringref field failed");
-        let mut up = Unpacker::new(buf);
-        let msg: stringref = up.unpack().unwrap();
-        let msg: &str = msg.into_native();
-        assert_eq!(STRING, msg);
+        helper_test::<stringref, &str>("string \u{1F600}", &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
     }
 }

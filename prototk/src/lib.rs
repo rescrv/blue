@@ -8,7 +8,7 @@ pub mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use buffertk::{stack_pack, v64, Buffer, Packable, Unpackable, Unpacker};
+use buffertk::{v64, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -80,7 +80,7 @@ impl From<buffertk::Error> for Error {
 
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WireType {
     /// Varint is wire type 0.  The payload is a single v64.
     Varint,
@@ -175,7 +175,7 @@ impl std::cmp::PartialEq<u32> for FieldNumber {
 
 //////////////////////////////////////////////// Tag ///////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Tag {
     pub field_number: FieldNumber,
     pub wire_type: WireType,
@@ -239,289 +239,82 @@ impl<'a> Unpackable<'a> for Tag {
 
 ///////////////////////////////////////////// FieldType ////////////////////////////////////////////
 
-pub trait FieldType<'a>: Packable + Unpackable<'a> {
+pub trait FieldType<'a>: Unpackable<'a> {
     const WIRE_TYPE: WireType;
     const LENGTH_PREFIXED: bool;
 
     type NativeType;
 
-    fn into_native(self) -> Self::NativeType;
     fn from_native(x: Self::NativeType) -> Self;
-
-    fn assign<A: FieldTypeAssigner<NativeType = Self::NativeType>>(
-        lhs: &mut A,
-        x: Self::NativeType,
-    ) {
-        lhs.assign_field_type(x);
-    }
-}
-////////////////////////////////////////// FieldTypePacker /////////////////////////////////////////
-
-pub struct FieldTypePacker<'a, A, B> {
-    t: Tag,
-    a: std::marker::PhantomData<A>,
-    b: &'a B,
 }
 
-impl<'a, A, B> FieldTypePacker<'a, A, B> {
-    pub fn new(t: Tag, a: std::marker::PhantomData<A>, b: &'a B) -> Self {
-        Self { t, a, b }
-    }
+//////////////////////////////////////////// FieldHelper ///////////////////////////////////////////
+
+pub trait FieldHelper<'a, T: FieldType<'a>> {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize;
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]);
+
+    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b;
+    fn prototk_convert_variant(proto: T) -> Self;
 }
 
-pub trait FieldTypePackable {}
-
-impl FieldTypePackable for i32 {}
-impl FieldTypePackable for i64 {}
-impl FieldTypePackable for u32 {}
-impl FieldTypePackable for u64 {}
-impl FieldTypePackable for f32 {}
-impl FieldTypePackable for f64 {}
-impl<'a> FieldTypePackable for [u8; 32] {}
-impl<'a> FieldTypePackable for &'a [u8] {}
-impl<'a> FieldTypePackable for Buffer {}
-impl<'a> FieldTypePackable for &'a str {}
-impl<'a> FieldTypePackable for String {}
-impl<'a, M: Message<'a>> FieldTypePackable for M {}
-
-impl<'a, F, T> Packable for FieldTypePacker<'a, F, T>
-where
-    F: FieldType<'a>,
-    T: FieldTypePackable + Clone,
-    &'a T: std::convert::Into<F>,
-{
-    fn pack_sz(&self) -> usize {
-        let pb: F = self.b.into();
-        stack_pack(&self.t).pack(&pb).pack_sz()
-    }
-
-    fn pack(&self, buf: &mut [u8]) {
-        let pb: F = self.b.into();
-        stack_pack(&self.t).pack(&pb).into_slice(buf);
-    }
-}
-
-pub trait FieldTypeVectorPackable {}
-
-impl FieldTypeVectorPackable for i32 {}
-impl FieldTypeVectorPackable for i64 {}
-impl FieldTypeVectorPackable for u32 {}
-impl FieldTypeVectorPackable for u64 {}
-impl FieldTypeVectorPackable for f32 {}
-impl FieldTypeVectorPackable for f64 {}
-impl<'a> FieldTypeVectorPackable for &'a [u8] {}
-impl<'a, M: Message<'a>> FieldTypeVectorPackable for M {}
-
-impl<'a, F, T> Packable for FieldTypePacker<'a, F, Vec<T>>
-where
-    F: FieldType<'a>,
-    T: FieldTypeVectorPackable + Clone,
-    &'a T: std::convert::Into<F>,
-{
-    fn pack_sz(&self) -> usize {
-        let mut sz = self.t.pack_sz() * self.b.len();
-        for x in self.b.iter() {
-            let px: F = x.into();
-            let elem_sz = px.pack_sz();
-            if F::LENGTH_PREFIXED {
-                sz += v64::from(elem_sz).pack_sz();
-            }
-            sz += elem_sz;
+impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> for Vec<F> {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let mut bytes = 0;
+        for f in field {
+            bytes += <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f);
         }
-        sz
+        bytes
     }
 
-    fn pack(&self, buffer: &mut [u8]) {
-        let tag_sz = self.t.pack_sz();
-        let mut total_sz = 0;
-        for x in self.b.iter() {
-            // TODO(rescrv): cleanup
-            let px: F = x.into();
-            let sz = px.pack_sz();
-            if F::LENGTH_PREFIXED {
-                let prefix: v64 = sz.into();
-                let buf = &mut buffer[total_sz..total_sz + tag_sz + prefix.pack_sz() + sz];
-                stack_pack(&self.t).pack(prefix).pack(px).into_slice(buf);
-            } else {
-                let buf = &mut buffer[total_sz..total_sz + tag_sz + sz];
-                stack_pack(&self.t).pack(px).into_slice(buf);
-            }
-            total_sz += tag_sz + sz;
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let mut out = out;
+        for f in field {
+            let size = <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f);
+            <F as FieldHelper<'a, T>>::prototk_pack(tag, f, &mut out[..size]);
+            out = &mut out[size..];
+        }
+    }
+
+    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b, {
+        out.push(F::default());
+        let idx = out.len() - 1;
+        <F as FieldHelper<'a, T>>::prototk_convert_field(proto, &mut out[idx]);
+    }
+
+    fn prototk_convert_variant(proto: T) -> Self {
+        vec![<F as FieldHelper<'a, T>>::prototk_convert_variant(proto)]
+    }
+}
+
+//////////////////////////////////////////// FieldPacker ///////////////////////////////////////////
+
+pub struct FieldPacker<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> {
+    tag: Tag,
+    field_value: &'a F,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, T, F> {
+    pub fn new(tag: Tag, field_value: &'a F, field_type: std::marker::PhantomData<T>) -> Self {
+        Self {
+            tag,
+            field_value,
+            _phantom: field_type,
         }
     }
 }
 
-///////////////////////////////////////// FieldTypeAssigner ////////////////////////////////////////
-
-pub trait FieldTypeAssigner {
-    type NativeType;
-
-    fn assign_field_type(&mut self, x: Self::NativeType);
-}
-
-trait TemplateFieldTypeAssigner {}
-
-impl FieldTypeAssigner for i32 {
-    type NativeType = i32;
-
-    fn assign_field_type(&mut self, x: i32) {
-        *self = x;
+impl<'a, T: FieldType<'a>, F: FieldHelper<'a, T>> Packable for FieldPacker<'a, T, F> {
+    fn pack_sz(&self) -> usize {
+        FieldHelper::prototk_pack_sz(&self.tag, self.field_value)
     }
-}
 
-impl FieldTypeAssigner for i64 {
-    type NativeType = i64;
-
-    fn assign_field_type(&mut self, x: i64) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for u32 {
-    type NativeType = u32;
-
-    fn assign_field_type(&mut self, x: u32) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for u64 {
-    type NativeType = u64;
-
-    fn assign_field_type(&mut self, x: u64) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for f32 {
-    type NativeType = f32;
-
-    fn assign_field_type(&mut self, x: f32) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for f64 {
-    type NativeType = f64;
-
-    fn assign_field_type(&mut self, x: f64) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for [u8; 32] {
-    type NativeType = [u8; 32];
-
-    fn assign_field_type(&mut self, x: [u8; 32]) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for &'a [u8] {
-    type NativeType = &'a [u8];
-
-    fn assign_field_type(&mut self, x: &'a [u8]) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for Buffer {
-    type NativeType = Buffer;
-
-    fn assign_field_type(&mut self, x: Buffer) {
-        *self = x;
-    }
-}
-
-impl<'a> FieldTypeAssigner for &'a str {
-    type NativeType = &'a str;
-
-    fn assign_field_type(&mut self, x: &'a str) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for String {
-    type NativeType = String;
-
-    fn assign_field_type(&mut self, x: String) {
-        *self = x;
-    }
-}
-
-impl<'a, M: Message<'a>> FieldTypeAssigner for M {
-    type NativeType = M;
-
-    fn assign_field_type(&mut self, x: M) {
-        *self = x;
-    }
-}
-
-impl FieldTypeAssigner for Vec<i32> {
-    type NativeType = i32;
-
-    fn assign_field_type(&mut self, x: i32) {
-        self.push(x);
-    }
-}
-
-impl FieldTypeAssigner for Vec<i64> {
-    type NativeType = i64;
-
-    fn assign_field_type(&mut self, x: i64) {
-        self.push(x);
-    }
-}
-
-impl FieldTypeAssigner for Vec<u32> {
-    type NativeType = u32;
-
-    fn assign_field_type(&mut self, x: u32) {
-        self.push(x);
-    }
-}
-
-impl FieldTypeAssigner for Vec<u64> {
-    type NativeType = u64;
-
-    fn assign_field_type(&mut self, x: u64) {
-        self.push(x);
-    }
-}
-
-impl FieldTypeAssigner for Vec<f32> {
-    type NativeType = f32;
-
-    fn assign_field_type(&mut self, x: f32) {
-        self.push(x);
-    }
-}
-
-impl FieldTypeAssigner for Vec<f64> {
-    type NativeType = f64;
-
-    fn assign_field_type(&mut self, x: f64) {
-        self.push(x);
-    }
-}
-
-impl<'a, M: Message<'a>> FieldTypeAssigner for Vec<M> {
-    type NativeType = M;
-
-    fn assign_field_type(&mut self, x: M) {
-        self.push(x);
+    fn pack(&self, out: &mut [u8]) {
+        FieldHelper::prototk_pack(&self.tag, self.field_value, out)
     }
 }
 
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
-// TODO(rescrv):  There's an extra clone type here because I couldn't do From/Into of
-// message<M:Message> to make it zero copy.  Get the macros up and revisit.
-pub trait Message<'a>: Clone + Default + buffertk::Packable + buffertk::Unpackable<'a> {}
-
-impl<'a, M> Message<'a> for &'a M
-where
-    M: Message<'a>,
-    &'a M: Default + buffertk::Packable + buffertk::Unpackable<'a>,
-{
-}
+pub trait Message<'a>: Default + buffertk::Packable + buffertk::Unpackable<'a> {}
