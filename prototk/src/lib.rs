@@ -336,7 +336,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn push<'a, const N: u32, T>(&mut self, field_value: T::NativeType) -> &mut Self
+    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::NativeType) -> &mut Self
     where
         T: FieldType<'a> + 'a,
         T::NativeType: FieldHelper<'a, T> + 'a,
@@ -353,5 +353,9 @@ impl Builder {
     pub fn append(&mut self, buffer: &[u8]) -> &mut Self {
         self.buffer.extend_from_slice(buffer);
         self
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buffer
     }
 }

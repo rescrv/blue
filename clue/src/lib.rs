@@ -10,10 +10,8 @@ use id::generate_id;
 
 use util::stopwatch::Stopwatch;
 
-use buffertk::stack_pack;
-
 use prototk::field_types::*;
-use prototk::{FieldHelper, FieldNumber, FieldType, Tag};
+use prototk::{FieldHelper, FieldType};
 use prototk::Builder as ProtoTKBuilder;
 
 use zerror::ZError;
@@ -59,14 +57,14 @@ impl Trace {
             stopwatch: None,
         };
         if let Some(trace_id) = id {
-            trace.with_context::<LABEL_FIELD_NUMBER, stringref>("label", label)
-                .with_context::<TRACE_ID_FIELD_NUMBER, string>("trace_id", trace_id.human_readable())
+            trace.with_context::<string, LABEL_FIELD_NUMBER>("label", label)
+                .with_context::<string, TRACE_ID_FIELD_NUMBER>("trace_id", &trace_id.human_readable())
         } else {
-            trace.with_context::<LABEL_FIELD_NUMBER, stringref>("label", label)
+            trace.with_context::<string, LABEL_FIELD_NUMBER>("label", label)
         }
     }
 
-    pub fn with_context<'a, const N: u32, F: FieldType<'a>>(self, field_name: &str, field_value: F::NativeType) -> Self
+    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(self, field_name: &str, field_value: F::NativeType) -> Self
     where
         F: FieldType<'a> + 'a,
         F::NativeType: Clone + Display + FieldHelper<'a, F> + 'a,
@@ -75,7 +73,7 @@ impl Trace {
             click!("clue.trace.context_not_logged");
             return self
         }
-        self.with_protobuf::<N, F>(field_value.clone())
+        self.with_protobuf::<F, N>(field_value.clone())
             .with_human::<F::NativeType>(field_name, field_value)
     }
 
@@ -88,7 +86,7 @@ impl Trace {
         self
     }
 
-    pub fn with_protobuf<'a, const N: u32, F>(mut self, field_value: F::NativeType) -> Self
+    pub fn with_protobuf<'a, F, const N: u32>(mut self, field_value: F::NativeType) -> Self
     where
         F: FieldType<'a> + 'a,
         F::NativeType: FieldHelper<'a, F> + 'a,
@@ -97,7 +95,7 @@ impl Trace {
             click!("clue.trace.protobuf_not_logged");
             return self
         }
-        self.proto.push::<N, F>(field_value);
+        self.proto.push::<F, N>(field_value);
         self
     }
 
@@ -108,7 +106,7 @@ impl Trace {
         }
         click!("clue.trace.with_backtrace");
         let backtrace = format!("{}", Backtrace::force_capture());
-        self.with_context::<BACKTRACE_FIELD_NUMBER, string>("backtrace", backtrace)
+        self.with_context::<string, BACKTRACE_FIELD_NUMBER>("backtrace", &backtrace)
     }
 
     pub fn with_stopwatch(mut self) -> Self {
@@ -124,7 +122,7 @@ impl Trace {
     pub fn finish(mut self) {
         if let Some(stopwatch) = &self.stopwatch {
             let time_ms: f64 = stopwatch.since();
-            self = self.with_context::<STOPWATCH_FIELD_NUMBER, double>("elapsed", time_ms);
+            self = self.with_context::<double, STOPWATCH_FIELD_NUMBER>("elapsed", time_ms);
         }
         TRACER.with(|t| {
             t.borrow_mut().finish(self);
@@ -269,7 +267,7 @@ mod tests {
         let trace = Trace::new("test")
             .with_backtrace()
             .with_stopwatch()
-            .with_context::<1, fixed64>("field_one", 0x1eaff00dc0ffeeu64);
+            .with_context::<fixed64, 1>("field_one", 0x1eaff00dc0ffeeu64);
         std::thread::sleep(std::time::Duration::from_millis(250));
         trace.finish();
     }

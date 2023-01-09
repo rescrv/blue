@@ -128,19 +128,19 @@ impl<M: Monitor + 'static> State<M> {
                     recent: None,
                 });
                 Trace::new("hey_listen.make_sticky")
-                    .with_context::<1, stringref>("label", self.monitor.label())
-                    .with_context::<2, string>("firing", firing.human_readable())
-                    .with_context::<3, stringref>("description", description)
-                    .with_context::<4, stringref>("context", &context)
+                    .with_context::<string, 1>("label", self.monitor.label())
+                    .with_context::<string, 2>("firing", &firing.human_readable())
+                    .with_context::<string, 3>("description", description)
+                    .with_context::<string, 4>("context", &context)
                     .finish();
             }
         }
         if let Some(sticky) = &mut self.sticky {
             Trace::new("hey_listen.recent")
-                .with_context::<1, stringref>("label", self.monitor.label())
-                .with_context::<2, string>("firing", sticky.firing.human_readable())
-                .with_context::<3, stringref>("description", condition.description())
-                .with_context::<4, stringref>("context", condition.context())
+                .with_context::<string, 1>("label", self.monitor.label())
+                .with_context::<string, 2>("firing", &sticky.firing.human_readable())
+                .with_context::<string, 3>("description", condition.description())
+                .with_context::<string, 4>("context", condition.context())
                 .finish();
             sticky.recent = Some(condition.clone());
         }
@@ -151,24 +151,24 @@ impl<M: Monitor + 'static> State<M> {
         match &self.sticky {
             Some(sticky) if sticky.firing == firing => {
                 Trace::new("hey_listen.reset")
-                    .with_context::<1, stringref>("label", self.monitor.label())
-                    .with_context::<2, stringref>("firing", &firing.human_readable())
+                    .with_context::<string, 1>("label", self.monitor.label())
+                    .with_context::<string, 2>("firing", &firing.human_readable())
                     .finish();
                 self.sticky = None;
                 true
             },
             Some(sticky) => {
                 Trace::new("hey_listen.reset.wrong_id")
-                    .with_context::<1, stringref>("label", self.monitor.label())
-                    .with_context::<2, stringref>("expected", &sticky.firing.human_readable())
-                    .with_context::<3, stringref>("provided", &firing.human_readable())
+                    .with_context::<string, 1>("label", self.monitor.label())
+                    .with_context::<string, 2>("expected", &sticky.firing.human_readable())
+                    .with_context::<string, 3>("provided", &firing.human_readable())
                     .finish();
                 false
             },
             None => {
                 Trace::new("hey_listen.reset.nothing_to_reset")
-                    .with_context::<1, stringref>("label", self.monitor.label())
-                    .with_context::<2, stringref>("provided", &firing.human_readable());
+                    .with_context::<string, 1>("label", self.monitor.label())
+                    .with_context::<string, 2>("provided", &firing.human_readable());
                 false
             },
         }

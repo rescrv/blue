@@ -5,10 +5,9 @@ extern crate prototk_derive;
 use std::backtrace::Backtrace;
 use std::fmt::{Debug, Display, Formatter};
 
-use buffertk::{stack_pack, Packable};
-
 use prototk::field_types::*;
-use prototk::{FieldNumber, FieldType, Tag};
+use prototk::{FieldHelper, FieldType};
+use prototk::Builder as ProtoTKBuilder;
 
 pub const VALUE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
@@ -19,7 +18,7 @@ pub const NESTED_ZERROR_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 3;
 
 pub struct ZError<E: Debug + Display> {
     error: E,
-    proto: Vec<u8>,
+    proto: ProtoTKBuilder,
     human: String,
     source: Option<Box<dyn std::error::Error + 'static>>,
 }
@@ -28,7 +27,7 @@ impl<E: Debug + Display> ZError<E> {
     pub fn new<'a>(error: E) -> Self {
         Self {
             error,
-            proto: Vec::new(),
+            proto: ProtoTKBuilder::default(),
             human: String::default(),
             source: None,
         }
@@ -39,7 +38,7 @@ impl<E: Debug + Display> ZError<E> {
         let wrapped_str = format!("{}", wrapped);
         self = self
             .with_human("wrapped", wrapped_str)
-            .with_protobuf::<bytes>(NESTED_ZERROR_FIELD_NUMBER, &wrapped.proto);
+            .with_protobuf::<bytes, NESTED_ZERROR_FIELD_NUMBER>(wrapped.proto.as_bytes());
         self.source = Some(Box::new(wrapped));
         self
     }
@@ -47,19 +46,18 @@ impl<E: Debug + Display> ZError<E> {
     pub fn wrap_error(mut self, wrapped: Box<dyn std::error::Error + 'static>) -> Self {
         let wrapped_str = format!("{}", wrapped);
         self.source = Some(wrapped);
-        self.with_context::<string>("wrapped", NESTED_ERROR_FIELD_NUMBER, wrapped_str)
+        self.with_context::<string, NESTED_ERROR_FIELD_NUMBER>("wrapped", &wrapped_str)
     }
 
-    pub fn with_context<'a, F: FieldType<'a>>(
+    pub fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
         field_name: &str,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self
     where
-        F::NativeType: Clone + Display,
+        F::NativeType: Clone + Display + FieldHelper<'a, F>,
     {
-        self.with_protobuf::<F>(field_number, field_value.clone())
+        self.with_protobuf::<F, N>(field_value.clone())
             .with_human::<F::NativeType>(field_name, field_value)
     }
 
@@ -68,23 +66,20 @@ impl<E: Debug + Display> ZError<E> {
         self
     }
 
-    pub fn with_protobuf<'a, F: FieldType<'a>>(
+    pub fn with_protobuf<'a, F: FieldType<'a> + 'a, const N: u32>(
         mut self,
-        field_number: u32,
         field_value: F::NativeType,
-    ) -> Self {
-        let tag = Tag {
-            field_number: FieldNumber::must(field_number),
-            wire_type: F::WIRE_TYPE,
-        };
-        let field = F::from_native(field_value);
-        stack_pack(tag).pack(field).append_to_vec(&mut self.proto);
+    ) -> Self
+    where
+        F::NativeType: FieldHelper<'a, F>,
+    {
+        self.proto.push::<F, N>(field_value);
         self
     }
 
     pub fn with_backtrace(mut self) -> Self {
         let backtrace = format!("{}", Backtrace::force_capture());
-        self = self.with_protobuf::<stringref>(BACKTRACE_FIELD_NUMBER, &backtrace);
+        self = self.with_protobuf::<string, BACKTRACE_FIELD_NUMBER>(&backtrace);
         self.human += "backtrace:\n";
         self.human += &backtrace;
         self.human += "\n";
@@ -92,17 +87,17 @@ impl<E: Debug + Display> ZError<E> {
     }
 
     pub fn to_proto(&self) -> Vec<u8> {
-        self.proto.clone()
+        self.proto.as_bytes().to_vec()
     }
 }
 
-impl<E: Clone + Debug + Display> ZError<E> {
-    pub fn value<'a, F: FieldType<'a, NativeType = E>>(error: E) -> Self {
-        let tag = Tag {
-            field_number: FieldNumber::must(VALUE_FIELD_NUMBER),
-            wire_type: F::WIRE_TYPE,
-        };
-        let proto = stack_pack(tag).pack(F::from_native(error.clone())).to_vec();
+impl<'a, E: Clone + Debug + Display + 'a> ZError<E> {
+    pub fn value<F: FieldType<'a, NativeType = E> + 'a>(error: E) -> Self
+    where
+        E: FieldHelper<'a, F>,
+    {
+        let mut proto = ProtoTKBuilder::default();
+        proto.push::<F, VALUE_FIELD_NUMBER>(error.clone());
         Self {
             error,
             proto,
@@ -148,16 +143,6 @@ impl<E: Debug + Display> Debug for ZError<E> {
     }
 }
 
-impl<E: Debug + Display> Packable for ZError<E> {
-    fn pack_sz(&self) -> usize {
-        self.proto.len()
-    }
-
-    fn pack(&self, buf: &mut [u8]) {
-        buf.copy_from_slice(&self.proto);
-    }
-}
-
 ///////////////////////////////////////////// AsZerror /////////////////////////////////////////////
 
 pub trait AsZError {
@@ -198,24 +183,22 @@ pub trait ZErrorResult {
 
     fn wrap_error(self, wrapped: Box<dyn std::error::Error + 'static>) -> Self::Error;
 
-    fn with_context<'a, F: FieldType<'a>>(
+    fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
         field_name: &str,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display;
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>;
 
     fn with_human<'a, F: Display>(self, field_name: &str, field_value: F) -> Self::Error;
 
-    fn with_protobuf<'a, F: FieldType<'a>>(
+    fn with_protobuf<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display;
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>;
 
     fn with_backtrace(self) -> Self::Error;
 }
@@ -237,21 +220,19 @@ impl<T, E: Debug + Display> ZErrorResult for Result<T, ZError<E>> {
         }
     }
 
-    fn with_context<'a, F: FieldType<'a>>(
+    fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
         field_name: &str,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display,
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>,
     {
         match self {
             Ok(x) => Ok(x),
-            Err(e) => Err(ZError::with_context::<F>(
+            Err(e) => Err(ZError::with_context::<F, N>(
                 e,
                 field_name,
-                field_number,
                 field_value,
             )),
         }
@@ -264,17 +245,16 @@ impl<T, E: Debug + Display> ZErrorResult for Result<T, ZError<E>> {
         }
     }
 
-    fn with_protobuf<'a, F: FieldType<'a>>(
+    fn with_protobuf<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display,
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>,
     {
         match self {
             Ok(x) => Ok(x),
-            Err(e) => Err(ZError::with_protobuf::<F>(e, field_number, field_value)),
+            Err(e) => Err(ZError::with_protobuf::<F, N>(e, field_value)),
         }
     }
 
@@ -303,20 +283,19 @@ impl<T> ZErrorResult for Result<T, std::io::Error> {
         }
     }
 
-    fn with_context<'a, F: FieldType<'a>>(
+    fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
         field_name: &str,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display,
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>,
     {
         match self {
             Ok(x) => Ok(x),
             Err(e) => Err(e
                 .zerr()
-                .with_context::<F>(field_name, field_number, field_value)),
+                .with_context::<F, N>(field_name, field_value)),
         }
     }
 
@@ -327,19 +306,17 @@ impl<T> ZErrorResult for Result<T, std::io::Error> {
         }
     }
 
-    fn with_protobuf<'a, F: FieldType<'a>>(
+    fn with_protobuf<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
-        field_number: u32,
         field_value: F::NativeType,
     ) -> Self::Error
     where
-        <F as FieldType<'a>>::NativeType: Clone + Debug + Display,
+        <F as FieldType<'a>>::NativeType: Clone + Debug + Display + FieldHelper<'a, F>,
     {
         match self {
             Ok(x) => Ok(x),
-            Err(e) => Err(ZError::with_protobuf::<F>(
+            Err(e) => Err(ZError::with_protobuf::<F, N>(
                 e.zerr(),
-                field_number,
                 field_value,
             )),
         }
@@ -366,7 +343,7 @@ mod tests {
         let zerr: ZError<u32> = ZError::value::<fixed32>(5);
         assert_eq!(5, *zerr.as_ref());
         let exp: &[u8] = &[253, 255, 255, 255, 15, 5, 0, 0, 0, 242, 255, 255, 255, 15];
-        assert_eq!(exp, &zerr.proto[..14]);
+        assert_eq!(exp, &zerr.proto.as_bytes()[..14]);
         assert!(zerr.human.starts_with("backtrace:\n"));
     }
 
@@ -374,19 +351,19 @@ mod tests {
     fn with_protobuf() {
         let mut zerr: ZError<u32> = ZError::value::<fixed32>(5);
         // test reset
-        zerr.proto = Vec::new();
+        zerr.proto = ProtoTKBuilder::default();
         zerr.human = "".to_owned();
         // body
-        zerr = zerr.with_protobuf::<stringref>(1, "this string");
+        zerr = zerr.with_protobuf::<string, 1>("this string");
         let exp: &[u8] = &[10, 11, 116, 104, 105, 115, 32, 115, 116, 114, 105, 110, 103];
-        assert_eq!(exp, zerr.proto);
+        assert_eq!(exp, zerr.proto.as_bytes());
     }
 
     #[test]
     fn with_human() {
         let mut zerr: ZError<u32> = ZError::value::<fixed32>(5);
         // test reset
-        zerr.proto = Vec::new();
+        zerr.proto = ProtoTKBuilder::default();
         zerr.human = "".to_owned();
         // body
         zerr = zerr.with_human("test_string", "this string");
@@ -397,12 +374,12 @@ mod tests {
     fn with_context() {
         let mut zerr: ZError<u32> = ZError::value::<fixed32>(5);
         // test reset
-        zerr.proto = Vec::new();
+        zerr.proto = ProtoTKBuilder::default();
         zerr.human = "".to_owned();
-        zerr = zerr.with_context::<stringref>("test_string", 1, "this string");
+        zerr = zerr.with_context::<string, 1>("test_string", "this string");
         // proto
         let exp: &[u8] = &[10, 11, 116, 104, 105, 115, 32, 115, 116, 114, 105, 110, 103];
-        assert_eq!(exp, zerr.proto);
+        assert_eq!(exp, zerr.proto.as_bytes());
         // human
         assert_eq!("test_string = this string\n", zerr.human);
     }
@@ -411,10 +388,11 @@ mod tests {
     fn wrap_error() {
         let wrapped: Box<dyn Error + 'static> = "wrapped error".into();
         let zerr: ZError<&'static str> =
-            ZError::value::<stringref>("wrapping error").wrap_error(wrapped);
+            ZError::value::<string>("wrapping error").wrap_error(wrapped);
         // proto
         let exp: &[u8] = &[];
-        assert_eq!(exp, &zerr.proto[zerr.proto.len() - exp.len()..]);
+        let got: &[u8] = zerr.proto.as_bytes();
+        assert_eq!(exp, &got[got.len() - exp.len()..]);
         // human
         println!("zerr.human = {}", zerr.human);
         assert!(zerr.human.ends_with("wrapped = wrapped error\n"));
@@ -422,26 +400,26 @@ mod tests {
 
     #[test]
     fn wrap_zerror() {
-        let wrapped: ZError<&'static str> = ZError::value::<stringref>("wrapped error");
+        let wrapped: ZError<&'static str> = ZError::value::<string>("wrapped error");
         let zerr: ZError<&'static str> =
-            ZError::value::<stringref>("wrapping error").wrap_zerror(wrapped);
+            ZError::value::<string>("wrapping error").wrap_zerror(wrapped);
         // look for "wrapping error"
         let exp: &[u8] = &[
             250, 255, 255, 255, 15, 14, 119, 114, 97, 112, 112, 105, 110, 103, 32, 101, 114, 114,
             111, 114,
         ];
-        assert_eq!(exp, &zerr.proto[..20]);
+        assert_eq!(exp, &zerr.proto.as_bytes()[..20]);
         // find an offset
         let exp: &[u8] = &[
             250, 255, 255, 255, 15, 13, 119, 114, 97, 112, 112, 101, 100, 32, 101, 114, 114, 111,
             114,
         ];
-        for idx in 0..zerr.proto.len() - exp.len() {
-            if exp == &zerr.proto[idx..idx + exp.len()] {
+        for idx in 0..zerr.proto.as_bytes().len() - exp.len() {
+            if exp == &zerr.proto.as_bytes()[idx..idx + exp.len()] {
                 return;
             }
         }
-        let got: &[u8] = &zerr.proto;
+        let got: &[u8] = zerr.proto.as_bytes();
         assert_eq!(exp, got);
         panic!("test didn't find wrapped error");
     }
