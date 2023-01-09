@@ -77,18 +77,18 @@ impl LSMTree {
             .as_ref()
             .canonicalize()
             .from_io()
-            .with_context::<stringref>("path", 1, &path.as_ref().to_string_lossy())?;
+            .with_context::<string, 1>("path", &path.as_ref().to_string_lossy())?;
         // Deal with the lockfile first.
         let lockfile_path = path.join("LOCKFILE");
         let lockfile = if options.wait_for_lock {
             Lockfile::wait(lockfile_path.clone())
                 .from_io()
-                .with_context::<stringref>("path", 1, &lockfile_path.to_string_lossy())
+                .with_context::<string, 1>("path", &lockfile_path.to_string_lossy())
                 .with_backtrace()?
         } else {
             Lockfile::lock(lockfile_path.clone())
                 .from_io()
-                .with_context::<stringref>("path", 1, &lockfile_path.to_string_lossy())
+                .with_context::<string, 1>("path", &lockfile_path.to_string_lossy())
                 .with_backtrace()?
         };
         if lockfile.is_none() {
@@ -105,16 +105,16 @@ impl LSMTree {
         if !path.join("sst").is_dir() {
             create_dir(path.join("sst"))
                 .from_io()
-                .with_context::<stringref>("sst", 2, &path.join("sst").to_string_lossy())?;
+                .with_context::<string, 2>("sst", &path.join("sst").to_string_lossy())?;
         }
         if !path.join("meta").is_dir() {
             create_dir(path.join("meta"))
                 .from_io()
-                .with_context::<stringref>("meta", 3, &path.join("meta").to_string_lossy())?;
+                .with_context::<string, 3>("meta", &path.join("meta").to_string_lossy())?;
         }
         // LSMTree.
         Trace::new("lp.lsm.open")
-            .with_context::<1, stringref>("path", &path.to_string_lossy())
+            .with_context::<string, 1>("path", &path.to_string_lossy())
             .finish();
         let lsm = LSMTree {
             root: path,
@@ -229,9 +229,8 @@ impl LSMTree {
                 ZError::new(Error::Corruption {
                     context: "key is corrupted in metadata".to_string(),
                 })
-                .with_context::<stringref>(
+                .with_context::<string, 1>(
                     "key",
-                    1,
                     &String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string()),
                 )
             })?;

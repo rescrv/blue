@@ -463,8 +463,8 @@ impl BlockCursor {
             let zerr = ZError::new(Error::LogicError {
                 context: "restart_idx exceeds num_restarts".to_string(),
             })
-            .with_context::<uint64>("restart_idx", 1, restart_idx as u64)
-            .with_context::<uint64>("num_restarts", 2, self.block.num_restarts as u64);
+            .with_context::<uint64, 1>("restart_idx", restart_idx as u64)
+            .with_context::<uint64, 2>("num_restarts", self.block.num_restarts as u64);
             return Err(zerr);
         }
         let offset = self.block.restart_point(restart_idx);
@@ -473,8 +473,8 @@ impl BlockCursor {
             let zerr = ZError::new(Error::Corruption {
                 context: "offset exceeds restarts_boundary".to_string(),
             })
-            .with_context::<uint64>("offset", 1, offset as u64)
-            .with_context::<uint64>("restarts_boundary", 2, self.block.restarts_boundary as u64);
+            .with_context::<uint64, 1>("offset", offset as u64)
+            .with_context::<uint64, 2>("restarts_boundary", self.block.restarts_boundary as u64);
             return Err(zerr);
         }
 
@@ -537,7 +537,7 @@ impl BlockCursor {
                 error: e,
                 context: "could not unpack key-value pair at offset".to_string(),
             })
-            .with_context::<uint64>("offset", 1, offset as u64)
+            .with_context::<uint64, 1>("offset", offset as u64)
         })?;
         let next_offset = block.restarts_boundary - up.remain().len();
         let restart_idx = block.restart_for_offset(offset);
@@ -588,7 +588,7 @@ impl Cursor for BlockCursor {
                     let zerr = ZError::new(Error::Corruption {
                         context: "restart point returned no key-value pair".to_string(),
                     })
-                    .with_context::<uint64>("restart_point", 1, mid as u64);
+                    .with_context::<uint64, 1>("restart_point", mid as u64);
                     return Err(zerr);
                 }
             };
@@ -620,8 +620,8 @@ impl Cursor for BlockCursor {
             let zerr = ZError::new(Error::Corruption {
                 context: "binary_search left != right".to_string(),
             })
-            .with_context::<uint64>("left", 1, left as u64)
-            .with_context::<uint64>("right", 2, right as u64);
+            .with_context::<uint64, 1>("left", left as u64)
+            .with_context::<uint64, 2>("right", right as u64);
             return Err(zerr)
         }
 
@@ -636,7 +636,7 @@ impl Cursor for BlockCursor {
                 let zerr = ZError::new(Error::Corruption {
                     context: "restart point returned no key-value pair".to_string(),
                 })
-                .with_context::<uint64>("restart_point", 1, left as u64);
+                .with_context::<uint64, 1>("restart_point", left as u64);
                 return Err(zerr);
             }
         };
@@ -720,10 +720,10 @@ impl Cursor for BlockCursor {
 
         // Seek and scan.
         self.seek_restart(restart_idx)
-            .with_context::<uint64>("restart_idx", 1, restart_idx as u64)?;
+            .with_context::<uint64, 1>("restart_idx", restart_idx as u64)?;
         while self.next_offset() < target_next_offset {
             self.next()
-                .with_context::<uint64>("target_next_offset", 1, target_next_offset as u64)?;
+                .with_context::<uint64, 1>("target_next_offset", target_next_offset as u64)?;
         }
         Ok(())
     }
@@ -783,7 +783,7 @@ impl Cursor for BlockCursor {
 
         // Setup the position correctly and return what we see.
         self.position = BlockCursor::extract_key(&self.block, offset, prev_key)
-            .with_context::<uint64>("offset", 3, offset as u64)?;
+            .with_context::<uint64, 3>("offset", offset as u64)?;
         Ok(())
     }
 

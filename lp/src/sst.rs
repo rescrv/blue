@@ -73,8 +73,8 @@ impl BlockMetadata {
             let zerr = ZError::new(Error::Corruption {
                 context: "block_metadata.start >= block_metadata.limit".to_string(),
             })
-            .with_context::<uint64>("self.start", 1, self.start as u64)
-            .with_context::<uint64>("self.limit", 2, self.limit as u64);
+            .with_context::<uint64, 1>("self.start", self.start as u64)
+            .with_context::<uint64, 2>("self.limit", self.limit as u64);
             return Err(zerr);
         }
         Ok(())
@@ -218,8 +218,8 @@ impl SST {
             let zerr = ZError::new(Error::Corruption {
                 context: "final block offset is larger than file size".to_string(),
             })
-            .with_context::<uint64>("final_block_offset", 1, final_block_offset)
-            .with_context::<uint64>("file_size", 2, file_sz);
+            .with_context::<uint64, 1>("final_block_offset", final_block_offset)
+            .with_context::<uint64, 2>("file_size", file_size);
             return Err(zerr);
         }
         let size_of_final_block = position + 8 - (final_block_offset);
@@ -240,10 +240,9 @@ impl SST {
             let zerr = ZError::new(Error::Corruption {
                 context: "index_block runs past final_block_offset".to_string(),
             })
-            .with_context::<uint64>("final_block_offset", 1, final_block_offset as u64)
-            .with_context::<uint64>(
+            .with_context::<uint64, 1>("final_block_offset", final_block_offset as u64)
+            .with_context::<uint64, 2>(
                 "index_block_limit",
-                2,
                 final_block.index_block.limit as u64,
             );
             return Err(zerr);
@@ -433,7 +432,7 @@ impl SSTBuilder {
             .write(true)
             .open(path.as_ref().to_path_buf())
             .from_io()
-            .with_context::<stringref>("open", 1, &path.as_ref().to_string_lossy())?;
+            .with_context::<string, 1>("open", &path.as_ref().to_string_lossy())?;
         Ok(SSTBuilder {
             options,
             last_key: Vec::new(),

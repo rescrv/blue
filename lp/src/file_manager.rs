@@ -42,8 +42,8 @@ impl FileHandle {
         let state = self.state.lock().unwrap();
         if let Some((path, _)) = &state.files[fd] {
             Trace::new("lp.open_file")
-                .with_context::<1, stringref>("path", &path.to_string_lossy())
-                .with_context::<2, int32>("fd", self.file.as_raw_fd())
+                .with_context::<string, 1>("path", &path.to_string_lossy())
+                .with_context::<int32, 2>("fd", self.file.as_raw_fd())
                 .finish();
             return Ok(path.clone());
         } else {
@@ -51,16 +51,16 @@ impl FileHandle {
             let zerr = ZError::new(Error::LogicError {
                 context: "FileManager has broken names->files pointer".to_string(),
             })
-            .with_context::<int32>("fd", 2, self.file.as_raw_fd());
+            .with_context::<int32, 2>("fd", self.file.as_raw_fd());
             return Err(zerr);
         }
     }
 
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ZError<Error>> {
         self.file.read_exact_at(buf, offset).from_io()
-           .with_context::<int32>("fd", 2, self.file.as_raw_fd())
-           .with_context::<uint64>("offset", 3, offset)
-           .with_context::<uint64>("amount", 4, buf.len() as u64)
+           .with_context::<int32, 2>("fd", self.file.as_raw_fd())
+           .with_context::<uint64, 3>("offset", offset)
+           .with_context::<uint64, 4>("amount", buf.len() as u64)
     }
 
     pub fn size(&self) -> Result<u64, ZError<Error>> {
@@ -94,29 +94,29 @@ impl State {
         assert!(fd >= 0);
         if self.files.len() <= fd as usize {
             Trace::new("unmanaged fd")
-                .with_context::<2, int32>("fd", fd)
-                .with_context::<3, uint64>("self.files.len()", self.files.len() as u64)
+                .with_context::<int32, 2>("fd", fd)
+                .with_context::<uint64, 3>("self.files.len()", self.files.len() as u64)
                 .panic(format!("self.files.len() <= fd"));
         }
         let (path, file) = match self.files[fd as usize].take() {
             Some((path, file)) => (path, file),
             None => {
                 Trace::new("unmanaged fd")
-                    .with_context::<2, int32>("fd", fd)
+                    .with_context::<int32, 2>("fd", fd)
                     .panic(format!("self.file[{}] is None", fd));
             }
         };
         if file.as_raw_fd() != fd {
             Trace::new("mismanaged fd")
-                .with_context::<2, int32>("fd", fd)
-                .with_context::<3, int32>("file.as_raw_fd()", file.as_raw_fd())
+                .with_context::<int32, 2>("fd", fd)
+                .with_context::<int32, 3>("file.as_raw_fd()", file.as_raw_fd())
                 .panic(format!("file.as_raw_fd() != fd"));
         }
         match self.names.remove(&path) {
             Some(_) => {},
             None => {
                 Trace::new("missing fd")
-                    .with_context::<1, stringref>("path", &path.to_string_lossy())
+                    .with_context::<string, 1>("path", &path.to_string_lossy())
                     .panic("path missing from names map".to_string());
             }
         };
@@ -156,8 +156,8 @@ impl FileManager {
                     let zerr = ZError::new(Error::LogicError {
                         context: "FileManager has fd that exists outside open_files".to_string(),
                     })
-                    .with_context::<uint64>("fd", 2, *fd as u64)
-                    .with_context::<uint64>("state.files.len()", 3, state.files.len() as u64);
+                    .with_context::<uint64, 2>("fd", *fd as u64)
+                    .with_context::<uint64, 3>("state.files.len()", state.files.len() as u64);
                     return Err(zerr);
                 };
                 // Check that we haven't violated internal invariants.
@@ -171,7 +171,7 @@ impl FileManager {
                     let zerr = ZError::new(Error::LogicError {
                         context: "FileManager has broken names->files pointer".to_string(),
                     })
-                    .with_context::<uint64>("fd", 2, *fd as u64);
+                    .with_context::<uint64, 2>("fd", *fd as u64);
                     return Err(zerr);
                 };
             };
@@ -182,8 +182,8 @@ impl FileManager {
                 let zerr = ZError::new(Error::TooManyOpenFiles {
                     limit: self.max_open_files,
                 })
-                .with_context::<uint64>("max_open_files", 1, self.max_open_files as u64)
-                .with_context::<uint64>("open_files", 2, (state.opening.len() + state.names.len()) as u64);
+                .with_context::<uint64, 1>("max_open_files", self.max_open_files as u64)
+                .with_context::<uint64, 2>("open_files", (state.opening.len() + state.names.len()) as u64);
                 return Err(zerr);
             }
             state.opening.insert(path.clone());
@@ -231,7 +231,7 @@ fn check_fd(fd: c_int) -> Result<usize, ZError<Error>> {
         let zerr = ZError::new(Error::LogicError {
             context: "valid file's file descriptor is negative".to_string(),
         })
-        .with_context::<int32>("fd", 2, fd);
+        .with_context::<int32, 2>("fd", fd);
         return Err(zerr);
     }
     Ok(fd as usize)
@@ -245,9 +245,8 @@ fn open(path: PathBuf) -> Result<File, ZError<Error>> {
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
-            let zerr = ZError::new(Error::IOError { what: e }).with_context::<stringref>(
+            let zerr = ZError::new(Error::IOError { what: e }).with_context::<string, 1>(
                 "path",
-                1,
                 &path.to_string_lossy(),
             );
             return Err(zerr);
