@@ -6,6 +6,8 @@
 // with e.g. #[prototk(7, uint64)], where the uint64 token is used verbatim.
 
 use std::convert::TryInto;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 
 use buffertk::{stack_pack, Buffer, Unpackable, Unpacker};
 
@@ -632,6 +634,46 @@ impl<'a> FieldHelper<'a, bytes<'a>> for &'a [u8] {
     }
 }
 
+impl<'a> FieldHelper<'a, bytes<'a>> for Vec<u8> {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let field: &[u8] = field;
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let field: &[u8] = field;
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0.to_vec();
+    }
+
+    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
+        proto.0.to_vec()
+    }
+}
+
+impl<'a> FieldHelper<'a, bytes<'a>> for Buffer {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let b: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(b).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let b: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(b).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = Buffer::from(proto.0);
+    }
+
+    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
+        Buffer::from(proto.0)
+    }
+}
+
 impl<'a> Unpackable<'a> for bytes<'a> {
     type Error = Error;
 
@@ -706,6 +748,12 @@ impl<'a> Unpackable<'a> for bytes32 {
                 had: v.into(),
             });
         }
+        if v != 32 {
+            return Err(Error::WrongLength {
+                required: 32,
+                had: v.into(),
+            });
+        }
         let mut ret = [0u8; 32];
         for i in 0..32 {
             ret[i] = rem[i];
@@ -714,78 +762,43 @@ impl<'a> Unpackable<'a> for bytes32 {
     }
 }
 
-////////////////////////////////////////////// buffer //////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default)]
-pub struct buffer(Buffer);
-
-impl<'a> FieldType<'a> for buffer {
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
-
-    type NativeType = Buffer;
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self(x)
-    }
-}
-
-impl<'a> FieldHelper<'a, buffer> for Buffer {
-    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
-        let b: &[u8] = field.as_bytes();
-        stack_pack(tag).pack(b).pack_sz()
-    }
-
-    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
-        let b: &[u8] = field.as_bytes();
-        stack_pack(tag).pack(b).into_slice(out);
-    }
-
-    fn prototk_convert_field<'b>(proto: buffer, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
-    }
-
-    fn prototk_convert_variant(proto: buffer) -> Self {
-        proto.0
-    }
-}
-
-impl<'a> Unpackable<'a> for buffer {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let mut up = Unpacker::new(buf);
-        let v: v64 = up.unpack()?;
-        let v: usize = v.into();
-        let rem = up.remain();
-        if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
-        }
-        let buf: Buffer = rem[..v].into();
-        Ok((Self(buf), &rem[v..]))
-    }
-}
-
 ///////////////////////////////////////////// string ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct string(String);
+pub struct string<'a>(&'a str);
 
-impl<'a> FieldType<'a> for string {
+impl<'a> FieldType<'a> for string<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
     const LENGTH_PREFIXED: bool = true;
 
-    type NativeType = String;
+    type NativeType = &'a str;
 
     fn from_native(s: Self::NativeType) -> Self {
         Self(s)
     }
 }
 
-impl<'a> FieldHelper<'a, string> for String {
+impl<'a> FieldHelper<'a, string<'a>> for &'a str {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let field: &[u8] = field.as_bytes();
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: string<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0;
+    }
+
+    fn prototk_convert_variant(proto: string<'a>) -> Self {
+        proto.0
+    }
+}
+
+impl<'a> FieldHelper<'a, string<'a>> for String {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field.as_bytes();
         stack_pack(tag).pack(field).pack_sz()
@@ -797,77 +810,35 @@ impl<'a> FieldHelper<'a, string> for String {
     }
 
     fn prototk_convert_field<'b>(proto: string, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+        *out = proto.0.to_owned();
     }
 
     fn prototk_convert_variant(proto: string) -> Self {
-        proto.0
+        proto.0.to_owned()
     }
 }
 
-impl<'a> Unpackable<'a> for string {
-    type Error = Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
-        let mut up = Unpacker::new(buf);
-        let v: v64 = up.unpack()?;
-        let v: usize = v.into();
-        let rem = up.remain();
-        if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
-        }
-        let x: &'a [u8] = &rem[..v];
-        let s: &'a str = match std::str::from_utf8(x) {
-            Ok(s) => s,
-            Err(_) => {
-                todo!();
-            }
-        };
-        let s: String = String::from(s);
-        Ok((Self(s), &rem[v..]))
-    }
-}
-
-///////////////////////////////////////////// stringref ////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default)]
-pub struct stringref<'a>(pub &'a str);
-
-impl<'a> FieldType<'a> for stringref<'a> {
-    const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
-
-    type NativeType = &'a str;
-
-    fn from_native(x: Self::NativeType) -> Self {
-        Self(x)
-    }
-}
-
-impl<'a> FieldHelper<'a, stringref<'a>> for &'a str {
+impl<'a> FieldHelper<'a, string<'a>> for PathBuf {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
-        let field: &[u8] = field.as_bytes();
+        let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).pack_sz()
     }
 
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
-        let field: &[u8] = field.as_bytes();
+        let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).into_slice(out);
     }
 
-    fn prototk_convert_field<'b>(proto: stringref<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+    fn prototk_convert_field<'b>(proto: string, out: &'b mut Self) where 'a: 'b {
+        *out = proto.0.into();
     }
 
-    fn prototk_convert_variant(proto: stringref<'a>) -> Self {
-        proto.0
+    fn prototk_convert_variant(proto: string) -> Self {
+        proto.0.into()
     }
 }
 
-impl<'a> Unpackable<'a> for stringref<'a> {
+impl<'a> Unpackable<'a> for string<'a> {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
@@ -885,10 +856,10 @@ impl<'a> Unpackable<'a> for stringref<'a> {
         let s: &'a str = match std::str::from_utf8(x) {
             Ok(s) => s,
             Err(_) => {
-                todo!();
+                return Err(Error::StringEncoding);
             }
         };
-        Ok((Self(s), &rem[v..]))
+        Ok((string(s), &rem[v..]))
     }
 }
 
@@ -1159,34 +1130,31 @@ mod tests {
     #[test]
     fn bytes() {
         helper_test::<bytes, &[u8]>(&[0xff, 0x00], &[0x2, 0xff, 0x00]);
-    }
-
-    #[test]
-    fn bytes32() {
-        let mut input: Vec<u8> = Vec::new();
-        let mut expect: Vec<u8> = Vec::new();
-        expect.push(32);
-        for i in 0..32 {
-            input.push(i);
-            expect.push(i);
-        }
-        helper_test::<bytes, &[u8]>(&input, &expect);
+        helper_test::<bytes, Vec<u8>>(vec![0xff, 0x00], &[0x2, 0xff, 0x00]);
     }
 
     #[test]
     fn buffer() {
         let buf: &[u8] = &[0u8, 1, 2, 3, 4, 5, 6, 7];
         let buf: Buffer = Buffer::from(buf);
-        helper_test::<buffer, Buffer>(buf, &[8, 0, 1, 2, 3, 4, 5, 6, 7]);
+        helper_test::<bytes, Buffer>(buf, &[8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn bytes32() {
+        let mut input: [u8; 32] = [0u8; 32];
+        let mut expect: Vec<u8> = Vec::new();
+        expect.push(32);
+        for i in 0..32 {
+            input[i] = i as u8;
+            expect.push(i as u8);
+        }
+        helper_test::<bytes32, [u8; 32]>(input, &expect);
     }
 
     #[test]
     fn string() {
         helper_test::<string, String>("string \u{1F600}".to_owned(), &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
-    }
-
-    #[test]
-    fn stringref() {
-        helper_test::<stringref, &str>("string \u{1F600}", &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
+        helper_test::<string, &str>("string \u{1F600}", &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
     }
 }

@@ -370,7 +370,7 @@ fn bytes32() {
 
 #[derive(Clone, Debug, Message, PartialEq)]
 struct BufferMessage {
-    #[prototk(11, buffer)]
+    #[prototk(11, bytes)]
     buffer: Buffer,
 }
 

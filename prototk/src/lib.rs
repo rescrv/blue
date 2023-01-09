@@ -34,7 +34,10 @@ pub enum Error {
     UnsignedOverflow { value: u64 },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
     SignedOverflow { value: i64 },
-    // TODO(rescrv): custom error type so that apps can extend
+    /// WrongLength indicates that a bytes32 did not have 32 bytes.
+    WrongLength { required: usize, had: usize },
+    /// StringEncoding indicates that a value is not UTF-8 friendly.
+    StringEncoding,
 }
 
 impl std::fmt::Display for Error {
@@ -60,6 +63,12 @@ impl std::fmt::Display for Error {
             }
             Error::SignedOverflow { value } => {
                 write!(f, "signed integer cannot hold value={}", value)
+            }
+            Error::WrongLength { required, had } => {
+                write!(f, "buffer wrong length: expected {}, had {}", required, had)
+            }
+            Error::StringEncoding => {
+                write!(f, "strings must be encoded in UTF-8")
             }
         }
     }
