@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader};
 
 use clap::{App, Arg};
 
+use util::time::now;
+
 use lp::sst::{SSTBuilder, SSTBuilderOptions};
 use lp::Builder;
 
@@ -41,7 +43,7 @@ fn main() {
         if split.len() != 2 {
             panic!("Invalid line: {}", line);
         }
-        sst.put(split[0].as_bytes(), 0, split[1].as_bytes())
+        sst.put(split[0].as_bytes(), now::micros(), split[1].as_bytes())
             .expect("could not put key-value pair");
     }
 
