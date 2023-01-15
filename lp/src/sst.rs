@@ -122,6 +122,8 @@ pub struct SSTMetadata {
     pub smallest_timestamp: u64,
     #[prototk(5, uint64)]
     pub biggest_timestamp: u64,
+    #[prototk(6, uint64)]
+    pub file_size: u64,
 }
 
 impl SSTMetadata {
@@ -183,6 +185,8 @@ pub struct SST {
     final_block: FinalBlock,
     // SST metadata.
     index_block: Block,
+    // Cache for metadata call.
+    file_size: u64,
 }
 
 impl SST {
@@ -193,15 +197,15 @@ impl SST {
 
     pub fn from_file_handle(handle: FileHandle) -> Result<Self, ZError<Error>> {
         // Read and parse the final block's offset
-        let file_sz = handle.size()?;
-        if file_sz < 8 {
+        let file_size = handle.size()?;
+        if file_size < 8 {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
                 context: "file has fewer than eight bytes".to_string(),
             });
             return Err(zerr);
         }
-        let position = file_sz - 8;
+        let position = file_size - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
         handle.read_exact_at(&mut buf, position)?;
         let mut up = Unpacker::new(&buf);
@@ -213,7 +217,7 @@ impl SST {
             })
         })?;
         // Read and parse the final block
-        if file_sz < final_block_offset {
+        if file_size < final_block_offset {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
                 context: "final block offset is larger than file size".to_string(),
@@ -252,6 +256,7 @@ impl SST {
             handle,
             final_block,
             index_block,
+            file_size,
         })
     }
 
@@ -299,6 +304,7 @@ impl SST {
             last_key,
             smallest_timestamp: self.final_block.smallest_timestamp,
             biggest_timestamp: self.final_block.biggest_timestamp,
+            file_size: self.file_size,
         })
     }
 
