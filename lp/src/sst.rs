@@ -110,7 +110,7 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ
 
 //////////////////////////////////////////// SSTMetadata ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Eq, Message, Ord, PartialEq, PartialOrd)]
 pub struct SSTMetadata {
     #[prototk(1, bytes32)]
     pub setsum: [u8; 32],
@@ -171,6 +171,7 @@ impl Default for SSTMetadata {
             last_key,
             smallest_timestamp: 0,
             biggest_timestamp: u64::max_value(),
+            file_size: 0,
         }
     }
 }

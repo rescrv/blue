@@ -25,6 +25,8 @@ use super::pruning_cursor::PruningCursor;
 use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
 
+pub mod compaction;
+
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static LOCK_NOT_OBTAINED: Counter = Counter::new("lp.lsm.lock_not_obtained");
