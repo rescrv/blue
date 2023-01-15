@@ -102,6 +102,11 @@ impl LSMTree {
         // FileManager.
         let file_manager = FileManager::new(options.max_open_files);
         // Create the correct directories, or at least make sure they exist.
+        if !path.is_dir() {
+            create_dir(path.clone())
+                .from_io()
+                .with_context::<string, 1>("root", &path.to_string_lossy())?;
+        }
         if !path.join("sst").is_dir() {
             create_dir(path.join("sst"))
                 .from_io()
