@@ -17,7 +17,7 @@ rm key-value-pairs
 # Convert each table to an sst.
 for table in table*.txt
 do
-    LC_ALL=C sort -S 128M -o $table $table
+    LC_ALL=C sort -S 256M -o $table $table
     rm -f ${table:r}.sst
     $BINDIR/lp-sst-from-plaintext --input ${table} --output ${table:r}.sst
     rm $table
