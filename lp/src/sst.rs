@@ -114,9 +114,9 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ
 pub struct SSTMetadata {
     #[prototk(1, bytes32)]
     pub setsum: [u8; 32],
-    #[prototk(2, buffer)]
+    #[prototk(2, bytes)]
     pub first_key: Buffer,
-    #[prototk(3, buffer)]
+    #[prototk(3, bytes)]
     pub last_key: Buffer,
     #[prototk(4, uint64)]
     pub smallest_timestamp: u64,
