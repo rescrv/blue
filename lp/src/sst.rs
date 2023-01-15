@@ -366,11 +366,15 @@ impl BlockCompression {
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
+pub const CLAMP_MIN_TARGET_FILE_SIZE: u32 = 1u32 << 12;
+pub const CLAMP_MAX_TARGET_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
+
 #[derive(Clone, Debug)]
 pub struct SSTBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,
     target_block_size: usize,
+    target_file_size: usize,
 }
 
 impl SSTBuilderOptions {
@@ -394,6 +398,17 @@ impl SSTBuilderOptions {
         self.target_block_size = target_block_size as usize;
         self
     }
+
+    pub fn target_file_size(mut self, mut target_file_size: u32) -> Self {
+        if target_file_size < CLAMP_MIN_TARGET_FILE_SIZE {
+            target_file_size = CLAMP_MIN_TARGET_FILE_SIZE;
+        }
+        if target_file_size > CLAMP_MAX_TARGET_FILE_SIZE {
+            target_file_size = CLAMP_MAX_TARGET_FILE_SIZE;
+        }
+        self.target_file_size = target_file_size as usize;
+        self
+    }
 }
 
 impl Default for SSTBuilderOptions {
@@ -402,6 +417,7 @@ impl Default for SSTBuilderOptions {
             block_options: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
+            target_file_size: 1<<22,
         }
     }
 }
@@ -645,7 +661,8 @@ impl SSTMultiBuilder {
 
     fn get_builder(&mut self) -> Result<&mut SSTBuilder, ZError<Error>> {
         if self.builder.is_some() {
-            if self.builder.as_mut().unwrap().approximate_size() >= TABLE_FULL_SIZE {
+            let size = self.builder.as_mut().unwrap().approximate_size();
+            if size >= TABLE_FULL_SIZE || size >= self.options.target_file_size {
                 let builder = self.builder.take().unwrap();
                 builder.seal()?;
                 return self.get_builder();
