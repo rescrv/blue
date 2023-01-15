@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::Write;
+use std::fmt::{Debug, Formatter, Write};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -172,6 +172,13 @@ impl Default for SSTMetadata {
             smallest_timestamp: 0,
             biggest_timestamp: u64::max_value(),
         }
+    }
+}
+
+impl Debug for SSTMetadata {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "SSTMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
+            self.setsum(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
     }
 }
 
