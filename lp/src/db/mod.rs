@@ -3,9 +3,9 @@ use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use util::lockfile::Lockfile;
+use util::time::now;
 
 use buffertk::{stack_pack, Unpacker};
 
@@ -66,6 +66,17 @@ impl Default for DBOptions {
 struct State {
     metadata_files: Vec<PathBuf>,
     sst_metadata: Vec<SSTMetadata>,
+}
+
+impl State {
+    fn get_metadata_by_setsum(&self, setsum: &str) -> Option<SSTMetadata> {
+        for sst in self.sst_metadata.iter() {
+            if sst.setsum() == setsum {
+                return Some(sst.clone())
+            }
+        }
+        None
+    }
 }
 
 //////////////////////////////////////////////// DB ////////////////////////////////////////////////
@@ -141,15 +152,7 @@ impl DB {
 
     pub fn ingest_ssts<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>> {
         // Make a directory into which all files will be linked.
-        let ingest_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| {
-                ZError::new(Error::SystemError {
-                    context: "system clock before UNIX epoch".to_string(),
-                })
-                .wrap_error(Box::new(e))
-            })?
-            .as_secs_f64();
+        let ingest_time = now::millis();
         let ingest_root = self.root.join(format!("ingest:{}", ingest_time));
         create_dir(&ingest_root).from_io()?;
         let mut ssts = Vec::new();
@@ -299,6 +302,41 @@ impl DB {
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
         Ok(compactions)
+    }
+
+    pub fn setup_compaction(&self, setsums: &[&str]) -> Result<String, ZError<Error>> {
+        let mut ssts = Vec::new();
+        let state = self.get_state();
+        for setsum in setsums.iter() {
+            let sst = state.get_metadata_by_setsum(setsum);
+            if sst.is_none() {
+                return Err(ZError::new(Error::SSTNotFound {
+                    setsum: setsum.to_string(),
+                }));
+            }
+            ssts.push(sst.unwrap());
+        }
+        let compaction_time = now::millis();
+        let compaction_base = format!("compaction:{}", compaction_time);
+        let compaction_root = self.root.join(&compaction_base);
+        create_dir(&compaction_root)
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("inputs"))
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("outputs"))
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        for sst in ssts.into_iter() {
+            let target = &self.root.join("sst").join(sst.setsum() + ".sst");
+            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
+            hard_link(target, link_name)
+                .from_io()
+                .with_context::<string, 1>("target", &target.to_string_lossy())
+                .with_context::<string, 1>("link_name", &link_name.to_string_lossy())?;
+        }
+        Ok(compaction_base)
     }
 
     fn get_state(&self) -> Arc<State> {

@@ -159,6 +159,9 @@ pub enum Error {
     TooManyOpenFiles {
         limit: usize,
     },
+    SSTNotFound {
+        setsum: String,
+    }
 }
 
 impl Display for Error {
