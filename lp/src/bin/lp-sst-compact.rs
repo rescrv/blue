@@ -1,6 +1,6 @@
 use clap::{App, Arg};
 
-use lp::db::compaction::Compactor;
+use lp::db::compaction::LosslessCompactor;
 use lp::sst::SSTBuilderOptions;
 
 fn main() {
@@ -28,7 +28,7 @@ fn main() {
     let options = SSTBuilderOptions::default()
         .target_file_size(args.value_of("sst-size").unwrap_or("4194304").parse::<u32>().unwrap_or(4194304));
     let output_prefix = args.value_of("output").unwrap_or("compacted_").to_string();
-    let mut compactor = Compactor::new(output_prefix, options);
+    let mut compactor = LosslessCompactor::new(output_prefix, options);
     let ssts: Vec<_> = args.values_of("ssts").unwrap().collect();
     for sst in ssts {
         compactor.add_input(sst);

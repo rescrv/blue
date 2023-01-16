@@ -387,17 +387,17 @@ impl Compaction {
     }
 }
 
-///////////////////////////////////////////// Compactor ////////////////////////////////////////////
+///////////////////////////////////////// LosslessCompactor ////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct Compactor {
+pub struct LosslessCompactor {
     inputs: Vec<PathBuf>,
     output: String,
     options: SSTBuilderOptions,
 }
 
-impl Compactor {
-    pub fn new(output: String, options: SSTBuilderOptions) -> Compactor {
+impl LosslessCompactor {
+    pub fn new(output: String, options: SSTBuilderOptions) -> Self {
         Self {
             inputs: Vec::new(),
             output,
