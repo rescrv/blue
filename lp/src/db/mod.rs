@@ -2,7 +2,7 @@ use std::collections::hash_set::HashSet;
 use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use util::lockfile::Lockfile;
@@ -21,11 +21,14 @@ use zerror::{FromIOError, ZError, ZErrorResult};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
+use super::options::CompactionOptions;
 use super::pruning_cursor::PruningCursor;
 use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
 
 pub mod compaction;
+
+pub use compaction::Compaction;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -43,6 +46,7 @@ pub struct DBOptions {
     max_open_files: usize,
     meta_options: SSTBuilderOptions,
     wait_for_lock: bool,
+    compaction: CompactionOptions,
 }
 
 impl Default for DBOptions {
@@ -51,6 +55,7 @@ impl Default for DBOptions {
             max_open_files: 1 << 20,
             meta_options: SSTBuilderOptions::default(),
             wait_for_lock: true,
+            compaction: CompactionOptions::default(),
         }
     }
 }
@@ -69,7 +74,7 @@ pub struct DB {
     root: PathBuf,
     options: DBOptions,
     file_manager: FileManager,
-    state: Mutex<State>,
+    state: Mutex<Arc<State>>,
     _lockfile: Lockfile,
 }
 
@@ -127,7 +132,7 @@ impl DB {
             root: path,
             options,
             file_manager,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(Arc::new(State::default())),
             _lockfile: lockfile,
         };
         db.reload_from_disk()?;
@@ -222,7 +227,7 @@ impl DB {
         let cursor = MergingCursor::new(cursors)?;
         let mut cursor = PruningCursor::new(cursor, u64::max_value())?;
         cursor.seek_to_first()?;
-        let mut metadatas = Vec::new();
+        let mut sst_metadata = Vec::new();
         loop {
             cursor.next()?;
             let value = match cursor.value() {
@@ -241,10 +246,12 @@ impl DB {
                     &String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string()),
                 )
             })?;
-            metadatas.push(metadata);
+            sst_metadata.push(metadata);
         }
-        state.metadata_files = metadata_files;
-        state.sst_metadata = metadatas;
+        *state = Arc::new(State {
+            metadata_files,
+            sst_metadata,
+        });
         Ok(())
     }
 
@@ -283,5 +290,19 @@ impl DB {
                 println!("{}", sst);
             }
         }
+    }
+
+    pub fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>> {
+        let state = self.get_state();
+        let graph = compaction::Graph::new(self.options.compaction.clone(), &state.sst_metadata)?;
+        let mut compactions = graph.compactions();
+        compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
+        compactions.reverse();
+        Ok(compactions)
+    }
+
+    fn get_state(&self) -> Arc<State> {
+        let state = self.state.lock().unwrap();
+        Arc::clone(&state)
     }
 }

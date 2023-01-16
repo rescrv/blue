@@ -360,6 +360,10 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
+    pub fn inputs(&self) -> &[SSTMetadata] {
+        &self.inputs
+    }
+
     pub fn stats(&self) -> CompactionStats {
         let graph = Graph::new(self.options.clone(), &self.inputs).unwrap();
         let mut stats = CompactionStats::default();
