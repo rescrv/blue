@@ -16,8 +16,8 @@ use hey_listen::{HeyListen, Stationary};
 use zerror::ZError;
 
 pub mod block;
+pub mod db;
 pub mod file_manager;
-pub mod lsm;
 pub mod merging_cursor;
 pub mod options;
 pub mod pruning_cursor;
@@ -49,8 +49,8 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&VALUE_TOO_LARGE_MONITOR);
     hey_listen.register_stationary(&TABLE_FULL_MONITOR);
 
+    db::register_monitors(hey_listen);
     file_manager::register_monitors(hey_listen);
-    lsm::register_monitors(hey_listen);
 }
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////

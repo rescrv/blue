@@ -29,23 +29,23 @@ pub mod compaction;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static LOCK_NOT_OBTAINED: Counter = Counter::new("lp.lsm.lock_not_obtained");
+static LOCK_NOT_OBTAINED: Counter = Counter::new("lp.db.lock_not_obtained");
 static LOCK_NOT_OBTAINED_MONITOR: Stationary =
-    Stationary::new("lp.lsm.lock_not_obtained", &LOCK_NOT_OBTAINED);
+    Stationary::new("lp.db.lock_not_obtained", &LOCK_NOT_OBTAINED);
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOCK_NOT_OBTAINED_MONITOR);
 }
 
-//////////////////////////////////////////// LSMOptions ////////////////////////////////////////////
+///////////////////////////////////////////// DBOptions ////////////////////////////////////////////
 
-pub struct LSMOptions {
+pub struct DBOptions {
     max_open_files: usize,
     meta_options: SSTBuilderOptions,
     wait_for_lock: bool,
 }
 
-impl Default for LSMOptions {
+impl Default for DBOptions {
     fn default() -> Self {
         Self {
             max_open_files: 1 << 20,
@@ -63,18 +63,18 @@ struct State {
     sst_metadata: Vec<SSTMetadata>,
 }
 
-////////////////////////////////////////////// LSMTree /////////////////////////////////////////////
+//////////////////////////////////////////////// DB ////////////////////////////////////////////////
 
-pub struct LSMTree {
+pub struct DB {
     root: PathBuf,
-    options: LSMOptions,
+    options: DBOptions,
     file_manager: FileManager,
     state: Mutex<State>,
     _lockfile: Lockfile,
 }
 
-impl LSMTree {
-    pub fn open<P: AsRef<Path>>(options: LSMOptions, path: P) -> Result<LSMTree, ZError<Error>> {
+impl DB {
+    pub fn open<P: AsRef<Path>>(options: DBOptions, path: P) -> Result<DB, ZError<Error>> {
         let path: PathBuf = path
             .as_ref()
             .canonicalize()
@@ -119,19 +119,19 @@ impl LSMTree {
                 .from_io()
                 .with_context::<string, 3>("meta", &path.join("meta").to_string_lossy())?;
         }
-        // LSMTree.
-        Trace::new("lp.lsm.open")
+        // DB.
+        Trace::new("lp.db.open")
             .with_context::<string, 1>("path", &path.to_string_lossy())
             .finish();
-        let lsm = LSMTree {
+        let db = Self {
             root: path,
             options,
             file_manager,
             state: Mutex::new(State::default()),
             _lockfile: lockfile,
         };
-        lsm.reload_from_disk()?;
-        Ok(lsm)
+        db.reload_from_disk()?;
+        Ok(db)
     }
 
     pub fn ingest_ssts<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>> {
