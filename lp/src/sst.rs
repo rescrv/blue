@@ -11,10 +11,10 @@ use prototk::field_types::*;
 
 use zerror::{FromIOError, ZError, ZErrorResult};
 
-use setsum::Setsum;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};
+use super::setsum::Setsum;
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, divide_keys,
     minimal_successor_key, Builder, Cursor, Error, KeyRef, KeyValueRef, CORRUPTION, LOGIC_ERROR,
@@ -587,8 +587,7 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.put(key, timestamp, value)?;
-        self.setsum
-            .insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
+        self.setsum.put(key, timestamp, value);
         self.assign_last_key(key, timestamp);
         Ok(())
     }
@@ -599,8 +598,7 @@ impl Builder for SSTBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.del(key, timestamp)?;
-        self.setsum
-            .insert_vectored(&[&[9], key, &timestamp.to_le_bytes(), &[]]);
+        self.setsum.del(key, timestamp);
         self.assign_last_key(key, timestamp);
         Ok(())
     }

@@ -23,6 +23,7 @@ pub mod options;
 pub mod pruning_cursor;
 pub mod reference;
 pub mod sequence_cursor;
+pub mod setsum;
 pub mod sst;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
