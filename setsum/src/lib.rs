@@ -81,7 +81,7 @@ fn item_vectored_to_state(item: &[&[u8]]) -> [u32; SETSUM_COLUMNS] {
 /// Setsum provides an interactive object for maintaining set checksums.  Technically, multi-set
 /// checksums.  Two Setsum objects are equal with high probability if and only if they contain the
 /// same items.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Setsum {
     state: [u32; SETSUM_COLUMNS],
 }
