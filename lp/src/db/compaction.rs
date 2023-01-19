@@ -2,15 +2,20 @@ use std::cmp::{max, min, Ordering, Reverse};
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
+use std::fs::{create_dir, hard_link, read_dir, read_to_string, write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
 use prototk::field_types::*;
 
-use zerror::ZError;
+use util::time::now;
 
+use zerror::{FromIOError, ZError, ZErrorResult};
+
+use super::super::file_manager::open_without_manager;
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
+use super::super::setsum::Setsum;
 use super::super::sst::{SST, SSTBuilderOptions, SSTMetadata, SSTMultiBuilder};
 use super::super::{compare_bytes, Builder, Cursor, Error};
 
@@ -348,6 +353,7 @@ impl<'a> Graph<'a> {
 pub struct Compaction {
     inputs: Vec<SSTMetadata>,
     options: CompactionOptions,
+    smallest_snapshot: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -360,6 +366,33 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
+    pub fn from_inputs(options: CompactionOptions, smallest_snapshot: u64, inputs: Vec<SSTMetadata>) -> Self {
+        Self {
+            inputs,
+            options,
+            smallest_snapshot,
+        }
+    }
+
+    pub fn load<P: AsRef<Path>>(options: CompactionOptions, compaction_root: P) -> Result<Self, ZError<Error>> {
+        let mut inputs = Vec::new();
+        for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
+            let path = input.from_io()?.path();
+            let file = open_without_manager(path)?;
+            let sst = SST::from_file_handle(file)?;
+            inputs.push(sst.metadata()?);
+        }
+        let snapshot = read_to_string(compaction_root.as_ref().to_path_buf().join("SNAPSHOT")).from_io()?;
+        let smallest_snapshot = snapshot.parse::<u64>().map_err(|e| ZError::new(Error::Corruption {
+            context: "could not parse snapshot file".to_string(),
+        }).with_context::<string, 1>("root", &compaction_root.as_ref().to_string_lossy()))?;
+        Ok(Self {
+            inputs,
+            options,
+            smallest_snapshot,
+        })
+    }
+
     pub fn inputs(&self) -> &[SSTMetadata] {
         &self.inputs
     }
@@ -389,6 +422,50 @@ impl Compaction {
         stats.ratio = (lower as f64) / (upper as f64);
         stats
     }
+
+    pub fn is_same(&self, compaction: &Compaction) -> bool {
+        let mut lhs_metadata = BTreeSet::new();
+        let mut rhs_metadata = BTreeSet::new();
+        for input in self.inputs().iter() {
+            lhs_metadata.insert(input);
+        }
+        for input in compaction.inputs().iter() {
+            rhs_metadata.insert(input);
+        }
+        lhs_metadata == rhs_metadata
+    }
+
+    pub fn setup<P: AsRef<Path>>(&self, root: P) -> Result<String, ZError<Error>> {
+        let compaction_time = now::millis();
+        let compaction_base = format!("compaction:{}", compaction_time);
+        let compaction_root = root.as_ref().to_path_buf().join(&compaction_base);
+        create_dir(&compaction_root)
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("inputs"))
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("outputs"))
+            .from_io()
+            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
+        write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot));
+        for sst in self.inputs.iter() {
+            let target = &root.as_ref().join("sst").join(sst.setsum() + ".sst");
+            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
+            hard_link(target, link_name)
+                .from_io()
+                .with_context::<string, 1>("target", &target.to_string_lossy())
+                .with_context::<string, 1>("link_name", &link_name.to_string_lossy())?;
+        }
+        let compaction = Compaction::load(self.options.clone(), root.as_ref().to_path_buf().join(&compaction_base))?;
+        if !self.is_same(&compaction) {
+            return Err(ZError::new(Error::LogicError {
+                context: "compaction does not load the same from disk".to_string(),
+            })
+            .with_context::<string, 1>("root", &root.as_ref().to_string_lossy()));
+        }
+        Ok(compaction_base)
+    }
 }
 
 ///////////////////////////////////////// LosslessCompactor ////////////////////////////////////////
@@ -396,15 +473,15 @@ impl Compaction {
 #[derive(Clone, Debug, Default)]
 pub struct LosslessCompactor {
     inputs: Vec<PathBuf>,
-    output: String,
+    prefix: String,
     options: SSTBuilderOptions,
 }
 
 impl LosslessCompactor {
-    pub fn new(output: String, options: SSTBuilderOptions) -> Self {
+    pub fn new(prefix: String, options: SSTBuilderOptions) -> Self {
         Self {
             inputs: Vec::new(),
-            output,
+            prefix,
             options,
         }
     }
@@ -420,16 +497,16 @@ impl LosslessCompactor {
         }
         let mut cursor = MergingCursor::new(ssts)?;
         cursor.seek_to_first()?;
-        let mut sstmb = SSTMultiBuilder::new(self.output, ".sst".to_string(), self.options.clone());
+        let mut sstmb = SSTMultiBuilder::new(self.prefix, ".sst".to_string(), self.options.clone());
         loop {
             cursor.next()?;
-            let value = match cursor.value() {
+            let kvr = match cursor.value() {
                 Some(v) => { v },
                 None => { break; },
             };
-            match value.value {
-                Some(v) => { sstmb.put(value.key, value.timestamp, v)?; }
-                None => { sstmb.del(value.key, value.timestamp)?; }
+            match kvr.value {
+                Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
+                None => { sstmb.del(kvr.key, kvr.timestamp)?; }
             }
         }
         sstmb.seal()

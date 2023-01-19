@@ -12,6 +12,11 @@ fn main() {
             .takes_value(true)
             .help("Path to the database."));
     let app = app.arg(
+        Arg::with_name("snapshot")
+            .long("snapshot")
+            .takes_value(true)
+            .help("Snapshot below which to garbage collect."));
+    let app = app.arg(
         Arg::with_name("sst")
             .index(1)
             .multiple(true)
@@ -20,10 +25,12 @@ fn main() {
     // parse
     let args = app.get_matches();
     let db = args.value_of("db").unwrap_or("db");
+    let snapshot = args.value_of("snapshot").unwrap_or("0");
+    let snapshot = snapshot.parse::<u64>().expect("snapshot should be an integer");
     let ssts: Vec<_> = args.values_of("sst").unwrap().collect();
 
     let opts = DBOptions::default();
     let db = DB::open(opts, db).expect("could not open database");
-    let path = db.setup_compaction(&ssts).expect("could not setup SSTs for compaction");
+    let path = db.setup_compaction(snapshot, &ssts).expect("could not setup SSTs for compaction");
     println!("{}", path);
 }

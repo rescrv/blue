@@ -304,7 +304,7 @@ impl DB {
         Ok(compactions)
     }
 
-    pub fn setup_compaction(&self, setsums: &[&str]) -> Result<String, ZError<Error>> {
+    pub fn setup_compaction(&self, smallest_snapshot: u64, setsums: &[&str]) -> Result<String, ZError<Error>> {
         let mut ssts = Vec::new();
         let state = self.get_state();
         for setsum in setsums.iter() {
@@ -316,27 +316,8 @@ impl DB {
             }
             ssts.push(sst.unwrap());
         }
-        let compaction_time = now::millis();
-        let compaction_base = format!("compaction:{}", compaction_time);
-        let compaction_root = self.root.join(&compaction_base);
-        create_dir(&compaction_root)
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        create_dir(&compaction_root.join("inputs"))
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        create_dir(&compaction_root.join("outputs"))
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        for sst in ssts.into_iter() {
-            let target = &self.root.join("sst").join(sst.setsum() + ".sst");
-            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
-            hard_link(target, link_name)
-                .from_io()
-                .with_context::<string, 1>("target", &target.to_string_lossy())
-                .with_context::<string, 1>("link_name", &link_name.to_string_lossy())?;
-        }
-        Ok(compaction_base)
+        let compaction = Compaction::from_inputs(self.options.compaction.clone(), smallest_snapshot, ssts);
+        Ok(compaction.setup(&self.root)?)
     }
 
     fn get_state(&self) -> Arc<State> {
