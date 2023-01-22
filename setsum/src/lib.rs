@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryInto;
+use std::fmt::Write;
 
 use sha2::{Digest, Sha256};
 
@@ -123,10 +124,51 @@ impl Setsum {
             let idx = col * SETSUM_BYTES_PER_COLUMN;
             let buf = self.state[col].to_le_bytes();
             for i in 0..4 {
-                item_hash[idx + i] = buf[i]
+                item_hash[idx + i] = buf[i];
             }
         }
         item_hash
+    }
+
+    /// Creates a setsum from an array of SETSUM_BYTES.
+    pub fn from_digest(digest: [u8; SETSUM_BYTES]) -> Setsum {
+        let mut state: [u32; SETSUM_COLUMNS] = [0u32; SETSUM_COLUMNS];
+        for col in 0..SETSUM_COLUMNS {
+            let idx = col * SETSUM_BYTES_PER_COLUMN;
+            let mut buf = [0u8; 4];
+            for i in 0..4 {
+                buf[i] = digest[idx + i];
+            }
+            state[col] = u32::from_le_bytes(buf);
+        }
+        Self {
+            state,
+        }
+    }
+
+    /// Computes an ASCII/hex representation of setsum for comparison or use in other situations.
+    pub fn hexdigest(&self) -> String {
+        let mut setsum = String::with_capacity(68);
+        let digest = self.digest();
+        for i in 0..digest.len() {
+            write!(&mut setsum, "{:02x}", digest[i]).expect("unable to write to string");
+        }
+        setsum
+    }
+
+    /// Creates a setsum from an ASCII/hex string.
+    pub fn from_hexdigest(digest: &str) -> Option<Setsum> {
+        if digest.len() != SETSUM_BYTES * 2 {
+            return None;
+        }
+        let mut bytes: [u8; SETSUM_BYTES] = [0u8; SETSUM_BYTES];
+        for idx in 0..SETSUM_BYTES {
+            bytes[idx] = match u8::from_str_radix(&digest[idx*2..idx*2+2], 16) {
+                Ok(b) => { b },
+                Err(_) => { return None; },
+            }
+        }
+        Some(Self::from_digest(bytes))
     }
 }
 
@@ -354,5 +396,24 @@ mod tests {
         let setsum_empty = setsum - setsum_one - setsum_two;
         let digest = setsum_empty.digest();
         assert_eq!(Setsum::default().digest(), digest);
+    }
+
+    #[test]
+    fn setsum_from_digest() {
+        let mut setsum = Setsum::default();
+        setsum.insert(b"this is the first value");
+        setsum.insert(b"this is the second value");
+        setsum.insert(b"this is the third value");
+        setsum.insert(b"this is the fourth value");
+        setsum.insert(b"this is the fifth value");
+        setsum.insert(b"this is the sixth value");
+        setsum.insert(b"this is the seventh value");
+        assert_eq!(Setsum::from_digest(SEVEN_VALUES), setsum);
+    }
+
+    #[test]
+    fn setsum_from_hexdigest() {
+        const SEVEN_HEX_VALUES: &str = "553aac2fea6c5e4106e61cb10f4f18150173497f6cf961e9f9fb0c72ff0fefa5";
+        assert_eq!(Setsum::from_digest(SEVEN_VALUES), Setsum::from_hexdigest(SEVEN_HEX_VALUES).unwrap());
     }
 }
