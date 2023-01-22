@@ -468,47 +468,26 @@ impl Compaction {
     }
 }
 
-///////////////////////////////////////// LosslessCompactor ////////////////////////////////////////
+//////////////////////////////////////// losslessly_compact ////////////////////////////////////////
 
-#[derive(Clone, Debug, Default)]
-pub struct LosslessCompactor {
-    inputs: Vec<PathBuf>,
-    prefix: String,
-    options: SSTBuilderOptions,
-}
-
-impl LosslessCompactor {
-    pub fn new(prefix: String, options: SSTBuilderOptions) -> Self {
-        Self {
-            inputs: Vec::new(),
-            prefix,
-            options,
+pub fn losslessly_compact<P: AsRef<Path>>(options: SSTBuilderOptions, prefix: String, inputs: Vec<P>) -> Result<(), ZError<Error>> {
+    let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
+    for sst in inputs.iter() {
+        ssts.push(Box::new(SST::new(sst)?.cursor()));
+    }
+    let mut cursor = MergingCursor::new(ssts)?;
+    cursor.seek_to_first()?;
+    let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), options.clone());
+    loop {
+        cursor.next()?;
+        let kvr = match cursor.value() {
+            Some(v) => { v },
+            None => { break; },
+        };
+        match kvr.value {
+            Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
+            None => { sstmb.del(kvr.key, kvr.timestamp)?; }
         }
     }
-
-    pub fn add_input<P: AsRef<Path>>(&mut self, path: P) {
-        self.inputs.push(path.as_ref().to_path_buf());
-    }
-
-    pub fn compact(self) -> Result<(), ZError<Error>> {
-        let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
-        for sst in self.inputs.iter() {
-            ssts.push(Box::new(SST::new(sst)?.cursor()));
-        }
-        let mut cursor = MergingCursor::new(ssts)?;
-        cursor.seek_to_first()?;
-        let mut sstmb = SSTMultiBuilder::new(self.prefix, ".sst".to_string(), self.options.clone());
-        loop {
-            cursor.next()?;
-            let kvr = match cursor.value() {
-                Some(v) => { v },
-                None => { break; },
-            };
-            match kvr.value {
-                Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
-                None => { sstmb.del(kvr.key, kvr.timestamp)?; }
-            }
-        }
-        sstmb.seal()
-    }
+    sstmb.seal()
 }
