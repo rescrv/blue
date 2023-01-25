@@ -2,15 +2,12 @@ use std::cmp::{max, min, Ordering, Reverse};
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
-use std::fs::{create_dir, hard_link, read_dir, read_to_string, write};
 use std::ops::Bound;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use prototk::field_types::*;
 
-use util::time::now;
-
-use zerror::{FromIOError, ZError, ZErrorResult};
+use zerror::{ZError, ZErrorResult};
 
 use super::super::file_manager::open_without_manager;
 use super::super::merging_cursor::MergingCursor;
@@ -351,8 +348,8 @@ impl<'a> Graph<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Compaction {
-    inputs: Vec<SSTMetadata>,
     options: CompactionOptions,
+    inputs: Vec<SSTMetadata>,
     smallest_snapshot: u64,
 }
 
@@ -366,31 +363,21 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
-    pub fn from_inputs(options: CompactionOptions, smallest_snapshot: u64, inputs: Vec<SSTMetadata>) -> Self {
-        Self {
-            inputs,
-            options,
-            smallest_snapshot,
+    pub fn from_paths<P: AsRef<Path>>(options: CompactionOptions, inputs: Vec<P>, smallest_snapshot: u64) -> Result<Self, ZError<Error>> {
+        let mut metadatas = Vec::new();
+        for input in inputs {
+            let sst = SST::new(input)?;
+            metadatas.push(sst.metadata()?);
         }
+        Ok(Self::from_inputs(options, metadatas, smallest_snapshot))
     }
 
-    pub fn load<P: AsRef<Path>>(options: CompactionOptions, compaction_root: P) -> Result<Self, ZError<Error>> {
-        let mut inputs = Vec::new();
-        for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
-            let path = input.from_io()?.path();
-            let file = open_without_manager(path)?;
-            let sst = SST::from_file_handle(file)?;
-            inputs.push(sst.metadata()?);
-        }
-        let snapshot = read_to_string(compaction_root.as_ref().to_path_buf().join("SNAPSHOT")).from_io()?;
-        let smallest_snapshot = snapshot.parse::<u64>().map_err(|e| ZError::new(Error::Corruption {
-            context: "could not parse snapshot file".to_string(),
-        }).with_context::<string, 1>("root", &compaction_root.as_ref().to_string_lossy()))?;
-        Ok(Self {
-            inputs,
+    pub fn from_inputs(options: CompactionOptions, inputs: Vec<SSTMetadata>, smallest_snapshot: u64) -> Self {
+        Self {
             options,
+            inputs,
             smallest_snapshot,
-        })
+        }
     }
 
     pub fn inputs(&self) -> &[SSTMetadata] {
@@ -400,7 +387,7 @@ impl Compaction {
     pub fn stats(&self) -> CompactionStats {
         let graph = Graph::new(self.options.clone(), &self.inputs).unwrap();
         let mut stats = CompactionStats::default();
-        stats.num_inputs += graph.vertices.len();
+        stats.num_inputs += self.inputs.len();
         if stats.num_inputs > 0 {
             stats.lower_level = usize::max_value();
         }
@@ -422,62 +409,18 @@ impl Compaction {
         stats.ratio = (lower as f64) / (upper as f64);
         stats
     }
-
-    pub fn is_same(&self, compaction: &Compaction) -> bool {
-        let mut lhs_metadata = BTreeSet::new();
-        let mut rhs_metadata = BTreeSet::new();
-        for input in self.inputs().iter() {
-            lhs_metadata.insert(input);
-        }
-        for input in compaction.inputs().iter() {
-            rhs_metadata.insert(input);
-        }
-        lhs_metadata == rhs_metadata
-    }
-
-    pub fn setup<P: AsRef<Path>>(&self, root: P) -> Result<String, ZError<Error>> {
-        let compaction_time = now::millis();
-        let compaction_base = format!("compaction:{}", compaction_time);
-        let compaction_root = root.as_ref().to_path_buf().join(&compaction_base);
-        create_dir(&compaction_root)
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        create_dir(&compaction_root.join("inputs"))
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        create_dir(&compaction_root.join("outputs"))
-            .from_io()
-            .with_context::<string, 1>("root", &compaction_root.to_string_lossy())?;
-        write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot));
-        for sst in self.inputs.iter() {
-            let target = &root.as_ref().join("sst").join(sst.setsum() + ".sst");
-            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
-            hard_link(target, link_name)
-                .from_io()
-                .with_context::<string, 1>("target", &target.to_string_lossy())
-                .with_context::<string, 1>("link_name", &link_name.to_string_lossy())?;
-        }
-        let compaction = Compaction::load(self.options.clone(), root.as_ref().to_path_buf().join(&compaction_base))?;
-        if !self.is_same(&compaction) {
-            return Err(ZError::new(Error::LogicError {
-                context: "compaction does not load the same from disk".to_string(),
-            })
-            .with_context::<string, 1>("root", &root.as_ref().to_string_lossy()));
-        }
-        Ok(compaction_base)
-    }
 }
 
 //////////////////////////////////////// losslessly_compact ////////////////////////////////////////
 
-pub fn losslessly_compact<P: AsRef<Path>>(options: SSTBuilderOptions, prefix: String, inputs: Vec<P>) -> Result<(), ZError<Error>> {
+pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), ZError<Error>> {
     let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
-    for sst in inputs.iter() {
-        ssts.push(Box::new(SST::new(sst)?.cursor()));
+    for sst in compaction.inputs.iter() {
+        ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));
     }
     let mut cursor = MergingCursor::new(ssts)?;
     cursor.seek_to_first()?;
-    let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), options.clone());
+    let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), compaction.options.sst_options.clone());
     loop {
         cursor.next()?;
         let kvr = match cursor.value() {

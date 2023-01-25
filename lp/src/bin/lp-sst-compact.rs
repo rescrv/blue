@@ -1,7 +1,8 @@
 use clap::{App, Arg};
 
-use lp::db::compaction::losslessly_compact;
+use lp::db::compaction::{losslessly_compact, Compaction};
 use lp::sst::SSTBuilderOptions;
+use lp::options::CompactionOptions;
 
 fn main() {
     let app = App::new("lp-sst-compact")
@@ -25,9 +26,14 @@ fn main() {
 
     // parse
     let args = app.get_matches();
-    let options = SSTBuilderOptions::default()
+    let sst_options = SSTBuilderOptions::default()
         .target_file_size(args.value_of("sst-size").unwrap_or("4194304").parse::<u32>().unwrap_or(4194304));
+    let options = CompactionOptions {
+        max_compaction_bytes: 1<<63,
+        sst_options,
+    };
     let output_prefix = args.value_of("output").unwrap_or("compacted_").to_string();
     let ssts: Vec<_> = args.values_of("ssts").unwrap().collect();
-    losslessly_compact(options, output_prefix, ssts).expect("compaction");
+    let compaction = Compaction::from_paths(options, ssts, 0).expect("compaction");
+    losslessly_compact(compaction, output_prefix).expect("compaction");
 }
