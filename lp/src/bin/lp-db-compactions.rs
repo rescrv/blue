@@ -1,6 +1,6 @@
 use clap::{App, Arg};
 
-use lp::db::{DB, DBOptions};
+use lp::db::{DB, DBOptions, TreeDB};
 
 fn main() {
     let app = App::new("lp-db-compactions")
@@ -17,7 +17,7 @@ fn main() {
     let db = args.value_of("db").unwrap_or("db");
 
     let opts = DBOptions::default();
-    let db = DB::open(opts, db).expect("could not open database");
+    let db = TreeDB::open(opts, db).expect("could not open database");
 
     for compaction in db.suggest_compactions().expect("could not suggest compactions").into_iter() {
         let mut first = true;

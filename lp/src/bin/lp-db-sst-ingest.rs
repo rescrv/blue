@@ -1,6 +1,6 @@
 use clap::{App, Arg};
 
-use lp::db::{DBOptions, DB};
+use lp::db::{DB, DBOptions, TreeDB};
 
 fn main() {
     let app = App::new("lp-db-sst-ingest")
@@ -23,6 +23,6 @@ fn main() {
     let ssts: Vec<_> = args.values_of("sst").unwrap().collect();
 
     let opts = DBOptions::default();
-    let db = DB::open(opts, db).expect("could not open database");
-    db.ingest_ssts(&ssts).expect("could not ingest SSTs");
+    let db = TreeDB::open(opts, db).expect("could not open database");
+    db.ingest(&ssts).expect("could not ingest SSTs");
 }
