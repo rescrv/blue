@@ -124,6 +124,7 @@ pub struct SSTMetadata {
     pub biggest_timestamp: u64,
     #[prototk(6, uint64)]
     pub file_size: u64,
+    pub file_path: PathBuf,
 }
 
 impl SSTMetadata {
@@ -172,6 +173,7 @@ impl Default for SSTMetadata {
             smallest_timestamp: 0,
             biggest_timestamp: u64::max_value(),
             file_size: 0,
+            file_path: PathBuf::default(),
         }
     }
 }
@@ -313,6 +315,7 @@ impl SST {
             smallest_timestamp: self.final_block.smallest_timestamp,
             biggest_timestamp: self.final_block.biggest_timestamp,
             file_size: self.file_size,
+            file_path: self.handle.path()?,
         })
     }
 
