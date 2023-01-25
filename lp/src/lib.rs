@@ -162,7 +162,41 @@ pub enum Error {
     },
     SSTNotFound {
         setsum: String,
-    }
+    },
+    DBExists {
+        path: PathBuf,
+    },
+    DBNotExist {
+        path: PathBuf,
+    },
+    PathError {
+        path: PathBuf,
+        what: String,
+    },
+    MissingManifest {
+        path: PathBuf,
+    },
+    MissingSST {
+        path: PathBuf,
+    },
+    ExtraFile {
+        path: PathBuf,
+    },
+    InvalidManifestLine {
+        line: String,
+    },
+    InvalidManifestCommand {
+        cmd: String,
+        arg: String,
+    },
+    InvalidManifestSetsum {
+        manifest: String,
+        computed: String,
+    },
+    InvalidSSTSetsum {
+        expected: String,
+        computed: String,
+    },
 }
 
 impl Display for Error {
