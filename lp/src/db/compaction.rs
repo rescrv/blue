@@ -434,3 +434,48 @@ pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), 
     }
     sstmb.seal()
 }
+
+//////////////////////////////////////////// gc_compact ////////////////////////////////////////////
+
+pub fn gc_compact(compaction: Compaction, is_base_level_for_key: &dyn Fn(&[u8]) -> bool, prefix: String) -> Result<(), ZError<Error>> {
+    let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
+    for sst in compaction.inputs.iter() {
+        ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));
+    }
+    let mut cursor = MergingCursor::new(ssts)?;
+    cursor.seek_to_first()?;
+    let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), compaction.options.sst_options.clone());
+    let mut dropped = Setsum::default();
+    let mut current: Option<(Vec<u8>, u64)> = None;
+    loop {
+        cursor.next()?;
+        let kvr = match cursor.value() {
+            Some(v) => { v },
+            None => { break; },
+        };
+        if current.is_none() || compare_bytes(&current.as_ref().unwrap().0, kvr.key) != Ordering::Equal {
+            current = Some((kvr.key.to_vec(), u64::max_value()));
+        }
+        let mut drop = false;
+        if current.as_ref().unwrap().1 <= compaction.smallest_snapshot {
+            drop = true;
+        } else if kvr.value.is_none() && kvr.timestamp <= compaction.smallest_snapshot && is_base_level_for_key(kvr.key) {
+            drop = true;
+        }
+        if let Some((_, ts)) = &mut current {
+            *ts = kvr.timestamp;
+        }
+        if !drop {
+            match kvr.value {
+                Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
+                None => { sstmb.del(kvr.key, kvr.timestamp)?; }
+            }
+        } else {
+            match kvr.value {
+                Some(v) => { dropped.put(kvr.key, kvr.timestamp, v); },
+                None => { dropped.del(kvr.key, kvr.timestamp); },
+            }
+        }
+    }
+    sstmb.seal()
+}
