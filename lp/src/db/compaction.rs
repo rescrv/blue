@@ -7,13 +7,12 @@ use std::path::Path;
 
 use prototk::field_types::*;
 
-use zerror::{ZError, ZErrorResult};
+use zerror::ZError;
 
-use super::super::file_manager::open_without_manager;
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
 use super::super::setsum::Setsum;
-use super::super::sst::{SST, SSTBuilderOptions, SSTMetadata, SSTMultiBuilder};
+use super::super::sst::{SST, SSTMetadata, SSTMultiBuilder};
 use super::super::{compare_bytes, Builder, Cursor, Error};
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////

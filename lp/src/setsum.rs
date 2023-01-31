@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use setsum::SETSUM_BYTES;
 use setsum::Setsum as RawSetsum;
 

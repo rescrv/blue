@@ -1,6 +1,5 @@
-use std::collections::hash_set::HashSet;
 use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file, File};
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -24,7 +23,7 @@ use super::merging_cursor::MergingCursor;
 use super::options::CompactionOptions;
 use super::pruning_cursor::PruningCursor;
 use super::setsum::Setsum;
-use super::sst::{SSTBuilder, SSTBuilderOptions, SSTMetadata, SST};
+use super::sst::{SSTBuilder, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error};
 
 pub mod compaction;
@@ -517,7 +516,7 @@ impl Manifest {
     fn parse_u64_command(arg: &str, value: &mut Option<u64>, what: &str) -> Option<ZError<Error>> {
         let x: u64 = match arg.parse::<u64>() {
             Ok(x) => { x },
-            Err(e) => {
+            Err(_) => {
                 return Some(ZError::new(Error::Corruption {
                     context: format!("not a number: {}", arg),
                 }));
@@ -611,7 +610,7 @@ impl GenerationalDB {
             }
             let generation = match entry.parse::<u64>() {
                 Ok(gen) => { gen },
-                Err(e) => {
+                Err(_) => {
                     errors.warning(ZError::new(Error::PathError {
                         path: PathBuf::from(entry),
                         what: "not a number".to_string(),
@@ -796,7 +795,7 @@ impl DB for GenerationalDB {
             Ok(root) => { root },
             Err(e) => { return vec![e.into()]; },
         };
-        let lockfile = match get_lockfile(&options, &root) {
+        let _lockfile = match get_lockfile(&options, &root) {
             Ok(lockfile) => { Some(lockfile) },
             Err(e) => {
                 errors.push(e);
@@ -805,7 +804,7 @@ impl DB for GenerationalDB {
         };
         // Scan the generation numbers.
         let mut errors = FsckErrorHandler::default();
-        let mut generations: Vec<u64> = Self::scan_generations(&root, &mut errors).unwrap();
+        let generations: Vec<u64> = Self::scan_generations(&root, &mut errors).unwrap();
         for gen in generations.into_iter() {
             Self::fsck_generation(&root, gen, &mut errors).expect("all errors to be swallowed");
         }
