@@ -2,7 +2,6 @@
 extern crate prototk_derive;
 
 use buffertk::{Unpacker, stack_pack};
-use clue::clue;
 use id::{generate_id, generate_id_prototk};
 
 use sim::*;
@@ -53,18 +52,9 @@ impl Process for Replica {
         let msg: ReplicaMessage = match up.unpack() {
             Ok(x) => { x },
             Err(e) => {
-                let what: &[u8] = &what;
-                clue!{"replica.deliver.unpack.error",
-                    move || {
-                        let clue = ClueReplicaDeliverUnpackError {
-                            from,
-                            what,
-                        };
-                        stack_pack(clue).to_vec()
-                    }
-                }
+                // TODO(rescrv): log error
                 return;
-            },
+            }
         };
         // XXX
     }
