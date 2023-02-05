@@ -179,10 +179,6 @@ impl<T, E: Debug + Display + From<std::io::Error>> FromIOError<T, E> for Result<
 pub trait ZErrorResult {
     type Error;
 
-    fn wrap_zerror<E: Clone + Debug + Display + 'static>(self, wrapped: ZError<E>) -> Self::Error;
-
-    fn wrap_error(self, wrapped: Box<dyn std::error::Error + 'static>) -> Self::Error;
-
     fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
         field_name: &str,
@@ -205,20 +201,6 @@ pub trait ZErrorResult {
 
 impl<T, E: Debug + Display> ZErrorResult for Result<T, ZError<E>> {
     type Error = Result<T, ZError<E>>;
-
-    fn wrap_zerror<F: Clone + Debug + Display + 'static>(self, wrapped: ZError<F>) -> Self::Error {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(ZError::wrap_zerror(e, wrapped)),
-        }
-    }
-
-    fn wrap_error(self, wrapped: Box<dyn std::error::Error + 'static>) -> Self::Error {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(ZError::wrap_error(e, wrapped)),
-        }
-    }
 
     fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
@@ -268,20 +250,6 @@ impl<T, E: Debug + Display> ZErrorResult for Result<T, ZError<E>> {
 
 impl<T> ZErrorResult for Result<T, std::io::Error> {
     type Error = Result<T, ZError<std::io::Error>>;
-
-    fn wrap_zerror<F: Clone + Debug + Display + 'static>(self, wrapped: ZError<F>) -> Self::Error {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(ZError::wrap_zerror(e.zerr(), wrapped)),
-        }
-    }
-
-    fn wrap_error(self, wrapped: Box<dyn std::error::Error + 'static>) -> Self::Error {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(ZError::wrap_error(e.zerr(), wrapped)),
-        }
-    }
 
     fn with_context<'a, F: FieldType<'a> + 'a, const N: u32>(
         self,
@@ -396,32 +364,6 @@ mod tests {
         // human
         println!("zerr.human = {}", zerr.human);
         assert!(zerr.human.ends_with("wrapped = wrapped error\n"));
-    }
-
-    #[test]
-    fn wrap_zerror() {
-        let wrapped: ZError<&'static str> = ZError::value::<string>("wrapped error");
-        let zerr: ZError<&'static str> =
-            ZError::value::<string>("wrapping error").wrap_zerror(wrapped);
-        // look for "wrapping error"
-        let exp: &[u8] = &[
-            250, 255, 255, 255, 15, 14, 119, 114, 97, 112, 112, 105, 110, 103, 32, 101, 114, 114,
-            111, 114,
-        ];
-        assert_eq!(exp, &zerr.proto.as_bytes()[..20]);
-        // find an offset
-        let exp: &[u8] = &[
-            250, 255, 255, 255, 15, 13, 119, 114, 97, 112, 112, 101, 100, 32, 101, 114, 114, 111,
-            114,
-        ];
-        for idx in 0..zerr.proto.as_bytes().len() - exp.len() {
-            if exp == &zerr.proto.as_bytes()[idx..idx + exp.len()] {
-                return;
-            }
-        }
-        let got: &[u8] = zerr.proto.as_bytes();
-        assert_eq!(exp, got);
-        panic!("test didn't find wrapped error");
     }
 
     #[derive(Clone, Debug, Message)]
