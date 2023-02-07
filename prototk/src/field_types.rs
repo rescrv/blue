@@ -6,6 +6,7 @@
 // with e.g. #[prototk(7, uint64)], where the uint64 token is used verbatim.
 
 use std::convert::TryInto;
+use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
@@ -671,6 +672,26 @@ impl<'a> FieldHelper<'a, bytes<'a>> for Buffer {
 
     fn prototk_convert_variant(proto: bytes<'a>) -> Self {
         Buffer::from(proto.0)
+    }
+}
+
+impl<'a> FieldHelper<'a, bytes<'a>> for PathBuf {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        let field: &[u8] = field.as_os_str().as_bytes();
+        stack_pack(tag).pack(field).pack_sz()
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        let field: &[u8] = field.as_os_str().as_bytes();
+        stack_pack(tag).pack(field).into_slice(out);
+    }
+
+    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
+        *out = PathBuf::from(OsStr::from_bytes(proto.0));
+    }
+
+    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
+        PathBuf::from(OsStr::from_bytes(proto.0))
     }
 }
 
