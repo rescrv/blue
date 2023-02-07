@@ -171,14 +171,37 @@ impl Default for DBOptions {
 //////////////////////////////////////////////// DB ////////////////////////////////////////////////
 
 // There are at least two different data stores to be written that share the same interface.
-pub trait DB: Sized {
-    fn open<P: AsRef<Path>>(options: DBOptions, root: P) -> Result<Self, ZError<Error>>;
-    fn fsck<P: AsRef<Path>>(options: DBOptions, root: P) -> Vec<ZError<Error>>;
+pub trait DB {
+    fn open<P: AsRef<Path>>(options: DBOptions, root: P) -> Result<Self, ZError<Error>> where Self: Sized;
+    fn fsck<P: AsRef<Path>>(options: DBOptions, root: P) -> Vec<ZError<Error>> where Self: Sized;
 
-    fn ingest<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>>;
+    fn ingest(&self, paths: &[PathBuf]) -> Result<(), ZError<Error>>;
     fn reload(&self) -> Result<(), ZError<Error>>;
 
     fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>>;
+}
+
+////////////////////////////////////////////// DBType //////////////////////////////////////////////
+
+pub enum DBType {
+    Generational,
+    Tree,
+}
+
+impl DBType {
+    pub fn open<P: AsRef<Path>>(&self, options: DBOptions, root: P) -> Result<Box<dyn DB>, ZError<Error>> {
+        Ok(match self {
+            Generational => { Box::new(GenerationalDB::open(options, root)?) as Box<dyn DB> },
+            Tree => { Box::new(TreeDB::open(options, root)?) as Box<dyn DB> },
+        })
+    }
+
+    pub fn fsck<P: AsRef<Path>>(&self, options: DBOptions, root: P) -> Vec<ZError<Error>> {
+        match self {
+            Generational => { GenerationalDB::fsck(options, root) },
+            Tree => { TreeDB::fsck(options, root) },
+        }
+    }
 }
 
 /////////////////////////////////////////////// State //////////////////////////////////////////////
@@ -286,7 +309,7 @@ impl DB for TreeDB {
         todo!();
     }
 
-    fn ingest<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>> {
+    fn ingest(&self, paths: &[PathBuf]) -> Result<(), ZError<Error>> {
         // Make a directory into which all files will be linked.
         let ingest_time = now::millis();
         let ingest_root = self.root.join(format!("ingest:{}", ingest_time));
@@ -294,7 +317,7 @@ impl DB for TreeDB {
         let mut ssts = Vec::new();
         // For each SST, hardlink it into the ingest root.
         for path in paths {
-            let file = self.file_manager.open(path.as_ref().to_path_buf())?;
+            let file = self.file_manager.open(path.clone())?;
             let sst = SST::from_file_handle(file)?;
             // Extract the metadata.
             let setsum_str = sst.setsum();
@@ -302,7 +325,7 @@ impl DB for TreeDB {
             // Hard-link the file into place.
             let filename = setsum_str.clone() + ".sst";
             let target = ingest_root.join(&filename);
-            hard_link(path.as_ref(), target).from_io()?;
+            hard_link(path, target).from_io()?;
             ssts.push((setsum_str, filename, metadata));
         }
         // Create one file that will be linked into meta.  Swizzling this file is what gives us a
@@ -621,7 +644,7 @@ impl GenerationalDB {
                     continue;
                 },
             };
-            if entry == "ingest" || entry == "LOCKFILE" {
+            if entry == "ingest" || entry == "LOCKFILE" || entry == "meta" || entry == "sst" {
                 continue;
             }
             let generation = match entry.parse::<u64>() {
@@ -827,7 +850,7 @@ impl DB for GenerationalDB {
         errors.errors
     }
 
-    fn ingest<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>> {
+    fn ingest(&self, paths: &[PathBuf]) -> Result<(), ZError<Error>> {
         for path in paths.into_iter() {
             let path: &Path = path.as_ref();
             let basename = match path.file_name() {
