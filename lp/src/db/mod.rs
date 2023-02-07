@@ -177,6 +177,8 @@ pub trait DB: Sized {
 
     fn ingest<P: AsRef<Path>>(&self, paths: &[P]) -> Result<(), ZError<Error>>;
     fn reload(&self) -> Result<(), ZError<Error>>;
+
+    fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>>;
 }
 
 /////////////////////////////////////////////// State //////////////////////////////////////////////
@@ -388,6 +390,15 @@ impl DB for TreeDB {
         });
         Ok(())
     }
+
+    fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>> {
+        let state = self.get_state();
+        let graph = compaction::Graph::new(self.options.compaction.clone(), &state.sst_metadata)?;
+        let mut compactions = graph.compactions();
+        compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
+        compactions.reverse();
+        Ok(compactions)
+    }
 }
 
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
@@ -579,6 +590,11 @@ impl GenerationalDB {
     #[allow(non_snake_case)]
     fn MANIFEST<P: AsRef<Path>>(root: P, generation: u64) -> PathBuf {
         Self::GENERATION_ROOT(root, generation).join("MANIFEST")
+    }
+
+    #[allow(non_snake_case)]
+    fn SST<P: AsRef<Path>>(root: P, generation: u64, sst: P) -> PathBuf {
+        Self::GENERATION_ROOT(root, generation).join(sst)
     }
 
     fn scan_generations<P: AsRef<Path>, H: ErrorHandler>(root: P, errors: &mut H) -> Result<Vec<u64>, ZError<Error>> {
@@ -848,5 +864,23 @@ impl DB for GenerationalDB {
         let mut state = self.state.lock().unwrap();
         *state = Arc::new(manifest);
         Ok(())
+    }
+
+    fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>> {
+        let mut ingests: Vec<PathBuf> = Vec::new();
+        let mut compactions = Vec::new();
+        let mut state = self.state.lock().unwrap();
+        for ingest in read_dir(Self::INGEST(&self.root)).from_io()?  {
+            ingests.push(ingest.from_io()?.path());
+        }
+        if ingests.len() > 0 {
+            let mut inputs = Vec::new();
+            inputs.append(&mut ingests);
+            for sst in state.outputs.iter() {
+                inputs.push(Self::SST(&self.root, state.generation, sst));
+            }
+            compactions.push(Compaction::from_paths(self.options.compaction.clone(), inputs, 0)?);
+        }
+        Ok(compactions)
     }
 }

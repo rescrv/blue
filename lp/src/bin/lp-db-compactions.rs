@@ -1,31 +1,25 @@
 use clap::{App, Arg};
 
-use lp::db::{DB, DBOptions, TreeDB};
+use lp::cli::{db_args, parse_db_args, parse_db_options};
 
 fn main() {
     let app = App::new("lp-db-compactions")
         .version("0.1.0")
         .about("List the most efficient compactions recommended for the database.");
-    let app = app.arg(
-        Arg::with_name("db")
-            .long("db")
-            .takes_value(true)
-            .help("Path to the database."));
+    let app = db_args(app);
 
     // parse
     let args = app.get_matches();
-    let db = args.value_of("db").unwrap_or("db");
-
-    let opts = DBOptions::default();
-    let db = TreeDB::open(opts, db).expect("could not open database");
+    let opts = parse_db_options(&args);
+    let db = parse_db_args(opts, &args);
 
     for compaction in db.suggest_compactions().expect("could not suggest compactions").into_iter() {
         let mut first = true;
         for input in compaction.inputs() {
             if first {
-                print!("{}", input.setsum());
+                print!("{}", input.file_path.to_string_lossy());
             } else {
-                print!(" {}", input.setsum());
+                print!(" {}", input.file_path.to_string_lossy());
             }
             first = false;
         }

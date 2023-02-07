@@ -16,6 +16,7 @@ use hey_listen::{HeyListen, Stationary};
 use zerror::ZError;
 
 pub mod block;
+pub mod cli;
 pub mod db;
 pub mod file_manager;
 pub mod merging_cursor;
