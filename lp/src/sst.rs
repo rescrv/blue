@@ -124,6 +124,7 @@ pub struct SSTMetadata {
     pub biggest_timestamp: u64,
     #[prototk(6, uint64)]
     pub file_size: u64,
+    #[prototk(7, bytes)]
     pub file_path: PathBuf,
 }
 
