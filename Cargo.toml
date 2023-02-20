@@ -4,6 +4,7 @@ members = [
     "biometrics",
     "bloom",
     "buffertk",
+    "busybee",
     "cache",
     "clue",
     "databuf",
