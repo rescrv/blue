@@ -296,6 +296,30 @@ impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> f
     }
 }
 
+impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> for Option<F> {
+    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+        if let Some(f) = &field {
+            <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f)
+        } else {
+            0
+        }
+    }
+
+    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+        if let Some(f) = &field {
+            <F as FieldHelper<'a, T>>::prototk_pack(tag, f, out)
+        }
+    }
+
+    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b, {
+        *out = Self::prototk_convert_variant(proto);
+    }
+
+    fn prototk_convert_variant(proto: T) -> Self {
+        Some(<F as FieldHelper<'a, T>>::prototk_convert_variant(proto))
+    }
+}
+
 //////////////////////////////////////////// FieldPacker ///////////////////////////////////////////
 
 pub struct FieldPacker<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> {

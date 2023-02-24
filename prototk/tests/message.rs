@@ -408,3 +408,38 @@ fn buffer_message() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
+
+////////////////////////////////////////////// Option //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, PartialEq)]
+struct OptionStruct {
+    #[prototk(1, uint64)]
+    x: Option<u64>,
+    #[prototk(2, double)]
+    y: Option<f64>,
+    #[prototk(3, sint32)]
+    z: Option<i32>,
+}
+
+#[test]
+fn option_struct() {
+    let s = OptionStruct {
+        x: Some(42),
+        y: Some(3.14159),
+        z: None,
+    };
+    // test packing
+    let buf = buffertk::stack_pack(&s).to_vec();
+    let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let exp = s.clone();
+    let got = up.unpack();
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", s);
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
