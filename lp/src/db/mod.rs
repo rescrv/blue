@@ -16,7 +16,7 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{ErrorCore, FromIOError, ZError, ZErrorResult};
+use zerror::{ErrorCore, Z};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
@@ -24,7 +24,7 @@ use super::options::CompactionOptions;
 use super::pruning_cursor::PruningCursor;
 use super::setsum::Setsum;
 use super::sst::{SSTBuilder, SSTMetadata, SST};
-use super::{compare_bytes, Builder, Cursor, Error};
+use super::{compare_bytes, Builder, Cursor, Error, FromIO};
 
 pub mod compaction;
 pub use compaction::Compaction;
@@ -49,19 +49,19 @@ fn LOCKFILE<P: AsRef<Path>>(root: P) -> PathBuf {
 /////////////////////////////////////////// ErrorHandler ///////////////////////////////////////////
 
 trait ErrorHandler {
-    fn error(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>>;
-    fn warning(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>>;
+    fn error(&mut self, err: Error) -> Result<(), Error>;
+    fn warning(&mut self, err: Error) -> Result<(), Error>;
 }
 
 #[derive(Default)]
 struct NormalErrorHandler {}
 
 impl ErrorHandler for NormalErrorHandler {
-    fn error(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn error(&mut self, err: Error) -> Result<(), Error> {
         Err(err)
     }
 
-    fn warning(&mut self, _: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn warning(&mut self, _: Error) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -70,27 +70,27 @@ impl ErrorHandler for NormalErrorHandler {
 struct ParanoidErrorHandler {}
 
 impl ErrorHandler for ParanoidErrorHandler {
-    fn error(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn error(&mut self, err: Error) -> Result<(), Error> {
         Err(err)
     }
 
-    fn warning(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn warning(&mut self, err: Error) -> Result<(), Error> {
         Err(err)
     }
 }
 
 #[derive(Default)]
 struct FsckErrorHandler {
-    errors: Vec<ZError<Error>>,
+    errors: Vec<Error>,
 }
 
 impl ErrorHandler for FsckErrorHandler {
-    fn error(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn error(&mut self, err: Error) -> Result<(), Error> {
         self.errors.push(err);
         Ok(())
     }
 
-    fn warning(&mut self, err: ZError<Error>) -> Result<(), ZError<Error>> {
+    fn warning(&mut self, err: Error) -> Result<(), Error> {
         self.errors.push(err);
         Ok(())
     }
@@ -98,20 +98,20 @@ impl ErrorHandler for FsckErrorHandler {
 
 /////////////////////////////////////////// get_lockfile ///////////////////////////////////////////
 
-pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, ZError<Error>> {
+pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, Error> {
     // Deal with making the root directory.
     if root.is_dir() && options.error_if_exists {
-        return Err(ZError::new(Error::DBExists { core: ErrorCore::default(), path: root.clone() }));
+        return Err(Error::DBExists { core: ErrorCore::default(), path: root.clone() });
     }
     if !root.is_dir() && !options.create_if_missing {
-        return Err(ZError::new(Error::DBNotExist { core: ErrorCore::default(), path: root.clone() }));
+        return Err(Error::DBNotExist { core: ErrorCore::default(), path: root.clone() });
     } else if !root.is_dir() {
         Trace::new("lp.db.create")
             .with_context::<string, 1>("root", &root.to_string_lossy())
             .finish();
         create_dir(&root)
             .from_io()
-            .with_context::<string, 1>("root", &root.to_string_lossy())?;
+            .with_variable("root", root.to_string_lossy())?;
     }
     // Deal with the lockfile first.
     let lockfile = if options.wait_for_lock {
@@ -120,24 +120,22 @@ pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, ZEr
             .finish();
         Lockfile::wait(LOCKFILE(&root))
             .from_io()
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .with_backtrace()?
+            .with_variable("root", root.to_string_lossy())?
     } else {
         Trace::new("lp.db.nowait_lockfile")
             .with_context::<string, 1>("root", &root.to_string_lossy())
             .finish();
         Lockfile::lock(LOCKFILE(&root))
             .from_io()
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .with_backtrace()?
+            .with_variable("root", root.to_string_lossy())?
     };
     if lockfile.is_none() {
         LOCK_NOT_OBTAINED.click();
-        let zerr = ZError::new(Error::LockNotObtained {
+        let err = Error::LockNotObtained {
             core: ErrorCore::default(),
             path: LOCKFILE(root),
-        });
-        return Err(zerr);
+        };
+        return Err(err);
     }
     Trace::new("lp.db.lock_obtained")
         .with_context::<string, 1>("root", &root.to_string_lossy())
@@ -208,24 +206,24 @@ impl DB {
         root.as_ref().to_path_buf().join("meta")
     }
 
-    pub fn open<P: AsRef<Path>>(options: DBOptions, root: P) -> Result<DB, ZError<Error>> {
+    pub fn open<P: AsRef<Path>>(options: DBOptions, root: P) -> Result<DB, Error> {
         let root: PathBuf = root
             .as_ref()
             .canonicalize()
             .from_io()
-            .with_context::<string, 1>("root", &root.as_ref().to_string_lossy())?;
+            .with_variable("root", root.as_ref().to_string_lossy())?;
         let lockfile = get_lockfile(&options, &root)?;
         let file_manager = FileManager::new(options.max_open_files);
         // Create the correct directories, or at least make sure they exist.
         if !Self::SST(&root).is_dir() {
             create_dir(Self::SST(&root))
                 .from_io()
-                .with_context::<string, 2>("sst", &Self::SST(&root).to_string_lossy())?;
+                .with_variable("sst", Self::SST(&root))?;
         }
         if !root.join("meta").is_dir() {
             create_dir(Self::META(&root))
                 .from_io()
-                .with_context::<string, 3>("meta", &root.join("meta").to_string_lossy())?;
+                .with_variable("meta", Self::META(&root))?;
         }
         // DB.
         Trace::new("lp.db.open")
@@ -242,11 +240,11 @@ impl DB {
         Ok(db)
     }
 
-    pub fn fsck<P: AsRef<Path>>(options: DBOptions, root: P) -> Vec<ZError<Error>> {
+    pub fn fsck<P: AsRef<Path>>(options: DBOptions, root: P) -> Vec<Error> {
         todo!();
     }
 
-    pub fn ingest(&self, paths: &[PathBuf]) -> Result<(), ZError<Error>> {
+    pub fn ingest(&self, paths: &[PathBuf]) -> Result<(), Error> {
         // Make a directory into which all files will be linked.
         let ingest_time = now::millis();
         let ingest_root = self.root.join(format!("ingest:{}", ingest_time));
@@ -288,9 +286,9 @@ impl DB {
                 Ok(_) => {},
                 Err(err) => {
                     if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(ZError::new(Error::DuplicateSST { core: ErrorCore::default(), what: sst.clone() }));
+                        return Err(Error::DuplicateSST { core: ErrorCore::default(), what: sst.clone() });
                     } else {
-                        return Err(ZError::new(err.into()));
+                        return Err(err.into());
                     }
                 },
             }
@@ -310,7 +308,7 @@ impl DB {
         self.reload()
     }
 
-    pub fn reload(&self) -> Result<(), ZError<Error>> {
+    pub fn reload(&self) -> Result<(), Error> {
         // We will hold the lock for the entirety of this call to synchronize all calls to the lsm
         // tree.  Everything else should grab the state and then grab the tree behind the Arc.
         let mut state = self.state.lock().unwrap();
@@ -335,14 +333,11 @@ impl DB {
             };
             let mut up = Unpacker::new(value.value.unwrap_or(&[]));
             let metadata: SSTMetadata = up.unpack().map_err(|_| {
-                ZError::new(Error::Corruption {
+                Error::Corruption {
                     core: ErrorCore::default(),
                     context: "key is corrupted in metadata".to_string(),
-                })
-                .with_context::<string, 1>(
-                    "key",
-                    &String::from_utf8(value.key.to_vec()).unwrap_or("<corrupted>".to_string()),
-                )
+                }
+                .with_variable("key", value.key)
             })?;
             sst_metadata.push(metadata);
         }
@@ -352,7 +347,7 @@ impl DB {
         Ok(())
     }
 
-    pub fn suggest_compactions(&self) -> Result<Vec<Compaction>, ZError<Error>> {
+    pub fn suggest_compactions(&self) -> Result<Vec<Compaction>, Error> {
         let state = self.get_state();
         let graph = compaction::Graph::new(self.options.compaction.clone(), &state.sst_metadata)?;
         let mut compactions = graph.compactions();
@@ -361,16 +356,16 @@ impl DB {
         Ok(compactions)
     }
 
-    pub fn setup_compaction(&self, smallest_snapshot: u64, setsums: &[&str]) -> Result<String, ZError<Error>> {
+    pub fn setup_compaction(&self, smallest_snapshot: u64, setsums: &[&str]) -> Result<String, Error> {
         let mut ssts = Vec::new();
         let state = self.get_state();
         for setsum in setsums.iter() {
             let sst = state.get_metadata_by_setsum(setsum);
             if sst.is_none() {
-                return Err(ZError::new(Error::SSTNotFound {
+                return Err(Error::SSTNotFound {
                     core: ErrorCore::default(),
                     setsum: setsum.to_string(),
-                }));
+                });
             }
             ssts.push(sst.unwrap());
         }

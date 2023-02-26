@@ -1,7 +1,5 @@
 use std::rc::Rc;
 
-use zerror::ZError;
-
 use super::{
     check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValuePair,
     KeyValueRef, TableMetadata,
@@ -61,7 +59,7 @@ impl ReferenceBuilder {
         self.approximate_size
     }
 
-    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>> {
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
         self.approximate_size += key.len() + 8 + value.len();
@@ -75,7 +73,7 @@ impl ReferenceBuilder {
         Ok(())
     }
 
-    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
         self.approximate_size += key.len() + 8;
         check_table_size(self.approximate_size)?;
@@ -88,7 +86,7 @@ impl ReferenceBuilder {
         Ok(())
     }
 
-    pub fn seal(self) -> Result<ReferenceTable, ZError<Error>> {
+    pub fn seal(self) -> Result<ReferenceTable, Error> {
         let mut entries = self.entries;
         entries.sort();
         Ok(ReferenceTable {
@@ -107,19 +105,19 @@ pub struct ReferenceCursor {
 }
 
 impl Cursor for ReferenceCursor {
-    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.index = -1;
         self.returned = true;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.index = self.entries.len() as isize;
         self.returned = true;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         let target = KeyValuePair {
             key: key.into(),
             timestamp: u64::max_value(),
@@ -133,7 +131,7 @@ impl Cursor for ReferenceCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), ZError<Error>> {
+    fn prev(&mut self) -> Result<(), Error> {
         self.index = if self.returned {
             self.index - 1
         } else {
@@ -147,7 +145,7 @@ impl Cursor for ReferenceCursor {
         }
     }
 
-    fn next(&mut self) -> Result<(), ZError<Error>> {
+    fn next(&mut self) -> Result<(), Error> {
         self.index = if self.returned {
             self.index + 1
         } else {

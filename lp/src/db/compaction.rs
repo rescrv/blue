@@ -7,7 +7,7 @@ use std::path::Path;
 
 use prototk::field_types::*;
 
-use zerror::{ErrorCore, ZError};
+use zerror::{ErrorCore, Z};
 
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
@@ -45,7 +45,7 @@ impl<'a> Graph<'a> {
     pub fn new(
         options: CompactionOptions,
         metadata: &'a Vec<SSTMetadata>,
-    ) -> Result<Self, ZError<Error>> {
+    ) -> Result<Self, Error> {
         let mut vertices = Vec::with_capacity(metadata.len());
         vertices.resize(
             metadata.len(),
@@ -61,14 +61,14 @@ impl<'a> Graph<'a> {
         let mut reverse_adj_list = BTreeSet::new();
         for i in 0..metadata.len() {
             if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
-                let zerr = ZError::new(Error::Corruption {
+                let err = Error::Corruption {
                     core: ErrorCore::default(),
                     context: "metadata timestamps not in order".to_string(),
-                })
-                .with_context::<string, 1>("SST", &metadata[i].setsum())
-                .with_context::<uint64, 2>("smallest timestamp", metadata[i].smallest_timestamp)
-                .with_context::<uint64, 3>("biggest timestamp", metadata[i].biggest_timestamp);
-                return Err(zerr);
+                }
+                .with_variable("SST", &metadata[i].setsum())
+                .with_variable("smallest_timestamp", metadata[i].smallest_timestamp)
+                .with_variable("biggest_timestamp", metadata[i].biggest_timestamp);
+                return Err(err);
             }
             for j in i + 1..metadata.len() {
                 if !key_range_overlap(&metadata[i], &metadata[j]) {
@@ -363,7 +363,7 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
-    pub fn from_paths<P: AsRef<Path>>(options: CompactionOptions, inputs: Vec<P>, smallest_snapshot: u64) -> Result<Self, ZError<Error>> {
+    pub fn from_paths<P: AsRef<Path>>(options: CompactionOptions, inputs: Vec<P>, smallest_snapshot: u64) -> Result<Self, Error> {
         let mut metadatas = Vec::new();
         for input in inputs {
             let sst = SST::new(input)?;
@@ -413,7 +413,7 @@ impl Compaction {
 
 //////////////////////////////////////// losslessly_compact ////////////////////////////////////////
 
-pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), ZError<Error>> {
+pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), Error> {
     let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
     for sst in compaction.inputs.iter() {
         ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));
@@ -437,7 +437,7 @@ pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), 
 
 //////////////////////////////////////////// gc_compact ////////////////////////////////////////////
 
-pub fn gc_compact(compaction: Compaction, is_base_level_for_key: &dyn Fn(&[u8]) -> bool, prefix: String) -> Result<(), ZError<Error>> {
+pub fn gc_compact(compaction: Compaction, is_base_level_for_key: &dyn Fn(&[u8]) -> bool, prefix: String) -> Result<(), Error> {
     let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
     for sst in compaction.inputs.iter() {
         ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));

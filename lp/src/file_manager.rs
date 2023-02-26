@@ -15,9 +15,9 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{ErrorCore, FromIOError, ZError, ZErrorResult};
+use zerror::{ErrorCore, Z};
 
-use super::{LOGIC_ERROR, Error};
+use super::{LOGIC_ERROR, Error, FromIO};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -37,35 +37,31 @@ pub struct FileHandle {
 }
 
 impl FileHandle {
-    pub fn path(&self) -> Result<PathBuf, ZError<Error>> {
+    pub fn path(&self) -> Result<PathBuf, Error> {
         let fd = check_fd(self.file.as_raw_fd())?;
         let state = self.state.lock().unwrap();
         if let Some((path, _)) = &state.files[fd] {
-            Trace::new("lp.open_file")
-                .with_context::<string, 1>("path", &path.to_string_lossy())
-                .with_context::<int32, 2>("fd", self.file.as_raw_fd())
-                .finish();
             return Ok(path.clone());
         } else {
             LOGIC_ERROR.click();
-            let zerr = ZError::new(Error::LogicError {
+            let err = Error::LogicError {
                 core: ErrorCore::default(),
                 context: "FileManager has broken names->files pointer".to_string(),
-            })
-            .with_context::<int32, 2>("fd", self.file.as_raw_fd());
-            return Err(zerr);
+            }
+            .with_variable("fd", self.file.as_raw_fd());
+            return Err(err);
         }
     }
 
-    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ZError<Error>> {
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
         self.file.read_exact_at(buf, offset).from_io()
-           .with_context::<int32, 2>("fd", self.file.as_raw_fd())
-           .with_context::<uint64, 3>("offset", offset)
-           .with_context::<uint64, 4>("amount", buf.len() as u64)
+            .with_variable("fd", self.file.as_raw_fd())
+            .with_variable("offset", offset)
+            .with_variable("amount", buf.len())
     }
 
-    pub fn size(&self) -> Result<u64, ZError<Error>> {
-        Ok(self.file.metadata().from_io()?.len())
+    pub fn size(&self) -> Result<u64, Error> {
+        Ok(self.file.metadata()?.len())
     }
 }
 
@@ -142,7 +138,7 @@ impl FileManager {
         }
     }
 
-    pub fn open(&self, path: PathBuf) -> Result<FileHandle, ZError<Error>> {
+    pub fn open(&self, path: PathBuf) -> Result<FileHandle, Error> {
         // Check if the file is opened or opening.
         {
             let mut state = self.state.lock().unwrap();
@@ -154,13 +150,13 @@ impl FileManager {
                 // Check that we won't exceed the vector's bounds.
                 if state.files.len() <= *fd {
                     LOGIC_ERROR.click();
-                    let zerr = ZError::new(Error::LogicError {
+                    let err = Error::LogicError {
                         core: ErrorCore::default(),
                         context: "FileManager has fd that exists outside open_files".to_string(),
-                    })
-                    .with_context::<uint64, 2>("fd", *fd as u64)
-                    .with_context::<uint64, 3>("state.files.len()", state.files.len() as u64);
-                    return Err(zerr);
+                    }
+                    .with_variable("fd", *fd)
+                    .with_variable("state.files.len()", state.files.len());
+                    return Err(err);
                 };
                 // Check that we haven't violated internal invariants.
                 if let Some((_, file)) = &state.files[*fd] {
@@ -170,25 +166,25 @@ impl FileManager {
                     });
                 } else {
                     LOGIC_ERROR.click();
-                    let zerr = ZError::new(Error::LogicError {
+                    let err = Error::LogicError {
                         core: ErrorCore::default(),
                         context: "FileManager has broken names->files pointer".to_string(),
-                    })
-                    .with_context::<uint64, 2>("fd", *fd as u64);
-                    return Err(zerr);
+                    }
+                    .with_variable("fd", *fd);
+                    return Err(err);
                 };
             };
             // We're going to be opening a file, so make sure we won't exceed the max number of
             // files.
             if state.opening.len() + state.names.len() >= self.max_open_files {
                 TOO_MANY_OPEN_FILES.click();
-                let zerr = ZError::new(Error::TooManyOpenFiles {
+                let err = Error::TooManyOpenFiles {
                     core: ErrorCore::default(),
                     limit: self.max_open_files,
-                })
-                .with_context::<uint64, 1>("max_open_files", self.max_open_files as u64)
-                .with_context::<uint64, 2>("open_files", (state.opening.len() + state.names.len()) as u64);
-                return Err(zerr);
+                }
+                .with_variable("max_open_files", self.max_open_files)
+                .with_variable("open_files", state.opening.len() + state.names.len());
+                return Err(err);
             }
             state.opening.insert(path.clone());
         }
@@ -229,35 +225,33 @@ impl FileManager {
 ///////////////////////////////////////////// check_fd /////////////////////////////////////////////
 
 // Check that the file descriptor is [0, usize::max_value).
-fn check_fd(fd: c_int) -> Result<usize, ZError<Error>> {
+fn check_fd(fd: c_int) -> Result<usize, Error> {
     if fd < 0 {
         LOGIC_ERROR.click();
-        let zerr = ZError::new(Error::LogicError {
+        let err = Error::LogicError {
             core: ErrorCore::default(),
             context: "valid file's file descriptor is negative".to_string(),
-        })
-        .with_context::<int32, 2>("fd", fd);
-        return Err(zerr);
+        }
+        .with_variable("fd", fd);
+        return Err(err);
     }
     Ok(fd as usize)
 }
 
 /////////////////////////////////////////////// open ///////////////////////////////////////////////
 
-fn open(path: PathBuf) -> Result<File, ZError<Error>> {
+fn open(path: PathBuf) -> Result<File, Error> {
     // Open the file
     click!("lp.file_manager.open");
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
-            let zerr = ZError::new(Error::IOError { 
+            let err = Error::IOError {
                 core: ErrorCore::default(),
                 what: e
-            }).with_context::<string, 1>(
-                "path",
-                &path.to_string_lossy(),
-            );
-            return Err(zerr);
+            }
+            .with_variable("path", path.to_string_lossy());
+            return Err(err);
         }
     };
     check_fd(file.as_raw_fd())?;
@@ -266,7 +260,7 @@ fn open(path: PathBuf) -> Result<File, ZError<Error>> {
 
 /////////////////////////////////////// open_without_manager ///////////////////////////////////////
 
-pub fn open_without_manager(path: PathBuf) -> Result<FileHandle, ZError<Error>> {
+pub fn open_without_manager(path: PathBuf) -> Result<FileHandle, Error> {
     let file = Arc::new(open(path.clone())?);
     let fd = file.as_raw_fd() as usize;
     assert!(fd < usize::max_value());

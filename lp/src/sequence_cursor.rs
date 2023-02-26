@@ -1,5 +1,3 @@
-use zerror::ZError;
-
 use super::{Cursor, Error, KeyRef, KeyValueRef, TableMetadata};
 
 ////////////////////////////////////////// SequenceCursor //////////////////////////////////////////
@@ -17,7 +15,7 @@ impl<T: TableMetadata + Clone, C: Cursor> SequenceCursor<T, C>
 where
     C: From<T>,
 {
-    pub fn new(tables: Vec<T>) -> Result<Self, ZError<Error>> {
+    pub fn new(tables: Vec<T>) -> Result<Self, Error> {
         assert!(!tables.is_empty());
         let position = 0;
         let mut cursor: C = C::from(tables[position].clone());
@@ -40,17 +38,17 @@ impl<T: TableMetadata + Clone, C: Cursor> Cursor for SequenceCursor<T, C>
 where
     C: From<T>,
 {
-    fn seek_to_first(&mut self) -> Result<(), ZError<Error>> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.reposition(0);
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), ZError<Error>> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.reposition(self.tables.len() - 1);
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         if self.tables.len() <= 1 {
             return self.cursor.seek(key);
         }
@@ -74,7 +72,7 @@ where
         self.cursor.seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), ZError<Error>> {
+    fn prev(&mut self) -> Result<(), Error> {
         loop {
             self.cursor.prev()?;
             if self.cursor.value().is_none() && self.position > 0 {
@@ -87,7 +85,7 @@ where
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), ZError<Error>> {
+    fn next(&mut self) -> Result<(), Error> {
         loop {
             self.cursor.next()?;
             if self.cursor.value().is_none() && self.position + 1 < self.tables.len() {

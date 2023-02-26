@@ -13,7 +13,7 @@ use biometrics::Counter;
 
 use hey_listen::{HeyListen, Stationary};
 
-use zerror::{ErrorCore, ZError};
+use zerror::{ErrorCore, Z};
 
 pub mod block;
 pub mod cli;
@@ -66,43 +66,43 @@ pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
 // some slop.  64MiB is overkill, but will last for awhile.
 pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
 
-fn check_key_len(key: &[u8]) -> Result<(), ZError<Error>> {
+fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
-        let zerr = ZError::new(Error::KeyTooLarge {
+        let err = Error::KeyTooLarge {
             core: ErrorCore::default(),
             length: key.len(),
             limit: MAX_KEY_LEN,
-        });
-        Err(zerr)
+        };
+        Err(err)
     } else {
         Ok(())
     }
 }
 
-fn check_value_len(value: &[u8]) -> Result<(), ZError<Error>> {
+fn check_value_len(value: &[u8]) -> Result<(), Error> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
-        let zerr = ZError::new(Error::ValueTooLarge {
+        let err = Error::ValueTooLarge {
             core: ErrorCore::default(),
             length: value.len(),
             limit: MAX_VALUE_LEN,
-        });
-        Err(zerr)
+        };
+        Err(err)
     } else {
         Ok(())
     }
 }
 
-fn check_table_size(size: usize) -> Result<(), ZError<Error>> {
+fn check_table_size(size: usize) -> Result<(), Error> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
-        let zerr = ZError::new(Error::TableFull {
+        let err = Error::TableFull {
             core: ErrorCore::default(),
             size,
             limit: TABLE_FULL_SIZE,
-        });
-        Err(zerr)
+        };
+        Err(err)
     } else {
         Ok(())
     }
@@ -228,16 +228,139 @@ pub enum Error {
     },
 }
 
+impl Error {
+    fn core(&self) -> &ErrorCore {
+        match self {
+            Error::KeyTooLarge { core, .. } => { core },
+            Error::ValueTooLarge { core, .. } => { core } ,
+            Error::SortOrder { core, .. } => { core } ,
+            Error::TableFull { core, .. } => { core } ,
+            Error::BlockTooSmall { core, .. } => { core } ,
+            Error::UnpackError { core, .. } => { core } ,
+            Error::CRC32CFailure { core, .. } => { core } ,
+            Error::LockNotObtained { core, .. } => { core } ,
+            Error::DuplicateSST { core, .. } => { core } ,
+            Error::Corruption { core, .. } => { core } ,
+            Error::LogicError { core, .. } => { core } ,
+            Error::SystemError { core, .. } => { core } ,
+            Error::IOError { core, .. } => { core } ,
+            Error::TooManyOpenFiles { core, .. } => { core } ,
+            Error::SSTNotFound { core, .. } => { core } ,
+            Error::DBExists { core, .. } => { core } ,
+            Error::DBNotExist { core, .. } => { core } ,
+            Error::PathError { core, .. } => { core } ,
+            Error::MissingManifest { core, .. } => { core } ,
+            Error::MissingSST { core, .. } => { core } ,
+            Error::ExtraFile { core, .. } => { core } ,
+            Error::InvalidManifestLine { core, .. } => { core } ,
+            Error::InvalidManifestCommand { core, .. } => { core } ,
+            Error::InvalidManifestSetsum { core, .. } => { core } ,
+            Error::InvalidSSTSetsum { core, .. } => { core } ,
+        }
+    }
+
+    fn core_mut(&mut self) -> &mut ErrorCore {
+        match self {
+            Error::KeyTooLarge { core, .. } => { core },
+            Error::ValueTooLarge { core, .. } => { core } ,
+            Error::SortOrder { core, .. } => { core } ,
+            Error::TableFull { core, .. } => { core } ,
+            Error::BlockTooSmall { core, .. } => { core } ,
+            Error::UnpackError { core, .. } => { core } ,
+            Error::CRC32CFailure { core, .. } => { core } ,
+            Error::LockNotObtained { core, .. } => { core } ,
+            Error::DuplicateSST { core, .. } => { core } ,
+            Error::Corruption { core, .. } => { core } ,
+            Error::LogicError { core, .. } => { core } ,
+            Error::SystemError { core, .. } => { core } ,
+            Error::IOError { core, .. } => { core } ,
+            Error::TooManyOpenFiles { core, .. } => { core } ,
+            Error::SSTNotFound { core, .. } => { core } ,
+            Error::DBExists { core, .. } => { core } ,
+            Error::DBNotExist { core, .. } => { core } ,
+            Error::PathError { core, .. } => { core } ,
+            Error::MissingManifest { core, .. } => { core } ,
+            Error::MissingSST { core, .. } => { core } ,
+            Error::ExtraFile { core, .. } => { core } ,
+            Error::InvalidManifestLine { core, .. } => { core } ,
+            Error::InvalidManifestCommand { core, .. } => { core } ,
+            Error::InvalidManifestSetsum { core, .. } => { core } ,
+            Error::InvalidSSTSetsum { core, .. } => { core } ,
+        }
+    }
+}
+
+impl Z for Error {
+    type Error = Self;
+
+    fn as_utf8(&self) -> String {
+        format!("{}", self) + "\n" + &self.core().as_utf8()
+    }
+
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.core().source()
+    }
+
+    fn set_source<E: std::error::Error + 'static>(&mut self, err: E) {
+        self.core_mut().set_source(err)
+    }
+
+    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
+        self.set_token(identifier, value);
+        self
+    }
+
+    fn set_token(&mut self, identifier: &str, value: &str) {
+        self.core_mut().set_token(identifier, value);
+    }
+
+    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
+        self.set_url(identifier, url);
+        self
+    }
+
+    fn set_url(&mut self, identifier: &str, url: &str) {
+        self.core_mut().set_url(identifier, url);
+    }
+
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
+        self.set_variable(variable, x);
+        self
+    }
+
+    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
+        self.core_mut().set_variable(variable, x);
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // TODO(rescrv): Don't be so debug-lazy.
-        write!(fmt, "{:?}", self)
+        write!(fmt, "{}", self.as_utf8())
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
         Error::IOError { core: ErrorCore::default(), what }
+    }
+}
+
+////////////////////////////////////////////// FromIO //////////////////////////////////////////////
+
+pub trait FromIO {
+    type Result;
+
+    fn from_io(self) -> Self::Result;
+}
+
+impl<T> FromIO for Result<T, std::io::Error> {
+    type Result = Result<T, Error>;
+
+    fn from_io(self) -> Self::Result {
+        match self {
+            Ok(x) => Ok(x),
+            Err(e) => Err(Error::from(e)),
+        }
     }
 }
 
@@ -399,10 +522,10 @@ pub trait Builder {
 
     fn approximate_size(&self) -> usize;
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), ZError<Error>>;
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>>;
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
 
-    fn seal(self) -> Result<Self::Sealed, ZError<Error>>;
+    fn seal(self) -> Result<Self::Sealed, Error>;
 }
 
 /////////////////////////////////////////// TableMetadata //////////////////////////////////////////
@@ -415,12 +538,12 @@ pub trait TableMetadata {
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 pub trait Cursor {
-    fn seek_to_first(&mut self) -> Result<(), ZError<Error>>;
-    fn seek_to_last(&mut self) -> Result<(), ZError<Error>>;
-    fn seek(&mut self, key: &[u8]) -> Result<(), ZError<Error>>;
+    fn seek_to_first(&mut self) -> Result<(), Error>;
+    fn seek_to_last(&mut self) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
 
-    fn prev(&mut self) -> Result<(), ZError<Error>>;
-    fn next(&mut self) -> Result<(), ZError<Error>>;
+    fn prev(&mut self) -> Result<(), Error>;
+    fn next(&mut self) -> Result<(), Error>;
 
     fn key(&self) -> Option<KeyRef>;
     fn value(&self) -> Option<KeyValueRef>;
