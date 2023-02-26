@@ -21,7 +21,6 @@ pub struct int32(i32);
 
 impl<'a> FieldType<'a> for int32 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i32;
 
@@ -67,7 +66,6 @@ pub struct int64(i64);
 
 impl<'a> FieldType<'a> for int64 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i64;
 
@@ -113,7 +111,6 @@ pub struct uint32(u32);
 
 impl<'a> FieldType<'a> for uint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = u32;
 
@@ -159,7 +156,6 @@ pub struct uint64(u64);
 
 impl<'a> FieldType<'a> for uint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = u64;
 
@@ -205,7 +201,6 @@ pub struct sint32(i32);
 
 impl<'a> FieldType<'a> for sint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i32;
 
@@ -257,7 +252,6 @@ pub struct sint64(i64);
 
 impl<'a> FieldType<'a> for sint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i64;
 
@@ -303,7 +297,6 @@ pub struct fixed32(u32);
 
 impl<'a> FieldType<'a> for fixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = u32;
 
@@ -346,7 +339,6 @@ pub struct fixed64(u64);
 
 impl<'a> FieldType<'a> for fixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = u64;
 
@@ -389,7 +381,6 @@ pub struct sfixed32(i32);
 
 impl<'a> FieldType<'a> for sfixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i32;
 
@@ -432,7 +423,6 @@ pub struct sfixed64(i64);
 
 impl<'a> FieldType<'a> for sfixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = i64;
 
@@ -475,7 +465,6 @@ pub struct float(f32);
 
 impl<'a> FieldType<'a> for float {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = f32;
 
@@ -518,7 +507,6 @@ pub struct double(f64);
 
 impl<'a> FieldType<'a> for double {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = f64;
 
@@ -561,7 +549,6 @@ pub struct Bool(bool);
 
 impl<'a> FieldType<'a> for Bool {
     const WIRE_TYPE: WireType = WireType::Varint;
-    const LENGTH_PREFIXED: bool = false;
 
     type NativeType = bool;
 
@@ -608,7 +595,6 @@ pub struct bytes<'a>(&'a [u8]);
 
 impl<'a> FieldType<'a> for bytes<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
 
     type NativeType = &'a [u8];
 
@@ -720,7 +706,6 @@ pub struct bytes32([u8; 32]);
 
 impl<'a> FieldType<'a> for bytes32 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
 
     type NativeType = [u8; 32];
 
@@ -790,7 +775,6 @@ pub struct string<'a>(&'a str);
 
 impl<'a> FieldType<'a> for string<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
 
     type NativeType = &'a str;
 
@@ -895,7 +879,6 @@ where
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
-    const LENGTH_PREFIXED: bool = true;
 
     type NativeType = M;
 

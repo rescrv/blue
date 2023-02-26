@@ -250,7 +250,6 @@ impl<'a> Unpackable<'a> for Tag {
 
 pub trait FieldType<'a>: Unpackable<'a> {
     const WIRE_TYPE: WireType;
-    const LENGTH_PREFIXED: bool;
 
     type NativeType;
 
