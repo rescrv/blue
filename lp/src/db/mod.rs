@@ -16,7 +16,7 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{FromIOError, ZError, ZErrorResult};
+use zerror::{ErrorCore, FromIOError, ZError, ZErrorResult};
 
 use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
@@ -101,10 +101,10 @@ impl ErrorHandler for FsckErrorHandler {
 pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, ZError<Error>> {
     // Deal with making the root directory.
     if root.is_dir() && options.error_if_exists {
-        return Err(ZError::new(Error::DBExists { path: root.clone() }));
+        return Err(ZError::new(Error::DBExists { core: ErrorCore::default(), path: root.clone() }));
     }
     if !root.is_dir() && !options.create_if_missing {
-        return Err(ZError::new(Error::DBNotExist { path: root.clone() }));
+        return Err(ZError::new(Error::DBNotExist { core: ErrorCore::default(), path: root.clone() }));
     } else if !root.is_dir() {
         Trace::new("lp.db.create")
             .with_context::<string, 1>("root", &root.to_string_lossy())
@@ -134,6 +134,7 @@ pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, ZEr
     if lockfile.is_none() {
         LOCK_NOT_OBTAINED.click();
         let zerr = ZError::new(Error::LockNotObtained {
+            core: ErrorCore::default(),
             path: LOCKFILE(root),
         });
         return Err(zerr);
@@ -287,7 +288,7 @@ impl DB {
                 Ok(_) => {},
                 Err(err) => {
                     if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(ZError::new(Error::DuplicateSST { what: sst.clone() }));
+                        return Err(ZError::new(Error::DuplicateSST { core: ErrorCore::default(), what: sst.clone() }));
                     } else {
                         return Err(ZError::new(err.into()));
                     }
@@ -335,6 +336,7 @@ impl DB {
             let mut up = Unpacker::new(value.value.unwrap_or(&[]));
             let metadata: SSTMetadata = up.unpack().map_err(|_| {
                 ZError::new(Error::Corruption {
+                    core: ErrorCore::default(),
                     context: "key is corrupted in metadata".to_string(),
                 })
                 .with_context::<string, 1>(
@@ -366,6 +368,7 @@ impl DB {
             let sst = state.get_metadata_by_setsum(setsum);
             if sst.is_none() {
                 return Err(ZError::new(Error::SSTNotFound {
+                    core: ErrorCore::default(),
                     setsum: setsum.to_string(),
                 }));
             }

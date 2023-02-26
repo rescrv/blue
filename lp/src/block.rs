@@ -7,7 +7,7 @@ use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk::field_types::*;
 use prototk_derive::Message;
 
-use zerror::{ZError, ZErrorResult};
+use zerror::{ErrorCore, ZError, ZErrorResult};
 
 use super::{
     LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
@@ -139,6 +139,7 @@ impl Block {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
             return Err(ZError::new(Error::BlockTooSmall {
+                core: ErrorCore::default(),
                 length: bytes.len(),
                 required: 4,
             }));
@@ -147,6 +148,7 @@ impl Block {
         let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e.into(),
                 context: "could not read last four bytes of block".to_string(),
             })
@@ -296,6 +298,7 @@ impl BlockBuilder {
     fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
             Err(ZError::new(Error::SortOrder {
+                core: ErrorCore::default(),
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
@@ -461,6 +464,7 @@ impl BlockCursor {
         if restart_idx >= self.block.num_restarts {
             LOGIC_ERROR.click();
             let zerr = ZError::new(Error::LogicError {
+                core: ErrorCore::default(),
                 context: "restart_idx exceeds num_restarts".to_string(),
             })
             .with_context::<uint64, 1>("restart_idx", restart_idx as u64)
@@ -471,6 +475,7 @@ impl BlockCursor {
         if offset >= self.block.restarts_boundary {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "offset exceeds restarts_boundary".to_string(),
             })
             .with_context::<uint64, 1>("offset", offset as u64)
@@ -534,6 +539,7 @@ impl BlockCursor {
         let be: BlockEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e,
                 context: "could not unpack key-value pair at offset".to_string(),
             })
@@ -570,6 +576,7 @@ impl Cursor for BlockCursor {
         if self.block.num_restarts == 0 {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "a block with 0 restarts".to_string(),
             });
             return Err(zerr);
@@ -586,6 +593,7 @@ impl Cursor for BlockCursor {
                 None => {
                     CORRUPTION.click();
                     let zerr = ZError::new(Error::Corruption {
+                        core: ErrorCore::default(),
                         context: "restart point returned no key-value pair".to_string(),
                     })
                     .with_context::<uint64, 1>("restart_point", mid as u64);
@@ -618,6 +626,7 @@ impl Cursor for BlockCursor {
         if left != right {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "binary_search left != right".to_string(),
             })
             .with_context::<uint64, 1>("left", left as u64)
@@ -634,6 +643,7 @@ impl Cursor for BlockCursor {
             None => {
                 CORRUPTION.click();
                 let zerr = ZError::new(Error::Corruption {
+                    core: ErrorCore::default(),
                     context: "restart point returned no key-value pair".to_string(),
                 })
                 .with_context::<uint64, 1>("restart_point", left as u64);
@@ -709,6 +719,7 @@ impl Cursor for BlockCursor {
             if current_restart_idx == 0 {
                 LOGIC_ERROR.click();
                 let zerr = ZError::new(Error::LogicError {
+                    core: ErrorCore::default(),
                     context: "tried taking the -1st restart_idx".to_string(),
                 });
                 return Err(zerr);
@@ -759,6 +770,7 @@ impl Cursor for BlockCursor {
         if !self.position.is_positioned() {
             LOGIC_ERROR.click();
             let zerr = ZError::new(Error::LogicError {
+                core: ErrorCore::default(),
                 context: "next was not positioned, but made it to here.".to_string(),
             });
             return Err(zerr);

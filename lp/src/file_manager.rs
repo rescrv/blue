@@ -15,7 +15,7 @@ use hey_listen::{HeyListen, Stationary};
 
 use clue::Trace;
 
-use zerror::{FromIOError, ZError, ZErrorResult};
+use zerror::{ErrorCore, FromIOError, ZError, ZErrorResult};
 
 use super::{LOGIC_ERROR, Error};
 
@@ -49,6 +49,7 @@ impl FileHandle {
         } else {
             LOGIC_ERROR.click();
             let zerr = ZError::new(Error::LogicError {
+                core: ErrorCore::default(),
                 context: "FileManager has broken names->files pointer".to_string(),
             })
             .with_context::<int32, 2>("fd", self.file.as_raw_fd());
@@ -154,6 +155,7 @@ impl FileManager {
                 if state.files.len() <= *fd {
                     LOGIC_ERROR.click();
                     let zerr = ZError::new(Error::LogicError {
+                        core: ErrorCore::default(),
                         context: "FileManager has fd that exists outside open_files".to_string(),
                     })
                     .with_context::<uint64, 2>("fd", *fd as u64)
@@ -169,6 +171,7 @@ impl FileManager {
                 } else {
                     LOGIC_ERROR.click();
                     let zerr = ZError::new(Error::LogicError {
+                        core: ErrorCore::default(),
                         context: "FileManager has broken names->files pointer".to_string(),
                     })
                     .with_context::<uint64, 2>("fd", *fd as u64);
@@ -180,6 +183,7 @@ impl FileManager {
             if state.opening.len() + state.names.len() >= self.max_open_files {
                 TOO_MANY_OPEN_FILES.click();
                 let zerr = ZError::new(Error::TooManyOpenFiles {
+                    core: ErrorCore::default(),
                     limit: self.max_open_files,
                 })
                 .with_context::<uint64, 1>("max_open_files", self.max_open_files as u64)
@@ -229,6 +233,7 @@ fn check_fd(fd: c_int) -> Result<usize, ZError<Error>> {
     if fd < 0 {
         LOGIC_ERROR.click();
         let zerr = ZError::new(Error::LogicError {
+            core: ErrorCore::default(),
             context: "valid file's file descriptor is negative".to_string(),
         })
         .with_context::<int32, 2>("fd", fd);
@@ -245,7 +250,10 @@ fn open(path: PathBuf) -> Result<File, ZError<Error>> {
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
-            let zerr = ZError::new(Error::IOError { what: e }).with_context::<string, 1>(
+            let zerr = ZError::new(Error::IOError { 
+                core: ErrorCore::default(),
+                what: e
+            }).with_context::<string, 1>(
                 "path",
                 &path.to_string_lossy(),
             );

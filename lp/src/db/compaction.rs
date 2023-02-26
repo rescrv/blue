@@ -7,7 +7,7 @@ use std::path::Path;
 
 use prototk::field_types::*;
 
-use zerror::ZError;
+use zerror::{ErrorCore, ZError};
 
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
@@ -62,6 +62,7 @@ impl<'a> Graph<'a> {
         for i in 0..metadata.len() {
             if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
                 let zerr = ZError::new(Error::Corruption {
+                    core: ErrorCore::default(),
                     context: "metadata timestamps not in order".to_string(),
                 })
                 .with_context::<string, 1>("SST", &metadata[i].setsum())

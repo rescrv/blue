@@ -13,7 +13,7 @@ use biometrics::Counter;
 
 use hey_listen::{HeyListen, Stationary};
 
-use zerror::ZError;
+use zerror::{ErrorCore, ZError};
 
 pub mod block;
 pub mod cli;
@@ -70,6 +70,7 @@ fn check_key_len(key: &[u8]) -> Result<(), ZError<Error>> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
         let zerr = ZError::new(Error::KeyTooLarge {
+            core: ErrorCore::default(),
             length: key.len(),
             limit: MAX_KEY_LEN,
         });
@@ -83,6 +84,7 @@ fn check_value_len(value: &[u8]) -> Result<(), ZError<Error>> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
         let zerr = ZError::new(Error::ValueTooLarge {
+            core: ErrorCore::default(),
             length: value.len(),
             limit: MAX_VALUE_LEN,
         });
@@ -96,6 +98,7 @@ fn check_table_size(size: usize) -> Result<(), ZError<Error>> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
         let zerr = ZError::new(Error::TableFull {
+            core: ErrorCore::default(),
             size,
             limit: TABLE_FULL_SIZE,
         });
@@ -110,91 +113,116 @@ fn check_table_size(size: usize) -> Result<(), ZError<Error>> {
 #[derive(Debug)]
 pub enum Error {
     KeyTooLarge {
+        core: ErrorCore,
         length: usize,
         limit: usize,
     },
     ValueTooLarge {
+        core: ErrorCore,
         length: usize,
         limit: usize,
     },
     SortOrder {
+        core: ErrorCore,
         last_key: Vec<u8>,
         last_timestamp: u64,
         new_key: Vec<u8>,
         new_timestamp: u64,
     },
     TableFull {
+        core: ErrorCore,
         size: usize,
         limit: usize,
     },
     BlockTooSmall {
+        core: ErrorCore,
         length: usize,
         required: usize,
     },
     UnpackError {
+        core: ErrorCore,
         error: prototk::Error,
         context: String,
     },
     CRC32CFailure {
+        core: ErrorCore,
         start: u64,
         limit: u64,
         crc32c: u32,
     },
     LockNotObtained {
+        core: ErrorCore,
         path: PathBuf,
     },
     DuplicateSST {
+        core: ErrorCore,
         what: String,
     },
     Corruption {
+        core: ErrorCore,
         context: String,
     },
     LogicError {
+        core: ErrorCore,
         context: String,
     },
     SystemError {
+        core: ErrorCore,
         context: String,
     },
     IOError {
+        core: ErrorCore,
         what: std::io::Error,
     },
     TooManyOpenFiles {
+        core: ErrorCore,
         limit: usize,
     },
     SSTNotFound {
+        core: ErrorCore,
         setsum: String,
     },
     DBExists {
+        core: ErrorCore,
         path: PathBuf,
     },
     DBNotExist {
+        core: ErrorCore,
         path: PathBuf,
     },
     PathError {
+        core: ErrorCore,
         path: PathBuf,
         what: String,
     },
     MissingManifest {
+        core: ErrorCore,
         path: PathBuf,
     },
     MissingSST {
+        core: ErrorCore,
         path: PathBuf,
     },
     ExtraFile {
+        core: ErrorCore,
         path: PathBuf,
     },
     InvalidManifestLine {
+        core: ErrorCore,
         line: String,
     },
     InvalidManifestCommand {
+        core: ErrorCore,
         cmd: String,
         arg: String,
     },
     InvalidManifestSetsum {
+        core: ErrorCore,
         manifest: String,
         computed: String,
     },
     InvalidSSTSetsum {
+        core: ErrorCore,
         expected: String,
         computed: String,
     },
@@ -209,7 +237,7 @@ impl Display for Error {
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
-        Error::IOError { what }
+        Error::IOError { core: ErrorCore::default(), what }
     }
 }
 

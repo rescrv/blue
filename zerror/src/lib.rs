@@ -91,7 +91,7 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 
 ///////////////////////////////////////////// ErrorCore ////////////////////////////////////////////
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ErrorCore {
     email: String,
     short: String,

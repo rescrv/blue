@@ -9,7 +9,7 @@ use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
 use prototk::field_types::*;
 
-use zerror::{FromIOError, ZError, ZErrorResult};
+use zerror::{ErrorCore, FromIOError, ZError, ZErrorResult};
 
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
@@ -71,6 +71,7 @@ impl BlockMetadata {
     fn sanity_check(&self) -> Result<(), ZError<Error>> {
         if self.start >= self.limit {
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "block_metadata.start >= block_metadata.limit".to_string(),
             })
             .with_context::<uint64, 1>("self.start", self.start as u64)
@@ -212,6 +213,7 @@ impl SST {
         if file_size < 8 {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "file has fewer than eight bytes".to_string(),
             });
             return Err(zerr);
@@ -223,6 +225,7 @@ impl SST {
         let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e.into(),
                 context: "parsing final block offset".to_string(),
             })
@@ -231,6 +234,7 @@ impl SST {
         if file_size < final_block_offset {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "final block offset is larger than file size".to_string(),
             })
             .with_context::<uint64, 1>("final_block_offset", final_block_offset)
@@ -244,6 +248,7 @@ impl SST {
         let final_block: FinalBlock = up.unpack().map_err(|e| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e,
                 context: "parsing final block".to_string(),
             })
@@ -253,6 +258,7 @@ impl SST {
         if final_block.index_block.limit > final_block_offset {
             CORRUPTION.click();
             let zerr = ZError::new(Error::Corruption {
+                core: ErrorCore::default(),
                 context: "index_block runs past final_block_offset".to_string(),
             })
             .with_context::<uint64, 1>("final_block_offset", final_block_offset as u64)
@@ -333,6 +339,7 @@ impl SST {
         let table_entry: SSTEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e,
                 context: "parsing table entry".to_string(),
             })
@@ -340,6 +347,7 @@ impl SST {
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
             let zerr = ZError::new(Error::CRC32CFailure {
+                core: ErrorCore::default(),
                 start: block_metadata.start,
                 limit: block_metadata.limit,
                 crc32c: block_metadata.crc32c,
@@ -351,6 +359,7 @@ impl SST {
             SSTEntry::FinalBlock(_) => {
                 CORRUPTION.click();
                 Err(ZError::new(Error::Corruption {
+                    core: ErrorCore::default(),
                     context: "tried loading final block".to_string(),
                 }))
             }
@@ -486,6 +495,7 @@ impl SSTBuilder {
     fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), ZError<Error>> {
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
             Err(ZError::new(Error::SortOrder {
+                core: ErrorCore::default(),
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
@@ -512,6 +522,7 @@ impl SSTBuilder {
         if !self.block_builder.is_none() {
             LOGIC_ERROR.click();
             return Err(ZError::new(Error::LogicError {
+                core: ErrorCore::default(),
                 context: "called start_new_block() when block_builder is not None".to_string(),
             }));
         }
@@ -524,6 +535,7 @@ impl SSTBuilder {
         if !self.block_builder.is_some() {
             LOGIC_ERROR.click();
             return Err(ZError::new(Error::LogicError {
+                core: ErrorCore::default(),
                 context: "self.block_builder.is_none()".to_string(),
             }));
         }
@@ -767,6 +779,7 @@ impl SSTCursor {
             None => {
                 CORRUPTION.click();
                 return Err(ZError::new(Error::Corruption {
+                    core: ErrorCore::default(),
                     context: "meta block has null value".to_string(),
                 }));
             }
@@ -775,6 +788,7 @@ impl SSTCursor {
         let metadata: BlockMetadata = up.unpack().map_err(|e| {
             CORRUPTION.click();
             ZError::new(Error::UnpackError {
+                core: ErrorCore::default(),
                 error: e,
                 context: "parsing block metadata".to_string(),
             })

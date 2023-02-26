@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use zerror::ZError;
+use zerror::{ErrorCore, ZError};
 
 use super::{compare_bytes, Cursor, Error, KeyRef, KeyValueRef};
 
@@ -106,6 +106,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                 Some(kvr) => kvr,
                 None => {
                     let zerr = ZError::new(Error::LogicError {
+                        core: ErrorCore::default(),
                         context: "should be positioned at some key with a value".to_string(),
                     });
                     return Err(zerr);
