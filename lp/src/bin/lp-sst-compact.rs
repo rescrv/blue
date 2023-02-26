@@ -1,8 +1,11 @@
 use clap::{App, Arg};
 
+use lp::cli::{sst_args, parse_sst_args};
 use lp::db::compaction::{losslessly_compact, Compaction};
-use lp::sst::SSTBuilderOptions;
+use lp::merging_cursor::MergingCursor;
+use lp::sst::{SST, SSTBuilderOptions};
 use lp::options::CompactionOptions;
+use lp::Cursor;
 
 fn main() {
     let app = App::new("lp-sst-compact")
@@ -18,11 +21,7 @@ fn main() {
             .long("sst-size")
             .takes_value(true)
             .help("Output file size (not a limit; creates next file when size exceeded)."));
-    let app = app.arg(
-        Arg::with_name("ssts")
-            .index(1)
-            .multiple(true)
-            .help("List of ssts to compact."));
+    let app = sst_args(app, 1);
 
     // parse
     let args = app.get_matches();
@@ -33,7 +32,17 @@ fn main() {
         sst_options,
     };
     let output_prefix = args.value_of("output").unwrap_or("compacted_").to_string();
-    let ssts: Vec<_> = args.values_of("ssts").unwrap().collect();
-    let compaction = Compaction::from_paths(options, ssts, 0).expect("compaction");
-    losslessly_compact(compaction, output_prefix).expect("compaction");
+    let ssts: Vec<_> = parse_sst_args(&args);
+
+    // compact
+    let mut metadatas = Vec::new();
+    let mut cursors: Vec<Box<dyn Cursor>> = Vec::new();
+    for input in ssts {
+        let sst = SST::new(input).expect("open sst");
+        metadatas.push(sst.metadata().expect("sst metadata"));
+        cursors.push(Box::new(sst.cursor()));
+    }
+    let compaction = Compaction::from_inputs(options, metadatas, 0/*XXX*/);
+    let mut cursor = MergingCursor::new(cursors).expect("compaction");
+    losslessly_compact(cursor, compaction, output_prefix).expect("compaction");
 }

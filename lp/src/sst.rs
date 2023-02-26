@@ -124,8 +124,6 @@ pub struct SSTMetadata {
     pub biggest_timestamp: u64,
     #[prototk(6, uint64)]
     pub file_size: u64,
-    #[prototk(7, bytes)]
-    pub file_path: PathBuf,
 }
 
 impl SSTMetadata {
@@ -174,15 +172,14 @@ impl Default for SSTMetadata {
             smallest_timestamp: 0,
             biggest_timestamp: u64::max_value(),
             file_size: 0,
-            file_path: PathBuf::default(),
         }
     }
 }
 
 impl Debug for SSTMetadata {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "SSTMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {}, file_path: \"{}\" }}",
-            self.setsum(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size, self.file_path.to_string_lossy())
+        write!(fmt, "SSTMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
+            self.setsum(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
     }
 }
 
@@ -318,7 +315,6 @@ impl SST {
             smallest_timestamp: self.final_block.smallest_timestamp,
             biggest_timestamp: self.final_block.biggest_timestamp,
             file_size: self.file_size,
-            file_path: self.handle.path()?,
         })
     }
 

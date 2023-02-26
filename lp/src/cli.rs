@@ -37,6 +37,6 @@ pub fn sst_args<'a>(app: App<'a, 'a>, index: u64) -> App<'a, 'a> {
     app
 }
 
-pub fn parse_ssts<'a>(args: &'a ArgMatches) -> Vec<&'a str> {
+pub fn parse_sst_args<'a>(args: &'a ArgMatches) -> Vec<&'a str> {
     args.values_of("ssts").unwrap().collect()
 }

@@ -367,15 +367,6 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
-    pub fn from_paths<P: AsRef<Path>>(options: CompactionOptions, inputs: Vec<P>, smallest_snapshot: u64) -> Result<Self, Error> {
-        let mut metadatas = Vec::new();
-        for input in inputs {
-            let sst = SST::new(input)?;
-            metadatas.push(sst.metadata()?);
-        }
-        Ok(Self::from_inputs(options, metadatas, smallest_snapshot))
-    }
-
     pub fn from_inputs(options: CompactionOptions, inputs: Vec<SSTMetadata>, smallest_snapshot: u64) -> Self {
         Self {
             options,
@@ -463,12 +454,7 @@ impl Compaction {
 
 //////////////////////////////////////// losslessly_compact ////////////////////////////////////////
 
-pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), Error> {
-    let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
-    for sst in compaction.inputs.iter() {
-        ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));
-    }
-    let mut cursor = MergingCursor::new(ssts)?;
+pub fn losslessly_compact<C: Cursor>(mut cursor: C, compaction: Compaction, prefix: String) -> Result<(), Error> {
     cursor.seek_to_first()?;
     let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), compaction.options.sst_options.clone());
     loop {
@@ -487,12 +473,7 @@ pub fn losslessly_compact(compaction: Compaction, prefix: String) -> Result<(), 
 
 //////////////////////////////////////////// gc_compact ////////////////////////////////////////////
 
-pub fn gc_compact(compaction: Compaction, is_base_level_for_key: &dyn Fn(&[u8]) -> bool, prefix: String) -> Result<(), Error> {
-    let mut ssts: Vec<Box<dyn Cursor>> = Vec::new();
-    for sst in compaction.inputs.iter() {
-        ssts.push(Box::new(SST::new(&sst.file_path)?.cursor()));
-    }
-    let mut cursor = MergingCursor::new(ssts)?;
+pub fn gc_compact<C: Cursor>(mut cursor: C, compaction: Compaction, is_base_level_for_key: &dyn Fn(&[u8]) -> bool, prefix: String) -> Result<(), Error> {
     cursor.seek_to_first()?;
     let mut sstmb = SSTMultiBuilder::new(prefix, ".sst".to_string(), compaction.options.sst_options.clone());
     let mut dropped = Setsum::default();

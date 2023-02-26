@@ -17,9 +17,9 @@ fn main() {
         let mut first = true;
         for input in compaction.inputs() {
             if first {
-                print!("{}", input.file_path.to_string_lossy());
+                print!("{}", input.setsum());
             } else {
-                print!(" {}", input.file_path.to_string_lossy());
+                print!(" {}", input.setsum());
             }
             first = false;
         }

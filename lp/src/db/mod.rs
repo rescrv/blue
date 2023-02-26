@@ -371,7 +371,9 @@ impl DB {
                 });
             }
         }
-        Ok(Compaction::from_inputs(options, setsums, smallest_snapshot))
+        let compaction = Compaction::from_inputs(options.clone(), setsums, smallest_snapshot);
+        compaction.setup(options, &self.root)?;
+        Ok(compaction)
     }
 
     fn get_state(&self) -> Arc<State> {
