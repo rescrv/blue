@@ -2,18 +2,22 @@ use std::cmp::{max, min, Ordering, Reverse};
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
+use std::fs::{create_dir, hard_link, read_dir, read_to_string};
 use std::ops::Bound;
 use std::path::Path;
 
 use prototk::field_types::*;
 
+use util::time::now;
+
 use zerror::{ErrorCore, Z};
 
+use super::super::file_manager::open_without_manager;
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
 use super::super::setsum::Setsum;
 use super::super::sst::{SST, SSTMetadata, SSTMultiBuilder};
-use super::super::{compare_bytes, Builder, Cursor, Error};
+use super::super::{compare_bytes, Builder, Cursor, Error, FromIO};
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 
@@ -408,6 +412,52 @@ impl Compaction {
         }
         stats.ratio = (lower as f64) / (upper as f64);
         stats
+    }
+
+    pub fn setup<P: AsRef<Path>>(&self, options: CompactionOptions, root: P) -> Result<Self, Error> {
+        let compaction_time = now::millis();
+        let compaction_base = format!("compaction:{}", compaction_time);
+        let compaction_root = root.as_ref().to_path_buf().join(&compaction_base);
+        create_dir(&compaction_root)
+            .from_io()
+            .with_variable("root", compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("inputs"))
+            .from_io()
+            .with_variable("root", compaction_root.to_string_lossy())?;
+        create_dir(&compaction_root.join("outputs"))
+            .from_io()
+            .with_variable("root", compaction_root.to_string_lossy())?;
+        std::fs::write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot));
+        for sst in self.inputs.iter() {
+            let target = &root.as_ref().join("sst").join(sst.setsum() + ".sst");
+            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
+            hard_link(target, link_name)
+                .from_io()
+                .with_variable("target", target.to_string_lossy())
+                .with_variable("link_name", link_name.to_string_lossy())?;
+        }
+        Self::load(options, compaction_root)
+    }
+
+    pub fn load<P: AsRef<Path>>(options: CompactionOptions, compaction_root: P) -> Result<Self, Error> {
+        let mut inputs = Vec::new();
+        for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
+            let path = input.from_io()?.path();
+            let file = open_without_manager(path)?;
+            let sst = SST::from_file_handle(file)?;
+            inputs.push(sst.metadata()?);
+        }
+        let snapshot = read_to_string(compaction_root.as_ref().to_path_buf().join("SNAPSHOT")).from_io()?;
+        let smallest_snapshot = snapshot.parse::<u64>().map_err(|e| Error::Corruption {
+            core: ErrorCore::default(),
+            context: "could not parse snapshot file".to_string(),
+        }
+        .with_variable("root", compaction_root.as_ref().to_string_lossy()))?;
+        Ok(Self {
+            inputs,
+            options,
+            smallest_snapshot,
+        })
     }
 }
 

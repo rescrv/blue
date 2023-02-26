@@ -145,13 +145,15 @@ pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, Err
 
 ///////////////////////////////////////////// DBOptions ////////////////////////////////////////////
 
+#[derive(Clone, Debug)]
 pub struct DBOptions {
+    // TODO(rescrv): Unify options feel and make these public.
     create_if_missing: bool,
     error_if_exists: bool,
     paranoid_checks: bool,
     wait_for_lock: bool,
     max_open_files: usize,
-    compaction: CompactionOptions,
+    pub compaction: CompactionOptions,
 }
 
 impl Default for DBOptions {
@@ -356,22 +358,20 @@ impl DB {
         Ok(compactions)
     }
 
-    pub fn setup_compaction(&self, smallest_snapshot: u64, setsums: &[&str]) -> Result<String, Error> {
-        let mut ssts = Vec::new();
+    pub fn compaction_setup(&self, options: CompactionOptions, inputs: &[&str], smallest_snapshot: u64) -> Result<Compaction, Error> {
         let state = self.get_state();
-        for setsum in setsums.iter() {
-            let sst = state.get_metadata_by_setsum(setsum);
-            if sst.is_none() {
+        let mut setsums = Vec::new();
+        for input in inputs.into_iter() {
+            if let Some(metadata) = state.get_metadata_by_setsum(input) {
+                setsums.push(metadata);
+            } else {
                 return Err(Error::SSTNotFound {
                     core: ErrorCore::default(),
-                    setsum: setsum.to_string(),
+                    setsum: input.to_string(),
                 });
             }
-            ssts.push(sst.unwrap());
         }
-        //let compaction = Compaction::from_inputs(self.options.compaction.clone(), smallest_snapshot, ssts);
-        //Ok(compaction.setup(&self.root)?)
-        todo!();
+        Ok(Compaction::from_inputs(options, setsums, smallest_snapshot))
     }
 
     fn get_state(&self) -> Arc<State> {
