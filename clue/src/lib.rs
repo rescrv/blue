@@ -14,8 +14,6 @@ use prototk::field_types::*;
 use prototk::{FieldHelper, FieldType};
 use prototk::Builder as ProtoTKBuilder;
 
-use zerror::ZError;
-
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
 pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
 pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 5;
@@ -35,13 +33,6 @@ pub struct Trace {
 }
 
 impl Trace {
-    pub fn from_zerr<E: Debug + Display>(label: &str, zerr: &ZError<E>) -> Self {
-        let mut trace = Trace::new(label);
-        trace.proto.append(&zerr.to_proto());
-        trace.human += &format!("from zerror:\n{}\n", zerr);
-        trace
-    }
-
     pub fn new(label: &str) -> Self {
         click!("clue.trace.instantiations");
         // If the id is None we won't record in the finish.
