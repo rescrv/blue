@@ -262,12 +262,39 @@ fn vector_integers() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
+/////////////////////////////////////////// VectorOfBytes //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, PartialEq)]
+struct VectorOfBytes {
+    #[prototk(15, bytes)]
+    value: Vec<u8>,
+}
+
+#[test]
+fn vector_of_bytes() {
+    let vb = VectorOfBytes {
+        value: vec![0, 1, 2, 3, 4, 5, 6, 7],
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&vb).to_vec();
+    let exp: &[u8] = &[122, 8, 0, 1, 2, 3, 4, 5, 6, 7];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(vb, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
 ///////////////////////////////////////// VectorOfMesssages ////////////////////////////////////////
 
-/*
 #[derive(Clone, Debug, Default, Message, PartialEq)]
 struct VectorOfMessages {
-    #[prototk(15, repeated<message>)]
+    #[prototk(15, message)]
     messages: Vec<NamedStruct>,
 }
 
@@ -302,7 +329,6 @@ fn vector_messages() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
-*/
 
 ////////////////////////////////////////////// String //////////////////////////////////////////////
 
