@@ -22,14 +22,18 @@ pub struct int32(i32);
 impl<'a> FieldType<'a> for int32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = i32;
+    type Native = i32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, int32> for i32 {
+impl<'a> FieldPackHelper<'a, int32> for i32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).pack_sz()
@@ -39,13 +43,19 @@ impl<'a> FieldHelper<'a, int32> for i32 {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: int32, out: &'b mut Self) where 'a: 'b, {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, int32> for i32 {
+    type Field = i32;
+
+    fn merge_field(&mut self, proto: int32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: int32) -> Self {
-        proto.0
+impl From<int32> for i32 {
+    fn from(f: int32) -> Self {
+        f.0
     }
 }
 
@@ -67,14 +77,18 @@ pub struct int64(i64);
 impl<'a> FieldType<'a> for int64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = i64;
+    type Native = i64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, int64> for i64 {
+impl<'a> FieldPackHelper<'a, int64> for i64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).pack_sz()
@@ -84,13 +98,19 @@ impl<'a> FieldHelper<'a, int64> for i64 {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: int64, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, int64> for i64 {
+    type Field = i64;
+
+    fn merge_field(&mut self, proto: int64) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: int64) -> Self {
-        proto.0
+impl From<int64> for i64 {
+    fn from(f: int64) -> i64 {
+        f.0
     }
 }
 
@@ -112,14 +132,18 @@ pub struct uint32(u32);
 impl<'a> FieldType<'a> for uint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = u32;
+    type Native = u32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, uint32> for u32 {
+impl<'a> FieldPackHelper<'a, uint32> for u32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).pack_sz()
@@ -129,13 +153,19 @@ impl<'a> FieldHelper<'a, uint32> for u32 {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: uint32, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, uint32> for u32 {
+    type Field = u32;
+
+    fn merge_field(&mut self, proto: uint32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: uint32) -> Self {
-        proto.0
+impl From<uint32> for u32 {
+    fn from(f: uint32) -> u32 {
+        f.0
     }
 }
 
@@ -157,14 +187,18 @@ pub struct uint64(u64);
 impl<'a> FieldType<'a> for uint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = u64;
+    type Native = u64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, uint64> for u64 {
+impl<'a> FieldPackHelper<'a, uint64> for u64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).pack_sz()
@@ -174,13 +208,19 @@ impl<'a> FieldHelper<'a, uint64> for u64 {
         let v: v64 = v64::from(*field);
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: uint64, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, uint64> for u64 {
+    type Field = u64;
+
+    fn merge_field(&mut self, proto: uint64) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: uint64) -> Self {
-        proto.0
+impl From<uint64> for u64 {
+    fn from(f: uint64) -> u64 {
+        f.0
     }
 }
 
@@ -202,14 +242,18 @@ pub struct sint32(i32);
 impl<'a> FieldType<'a> for sint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = i32;
+    type Native = i32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, sint32> for i32 {
+impl<'a> FieldPackHelper<'a, sint32> for i32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(zigzag(*field as i64));
         stack_pack(tag).pack(v).pack_sz()
@@ -219,13 +263,19 @@ impl<'a> FieldHelper<'a, sint32> for i32 {
         let v: v64 = v64::from(zigzag(*field as i64));
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: sint32, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, sint32> for i32 {
+    type Field = i32;
+
+    fn merge_field(&mut self, proto: sint32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: sint32) -> Self {
-        proto.0
+impl From<sint32> for i32 {
+    fn from(f: sint32) -> i32 {
+        f.0
     }
 }
 
@@ -253,14 +303,18 @@ pub struct sint64(i64);
 impl<'a> FieldType<'a> for sint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = i64;
+    type Native = i64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, sint64> for i64 {
+impl<'a> FieldPackHelper<'a, sint64> for i64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(zigzag(*field));
         stack_pack(tag).pack(v).pack_sz()
@@ -270,13 +324,19 @@ impl<'a> FieldHelper<'a, sint64> for i64 {
         let v: v64 = v64::from(zigzag(*field));
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: sint64, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, sint64> for i64 {
+    type Field = i64;
+
+    fn merge_field(&mut self, proto: sint64) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: sint64) -> Self {
-        proto.0
+impl From<sint64> for i64 {
+    fn from(f: sint64) -> i64 {
+        f.0
     }
 }
 
@@ -298,14 +358,18 @@ pub struct fixed32(u32);
 impl<'a> FieldType<'a> for fixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
 
-    type NativeType = u32;
+    type Native = u32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, fixed32> for u32 {
+impl<'a> FieldPackHelper<'a, fixed32> for u32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -313,13 +377,19 @@ impl<'a> FieldHelper<'a, fixed32> for u32 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: fixed32, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, fixed32> for u32 {
+    type Field = u32;
+
+    fn merge_field(&mut self, proto: fixed32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: fixed32) -> Self {
-        proto.0
+impl From<fixed32> for u32 {
+    fn from(f: fixed32) -> u32 {
+        f.0
     }
 }
 
@@ -340,14 +410,18 @@ pub struct fixed64(u64);
 impl<'a> FieldType<'a> for fixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
-    type NativeType = u64;
+    type Native = u64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, fixed64> for u64 {
+impl<'a> FieldPackHelper<'a, fixed64> for u64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -355,13 +429,19 @@ impl<'a> FieldHelper<'a, fixed64> for u64 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: fixed64, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, fixed64> for u64 {
+    type Field = u64;
+
+    fn merge_field(&mut self, proto: fixed64) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: fixed64) -> Self {
-        proto.0
+impl From<fixed64> for u64 {
+    fn from(f: fixed64) -> u64 {
+        f.0
     }
 }
 
@@ -382,14 +462,18 @@ pub struct sfixed32(i32);
 impl<'a> FieldType<'a> for sfixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
 
-    type NativeType = i32;
+    type Native = i32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, sfixed32> for i32 {
+impl<'a> FieldPackHelper<'a, sfixed32> for i32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -397,13 +481,19 @@ impl<'a> FieldHelper<'a, sfixed32> for i32 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: sfixed32, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, sfixed32> for i32 {
+    type Field = i32;
+
+    fn merge_field(&mut self, proto: sfixed32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: sfixed32) -> Self {
-        proto.0
+impl From<sfixed32> for i32 {
+    fn from(f: sfixed32) -> i32 {
+        f.0
     }
 }
 
@@ -424,14 +514,18 @@ pub struct sfixed64(i64);
 impl<'a> FieldType<'a> for sfixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
-    type NativeType = i64;
+    type Native = i64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, sfixed64> for i64 {
+impl<'a> FieldPackHelper<'a, sfixed64> for i64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -439,13 +533,19 @@ impl<'a> FieldHelper<'a, sfixed64> for i64 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: sfixed64, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, sfixed64> for i64 {
+    type Field = i64;
+
+    fn merge_field(&mut self, proto: sfixed64) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: sfixed64) -> Self {
-        proto.0
+impl From<sfixed64> for i64 {
+    fn from(f: sfixed64) -> i64 {
+        f.0
     }
 }
 
@@ -466,14 +566,18 @@ pub struct float(f32);
 impl<'a> FieldType<'a> for float {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
-    type NativeType = f32;
+    type Native = f32;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, float> for f32 {
+impl<'a> FieldPackHelper<'a, float> for f32 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -481,13 +585,19 @@ impl<'a> FieldHelper<'a, float> for f32 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: float, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, float> for f32 {
+    type Field = f32;
+
+    fn merge_field(&mut self, proto: float) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: float) -> Self {
-        proto.0
+impl From<float> for f32 {
+    fn from(f: float) -> f32 {
+        f.0
     }
 }
 
@@ -508,14 +618,18 @@ pub struct double(f64);
 impl<'a> FieldType<'a> for double {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
-    type NativeType = f64;
+    type Native = f64;
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, double> for f64 {
+impl<'a> FieldPackHelper<'a, double> for f64 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -523,13 +637,19 @@ impl<'a> FieldHelper<'a, double> for f64 {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: double, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, double> for f64 {
+    type Field = f64;
+
+    fn merge_field(&mut self, proto: double) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: double) -> Self {
-        proto.0
+impl From<double> for f64 {
+    fn from(f: double) -> f64 {
+        f.0
     }
 }
 
@@ -550,14 +670,18 @@ pub struct Bool(bool);
 impl<'a> FieldType<'a> for Bool {
     const WIRE_TYPE: WireType = WireType::Varint;
 
-    type NativeType = bool;
+    type Native = bool;
 
-    fn from_native(b: Self::NativeType) -> Self {
+    fn from_native(b: Self::Native) -> Self {
         Self(b)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, Bool> for bool {
+impl<'a> FieldPackHelper<'a, Bool> for bool {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let v: v64 = v64::from(if *field { 1 } else { 0 });
         stack_pack(tag).pack(v).pack_sz()
@@ -567,13 +691,19 @@ impl<'a> FieldHelper<'a, Bool> for bool {
         let v: v64 = v64::from(if *field { 1 } else { 0 });
         stack_pack(tag).pack(v).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: Bool, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, Bool> for bool {
+    type Field = bool;
+
+    fn merge_field(&mut self, proto: Bool) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: Bool) -> Self {
-        proto.0
+impl From<Bool> for bool {
+    fn from(f: Bool) -> bool {
+        f.0
     }
 }
 
@@ -596,14 +726,18 @@ pub struct bytes<'a>(&'a [u8]);
 impl<'a> FieldType<'a> for bytes<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
-    type NativeType = &'a [u8];
+    type Native = &'a [u8];
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
     }
+
+    fn into_native(self) -> Self::Native {
+        self.0
+    }
 }
 
-impl<'a> FieldHelper<'a, bytes<'a>> for &'a [u8] {
+impl<'a> FieldPackHelper<'a, bytes<'a>> for &'a [u8] {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         stack_pack(tag).pack(field).pack_sz()
     }
@@ -611,17 +745,23 @@ impl<'a> FieldHelper<'a, bytes<'a>> for &'a [u8] {
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
-    }
+impl<'a> FieldUnpackHelper<'a, bytes<'a>> for &'a [u8] {
+    type Field = &'a [u8];
 
-    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
-        proto.0
+    fn merge_field(&mut self, proto: bytes<'a>) {
+        *self = proto.into();
     }
 }
 
-impl<'a> FieldHelper<'a, bytes<'a>> for Vec<u8> {
+impl<'a> From<bytes<'a>> for &'a [u8] {
+    fn from(f: bytes<'a>) -> &'a [u8] {
+        f.0
+    }
+}
+
+impl<'a> FieldPackHelper<'a, bytes<'a>> for Vec<u8> {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field;
         stack_pack(tag).pack(field).pack_sz()
@@ -631,17 +771,23 @@ impl<'a> FieldHelper<'a, bytes<'a>> for Vec<u8> {
         let field: &[u8] = field;
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0.to_vec();
-    }
+impl<'a> FieldUnpackHelper<'a, bytes<'a>> for Vec<u8> {
+    type Field = Vec<u8>;
 
-    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
-        proto.0.to_vec()
+    fn merge_field(&mut self, proto: bytes<'a>) {
+        *self = proto.into();
     }
 }
 
-impl<'a> FieldHelper<'a, bytes<'a>> for Buffer {
+impl<'a> From<bytes<'a>> for Vec<u8> {
+    fn from(f: bytes<'a>) -> Vec<u8> {
+        f.0.to_vec()
+    }
+}
+
+impl<'a> FieldPackHelper<'a, bytes<'a>> for Buffer {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let b: &[u8] = field.as_bytes();
         stack_pack(tag).pack(b).pack_sz()
@@ -651,17 +797,23 @@ impl<'a> FieldHelper<'a, bytes<'a>> for Buffer {
         let b: &[u8] = field.as_bytes();
         stack_pack(tag).pack(b).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = Buffer::from(proto.0);
-    }
+impl<'a> FieldUnpackHelper<'a, bytes<'a>> for Buffer {
+    type Field = Buffer;
 
-    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
-        Buffer::from(proto.0)
+    fn merge_field(&mut self, proto: bytes<'a>) {
+        *self = proto.into();
     }
 }
 
-impl<'a> FieldHelper<'a, bytes<'a>> for PathBuf {
+impl<'a> From<bytes<'a>> for Buffer {
+    fn from(f: bytes<'a>) -> Buffer {
+        Buffer::from(f.0)
+    }
+}
+
+impl<'a> FieldPackHelper<'a, bytes<'a>> for PathBuf {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).pack_sz()
@@ -671,13 +823,19 @@ impl<'a> FieldHelper<'a, bytes<'a>> for PathBuf {
         let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: bytes<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = PathBuf::from(OsStr::from_bytes(proto.0));
+impl<'a> FieldUnpackHelper<'a, bytes<'a>> for PathBuf {
+    type Field = PathBuf;
+
+    fn merge_field(&mut self, proto: bytes<'a>) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: bytes<'a>) -> Self {
-        PathBuf::from(OsStr::from_bytes(proto.0))
+impl<'a> From<bytes<'a>> for PathBuf {
+    fn from(f: bytes<'a>) -> PathBuf {
+        PathBuf::from(OsStr::from_bytes(f.0))
     }
 }
 
@@ -707,14 +865,18 @@ pub struct bytes32([u8; 32]);
 impl<'a> FieldType<'a> for bytes32 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
-    type NativeType = [u8; 32];
+    type Native = [u8; 32];
 
-    fn from_native(x: Self::NativeType) -> Self {
+    fn from_native(x: Self::Native) -> Self {
         Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
     }
 }
 
-impl<'a> FieldHelper<'a, bytes32> for [u8; 32] {
+impl<'a> FieldPackHelper<'a, bytes32> for [u8; 32] {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let b: &[u8] = &*field;
         stack_pack(tag).pack(b).pack_sz()
@@ -724,13 +886,19 @@ impl<'a> FieldHelper<'a, bytes32> for [u8; 32] {
         let b: &[u8] = &*field;
         stack_pack(tag).pack(b).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: bytes32, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
+impl<'a> FieldUnpackHelper<'a, bytes32> for [u8; 32] {
+    type Field = [u8; 32];
+
+    fn merge_field(&mut self, proto: bytes32) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: bytes32) -> Self {
-        proto.0
+impl From<bytes32> for [u8; 32] {
+    fn from(f: bytes32) -> [u8; 32] {
+        f.0
     }
 }
 
@@ -776,14 +944,18 @@ pub struct string<'a>(&'a str);
 impl<'a> FieldType<'a> for string<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
-    type NativeType = &'a str;
+    type Native = &'a str;
 
-    fn from_native(s: Self::NativeType) -> Self {
+    fn from_native(s: Self::Native) -> Self {
         Self(s)
     }
+
+    fn into_native(self) -> Self::Native {
+        self.0
+    }
 }
 
-impl<'a> FieldHelper<'a, string<'a>> for &'a str {
+impl<'a> FieldPackHelper<'a, string<'a>> for &'a str {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field.as_bytes();
         stack_pack(tag).pack(field).pack_sz()
@@ -793,17 +965,23 @@ impl<'a> FieldHelper<'a, string<'a>> for &'a str {
         let field: &[u8] = field.as_bytes();
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: string<'a>, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
-    }
+impl<'a> FieldUnpackHelper<'a, string<'a>> for &'a str {
+    type Field = &'a str;
 
-    fn prototk_convert_variant(proto: string<'a>) -> Self {
-        proto.0
+    fn merge_field(&mut self, proto: string<'a>) {
+        *self = proto.into();
     }
 }
 
-impl<'a> FieldHelper<'a, string<'a>> for String {
+impl<'a> From<string<'a>> for &'a str {
+    fn from(f: string<'a>) -> &'a str {
+        f.0
+    }
+}
+
+impl<'a> FieldPackHelper<'a, string<'a>> for String {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field.as_bytes();
         stack_pack(tag).pack(field).pack_sz()
@@ -813,17 +991,23 @@ impl<'a> FieldHelper<'a, string<'a>> for String {
         let field: &[u8] = field.as_bytes();
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: string, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0.to_owned();
-    }
+impl<'a> FieldUnpackHelper<'a, string<'a>> for String {
+    type Field = String;
 
-    fn prototk_convert_variant(proto: string) -> Self {
-        proto.0.to_owned()
+    fn merge_field(&mut self, proto: string<'a>) {
+        *self = proto.into();
     }
 }
 
-impl<'a> FieldHelper<'a, string<'a>> for PathBuf {
+impl<'a> From<string<'a>> for String {
+    fn from(f: string<'a>) -> String {
+        f.0.to_owned()
+    }
+}
+
+impl<'a> FieldPackHelper<'a, string<'a>> for PathBuf {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).pack_sz()
@@ -833,13 +1017,19 @@ impl<'a> FieldHelper<'a, string<'a>> for PathBuf {
         let field: &[u8] = field.as_os_str().as_bytes();
         stack_pack(tag).pack(field).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: string, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0.into();
+impl<'a> FieldUnpackHelper<'a, string<'a>> for PathBuf {
+    type Field = PathBuf;
+
+    fn merge_field(&mut self, proto: string<'a>) {
+        *self = proto.into();
     }
+}
 
-    fn prototk_convert_variant(proto: string) -> Self {
-        proto.0.into()
+impl<'a> From<string<'a>> for PathBuf {
+    fn from(f: string<'a>) -> PathBuf {
+        f.0.into()
     }
 }
 
@@ -871,25 +1061,29 @@ impl<'a> Unpackable<'a> for string<'a> {
 ////////////////////////////////////////////// message /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct message<M>(M);
+pub struct message<'a, M: Message<'a> + 'a>(u32, M, std::marker::PhantomData<&'a ()>);
 
-impl<'a, M> FieldType<'a> for message<M>
+impl<'a, M> FieldType<'a> for message<'a, M>
 where
-    M: Message<'a>,
+    M: Message<'a> + 'a,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
-    type NativeType = M;
+    type Native = M;
 
     fn from_native(msg: M) -> Self {
-        Self(msg)
+        Self(0, msg, std::marker::PhantomData)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.1
     }
 }
 
-impl<'a, M> FieldHelper<'a, message<M>> for M
+impl<'a, M> FieldPackHelper<'a, message<'a, M>> for M
 where
-    M: Message<'a>,
+    M: Message<'a> + 'a,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
@@ -899,19 +1093,23 @@ where
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         stack_pack(tag).pack(stack_pack(field).length_prefixed()).into_slice(out);
     }
+}
 
-    fn prototk_convert_field<'b>(proto: message<M>, out: &'b mut Self) where 'a: 'b {
-        *out = proto.0;
-    }
+impl<'a, M> FieldUnpackHelper<'a, message<'a, M>> for M
+where
+    M: Message<'a> + Unpackable<'a> + 'a,
+    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+{
+    type Field = M;
 
-    fn prototk_convert_variant(proto: message<M>) -> Self {
-        proto.0
+    fn merge_field(&mut self, proto: message<'a, M>) {
+        *self = proto.1;
     }
 }
 
-impl<'a, M> Unpackable<'a> for message<M>
+impl<'a, M> Unpackable<'a> for message<'a, M>
 where
-    M: Message<'a>,
+    M: Message<'a> + 'a,
     <M as Unpackable<'a>>::Error: From<buffertk::Error>,
 {
     type Error = M::Error;
@@ -939,7 +1137,7 @@ where
         let (m, empty): (M, &'a [u8]) = <M as Unpackable<'a>>::unpack(buf)?;
         // TODO(rescrv): assert is nasty
         assert_eq!(0, empty.len());
-        Ok((Self(m), rem))
+        Ok((Self(0, m, std::marker::PhantomData), rem))
     }
 }
 
@@ -952,10 +1150,11 @@ mod tests {
     use crate::field_types::*;
 
     // expect is the body of the field, including length prefix if necessary.
-    fn helper_test<'a, T, H>(value: H, expect: &'a [u8])
+    fn helper_test<'a, T, H>(value: H::Field, expect: &'a [u8])
     where
         T: Clone + FieldType<'a>,
-        H: Debug + Default + Eq + FieldHelper<'a, T>,
+        H: FieldPackHelper<'a, T> + FieldUnpackHelper<'a, T, Field=H>,
+        H::Field: Debug + Default + Eq + From<T>,
     {
         // tag
         let tag = Tag {
@@ -963,11 +1162,11 @@ mod tests {
             wire_type: T::WIRE_TYPE,
         };
         // pack_sz
-        assert_eq!(1 + expect.len(), <H as FieldHelper<'a, T>>::prototk_pack_sz(&tag, &value));
+        assert_eq!(1 + expect.len(), <H as FieldPackHelper<'a, T>>::prototk_pack_sz(&tag, &value));
         // pack
         let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
         output.resize(1 + expect.len(), 0);
-        <H as FieldHelper<'a, T>>::prototk_pack(&tag, &value, &mut output);
+        <H as FieldPackHelper<'a, T>>::prototk_pack(&tag, &value, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
         let mut up = Unpacker::new(expect);
@@ -975,11 +1174,9 @@ mod tests {
             Ok(x) => x,
             Err(_) => { panic!("up.unpack() failed"); }
         };
-        let mut field: H = H::default();
-        FieldHelper::<T>::prototk_convert_field(unpacked.clone(), &mut field);
+        let mut field = H::Field::default();
+        field.merge_field(unpacked.clone());
         assert_eq!(value, field);
-        let variant: H = FieldHelper::<'a, T>::prototk_convert_variant(unpacked);
-        assert_eq!(value, variant);
     }
 
     #[test]
@@ -1075,11 +1272,11 @@ mod tests {
             wire_type: float::WIRE_TYPE,
         };
         // pack_sz
-        assert_eq!(1 + expect.len(), FieldHelper::<float>::prototk_pack_sz(&tag, &value));
+        assert_eq!(1 + expect.len(), FieldPackHelper::<float>::prototk_pack_sz(&tag, &value));
         // pack
         let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
         output.resize(1 + expect.len(), 0);
-        FieldHelper::<float>::prototk_pack(&tag, &value, &mut output);
+        FieldPackHelper::<float>::prototk_pack(&tag, &value, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
         let mut up = Unpacker::new(expect);
@@ -1088,10 +1285,8 @@ mod tests {
             Err(_) => { panic!("up.unpack() failed"); }
         };
         let mut field: f32 = f32::default();
-        FieldHelper::<float>::prototk_convert_field(unpacked.clone(), &mut field);
+        field.merge_field(unpacked.clone());
         assert!(field * 0.9999 < value && field * 1.0001 > value);
-        let variant: f32 = FieldHelper::<float>::prototk_convert_variant(unpacked);
-        assert!(variant * 0.9999 < value && variant * 1.0001 > value);
     }
 
     #[test]
@@ -1105,11 +1300,11 @@ mod tests {
             wire_type: double::WIRE_TYPE,
         };
         // pack_sz
-        assert_eq!(1 + expect.len(), FieldHelper::<double>::prototk_pack_sz(&tag, &value));
+        assert_eq!(1 + expect.len(), FieldPackHelper::<double>::prototk_pack_sz(&tag, &value));
         // pack
         let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
         output.resize(1 + expect.len(), 0);
-        FieldHelper::<double>::prototk_pack(&tag, &value, &mut output);
+        FieldPackHelper::<double>::prototk_pack(&tag, &value, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
         let mut up = Unpacker::new(expect);
@@ -1118,10 +1313,8 @@ mod tests {
             Err(_) => { panic!("up.unpack() failed"); }
         };
         let mut field: f64 = f64::default();
-        FieldHelper::<double>::prototk_convert_field(unpacked.clone(), &mut field);
+        field.merge_field(unpacked.clone());
         assert!(field * 0.9999 < value && field * 1.0001 > value);
-        let variant: f64 = FieldHelper::<double>::prototk_convert_variant(unpacked);
-        assert!(variant * 0.9999 < value && variant * 1.0001 > value);
     }
 
     #[test]

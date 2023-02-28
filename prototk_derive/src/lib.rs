@@ -76,19 +76,19 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics buffertk::Packable for #ty_name #ty_generics #where_clause {
             fn pack_sz(&self) -> usize {
                 use buffertk::v64;
-                use prototk::{FieldHelper, FieldType, Message};
+                use prototk::{FieldPackHelper, FieldType, Message};
                 #pack_reqd_bytes
             }
 
             fn pack(&self, buf: &mut [u8]) {
                 use buffertk::v64;
-                use prototk::{FieldHelper, FieldType, Message};
+                use prototk::{FieldPackHelper, FieldType, Message};
                 #pack_into_slice
             }
 
             fn stream<W: std::io::Write>(&self, writer: &mut W) -> std::result::Result<usize, std::io::Error> {
                 use buffertk::v64;
-                use prototk::{FieldHelper, FieldType, Message};
+                use prototk::{FieldPackHelper, FieldType, Message};
                 #message_stream
             }
         }
@@ -101,7 +101,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     'b: #lifetime,
             {
                 use buffertk::v64;
-                use prototk::{FieldHelper, FieldType, Message};
+                use prototk::{FieldUnpackHelper, FieldType, Message};
                 #unpack
             }
         }
@@ -576,7 +576,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote_spanned! { field.span() =>
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
-                FieldHelper::prototk_convert_field(tmp, &mut ret.#field_ident);
+                ret.#field_ident.merge_field(tmp);
             }
         }
     }
@@ -609,7 +609,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote_spanned! { variant.span() =>
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
-                Ok((#ctor(FieldHelper::prototk_convert_variant(tmp)), up.remain()))
+                Ok((#ctor(tmp.into_native().into()), up.remain()))
             }
         }
     }

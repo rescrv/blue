@@ -251,26 +251,24 @@ impl<'a> Unpackable<'a> for Tag {
 pub trait FieldType<'a>: Unpackable<'a> {
     const WIRE_TYPE: WireType;
 
-    type NativeType;
+    type Native;
 
-    fn from_native(x: Self::NativeType) -> Self;
+    fn from_native(x: Self::Native) -> Self;
+    fn into_native(self) -> Self::Native;
 }
 
-//////////////////////////////////////////// FieldHelper ///////////////////////////////////////////
+////////////////////////////////////////// FieldPackHelper /////////////////////////////////////////
 
-pub trait FieldHelper<'a, T: FieldType<'a>> {
+pub trait FieldPackHelper<'a, T: FieldType<'a>> {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize;
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]);
-
-    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b;
-    fn prototk_convert_variant(proto: T) -> Self;
 }
 
-impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> for Vec<F> {
+impl<'a, T: FieldType<'a>, F: Default + FieldPackHelper<'a, T>> FieldPackHelper<'a, T> for Vec<F> {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         let mut bytes = 0;
         for f in field {
-            bytes += <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f);
+            bytes += <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f);
         }
         bytes
     }
@@ -278,27 +276,17 @@ impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> f
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         let mut out = out;
         for f in field {
-            let size = <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f);
-            <F as FieldHelper<'a, T>>::prototk_pack(tag, f, &mut out[..size]);
+            let size = <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f);
+            <F as FieldPackHelper<'a, T>>::prototk_pack(tag, f, &mut out[..size]);
             out = &mut out[size..];
         }
     }
-
-    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b, {
-        out.push(F::default());
-        let idx = out.len() - 1;
-        <F as FieldHelper<'a, T>>::prototk_convert_field(proto, &mut out[idx]);
-    }
-
-    fn prototk_convert_variant(proto: T) -> Self {
-        vec![<F as FieldHelper<'a, T>>::prototk_convert_variant(proto)]
-    }
 }
 
-impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> for Option<F> {
+impl<'a, T: FieldType<'a>, F: Default + FieldPackHelper<'a, T>> FieldPackHelper<'a, T> for Option<F> {
     fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
         if let Some(f) = &field {
-            <F as FieldHelper<'a, T>>::prototk_pack_sz(tag, f)
+            <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f)
         } else {
             0
         }
@@ -306,28 +294,60 @@ impl<'a, T: FieldType<'a>, F: Default + FieldHelper<'a, T>> FieldHelper<'a, T> f
 
     fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
         if let Some(f) = &field {
-            <F as FieldHelper<'a, T>>::prototk_pack(tag, f, out)
+            <F as FieldPackHelper<'a, T>>::prototk_pack(tag, f, out)
         }
     }
+}
 
-    fn prototk_convert_field<'b>(proto: T, out: &'b mut Self) where 'a: 'b, {
-        *out = Self::prototk_convert_variant(proto);
+///////////////////////////////////////// FieldUnpackHelper ////////////////////////////////////////
+
+pub trait FieldUnpackHelper<'a, T: FieldType<'a>> {
+    type Field;
+
+    fn merge_field(&mut self, proto: T);
+}
+
+impl<'a, T, F> FieldUnpackHelper<'a, T> for Vec<F>
+where
+    T: FieldType<'a> + Into<F>,
+    F: FieldUnpackHelper<'a, T>,
+{
+    type Field = F;
+
+    fn merge_field(&mut self, proto: T) {
+        self.push(proto.into());
     }
+}
 
-    fn prototk_convert_variant(proto: T) -> Self {
-        Some(<F as FieldHelper<'a, T>>::prototk_convert_variant(proto))
+impl<'a, T, F> FieldUnpackHelper<'a, T> for Option<F>
+where
+    T: FieldType<'a> + Into<F>,
+    F: FieldUnpackHelper<'a, T>,
+{
+    type Field = F;
+
+    fn merge_field(&mut self, proto: T) {
+        *self = Some(proto.into());
     }
 }
 
 //////////////////////////////////////////// FieldPacker ///////////////////////////////////////////
 
-pub struct FieldPacker<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> {
+pub struct FieldPacker<'a, 'b, T, F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
     tag: Tag,
     field_value: &'b F,
     _phantom: std::marker::PhantomData<&'a T>,
 }
 
-impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, 'b, T, F> {
+impl<'a, 'b, T, F> FieldPacker<'a, 'b, T, F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
     pub fn new(tag: Tag, field_value: &'b F, field_type: std::marker::PhantomData<&'a T>) -> Self {
         Self {
             tag,
@@ -337,13 +357,17 @@ impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> FieldPacker<'a, 'b, T, F> 
     }
 }
 
-impl<'a, 'b, T: FieldType<'a>, F: FieldHelper<'a, T>> Packable for FieldPacker<'a, 'b, T, F> {
+impl<'a, 'b, T, F> Packable for FieldPacker<'a, 'b, T, F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
     fn pack_sz(&self) -> usize {
-        FieldHelper::prototk_pack_sz(&self.tag, self.field_value)
+        FieldPackHelper::prototk_pack_sz(&self.tag, self.field_value)
     }
 
     fn pack(&self, out: &mut [u8]) {
-        FieldHelper::prototk_pack(&self.tag, self.field_value, out)
+        FieldPackHelper::prototk_pack(&self.tag, self.field_value, out)
     }
 }
 
@@ -359,10 +383,10 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::NativeType) -> &mut Self
+    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::Native) -> &mut Self
     where
         T: FieldType<'a> + 'a,
-        T::NativeType: FieldHelper<'a, T> + 'a,
+        T::Native: FieldPackHelper<'a, T> + 'a,
     {
         let tag = Tag {
             field_number: FieldNumber::must(N),

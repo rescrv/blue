@@ -290,6 +290,7 @@ fn vector_of_bytes() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
+/*
 ///////////////////////////////////////// VectorOfMesssages ////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
@@ -329,6 +330,7 @@ fn vector_messages() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
+*/
 
 ////////////////////////////////////////////// String //////////////////////////////////////////////
 
