@@ -105,6 +105,33 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 #unpack
             }
         }
+
+        impl #exp_impl_generics ::prototk::FieldPackHelper<#lifetime, ::prototk::field_types::message<#ty_name #ty_generics>> for #ty_name #ty_generics #where_clause {
+            fn field_pack_sz(&self, tag: &::prototk::Tag) -> usize {
+                use buffertk::{stack_pack, Packable};
+                use prototk::{FieldPackHelper, FieldType, Message};
+                // TODO(rescrv):  Double stack-pack is double wasteful.
+                stack_pack(tag).pack(stack_pack(self).length_prefixed()).pack_sz()
+            }
+
+            fn field_pack(&self, tag: &::prototk::Tag, out: &mut [u8]) {
+                use buffertk::{stack_pack, Packable};
+                use prototk::{FieldPackHelper, FieldType, Message};
+                stack_pack(tag).pack(stack_pack(self).length_prefixed()).into_slice(out);
+            }
+        }
+
+        impl #exp_impl_generics ::prototk::FieldUnpackHelper<#lifetime, ::prototk::field_types::message<#ty_name #ty_generics>> for #ty_name #ty_generics #where_clause {
+            fn merge_field(&mut self, proto: ::prototk::field_types::message<#ty_name #ty_generics>) {
+                *self = proto.unwrap_message();
+            }
+        }
+
+        impl #impl_generics From<::prototk::field_types::message<#ty_name #ty_generics>> for #ty_name #ty_generics #where_clause {
+            fn from(proto: ::prototk::field_types::message<#ty_name #ty_generics>) -> Self {
+                proto.unwrap_message()
+            }
+        }
     };
     gen.into()
 }
@@ -326,8 +353,20 @@ trait ProtoTKVisitor:
 
 fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream {
     if field_type.is_ident(&syn::Ident::new("message", field_type.span())) {
-        let ty = &field.ty;
         let ret = ToTokens::into_token_stream(&field_type);
+        let ty = &field.ty;
+        if let syn::Type::Path(path) = ty {
+            if path.path.segments.len() > 0 && (
+                path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
+                || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span())) {
+                let tokens = ToTokens::into_token_stream(&ty);
+                let tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
+                let tokens = &tokens[2];
+                return quote! {
+                    #ret::<#tokens>
+                }
+            }
+        }
         quote! {
             #ret::<#ty>
         }

@@ -350,10 +350,13 @@ impl<'a> Graph<'a> {
 
 //////////////////////////////////////////// Compaction ////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Message)]
 pub struct Compaction {
+    #[prototk(1, message)]
     options: CompactionOptions,
+    #[prototk(2, message)]
     inputs: Vec<SSTMetadata>,
+    #[prototk(3, uint64)]
     smallest_snapshot: u64,
 }
 

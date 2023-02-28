@@ -290,7 +290,6 @@ fn vector_of_bytes() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
-/*
 ///////////////////////////////////////// VectorOfMesssages ////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
@@ -330,8 +329,40 @@ fn vector_messages() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
-*/
 
+///////////////////////////////////////// OptionOfMesssages ////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, PartialEq)]
+struct OptionOfMessages {
+    #[prototk(15, message)]
+    messages: Option<NamedStruct>,
+}
+
+#[test]
+fn option_messages() {
+    let vm = OptionOfMessages {
+        messages: Some(
+            NamedStruct {
+                x: 42,
+                y: 3.14159,
+                z: -1,
+            },
+        ),
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
+    let exp: &[u8] = &[122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(vm, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
 ////////////////////////////////////////////// String //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]

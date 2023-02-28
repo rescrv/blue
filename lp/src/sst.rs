@@ -382,7 +382,7 @@ pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 pub const CLAMP_MIN_TARGET_FILE_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub struct SSTBuilderOptions {
     block_options: BlockBuilderOptions,
     block_compression: BlockCompression,

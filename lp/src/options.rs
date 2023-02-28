@@ -3,7 +3,7 @@ use super::TABLE_FULL_SIZE;
 
 ///////////////////////////////////////// CompactionOptions ////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub struct CompactionOptions {
     pub max_compaction_bytes: u64,
     pub sst_options: SSTBuilderOptions,

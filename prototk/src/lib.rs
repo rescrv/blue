@@ -8,7 +8,7 @@ pub mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
+use buffertk::{v64, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -248,7 +248,7 @@ impl<'a> Unpackable<'a> for Tag {
 
 ///////////////////////////////////////////// FieldType ////////////////////////////////////////////
 
-pub trait FieldType<'a>: Unpackable<'a> {
+pub trait FieldType<'a> {
     const WIRE_TYPE: WireType;
 
     type Native;
@@ -260,41 +260,49 @@ pub trait FieldType<'a>: Unpackable<'a> {
 ////////////////////////////////////////// FieldPackHelper /////////////////////////////////////////
 
 pub trait FieldPackHelper<'a, T: FieldType<'a>> {
-    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize;
-    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]);
+    fn field_pack_sz(&self, tag: &Tag) -> usize;
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]);
 }
 
-impl<'a, T: FieldType<'a>, F: Default + FieldPackHelper<'a, T>> FieldPackHelper<'a, T> for Vec<F> {
-    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
+impl<'a, T, F> FieldPackHelper<'a, T> for Vec<F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
         let mut bytes = 0;
-        for f in field {
-            bytes += <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f);
+        for f in self {
+            bytes += f.field_pack_sz(tag);
         }
         bytes
     }
 
-    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
         let mut out = out;
-        for f in field {
-            let size = <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f);
-            <F as FieldPackHelper<'a, T>>::prototk_pack(tag, f, &mut out[..size]);
+        for f in self {
+            let size = f.field_pack_sz(tag);
+            f.field_pack(tag, &mut out[..size]);
             out = &mut out[size..];
         }
     }
 }
 
-impl<'a, T: FieldType<'a>, F: Default + FieldPackHelper<'a, T>> FieldPackHelper<'a, T> for Option<F> {
-    fn prototk_pack_sz(tag: &Tag, field: &Self) -> usize {
-        if let Some(f) = &field {
-            <F as FieldPackHelper<'a, T>>::prototk_pack_sz(tag, f)
+impl<'a, T, F> FieldPackHelper<'a, T> for Option<F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        if let Some(f) = self {
+            f.field_pack_sz(tag)
         } else {
             0
         }
     }
 
-    fn prototk_pack(tag: &Tag, field: &Self, out: &mut [u8]) {
-        if let Some(f) = &field {
-            <F as FieldPackHelper<'a, T>>::prototk_pack(tag, f, out)
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        if let Some(f) = self {
+            f.field_pack(tag, out)
         }
     }
 }
@@ -302,8 +310,6 @@ impl<'a, T: FieldType<'a>, F: Default + FieldPackHelper<'a, T>> FieldPackHelper<
 ///////////////////////////////////////// FieldUnpackHelper ////////////////////////////////////////
 
 pub trait FieldUnpackHelper<'a, T: FieldType<'a>> {
-    type Field;
-
     fn merge_field(&mut self, proto: T);
 }
 
@@ -312,8 +318,6 @@ where
     T: FieldType<'a> + Into<F>,
     F: FieldUnpackHelper<'a, T>,
 {
-    type Field = F;
-
     fn merge_field(&mut self, proto: T) {
         self.push(proto.into());
     }
@@ -324,8 +328,6 @@ where
     T: FieldType<'a> + Into<F>,
     F: FieldUnpackHelper<'a, T>,
 {
-    type Field = F;
-
     fn merge_field(&mut self, proto: T) {
         *self = Some(proto.into());
     }
@@ -363,11 +365,11 @@ where
     F: FieldPackHelper<'a, T>,
 {
     fn pack_sz(&self) -> usize {
-        FieldPackHelper::prototk_pack_sz(&self.tag, self.field_value)
+        self.field_value.field_pack_sz(&self.tag)
     }
 
     fn pack(&self, out: &mut [u8]) {
-        FieldPackHelper::prototk_pack(&self.tag, self.field_value, out)
+        self.field_value.field_pack(&self.tag, out)
     }
 }
 
@@ -386,7 +388,7 @@ impl Builder {
     pub fn push<'a, T, const N: u32>(&mut self, field_value: T::Native) -> &mut Self
     where
         T: FieldType<'a> + 'a,
-        T::Native: FieldPackHelper<'a, T> + 'a,
+        T::Native: Default + FieldPackHelper<'a, T> + 'a,
     {
         let tag = Tag {
             field_number: FieldNumber::must(N),
