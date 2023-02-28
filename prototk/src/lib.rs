@@ -376,35 +376,3 @@ where
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
 pub trait Message<'a>: Default + buffertk::Packable + buffertk::Unpackable<'a> {}
-
-////////////////////////////////////////////// Builder /////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default)]
-pub struct Builder {
-    buffer: Vec<u8>,
-}
-
-impl Builder {
-    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::Native) -> &mut Self
-    where
-        T: FieldType<'a> + 'a,
-        T::Native: Default + FieldPackHelper<'a, T> + 'a,
-    {
-        let tag = Tag {
-            field_number: FieldNumber::must(N),
-            wire_type: T::WIRE_TYPE,
-        };
-        let packer = FieldPacker::new(tag, &field_value, std::marker::PhantomData::<&T>);
-        stack_pack(packer).append_to_vec(&mut self.buffer);
-        self
-    }
-
-    pub fn append(&mut self, buffer: &[u8]) -> &mut Self {
-        self.buffer.extend_from_slice(buffer);
-        self
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer
-    }
-}

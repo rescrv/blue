@@ -12,7 +12,6 @@ use util::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
 use prototk::{FieldHelper, FieldType};
-use prototk::Builder as ProtoTKBuilder;
 
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
 pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
@@ -188,6 +187,38 @@ impl Tracer {
 
     fn set_emitter(&mut self, emitter: Rc<dyn Emitter>) {
         self.emitter = Some(emitter);
+    }
+}
+
+////////////////////////////////////////// ProtoTKBuilder //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct ProtoTKBuilder {
+    buffer: Vec<u8>,
+}
+
+impl ProtoTKBuilder {
+    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::Native) -> &mut Self
+    where
+        T: FieldType<'a> + 'a,
+        T::Native: Default + FieldPackHelper<'a, T> + 'a,
+    {
+        let tag = Tag {
+            field_number: FieldNumber::must(N),
+            wire_type: T::WIRE_TYPE,
+        };
+        let packer = FieldPacker::new(tag, &field_value, std::marker::PhantomData::<&T>);
+        stack_pack(packer).append_to_vec(&mut self.buffer);
+        self
+    }
+
+    pub fn append(&mut self, buffer: &[u8]) -> &mut Self {
+        self.buffer.extend_from_slice(buffer);
+        self
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buffer
     }
 }
 
