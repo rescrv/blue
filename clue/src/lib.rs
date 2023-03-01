@@ -6,12 +6,14 @@ use std::rc::Rc;
 
 use biometrics::{click, Counter};
 
+use buffertk::stack_pack;
+
 use id::generate_id;
 
 use util::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
-use prototk::{FieldHelper, FieldType};
+use prototk::{FieldNumber, FieldPacker, FieldPackHelper, FieldType, Tag};
 
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
 pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
@@ -54,17 +56,17 @@ impl Trace {
         }
     }
 
-    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(self, field_name: &str, field_value: F::NativeType) -> Self
+    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(self, field_name: &str, field_value: F::Native) -> Self
     where
         F: FieldType<'a> + 'a,
-        F::NativeType: Clone + Display + FieldHelper<'a, F> + 'a,
+        F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
     {
         if self.id.is_none() {
             click!("clue.trace.context_not_logged");
             return self
         }
         self.with_protobuf::<F, N>(field_value.clone())
-            .with_human::<F::NativeType>(field_name, field_value)
+            .with_human::<F::Native>(field_name, field_value)
     }
 
     pub fn with_human<'a, F: Display>(mut self, field_name: &str, field_value: F) -> Self {
@@ -76,16 +78,19 @@ impl Trace {
         self
     }
 
-    pub fn with_protobuf<'a, F, const N: u32>(mut self, field_value: F::NativeType) -> Self
+    pub fn with_protobuf<'a, F, const N: u32>(mut self, field_value: F::Native) -> Self
     where
         F: FieldType<'a> + 'a,
-        F::NativeType: FieldHelper<'a, F> + 'a,
+        F::Native: FieldPackHelper<'a, F> + 'a,
     {
+        // TODO(rescrv): implement something here or remove the method.
+        /*
         if self.id.is_none() {
             click!("clue.trace.protobuf_not_logged");
             return self
         }
         self.proto.push::<F, N>(field_value);
+        */
         self
     }
 
