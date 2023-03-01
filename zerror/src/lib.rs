@@ -1,18 +1,9 @@
-#[allow(unused_imports)]
-#[macro_use]
-extern crate prototk_derive;
-
 use std::backtrace::Backtrace;
 use std::collections::btree_map::BTreeMap;
 use std::error::Error;
 use std::fmt::Debug;
 
 use biometrics::Counter;
-
-pub const VALUE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
-pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
-pub const NESTED_ERROR_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 2;
-pub const NESTED_ZERROR_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 3;
 
 ///////////////////////////////////////////////// Z ////////////////////////////////////////////////
 
