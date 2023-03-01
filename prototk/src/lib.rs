@@ -142,6 +142,10 @@ pub struct FieldNumber {
 }
 
 impl FieldNumber {
+    pub fn is_valid(field_number: u32) -> bool {
+        FieldNumber::new(field_number).is_ok()
+    }
+
     pub fn must(field_number: u32) -> FieldNumber {
         FieldNumber::new(field_number).unwrap()
     }

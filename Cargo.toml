@@ -16,7 +16,6 @@ members = [
     "prototk",
     "prototk_derive",
     "setsum",
-    "sim",
     "tiny_lfu",
     "util",
     "zerror",
