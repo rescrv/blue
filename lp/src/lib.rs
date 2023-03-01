@@ -293,8 +293,8 @@ impl Error {
 impl Z for Error {
     type Error = Self;
 
-    fn as_utf8(&self) -> String {
-        format!("{}", self) + "\n" + &self.core().as_utf8()
+    fn long_form(&self) -> String {
+        format!("{}", self) + "\n" + &self.core().long_form()
     }
 
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -335,7 +335,7 @@ impl Z for Error {
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "{}", self.as_utf8())
+        write!(fmt, "{}", self.long_form())
     }
 }
 

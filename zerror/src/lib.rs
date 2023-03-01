@@ -11,7 +11,7 @@ pub trait Z {
     type Error;
 
     // Convert an error to a string free from "="*80.
-    fn as_utf8(&self) -> String;
+    fn long_form(&self) -> String;
 
     // What caused this error.
     fn source(&self) -> Option<&(dyn Error + 'static)>;
@@ -32,12 +32,12 @@ pub trait Z {
 impl<T, E: Z<Error=E>> Z for Result<T, E> {
     type Error = Result<T, E>;
 
-    fn as_utf8(&self) -> String {
+    fn long_form(&self) -> String {
         match self {
             Ok(_) => {
-                panic!("called \"<Result<T, E> as Z>.as_utf8()\" on Ok Result");
+                panic!("called \"<Result<T, E> as Z>.long_form()\" on Ok Result");
             },
-            Err(e) => { e.as_utf8() },
+            Err(e) => { e.long_form() },
         }
     }
 
@@ -129,7 +129,7 @@ impl ErrorCore {
 impl Z for ErrorCore {
     type Error = Self;
 
-    fn as_utf8(&self) -> String {
+    fn long_form(&self) -> String {
         let mut s = String::default();
         s += &format!("{}\n\nOWNER: {}", self.short, self.email);
         for (key, val) in self.toks.iter() {
