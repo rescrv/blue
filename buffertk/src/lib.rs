@@ -164,6 +164,15 @@ where
         buf
     }
 
+    /// `to_buffer` allocates a new Buffer and packs the entire chain of `pack()` calls into it.
+    /// The return value is a `Buffer` sized to exactly the packed bytes.
+    pub fn to_buffer(&self) -> Buffer {
+        let len = self.pack_sz();
+        let mut buf = Buffer::new(len);
+        Packable::pack(self, buf.as_bytes_mut());
+        buf
+    }
+
     /// `to_vec` allocates a new vector and packs the entire chain of `pack()` calls into it.  The
     /// return value is a `Vec<u8>` sized to exactly the packed bytes.
     pub fn to_vec(&self) -> Vec<u8> {
