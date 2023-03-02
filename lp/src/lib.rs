@@ -57,8 +57,8 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
-pub const MAX_KEY_LEN: usize = 1usize << 16; /* 64KiB */
-pub const MAX_VALUE_LEN: usize = 1usize << 24; /* 16MiB */
+pub const MAX_KEY_LEN: usize = 1usize << 14; /* 16KiB */
+pub const MAX_VALUE_LEN: usize = 1usize << 15; /* 32KiB */
 
 // NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
 // but rather a size that, once exceeded, will cause the table to return a TableFull error.  The

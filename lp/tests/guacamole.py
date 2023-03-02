@@ -15,8 +15,8 @@ TEMPLATE = '''            #[test]
 '''
 
 for num_keys in (10, 10000):
-    for key_bytes in (1, 16, 256, 4096, 65536):
-        for value_bytes in (0, 1, 16, 256, 4096, 65536, 1048576, 16777216):
+    for key_bytes in (1, 16, 256, 4096, 16384):
+        for value_bytes in (0, 1, 16, 256, 4096, 32768):
             if num_keys * (key_bytes + value_bytes) >= MAX_SIZE:
                 continue
             for num_seeks in (1000,):
