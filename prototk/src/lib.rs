@@ -38,6 +38,8 @@ pub enum Error {
     WrongLength { required: usize, had: usize },
     /// StringEncoding indicates that a value is not UTF-8 friendly.
     StringEncoding,
+    /// UnknownDiscriminant indicates a variant that is not understood by this code.
+    UnknownDiscriminant { discriminant: u32 },
 }
 
 impl std::fmt::Display for Error {
@@ -69,6 +71,9 @@ impl std::fmt::Display for Error {
             }
             Error::StringEncoding => {
                 write!(f, "strings must be encoded in UTF-8")
+            }
+            Error::UnknownDiscriminant { discriminant } => {
+                write!(f, "unknown discriminant {}", discriminant)
             }
         }
     }
