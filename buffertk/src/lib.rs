@@ -245,6 +245,14 @@ impl<'a> Unpacker<'a> {
     pub fn remain(&self) -> &'a [u8] {
         self.buf
     }
+
+    pub fn advance(&mut self, by: usize) {
+        if by > self.buf.len() {
+            self.buf = &[];
+        } else {
+            self.buf = &self.buf[by..];
+        }
+    }
 }
 
 ////////////////////////////////////////// Packable for &P /////////////////////////////////////////
