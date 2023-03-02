@@ -11,7 +11,6 @@ clap = "2.33"
 
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
-clue = { path = "../clue" }
 guacamole = { path = "../guacamole" }
 hey_listen = { path = "../hey_listen" }
 id = { path = "../id" }
