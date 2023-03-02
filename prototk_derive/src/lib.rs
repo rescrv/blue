@@ -340,7 +340,7 @@ trait ProtoTKVisitor:
 
     fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream;
 
-    fn variant_snippet(
+    fn unnamed_variant_snippet(
         &mut self,
         ctor: &TokenStream,
         variant: &syn::Variant,
@@ -516,7 +516,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
                     let field_type = &field_type_tokens(field, field_type);
                     let variant_ident = &variant.ident;
                     let ctor = quote! { #ty_name :: #variant_ident };
-                    return self.variant_snippet(&ctor, variant, &field_number, &field_type);
+                    return self.unnamed_variant_snippet(&ctor, variant, &field_number, &field_type);
                 }
                 _ => panic!("{}", USAGE),
             }
@@ -567,7 +567,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
         }
     }
 
-    fn variant_snippet(
+    fn unnamed_variant_snippet(
         &mut self,
         ctor: &TokenStream,
         variant: &syn::Variant,
@@ -638,7 +638,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         }
     }
 
-    fn variant_snippet(
+    fn unnamed_variant_snippet(
         &mut self,
         ctor: &TokenStream,
         variant: &syn::Variant,
