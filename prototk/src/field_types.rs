@@ -216,6 +216,30 @@ impl From<uint64> for u64 {
     }
 }
 
+impl<'a> FieldPackHelper<'a, uint64> for usize {
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        let v: v64 = v64::from(*self);
+        stack_pack(tag).pack(v).pack_sz()
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        let v: v64 = v64::from(*self);
+        stack_pack(tag).pack(v).into_slice(out);
+    }
+}
+
+impl<'a> FieldUnpackHelper<'a, uint64> for usize {
+    fn merge_field(&mut self, proto: uint64) {
+        *self = proto.into();
+    }
+}
+
+impl From<uint64> for usize {
+    fn from(f: uint64) -> usize {
+        f.0 as usize
+    }
+}
+
 impl<'a> Unpackable<'a> for uint64 {
     type Error = Error;
 
