@@ -100,7 +100,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 where
                     'b: #lifetime,
             {
-                use buffertk::v64;
+                use buffertk::{v64, Unpackable};
                 use prototk::{FieldUnpackHelper, FieldType, Message};
                 #unpack
             }
@@ -614,7 +614,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { field.span() =>
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
-                let tmp: prototk::field_types::#field_type = up.unpack()?;
+                let (tmp, _): (prototk::field_types::#field_type, _) = Unpackable::unpack(field_value)?;
                 ret.#field_ident.merge_field(tmp);
             }
         }
@@ -623,18 +623,16 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         quote! {
             let mut ret: #ty_name = #ty_name::default();
-            let mut up = buffertk::Unpacker::new(buf);
-            while !up.is_empty() {
-                let tag: prototk::Tag = up.unpack()?;
+            let mut error: Option<prototk::Error> = None;
+            let fields = prototk::FieldIterator::new(buf, &mut error);
+            for (tag, field_value) in fields {
                 let num: u32 = tag.field_number.into();
                 match (num, tag.wire_type) {
                     #(#fields,)*
-                    // TODO(rescrv):  I'd prefer to lift lifecycle management of fields to a
-                    // higher level and deal with it there, but that will take some examples.
                     (_, _) => {}
-                };
+                }
             }
-            Ok((ret, up.remain()))
+            Ok((ret, &[]))
         }
     }
 

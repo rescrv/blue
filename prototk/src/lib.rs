@@ -94,7 +94,7 @@ impl From<buffertk::Error> for Error {
 
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WireType {
     /// Varint is wire type 0.  The payload is a single v64.
     Varint,
@@ -436,6 +436,7 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
                     Some((tag, &buf[0..8]))
                 },
                 WireType::LengthDelimited => {
+                    let buf: &[u8] = self.up.remain();
                     let x: v64 = match self.up.unpack() {
                         Ok(x) => { x },
                         Err(e) => {
@@ -443,10 +444,9 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
                             return None;
                         },
                     };
-                    let buf: &[u8] = self.up.remain();
                     let sz: usize = x.into();
                     self.up.advance(sz);
-                    Some((tag, &buf[0..sz]))
+                    Some((tag, &buf[0..x.pack_sz() + sz]))
                 },
                 WireType::ThirtyTwo => {
                     let buf: &[u8] = self.up.remain();
