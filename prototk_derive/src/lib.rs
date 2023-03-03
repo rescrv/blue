@@ -383,6 +383,15 @@ trait ProtoTKVisitor:
 
     fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream;
 
+    fn named_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+        field_type: &syn::Path,
+        fields: &syn::FieldsNamed,
+    ) -> TokenStream;
+
     fn unnamed_variant_snippet(
         &mut self,
         ctor: &TokenStream,
@@ -500,6 +509,19 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         self.enum_snippet(ty_name, variants.into())
     }
 
+    fn visit_enum_variant_named_fields(
+        &mut self,
+        ty_name: &syn::Ident,
+        _de: &syn::DataEnum,
+        variant: &syn::Variant,
+        fields: &syn::FieldsNamed,
+    ) -> Self::VariantOutput {
+        let (field_number, field_type) = parse_attributes(&variant.attrs);
+        let variant_ident = &variant.ident;
+        let ctor = quote! { #ty_name :: #variant_ident };
+        return self.named_variant_snippet(&ctor, variant, &field_number, &field_type, &fields);
+    }
+
     fn visit_enum_variant_unnamed_fields(
         &mut self,
         ty_name: &syn::Ident,
@@ -573,6 +595,52 @@ impl ProtoTKVisitor for PackMessageVisitor {
         }
     }
 
+    fn named_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+        field_type: &syn::Path,
+        fields: &syn::FieldsNamed,
+    ) -> TokenStream {
+        let mut enum_names = Vec::new();
+        let mut field_decls = Vec::new();
+        let mut field_pack = Vec::new();
+        for field in fields.named.iter() {
+            let enum_name = field.ident.clone();
+            enum_names.push(field.ident.clone());
+            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream().to_string()), field.span());
+            let (enum_number, enum_type) = parse_attributes(&field.attrs);
+            let enum_type = &field_type_tokens(field, &enum_type);
+            let decl = quote! {
+                let tag = prototk::Tag {
+                    field_number: prototk::FieldNumber::must(#enum_number),
+                    wire_type: prototk::field_types::#enum_type::WIRE_TYPE,
+                };
+                let #field_name = FieldPacker::new(tag, #enum_name,
+                    std::marker::PhantomData::<&::prototk::field_types::#enum_type>{});
+            };
+            field_decls.push(decl);
+            let pack = quote! {
+                let pa = pa.pack(#field_name);
+            };
+            field_pack.push(pack);
+        }
+        let call = &self.call;
+        quote! {
+            #ctor { #(#enum_names,)* } => {
+                #(#field_decls;)*
+                let tag = prototk::Tag {
+                    field_number: prototk::FieldNumber::must(#field_number),
+                    wire_type: prototk::WireType::LengthDelimited,
+                };
+                let pa = stack_pack(());
+                #(#field_pack;)*
+                stack_pack(tag).pack(pa.length_prefixed()).#call
+            },
+        }
+    }
+
     fn unnamed_variant_snippet(
         &mut self,
         ctor: &TokenStream,
@@ -591,7 +659,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
                     std::marker::PhantomData::<&prototk::field_types::#field_type>{});
                 let pa = buffertk::stack_pack(fp);
                 pa.#call
-            }
+            },
         }
     }
 
@@ -608,18 +676,19 @@ impl ProtoTKVisitor for PackMessageVisitor {
                     field_number: prototk::FieldNumber::must(#field_number),
                     wire_type: prototk::field_types::bytes::WIRE_TYPE,
                 };
-                let fp = prototk::FieldPacker::new(tag, &[],
+                let empty: &[u8] = &[];
+                let fp = prototk::FieldPacker::new(tag, &empty,
                     std::marker::PhantomData::<&prototk::field_types::bytes>{});
                 let pa = buffertk::stack_pack(fp);
                 pa.#call
-            }
+            },
         }
     }
 
     fn enum_snippet(&mut self, _ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream {
         quote! {
             match self {
-                #(#variants,)*
+                #(#variants)*
             }
         }
     }
@@ -643,7 +712,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let (tmp, _): (prototk::field_types::#field_type, _) = Unpackable::unpack(field_value)?;
                 ret.#field_ident.merge_field(tmp);
-            }
+            },
         }
     }
 
@@ -655,11 +724,68 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             for (tag, field_value) in fields {
                 let num: u32 = tag.field_number.into();
                 match (num, tag.wire_type) {
-                    #(#fields,)*
-                    (_, _) => {}
+                    #(#fields)*
+                    (_, _) => {},
                 }
             }
             Ok((ret, &[]))
+        }
+    }
+
+    fn named_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+        field_type: &syn::Path,
+        fields: &syn::FieldsNamed,
+    ) -> TokenStream {
+        let mut enum_names = Vec::new();
+        let mut field_decls = Vec::new();
+        let mut field_blocks = Vec::new();
+        let mut hydration = Vec::new();
+        for field in fields.named.iter() {
+            let enum_name = field.ident.clone();
+            enum_names.push(field.ident.clone());
+            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream().to_string()), field.span());
+            let (enum_number, enum_type) = parse_attributes(&field.attrs);
+            let enum_type = &field_type_tokens(field, &enum_type);
+            let decl = quote! {
+                let mut #field_name: ::prototk::field_types::#enum_type = ::prototk::field_types::#enum_type::default();
+            };
+            field_decls.push(decl);
+            let block = quote! {
+                (#enum_number, ::prototk::field_types::#enum_type::WIRE_TYPE) => {
+                    (#field_name, _) = Unpackable::unpack(buf)?;
+                },
+            };
+            field_blocks.push(block);
+            let hydrate = quote! {
+                #enum_name: #field_name.into(),
+            };
+            hydration.push(hydrate);
+        }
+        quote! {
+            (#field_number, ::prototk::WireType::LengthDelimited) => {
+                let length: v64 = up.unpack()?;
+                let mut error: Option<prototk::Error> = None;
+                let fields = ::prototk::FieldIterator::new(&up.remain()[0..length.into()], &mut error);
+                up.advance(length.into());
+                #(#field_decls;)*
+                for (tag, buf) in fields {
+                    let num: u32 = tag.field_number.into();
+                    match (num, tag.wire_type) {
+                        #(#field_blocks)*
+                        (_, _) => {
+                            return Err(prototk::Error::UnknownDiscriminant { discriminant: num }.into());
+                        },
+                    }
+                }
+                let ret = #ctor {
+                    #(#hydration)*
+                };
+                Ok((ret, up.remain()))
+            },
         }
     }
 
@@ -674,7 +800,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
                 Ok((#ctor(tmp.into_native().into()), up.remain()))
-            }
+            },
         }
     }
 
@@ -688,7 +814,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             (#field_number, prototk::WireType::LengthDelimited) => {
                 up.advance(1);
                 Ok((#ctor, up.remain()))
-            }
+            },
         }
     }
 
@@ -699,7 +825,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             let num: u32 = tag.field_number.into();
             let wire_type: prototk::WireType = tag.wire_type;
             match (num, wire_type) {
-                #(#variants,)*
+                #(#variants)*
                 _ => {
                     return Err(prototk::Error::UnknownDiscriminant { discriminant: num }.into());
                 },
