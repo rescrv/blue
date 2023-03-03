@@ -361,7 +361,7 @@ packable_with_to_bits_to_le_bytes!(f64, u64);
 
 //////////////////////////////////////////// length_free ///////////////////////////////////////////
 
-pub fn length_free<'a, P:Packable>(slice: &'a [P]) -> LengthFree<'a, P> {
+pub fn length_free<P:Packable>(slice: &[P]) -> LengthFree<P> {
     LengthFree {
         slice,
     }
