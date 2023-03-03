@@ -348,6 +348,13 @@ trait ProtoTKVisitor:
         field_type: &TokenStream,
     ) -> TokenStream;
 
+    fn unit_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+    ) -> TokenStream;
+
     fn enum_snippet(&mut self, ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream;
 }
 
@@ -523,6 +530,46 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         }
         panic!("{}", USAGE);
     }
+
+    fn visit_enum_variant_unit(
+        &mut self,
+        ty_name: &syn::Ident,
+        _de: &syn::DataEnum,
+        variant: &syn::Variant,
+    ) -> Self::VariantOutput {
+        for ref attr in variant.attrs.iter() {
+            let meta = &attr.parse_meta().unwrap();
+            // TODO(rescrv): Double Ick!
+            if meta.path().clone().into_token_stream().to_string() != META_PATH {
+                continue;
+            }
+            let meta_list = match meta {
+                syn::Meta::Path(_) => {
+                    panic!("{}", USAGE);
+                }
+                syn::Meta::List(ref ml) => ml,
+                syn::Meta::NameValue(_) => {
+                    panic!("{}", USAGE);
+                }
+            };
+            if meta_list.nested.len() != 2 {
+                panic!("{}", USAGE);
+            }
+            match (&meta_list.nested[0], &meta_list.nested[1]) {
+                (
+                    syn::NestedMeta::Lit(syn::Lit::Int(field_number)),
+                    syn::NestedMeta::Meta(_),
+                ) => {
+                    validate_field_number(field_number.base10_parse().unwrap());
+                    let variant_ident = &variant.ident;
+                    let ctor = quote! { #ty_name :: #variant_ident };
+                    return self.unit_variant_snippet(&ctor, variant, &field_number);
+                }
+                _ => panic!("{}", USAGE),
+            }
+        }
+        panic!("{}", USAGE);
+    }
 }
 
 //////////////////////////////////////// PackMessageVisitor ////////////////////////////////////////
@@ -589,6 +636,27 @@ impl ProtoTKVisitor for PackMessageVisitor {
         }
     }
 
+    fn unit_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+    ) -> TokenStream {
+        let call = &self.call;
+        quote_spanned! { variant.span() =>
+            #ctor => {
+                let tag = prototk::Tag {
+                    field_number: prototk::FieldNumber::must(#field_number),
+                    wire_type: prototk::field_types::bytes::WIRE_TYPE,
+                };
+                let fp = prototk::FieldPacker::new(tag, &[],
+                    std::marker::PhantomData::<&prototk::field_types::bytes>{});
+                let pa = buffertk::stack_pack(fp);
+                pa.#call
+            }
+        }
+    }
+
     fn enum_snippet(&mut self, _ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream {
         quote! {
             match self {
@@ -647,6 +715,20 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: prototk::field_types::#field_type = up.unpack()?;
                 Ok((#ctor(tmp.into_native().into()), up.remain()))
+            }
+        }
+    }
+
+    fn unit_variant_snippet(
+        &mut self,
+        ctor: &TokenStream,
+        variant: &syn::Variant,
+        field_number: &syn::LitInt,
+    ) -> TokenStream {
+        quote_spanned! { variant.span() =>
+            (#field_number, prototk::WireType::LengthDelimited) => {
+                up.advance(1);
+                Ok((#ctor, up.remain()))
             }
         }
     }
