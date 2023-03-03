@@ -662,8 +662,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             match (num, wire_type) {
                 #(#variants,)*
                 _ => {
-                    // TODO(rescrv): production-ready blocker
-                    unimplemented!("enum_snippet does not gracefully handle unknown variants");
+                    return Err(prototk::Error::UnknownDiscriminant { discriminant: num }.into());
                 },
             }
         }
