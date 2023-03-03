@@ -2,10 +2,9 @@ extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
-use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
+use buffertk::stack_pack;
 
-use prototk::field_types::*;
-use prototk::{tag, FieldPacker, Message};
+use prototk::FieldPacker;
 
 ////////////////////////////////////// Stuff we want to write //////////////////////////////////////
 
@@ -35,18 +34,6 @@ pub enum Error {
 impl Default for Error {
     fn default() -> Error {
         Error::Success
-    }
-}
-
-impl From<buffertk::Error> for Error {
-    fn from(err: buffertk::Error) -> Error {
-        todo!();
-    }
-}
-
-impl From<prototk::Error> for Error {
-    fn from(err: prototk::Error) -> Error {
-        todo!();
     }
 }
 

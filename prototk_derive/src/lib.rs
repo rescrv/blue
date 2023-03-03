@@ -546,7 +546,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         _de: &syn::DataEnum,
         variant: &syn::Variant,
     ) -> Self::VariantOutput {
-        let (field_number, field_type) = parse_attributes(&variant.attrs);
+        let (field_number, _) = parse_attributes(&variant.attrs);
         let variant_ident = &variant.ident;
         let ctor = quote! { #ty_name :: #variant_ident };
         return self.unit_variant_snippet(&ctor, variant, &field_number);
@@ -598,9 +598,9 @@ impl ProtoTKVisitor for PackMessageVisitor {
     fn named_variant_snippet(
         &mut self,
         ctor: &TokenStream,
-        variant: &syn::Variant,
+        _variant: &syn::Variant,
         field_number: &syn::LitInt,
-        field_type: &syn::Path,
+        _field_type: &syn::Path,
         fields: &syn::FieldsNamed,
     ) -> TokenStream {
         let mut enum_names = Vec::new();
@@ -735,9 +735,9 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn named_variant_snippet(
         &mut self,
         ctor: &TokenStream,
-        variant: &syn::Variant,
+        _variant: &syn::Variant,
         field_number: &syn::LitInt,
-        field_type: &syn::Path,
+        _field_type: &syn::Path,
         fields: &syn::FieldsNamed,
     ) -> TokenStream {
         let mut enum_names = Vec::new();
