@@ -28,7 +28,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     // Find the lifetime, adjusting impl_generics if necessary.
     let mut lifetime = find_lifetimes(&impl_generics, &ty_generics);
     let mut exp_impl_generics = impl_generics.clone().into_token_stream();
-    if let None = lifetime {
+    if lifetime.is_none() {
         let prototk_lifetime = syn::LifetimeDef {
             attrs: Vec::new(),
             lifetime: syn::Lifetime::new("'prototk", proc_macro2::Span::call_site()),
@@ -58,12 +58,12 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         lifetime = Some(quote! {'prototk});
     }
     // Generate the message code.
-    let mut message = PackMessageVisitor::new(quote! {stream(writer)}.into());
+    let mut message = PackMessageVisitor::new(quote! {stream(writer)});
     let message_stream = message.visit(&ty_name, &input.data);
     // Generate the pack code.
-    let mut pack = PackMessageVisitor::new(quote! {pack_sz()}.into());
+    let mut pack = PackMessageVisitor::new(quote! {pack_sz()});
     let pack_reqd_bytes = pack.visit(&ty_name, &input.data);
-    let mut pack = PackMessageVisitor::new(quote! {into_slice(buf);}.into());
+    let mut pack = PackMessageVisitor::new(quote! {into_slice(buf);});
     let pack_into_slice = pack.visit(&ty_name, &input.data);
     // Generate the unpack code.
     let mut unpack = UnpackMessageVisitor::default();
@@ -162,13 +162,8 @@ fn find_lifetimes(
     ty_generics: &syn::TypeGenerics,
 ) -> Option<TokenStream> {
     match find_lifetime_in_generics(ty_generics) {
-        Some(x) => {
-            return Some(x);
-        }
-        None => match find_lifetime_in_generics(impl_generics) {
-            Some(x) => Some(x),
-            None => None,
-        },
+        Some(x) => Some(x),
+        None => { find_lifetime_in_generics(impl_generics) }
     }
 }
 
@@ -301,7 +296,7 @@ fn validate_field_number(field_number: u64) {
             field_number, LAST_FIELD_NUMBER
         );
     }
-    if field_number >= FIRST_RESERVED_FIELD_NUMBER && field_number <= LAST_RESERVED_FIELD_NUMBER {
+    if (FIRST_RESERVED_FIELD_NUMBER..=LAST_RESERVED_FIELD_NUMBER).contains(&field_number) {
         panic!(
             "field_number={} reserved: reserved range [{}, {}]",
             field_number, FIRST_RESERVED_FIELD_NUMBER, LAST_RESERVED_FIELD_NUMBER
@@ -313,11 +308,11 @@ fn validate_field_number(field_number: u64) {
 
 /////////////////////////////////////////////// USAGE //////////////////////////////////////////////
 
-const USAGE: &'static str = "must provide attributes of the form `prototk(field_number, field_type)`";
+const USAGE: &str = "must provide attributes of the form `prototk(field_number, field_type)`";
 
 ////////////////////////////////////// meta path manipulation //////////////////////////////////////
 
-const META_PATH: &'static str = "prototk";
+const META_PATH: &str = "prototk";
 
 fn parse_attribute(attr: &syn::Attribute) -> Option<(syn::LitInt, syn::Path)> {
     let meta = &attr.parse_meta().unwrap();
@@ -342,14 +337,14 @@ fn parse_attribute(attr: &syn::Attribute) -> Option<(syn::LitInt, syn::Path)> {
             syn::NestedMeta::Meta(syn::Meta::Path(field_type)),
         ) => {
             validate_field_number(field_number.base10_parse().unwrap());
-            return Some((field_number.clone(), field_type.clone()))
+            Some((field_number.clone(), field_type.clone()))
         },
         _ => panic!("{}", USAGE),
     }
 }
 
 fn parse_attributes(attrs: &[syn::Attribute]) -> (syn::LitInt, syn::Path) {
-    for ref attr in attrs.iter() {
+    for attr in attrs.iter() {
         if let Some((field_number, field_type)) = parse_attribute(attr) {
             return (field_number, field_type);
         }
@@ -412,13 +407,13 @@ trait ProtoTKVisitor:
 
 fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream {
     if field_type.is_ident(&syn::Ident::new("message", field_type.span())) {
-        let ret = ToTokens::into_token_stream(&field_type);
+        let ret = ToTokens::into_token_stream(field_type);
         let ty = &field.ty;
         if let syn::Type::Path(path) = ty {
-            if path.path.segments.len() > 0 && (
+            if !path.path.segments.is_empty() && (
                 path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
                 || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span())) {
-                let tokens = ToTokens::into_token_stream(&ty);
+                let tokens = ToTokens::into_token_stream(ty);
                 let tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
                 let tokens = &tokens[2];
                 return quote! {
@@ -430,7 +425,7 @@ fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream 
             #ret::<#ty>
         }
     } else {
-        ToTokens::into_token_stream(&field_type)
+        ToTokens::into_token_stream(field_type)
     }
 }
 
@@ -447,7 +442,7 @@ fn visit_attribute<V: ProtoTKVisitor>(
     };
     let field_type = &field_type_tokens(field, &field_type);
     let ctor = quote! { ctor };
-    Some(v.field_snippet(&ctor, field, field_ident, &field_number, &field_type))
+    Some(v.field_snippet(&ctor, field, field_ident, &field_number, field_type))
 }
 
 impl<V: ProtoTKVisitor> StructVisitor for V {
@@ -460,9 +455,9 @@ impl<V: ProtoTKVisitor> StructVisitor for V {
         fields: &syn::FieldsNamed,
     ) -> TokenStream {
         let mut unrolled: Vec<TokenStream> = Vec::new();
-        for ref field in fields.named.iter() {
+        for field in fields.named.iter() {
             let field_ident = &ToTokens::into_token_stream(&field.ident);
-            for ref attr in field.attrs.iter() {
+            for attr in field.attrs.iter() {
                 if let Some(x) = visit_attribute::<V>(ty_name, field, field_ident, attr, self) {
                     unrolled.push(x);
                 }
@@ -478,11 +473,11 @@ impl<V: ProtoTKVisitor> StructVisitor for V {
         fields: &syn::FieldsUnnamed,
     ) -> TokenStream {
         let mut unrolled = Vec::new();
-        for (index, ref field) in fields.unnamed.iter().enumerate() {
+        for (index, field) in fields.unnamed.iter().enumerate() {
             let field_ident =
                 syn::LitInt::new(&format!("{}", index), proc_macro2::Span::call_site());
             let field_ident = &ToTokens::into_token_stream(&field_ident);
-            for ref attr in field.attrs.iter() {
+            for attr in field.attrs.iter() {
                 if let Some(x) = visit_attribute::<V>(ty_name, field, field_ident, attr, self) {
                     unrolled.push(x);
                 }
@@ -506,7 +501,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         _de: &syn::DataEnum,
         variants: &[Self::VariantOutput],
     ) -> TokenStream {
-        self.enum_snippet(ty_name, variants.into())
+        self.enum_snippet(ty_name, variants)
     }
 
     fn visit_enum_variant_named_fields(
@@ -519,7 +514,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         let (field_number, field_type) = parse_attributes(&variant.attrs);
         let variant_ident = &variant.ident;
         let ctor = quote! { #ty_name :: #variant_ident };
-        return self.named_variant_snippet(&ctor, variant, &field_number, &field_type, &fields);
+        self.named_variant_snippet(&ctor, variant, &field_number, &field_type, fields)
     }
 
     fn visit_enum_variant_unnamed_fields(
@@ -537,7 +532,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         let field_type = &field_type_tokens(field, &field_type);
         let variant_ident = &variant.ident;
         let ctor = quote! { #ty_name :: #variant_ident };
-        return self.unnamed_variant_snippet(&ctor, variant, &field_number, &field_type);
+        self.unnamed_variant_snippet(&ctor, variant, &field_number, field_type)
     }
 
     fn visit_enum_variant_unit(
@@ -549,7 +544,7 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         let (field_number, _) = parse_attributes(&variant.attrs);
         let variant_ident = &variant.ident;
         let ctor = quote! { #ty_name :: #variant_ident };
-        return self.unit_variant_snippet(&ctor, variant, &field_number);
+        self.unit_variant_snippet(&ctor, variant, &field_number)
     }
 }
 
@@ -609,7 +604,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
         for field in fields.named.iter() {
             let enum_name = field.ident.clone();
             enum_names.push(field.ident.clone());
-            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream().to_string()), field.span());
+            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream()), field.span());
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
             let decl = quote! {
@@ -747,7 +742,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         for field in fields.named.iter() {
             let enum_name = field.ident.clone();
             enum_names.push(field.ident.clone());
-            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream().to_string()), field.span());
+            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream()), field.span());
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
             let decl = quote! {

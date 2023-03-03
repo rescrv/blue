@@ -868,12 +868,12 @@ impl<'a> FieldType<'a> for bytes32 {
 
 impl<'a> FieldPackHelper<'a, bytes32> for [u8; 32] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let b: &[u8] = &*self;
+        let b: &[u8] = self;
         stack_pack(tag).pack(b).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let b: &[u8] = &*self;
+        let b: &[u8] = self;
         stack_pack(tag).pack(b).into_slice(out);
     }
 }
@@ -907,19 +907,17 @@ impl<'a> Unpackable<'a> for bytes32 {
         if v < 32 {
             return Err(Error::BufferTooShort {
                 required: 32,
-                had: v.into(),
+                had: v,
             });
         }
         if v != 32 {
             return Err(Error::WrongLength {
                 required: 32,
-                had: v.into(),
+                had: v,
             });
         }
         let mut ret = [0u8; 32];
-        for i in 0..32 {
-            ret[i] = rem[i];
-        }
+        ret[..32].copy_from_slice(&rem[..32]);
         Ok((Self(ret), &rem[v..]))
     }
 }

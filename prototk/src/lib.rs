@@ -168,8 +168,7 @@ impl FieldNumber {
                 what: "field number too large",
             });
         }
-        if field_number >= FIRST_RESERVED_FIELD_NUMBER && field_number <= LAST_RESERVED_FIELD_NUMBER
-        {
+        if (FIRST_RESERVED_FIELD_NUMBER..=LAST_RESERVED_FIELD_NUMBER).contains(&field_number) {
             return Err(Error::InvalidFieldNumber {
                 field_number,
                 what: "field is reserved",
@@ -179,9 +178,9 @@ impl FieldNumber {
     }
 }
 
-impl Into<u32> for FieldNumber {
-    fn into(self) -> u32 {
-        self.field_number
+impl From<FieldNumber> for u32 {
+    fn from(f: FieldNumber) -> u32 {
+        f.field_number
     }
 }
 
@@ -406,60 +405,60 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
     type Item = (Tag, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while !self.up.is_empty() {
-            let tag: Tag = match self.up.unpack() {
-                Ok(tag) => { tag },
-                Err(e) => {
-                    *self.err = Some(e.into());
-                    return None;
-                },
-            };
-            return match tag.wire_type {
-                WireType::Varint => {
-                    let buf: &[u8] = self.up.remain();
-                    let x: v64 = match self.up.unpack() {
-                        Ok(x) => { x },
-                        Err(e) => {
-                            *self.err = Some(e.into());
-                            return None;
-                        },
-                    };
-                    Some((tag, &buf[0..x.pack_sz()]))
-                },
-                WireType::SixtyFour => {
-                    let buf: &[u8] = self.up.remain();
-                    if buf.len() < 8 {
-                        *self.err = Some(Error::BufferTooShort { required: 8, had: buf.len() });
-                        return None;
-                    }
-                    self.up.advance(8);
-                    Some((tag, &buf[0..8]))
-                },
-                WireType::LengthDelimited => {
-                    let buf: &[u8] = self.up.remain();
-                    let x: v64 = match self.up.unpack() {
-                        Ok(x) => { x },
-                        Err(e) => {
-                            *self.err = Some(e.into());
-                            return None;
-                        },
-                    };
-                    let sz: usize = x.into();
-                    self.up.advance(sz);
-                    Some((tag, &buf[0..x.pack_sz() + sz]))
-                },
-                WireType::ThirtyTwo => {
-                    let buf: &[u8] = self.up.remain();
-                    if buf.len() < 4 {
-                        *self.err = Some(Error::BufferTooShort { required: 4, had: buf.len() });
-                        return None;
-                    }
-                    self.up.advance(4);
-                    Some((tag, &buf[0..4]))
-                },
-            }
+        if self.up.is_empty() {
+            return None;
         }
-        None
+        let tag: Tag = match self.up.unpack() {
+            Ok(tag) => { tag },
+            Err(e) => {
+                *self.err = Some(e);
+                return None;
+            },
+        };
+        match tag.wire_type {
+            WireType::Varint => {
+                let buf: &[u8] = self.up.remain();
+                let x: v64 = match self.up.unpack() {
+                    Ok(x) => { x },
+                    Err(e) => {
+                        *self.err = Some(e.into());
+                        return None;
+                    },
+                };
+                Some((tag, &buf[0..x.pack_sz()]))
+            },
+            WireType::SixtyFour => {
+                let buf: &[u8] = self.up.remain();
+                if buf.len() < 8 {
+                    *self.err = Some(Error::BufferTooShort { required: 8, had: buf.len() });
+                    return None;
+                }
+                self.up.advance(8);
+                Some((tag, &buf[0..8]))
+            },
+            WireType::LengthDelimited => {
+                let buf: &[u8] = self.up.remain();
+                let x: v64 = match self.up.unpack() {
+                    Ok(x) => { x },
+                    Err(e) => {
+                        *self.err = Some(e.into());
+                        return None;
+                    },
+                };
+                let sz: usize = x.into();
+                self.up.advance(sz);
+                Some((tag, &buf[0..x.pack_sz() + sz]))
+            },
+            WireType::ThirtyTwo => {
+                let buf: &[u8] = self.up.remain();
+                if buf.len() < 4 {
+                    *self.err = Some(Error::BufferTooShort { required: 4, had: buf.len() });
+                    return None;
+                }
+                self.up.advance(4);
+                Some((tag, &buf[0..4]))
+            },
+        }
     }
 }
 
