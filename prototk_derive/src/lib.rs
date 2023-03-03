@@ -311,10 +311,53 @@ fn validate_field_number(field_number: u64) {
 
 // TODO(rescrv):  tests that these panic
 
-////////////////////////////////////////// ProtoTKVisitor //////////////////////////////////////////
+/////////////////////////////////////////////// USAGE //////////////////////////////////////////////
+
+const USAGE: &'static str = "must provide attributes of the form `prototk(field_number, field_type)`";
+
+////////////////////////////////////// meta path manipulation //////////////////////////////////////
 
 const META_PATH: &'static str = "prototk";
-const USAGE: &'static str = "macro helpers must take the form `prototk(field#, type)`";
+
+fn parse_attribute(attr: &syn::Attribute) -> Option<(syn::LitInt, syn::Path)> {
+    let meta = &attr.parse_meta().unwrap();
+    if meta.path().clone().into_token_stream().to_string() != META_PATH {
+        return None;
+    }
+    let meta_list = match meta {
+        syn::Meta::Path(_) => {
+            panic!("{}", USAGE);
+        }
+        syn::Meta::List(ref ml) => ml,
+        syn::Meta::NameValue(_) => {
+            panic!("{}", USAGE);
+        }
+    };
+    if meta_list.nested.len() != 2 {
+        panic!("{}", USAGE);
+    }
+    match (&meta_list.nested[0], &meta_list.nested[1]) {
+        (
+            syn::NestedMeta::Lit(syn::Lit::Int(field_number)),
+            syn::NestedMeta::Meta(syn::Meta::Path(field_type)),
+        ) => {
+            validate_field_number(field_number.base10_parse().unwrap());
+            return Some((field_number.clone(), field_type.clone()))
+        },
+        _ => panic!("{}", USAGE),
+    }
+}
+
+fn parse_attributes(attrs: &[syn::Attribute]) -> (syn::LitInt, syn::Path) {
+    for ref attr in attrs.iter() {
+        if let Some((field_number, field_type)) = parse_attribute(attr) {
+            return (field_number, field_type);
+        }
+    }
+    panic!("{}", USAGE);
+}
+
+////////////////////////////////////////// ProtoTKVisitor //////////////////////////////////////////
 
 trait ProtoTKVisitor:
     StructVisitor<Output = TokenStream> + EnumVisitor<Output = TokenStream, VariantOutput = TokenStream>
@@ -389,35 +432,13 @@ fn visit_attribute<V: ProtoTKVisitor>(
     attr: &syn::Attribute,
     v: &mut V,
 ) -> Option<TokenStream> {
-    let meta = &attr.parse_meta().unwrap();
-    // TODO(rescrv): Ick.
-    if meta.path().clone().into_token_stream().to_string() != META_PATH {
-        return None;
-    }
-    let meta_list = match meta {
-        syn::Meta::Path(_) => {
-            panic!("{}", USAGE);
-        }
-        syn::Meta::List(ref ml) => ml,
-        syn::Meta::NameValue(_) => {
-            panic!("{}", USAGE);
-        }
+    let (field_number, field_type) = match parse_attribute(attr) {
+        Some(x) => { x },
+        None => { panic!("{}", USAGE); },
     };
-    if meta_list.nested.len() != 2 {
-        panic!("{}", USAGE);
-    }
-    match (&meta_list.nested[0], &meta_list.nested[1]) {
-        (
-            syn::NestedMeta::Lit(syn::Lit::Int(field_number)),
-            syn::NestedMeta::Meta(syn::Meta::Path(field_type)),
-        ) => {
-            validate_field_number(field_number.base10_parse().unwrap());
-            let field_type = &field_type_tokens(field, field_type);
-            let ctor = quote! { ctor };
-            Some(v.field_snippet(&ctor, field, field_ident, &field_number, &field_type))
-        }
-        _ => panic!("{}", USAGE),
-    }
+    let field_type = &field_type_tokens(field, &field_type);
+    let ctor = quote! { ctor };
+    Some(v.field_snippet(&ctor, field, field_ident, &field_number, &field_type))
 }
 
 impl<V: ProtoTKVisitor> StructVisitor for V {
@@ -490,45 +511,11 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
             panic!("{}", USAGE);
         }
         let field = &fields.unnamed[0];
-        for ref attr in variant.attrs.iter() {
-            let meta = &attr.parse_meta().unwrap();
-            // TODO(rescrv): Double Ick!
-            if meta.path().clone().into_token_stream().to_string() != META_PATH {
-                continue;
-            }
-            let meta_list = match meta {
-                syn::Meta::Path(_) => {
-                    panic!("{}", USAGE);
-                }
-                syn::Meta::List(ref ml) => ml,
-                syn::Meta::NameValue(_) => {
-                    panic!("{}", USAGE);
-                }
-            };
-            if meta_list.nested.len() != 2 {
-                match field.ident {
-                    Some(ref x) => panic!(
-                        "variant must take the form {}(T) with a single unnamed field of type T",
-                        x
-                    ),
-                    None => panic!("{}", USAGE),
-                }
-            }
-            match (&meta_list.nested[0], &meta_list.nested[1]) {
-                (
-                    syn::NestedMeta::Lit(syn::Lit::Int(field_number)),
-                    syn::NestedMeta::Meta(syn::Meta::Path(field_type)),
-                ) => {
-                    validate_field_number(field_number.base10_parse().unwrap());
-                    let field_type = &field_type_tokens(field, field_type);
-                    let variant_ident = &variant.ident;
-                    let ctor = quote! { #ty_name :: #variant_ident };
-                    return self.unnamed_variant_snippet(&ctor, variant, &field_number, &field_type);
-                }
-                _ => panic!("{}", USAGE),
-            }
-        }
-        panic!("{}", USAGE);
+        let (field_number, field_type) = parse_attributes(&variant.attrs);
+        let field_type = &field_type_tokens(field, &field_type);
+        let variant_ident = &variant.ident;
+        let ctor = quote! { #ty_name :: #variant_ident };
+        return self.unnamed_variant_snippet(&ctor, variant, &field_number, &field_type);
     }
 
     fn visit_enum_variant_unit(
@@ -537,38 +524,10 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         _de: &syn::DataEnum,
         variant: &syn::Variant,
     ) -> Self::VariantOutput {
-        for ref attr in variant.attrs.iter() {
-            let meta = &attr.parse_meta().unwrap();
-            // TODO(rescrv): Double Ick!
-            if meta.path().clone().into_token_stream().to_string() != META_PATH {
-                continue;
-            }
-            let meta_list = match meta {
-                syn::Meta::Path(_) => {
-                    panic!("{}", USAGE);
-                }
-                syn::Meta::List(ref ml) => ml,
-                syn::Meta::NameValue(_) => {
-                    panic!("{}", USAGE);
-                }
-            };
-            if meta_list.nested.len() != 2 {
-                panic!("{}", USAGE);
-            }
-            match (&meta_list.nested[0], &meta_list.nested[1]) {
-                (
-                    syn::NestedMeta::Lit(syn::Lit::Int(field_number)),
-                    syn::NestedMeta::Meta(_),
-                ) => {
-                    validate_field_number(field_number.base10_parse().unwrap());
-                    let variant_ident = &variant.ident;
-                    let ctor = quote! { #ty_name :: #variant_ident };
-                    return self.unit_variant_snippet(&ctor, variant, &field_number);
-                }
-                _ => panic!("{}", USAGE),
-            }
-        }
-        panic!("{}", USAGE);
+        let (field_number, field_type) = parse_attributes(&variant.attrs);
+        let variant_ident = &variant.ident;
+        let ctor = quote! { #ty_name :: #variant_ident };
+        return self.unit_variant_snippet(&ctor, variant, &field_number);
     }
 }
 
