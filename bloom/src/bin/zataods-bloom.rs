@@ -13,7 +13,7 @@ fn parse<X: Parameter>(args: &ArgMatches, name: &str) -> Option<X> {
 }
 
 fn main() {
-    let app = App::new("bloom")
+    let app = App::new("zataods-bloom")
         .version("0.1.0")
         .about("compute bloom filter parameters");
     let app = app.arg(
