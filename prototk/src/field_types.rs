@@ -16,6 +16,8 @@ use super::*;
 
 /////////////////////////////////////////////// int32 //////////////////////////////////////////////
 
+/// [int32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
+/// represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct int32(i32);
 
@@ -69,6 +71,8 @@ impl<'a> Unpackable<'a> for int32 {
 
 /////////////////////////////////////////////// int64 //////////////////////////////////////////////
 
+/// [int64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
+/// represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct int64(i64);
 
@@ -122,6 +126,8 @@ impl<'a> Unpackable<'a> for int64 {
 
 ////////////////////////////////////////////// uint32 //////////////////////////////////////////////
 
+/// [uint32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
+/// represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct uint32(u32);
 
@@ -175,6 +181,8 @@ impl<'a> Unpackable<'a> for uint32 {
 
 ////////////////////////////////////////////// uint64 //////////////////////////////////////////////
 
+/// [uint64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
+/// represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct uint64(u64);
 
@@ -252,6 +260,8 @@ impl<'a> Unpackable<'a> for uint64 {
 
 ////////////////////////////////////////////// sint32 //////////////////////////////////////////////
 
+/// [sint32] corresponds to the protobuf type of the same name.  It's a signed 32-bit
+/// zig-zag-integer represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct sint32(i32);
 
@@ -311,6 +321,8 @@ impl<'a> Unpackable<'a> for sint32 {
 
 ////////////////////////////////////////////// sint64 //////////////////////////////////////////////
 
+/// [sint64] corresponds to the protobuf type of the same name.  It's a signed 64-bit
+/// zig-zag-integer represented as a varint.
 #[derive(Clone, Debug, Default)]
 pub struct sint64(i64);
 
@@ -364,6 +376,8 @@ impl<'a> Unpackable<'a> for sint64 {
 
 ////////////////////////////////////////////// fixed32 //////////////////////////////////////////////
 
+/// [fixed32] corresponds to the protobuf type of the same name.  It's an unsigned 32-bit integer
+/// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
 pub struct fixed32(u32);
 
@@ -414,6 +428,8 @@ impl<'a> Unpackable<'a> for fixed32 {
 
 ////////////////////////////////////////////// fixed64 //////////////////////////////////////////////
 
+/// [fixed64] corresponds to the protobuf type of the same name.  It's an unsigned 64-bit integer
+/// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
 pub struct fixed64(u64);
 
@@ -464,6 +480,8 @@ impl<'a> Unpackable<'a> for fixed64 {
 
 ///////////////////////////////////////////// sfixed32 //////////////////////////////////////////////
 
+/// [sfixed32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
+/// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
 pub struct sfixed32(i32);
 
@@ -514,6 +532,8 @@ impl<'a> Unpackable<'a> for sfixed32 {
 
 ///////////////////////////////////////////// sfixed64 //////////////////////////////////////////////
 
+/// [sfixed64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
+/// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
 pub struct sfixed64(i64);
 
@@ -564,6 +584,8 @@ impl<'a> Unpackable<'a> for sfixed64 {
 
 /////////////////////////////////////////////// float //////////////////////////////////////////////
 
+/// [float] corresponds to the protobuf type of the same name.  It's a 32-bit IEEE 754 float point
+/// number in little-endian format.
 #[derive(Clone, Debug, Default)]
 pub struct float(f32);
 
@@ -614,6 +636,8 @@ impl<'a> Unpackable<'a> for float {
 
 ////////////////////////////////////////////// double //////////////////////////////////////////////
 
+/// [double] corresponds to the protobuf type of the same name.  It's a 64-bit IEEE 754 float point
+/// number in little-endian format.
 #[derive(Clone, Debug, Default)]
 pub struct double(f64);
 
@@ -664,6 +688,7 @@ impl<'a> Unpackable<'a> for double {
 
 /////////////////////////////////////////////// Bool ///////////////////////////////////////////////
 
+/// [Bool] corresponds to the protobuf type of the same name.
 #[derive(Clone, Debug, Default)]
 pub struct Bool(bool);
 
@@ -718,6 +743,7 @@ impl<'a> Unpackable<'a> for Bool {
 
 /////////////////////////////////////////////// bytes //////////////////////////////////////////////
 
+/// [bytes] represents a variable-number of bytes.
 #[derive(Clone, Debug, Default)]
 pub struct bytes<'a>(&'a [u8]);
 
@@ -849,6 +875,7 @@ impl<'a> Unpackable<'a> for bytes<'a> {
 
 ////////////////////////////////////////////// bytes32 /////////////////////////////////////////////
 
+/// [bytes] represents 32 bytes.
 #[derive(Clone, Debug, Default)]
 pub struct bytes32([u8; 32]);
 
@@ -924,6 +951,7 @@ impl<'a> Unpackable<'a> for bytes32 {
 
 ///////////////////////////////////////////// string ////////////////////////////////////////////
 
+/// [string] represents a UTF-8 string of variable length.
 #[derive(Clone, Debug, Default)]
 pub struct string<'a>(&'a str);
 
@@ -1040,10 +1068,12 @@ impl<'a> Unpackable<'a> for string<'a> {
 
 ////////////////////////////////////////////// message /////////////////////////////////////////////
 
+/// [message] represents a ProtoTK message.
 #[derive(Clone, Debug)]
 pub struct message<M>(M);
 
 impl<M> message<M> {
+    /// Return the message that's held by this [message].
     pub fn unwrap_message(self) -> M {
         self.0
     }

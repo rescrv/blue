@@ -8,6 +8,7 @@ use prototk::FieldPacker;
 
 ////////////////////////////////////// Stuff we want to write //////////////////////////////////////
 
+/// Details of an X,Y point that might be relevant for an error.
 #[derive(Debug, Default, Eq, Message, PartialEq)]
 pub struct Details {
     #[prototk(1, uint64)]
@@ -16,6 +17,7 @@ pub struct Details {
     y: u64,
 }
 
+/// An [Error] demonstrating three different ways of auto-generating enums.
 #[derive(Debug, Eq, Message, PartialEq)]
 pub enum Error {
     #[prototk(1, message)]

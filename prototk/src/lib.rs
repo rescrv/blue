@@ -141,20 +141,24 @@ pub const LAST_FIELD_NUMBER: u32 = (1 << 29) - 1;
 pub const FIRST_RESERVED_FIELD_NUMBER: u32 = 19000;
 pub const LAST_RESERVED_FIELD_NUMBER: u32 = 19999;
 
+/// [FieldNumber] wraps a u32 and guards it against reserved or invalid field numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldNumber {
     field_number: u32,
 }
 
 impl FieldNumber {
+    /// Returns true if and only if `field_number` is not valid and not reserved.
     pub fn is_valid(field_number: u32) -> bool {
         FieldNumber::new(field_number).is_ok()
     }
 
+    /// Returns a valid [FieldNumber], panicking if `field_number` is invalid or reserved.
     pub fn must(field_number: u32) -> FieldNumber {
         FieldNumber::new(field_number).unwrap()
     }
 
+    /// Create a new [FieldNumber] if `field_number` is valid and not reserved.
     pub fn new(field_number: u32) -> Result<FieldNumber, Error> {
         if field_number < FIRST_FIELD_NUMBER {
             return Err(Error::InvalidFieldNumber {
@@ -192,6 +196,7 @@ impl std::cmp::PartialEq<u32> for FieldNumber {
 
 //////////////////////////////////////////////// Tag ///////////////////////////////////////////////
 
+/// A protobuf tag has two parts:  A `field_number` and a `wire_type`.
 #[derive(Clone, Debug)]
 pub struct Tag {
     pub field_number: FieldNumber,
