@@ -23,7 +23,7 @@ fn main() {
     let args = app.get_matches();
     let n = args.value_of("n").unwrap_or("1000");
     let mut n = n.parse::<u64>().expect("could not parse n") as usize;
-    let seed = args.value_of("seed").unwrap_or("1000");
+    let seed = args.value_of("seed").unwrap_or("0");
     let seed = seed.parse::<u64>().expect("could not parse seed");
     let mut guac = Guacamole::new(seed);
     let mut buf = [0u8; 1<<20];
@@ -34,8 +34,8 @@ fn main() {
         } else {
             n
         };
-        guac.generate(buf);
-        std::io::stdout().write_all(buf).expect("failed to write");
+        guac.generate(&mut buf[..remain]);
+        std::io::stdout().write_all(&buf[..remain]).expect("failed to write");
         n -= remain;
         if remain < buf.len() {
             break;

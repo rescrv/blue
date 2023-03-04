@@ -232,7 +232,8 @@ impl RngCore for Guacamole {
     }
 
     fn try_fill_bytes(&mut self, buf: &mut [u8]) -> Result<(), rand::Error> {
-        Ok(self.fill_bytes(buf))
+        self.fill_bytes(buf);
+        Ok(())
     }
 }
 
