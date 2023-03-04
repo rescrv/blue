@@ -44,14 +44,17 @@ impl Parameter for K {
 
 /////////////////////////////////////////// Calculations ///////////////////////////////////////////
 
+/// Given the probability of false positive, compute the necessary number of keys.
 pub fn calc_keys_given_probability(p: P) -> K {
     K(0.0f64 - p.0.log2())
 }
 
+/// Given the probability of false positive and number of elements, compute the number of bits.
 pub fn calc_m_given_p_n(p: P, n: N) -> M {
     M(0.0 - n.0 * p.0.ln() / LN2_2)
 }
 
+/// Given the number of elements and number of bits, compute the probability of false positive.
 pub fn calc_p_given_n_m(n: N, m: M) -> P {
     let e = std::f64::consts::E;
     P(e.powf(0.0 - LN2_2 * m.0 / n.0))
