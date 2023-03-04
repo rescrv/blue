@@ -7,7 +7,7 @@ use guacamole::Guacamole;
 use armnod::{ARMNOD, LengthChooser, SeedChooser};
 
 fn random_chooser() -> Box<dyn SeedChooser> {
-    Box::new(armnod::RandomStringChooser::default())
+    Box::<armnod::RandomStringChooser>::default()
 }
 
 fn set_chooser(cardinality: u64) -> Box<dyn SeedChooser> {
@@ -33,7 +33,7 @@ fn uniform_length_chooser(min_length: u32, max_length: u32) -> Box<dyn LengthCho
 fn main() {
     let app = App::new("armnod")
         .version("0.1.0")
-        .about("generate pseudo-random, predictable strings");
+        .about("Generate pseudo-random, predictable strings.");
     let app = app.arg(
         Arg::with_name("n")
             .long("n")
@@ -190,7 +190,7 @@ fn main() {
     let mut fout = BufWriter::new(std::io::stdout());
     for _ in 0..n {
         match armnod.choose(&mut guac) {
-            Some(x) => { write!(fout, "{}\n", x).unwrap(); }
+            Some(x) => { writeln!(fout, "{}", x).unwrap(); }
             None => break,
         }
     }
