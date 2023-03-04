@@ -6,6 +6,7 @@ pub use varint::v64;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// All Error conditions within `buffertk`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
@@ -98,8 +99,7 @@ pub trait Unpackable<'a>: Sized {
     type Error;
 
     /// `unpack` attempts to return an Unpackable object stored in a prefix of `buf`.  The method
-    /// returns the result and remaining unused buffer.  An error consumes an implementation-defined
-    /// portion of the buffer, but should typically consume zero bytes.
+    /// returns the result and remaining unused buffer.
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error>;
 }
 
@@ -119,7 +119,7 @@ pub fn pack_helper<T: Packable>(t: T, buf: &mut [u8]) -> &mut [u8] {
 
 const EMPTY: () = ();
 
-/// `stack_pack` begins construction of a [packer-like](struct.Packer.html) object on the stack.
+/// `stack_pack` begins a tree of packable data on the stack.
 pub fn stack_pack<'a, T: Packable + 'a>(t: T) -> StackPacker<'a, (), T> {
     StackPacker {
         prefix: &EMPTY,
@@ -127,10 +127,10 @@ pub fn stack_pack<'a, T: Packable + 'a>(t: T) -> StackPacker<'a, (), T> {
     }
 }
 
-/// StackPacker provides similar chained-pack API as [Packer](struct.Packer.html), but uses stack
-/// allocation and monomorphism to do so without obvious sources of heap allocation.  Beyond this
-/// hypothesized performance advantage, the StackPacker can inspect the sequence of Packables to be
-/// serialized and dynamically allocate the requisite space in a single allocation.
+/// [StackPacker] is the type returned by StackPack.  It's a pointer to something packable (usually
+/// another StackPacker) and some type that we can directly pack.  Both are packable, but it's
+/// usually the case that the former is another StackPacker while the latter is the type being
+/// serialized in a call to `pack`.
 pub struct StackPacker<'a, P, T>
 where
     P: Packable + 'a,
@@ -191,6 +191,9 @@ where
         Packable::pack(self, &mut v[v_sz..]);
     }
 
+    /// Create a Packable object that will pack like `"<varint-length><bytes>"` where the length
+    /// indicates how many bytes there are.  Nothing gets copied.  Usually this gets passed to
+    /// another `stack_pack`, which will do the work.
     pub fn length_prefixed(&'a self) -> LengthPrefixer<'a, StackPacker<'a, P, T>> {
         LengthPrefixer {
             size: self.pack_sz(),
@@ -218,16 +221,19 @@ where
 
 ///////////////////////////////////////////// Unpacker /////////////////////////////////////////////
 
+/// Unpacker parses a buffer start to finish.
 #[derive(Clone, Default)]
 pub struct Unpacker<'a> {
     buf: &'a [u8],
 }
 
 impl<'a> Unpacker<'a> {
+    /// Create a new [Unpacker] that parses `buf`.
     pub fn new(buf: &'a [u8]) -> Self {
         Self { buf }
     }
 
+    /// Unpack from buf into an object of type T.
     pub fn unpack<'b, E, T: Unpackable<'b, Error=E>>(&mut self) -> Result<T, E>
         where
         'a: 'b,
@@ -237,14 +243,17 @@ impl<'a> Unpacker<'a> {
         Ok(t)
     }
 
+    /// Return true if and only if there's no buffer left to parse.
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
 
+    /// Return the remaining buffer.
     pub fn remain(&self) -> &'a [u8] {
         self.buf
     }
 
+    /// Advance the buffer by `by`.  Saturating.
     pub fn advance(&mut self, by: usize) {
         if by > self.buf.len() {
             self.buf = &[];
@@ -360,12 +369,16 @@ packable_with_to_bits_to_le_bytes!(f64, u64);
 
 //////////////////////////////////////////// length_free ///////////////////////////////////////////
 
+/// Pack a byte slice without a length prefix.  The resulting format is equivalent to concatenating
+/// the individual packings.
 pub fn length_free<P:Packable>(slice: &[P]) -> LengthFree<P> {
     LengthFree {
         slice,
     }
 }
 
+/// A type that packs a slice of objects by concatenating their packed representations.  Does not
+/// prepend a length.
 pub struct LengthFree<'a, P:Packable> {
     slice: &'a [P],
 }
@@ -385,6 +398,8 @@ impl<'a, P:Packable> Packable for LengthFree<'a, P> {
 
 ////////////////////////////////////////// LengthPrefixer //////////////////////////////////////////
 
+/// A type that packs a slice of objects by concatenating their packed representations.  Prepends a
+/// length.
 pub struct LengthPrefixer<'a, P>
 where
     P: Packable + 'a,

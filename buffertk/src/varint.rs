@@ -1,9 +1,9 @@
 //! This module provides an implementation of the variable integer encoding specified in the
 //! [protobuf encoding documentation](https://developers.google.com/protocol-buffers/docs/encoding).
 //!
-//! By convention the From<I> and Into<I> traits are implemented for all common integer types I.
-//! They will silently truncate and it is up to higher level code to unpack to full v64 and check
-//! for overflow when casting.
+//! By convention the `From<I>` and `Into<I>` traits are implemented for all common integer types
+//! I.  They will silently truncate and it is up to higher level code to unpack to full v64 and
+//! check for overflow when casting.
 #![allow(clippy::len_zero)]
 #![allow(clippy::from_over_into)]
 

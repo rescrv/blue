@@ -7,6 +7,7 @@ use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 ////////////////////////////////////////////// Buffer //////////////////////////////////////////////
 
+/// A Buffer is a mutable, fixed-size, contiguous slice of bytes.
 pub struct Buffer {
     ptr: *mut u8,
     sz: usize,
@@ -18,6 +19,7 @@ impl Buffer {
         Layout::from_size_align(sz, 1).expect("invalid layout?")
     }
 
+    /// Create a new buffer of `sz` bytes.
     pub fn new(sz: usize) -> Self {
         let layout = Buffer::layout(sz);
         let ptr = unsafe { alloc(layout) };
@@ -27,14 +29,17 @@ impl Buffer {
         Buffer { ptr, sz }
     }
 
+    /// The number of bytes in the buffer.
     pub fn len(&self) -> usize {
         self.sz
     }
 
+    /// Returns the buffer as an immutable byte-slice.
     pub fn as_bytes(&self) -> &[u8] {
         unsafe { from_raw_parts(self.ptr, self.sz) }
     }
 
+    /// Returns the buffer as a mutable byte-slice.
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { from_raw_parts_mut(self.ptr, self.sz) }
     }
@@ -143,6 +148,8 @@ impl PartialOrd for Buffer {
 
 // Content under CC By-Sa.  I just use as is, as can you.
 // https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
+
+/// Compare byte slices `a` and `b`.
 pub fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
     for (ai, bi) in a.iter().zip(b.iter()) {
         match ai.cmp(bi) {
@@ -154,6 +161,7 @@ pub fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
     /* if every single element was equal, compare length */
     a.len().cmp(&b.len())
 }
+
 // End borrowed code
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
