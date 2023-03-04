@@ -104,7 +104,7 @@ impl SetStringChooserZipf {
 
 impl SeedChooser for SetStringChooserZipf {
     fn which_seed(&mut self, guac: &mut Guacamole) -> SeedChoice {
-        SeedChoice::Seed(self.zipf.next(guac))
+        SeedChoice::Seed(self.zipf.next(guac) * SET_SPREADER)
     }
 }
 
