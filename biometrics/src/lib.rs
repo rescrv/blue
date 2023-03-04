@@ -1,3 +1,7 @@
+//! biometrics is a library for measuring the vitals of processes using intrusive sensors.
+//! A sensor is an object that maintains a view of the system.  Threads active in the system
+//! cooperate to update the view, and background threads output the view to elsewhere for analysis.
+
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::Write;
@@ -16,16 +20,22 @@ pub use sensors::TDigest;
 
 ////////////////////////////////////////////// Sensor //////////////////////////////////////////////
 
+/// [Sensor] is the core type of the system.
 pub trait Sensor {
     type Reading;
 
+    /// Every sensor has a label.  This is a UTF-8 string.  It must be static because sensors are
+    /// meant to be instantiated statically as well, and having the constraint here enforces that.
     fn label(&'static self) -> &'static str;
+    /// Return a linearlizable view of the sensor.
     fn read(&'static self) -> Self::Reading;
+    /// Mark that the sensor has been registered to at least one registry.
     fn mark_registered(&'static self);
 }
 
 ////////////////////////////////////////// SensorRegistry //////////////////////////////////////////
 
+/// [SensorRegistry] refers to a set of sensors of the same type.
 pub struct SensorRegistry<S: Sensor + 'static> {
     sensors: Mutex<Vec<&'static S>>,
     register: &'static Counter,
@@ -34,6 +44,9 @@ pub struct SensorRegistry<S: Sensor + 'static> {
 }
 
 impl<S: Sensor + 'static> SensorRegistry<S> {
+    /// Create a new [SensorRegistry] using the three counters for internal instrumentation.  We
+    /// don't define these counters here, so that each registry can define its own counters and get
+    /// ground truth about the registry.
     pub fn new(register: &'static Counter, emit: &'static Counter, err: &'static Counter) -> Self {
         Self {
             sensors: Mutex::new(Vec::new()),
@@ -43,6 +56,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         }
     }
 
+    /// Unconditionally register the sensor with the sensor library.
     pub fn register(&self, sensor: &'static S) {
         {
             let mut sensors = self.sensors.lock().unwrap();
@@ -52,6 +66,8 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         sensor.mark_registered();
     }
 
+    /// Emit readings all sensors through `emitter`+`emit`, recording each sensor reading as close
+    /// to `now` as possible.
     pub fn emit<EM: Emitter<Error = ERR>, ERR>(
         &self,
         emitter: &mut EM,
@@ -88,6 +104,7 @@ thread_local! {
     pub static COLLECT: RefCell<Option<Rc<Collector>>> = RefCell::new(None);
 }
 
+/// Register a [Counter] with the default Collector.
 pub fn register_counter(counter: &'static Counter) -> bool {
     let mut result = false;
     COLLECT.with(|f| match f.borrow().as_ref() {
@@ -103,6 +120,7 @@ pub fn register_counter(counter: &'static Counter) -> bool {
     result
 }
 
+/// Register a [Gauge] with the default Collector.
 pub fn register_gauge(gauge: &'static Gauge) -> bool {
     let mut result = false;
     COLLECT.with(|f| match f.borrow().as_ref() {
@@ -118,6 +136,7 @@ pub fn register_gauge(gauge: &'static Gauge) -> bool {
     result
 }
 
+/// Register [Moments] with the default [Collector].
 pub fn register_moments(moments: &'static Moments) -> bool {
     let mut result = false;
     COLLECT.with(|f| match f.borrow().as_ref() {
@@ -133,6 +152,7 @@ pub fn register_moments(moments: &'static Moments) -> bool {
     result
 }
 
+/// Register [TDigest] with the default [Collector].
 pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
     let mut result = false;
     COLLECT.with(|f| match f.borrow().as_ref() {
