@@ -89,10 +89,16 @@ const ZIPFS: &[Zipf] = &[
     Zipf { n: 1000000000000, alpha: 10000.0, theta: 0.9999, zetan: 28.246438229354407, zeta2: 0.0, eta: 0.002690162403990004},
 ];
 
-////////////////////////////////////////////////////////////////////////////////
-// "Quickly Generating Billion-Record Synthetic Databases"
-// Gray et.al., SIGMOD 1994
+/////////////////////////////////////////////// Zipf ///////////////////////////////////////////////
 
+/// Zipf generator over [0, n).  From:
+///
+/// "Quickly Generating Billion-Record Synthetic Databases."
+/// Gray et.al., SIGMOD 1994
+///
+/// This should be used *only* where it's OK to not be a perfect Zipf distribution.  For larger
+/// distributions, low-rank items are missing and the curve is bent.  It's an approximation meant
+/// to skew workloads for a key-value-store generator.
 #[derive(Clone, Debug)]
 pub struct Zipf {
     n: u64,
@@ -104,6 +110,7 @@ pub struct Zipf {
 }
 
 impl Zipf {
+    /// Create a new Zipf distribution for `n` objects with `alpha > 1`.
     pub fn from_alpha(n: u64, alpha: f64) -> Self {
         for precomputed in ZIPFS.iter() {
             if precomputed.n == n && precomputed.alpha >= alpha * 0.999 && precomputed.alpha < alpha * 1.001 {
@@ -122,7 +129,7 @@ impl Zipf {
         zipf
     }
 
-
+    /// Create a new Zipf distribution for `n` objects with `theta` over `(0, 1)`.
     pub fn from_theta(n: u64, theta: f64) -> Self {
         for precomputed in ZIPFS.iter() {
             if precomputed.n == n && precomputed.theta >= theta * 0.999 && precomputed.theta < theta * 1.001 {
@@ -141,6 +148,9 @@ impl Zipf {
         zipf
     }
 
+    /// Use `guac` to generate some randomness and then adjust so that the returned u64 obeys a
+    /// Zipf distribution on [0, n), where 0 is the most common element, 1 the next most common and
+    /// so on.  It's not perfect, so expect to see cases where the distribution doesn't hold.
     pub fn next(&self, guac: &mut Guacamole) -> u64 {
         let u: f64 = guac.gen();
         let uz: f64 = u * self.zetan;

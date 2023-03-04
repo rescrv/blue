@@ -4,10 +4,11 @@ use std::io::Write;
 
 use guacamole::Guacamole;
 
+/// Generate pseudo-random, predictable bytes.
 fn main() {
-    let app = App::new("guacamole")
+    let app = App::new("zataods-guacamole")
         .version("0.1.0")
-        .about("generate pseudo-random, predictable bytes");
+        .about("Generate pseudo-random, predictable bytes.");
     let app = app.arg(
         Arg::with_name("n")
             .long("n")

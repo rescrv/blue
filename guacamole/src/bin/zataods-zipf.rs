@@ -3,10 +3,12 @@ use clap::{App, Arg};
 use guacamole::Guacamole;
 use guacamole::zipf::Zipf;
 
+
+/// Choose numbers [0, n) from a zipf distribution.
 fn main() {
-    let app = App::new("zipf")
+    let app = App::new("zataods-zipf")
         .version("0.1.0")
-        .about("choose numbers [0, n) from a zipf distribution");
+        .about("Choose numbers [0, n) from a zipf distribution.");
     let app = app.arg(
         Arg::with_name("n")
             .long("n")

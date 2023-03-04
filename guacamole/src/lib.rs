@@ -1,3 +1,6 @@
+//! Randomness tooling.  [Guacamole] provides a linear-seekable pseudo-random number generator.
+//! [Zipf] provides a zipf-distribution sampler.
+
 extern crate rand;
 
 use rand::RngCore;
@@ -19,7 +22,7 @@ D. J. Bernstein
 Public domain.
 */
 
-pub fn mash(x: u64, output: &mut [u32; 16]) {
+fn mash(x: u64, output: &mut [u32; 16]) {
     let low: u32 = (x & 0xffffffffu64) as u32;
     let high: u32 = (x >> 32) as u32;
 
@@ -155,6 +158,10 @@ impl MashOutput {
     }
 }
 
+/// Guacamole is a stream of random bytes.  It's linearly-seekable, which is a new way of saying
+/// that that seed(i) and seed(i+1) are adjacent in the input and output.  This allows workloads
+/// that are partitionable or discrete with many members to predictably manipulate the output by
+/// the input.
 #[derive(Clone)]
 pub struct Guacamole {
     // we treat this like the nonce in the stream cipher
@@ -166,12 +173,15 @@ pub struct Guacamole {
 }
 
 impl Guacamole {
+    /// Create a new [Guacamole] and seek it to `x`.
     pub fn new(x: u64) -> Self {
         let mut g = Guacamole::default();
         g.seek(x);
         g
     }
 
+    /// Seek to `x`.  The seek space is over 64-bits for efficiency, while the output of guacamole is
+    /// over 70-bits.  Each seek `i` to `i+1` advances 64 bytes in the output stream.
     pub fn seek(&mut self, x: u64) {
         self.nonce = x;
         self.index = 0;
@@ -179,6 +189,7 @@ impl Guacamole {
         mash(self.nonce, self.buffer.as_blocks());
     }
 
+    /// Fill `bytes` with the next `bytes.len()` random bytes from the stream.
     pub fn generate(&mut self, bytes: &mut [u8]) {
         let mut bytes = bytes;
         while bytes.len() >= self.remaining_len() {
@@ -202,13 +213,14 @@ impl Guacamole {
 }
 
 impl Default for Guacamole {
+    /// Returns a Guacamole that has been seek'd to 0.
     fn default() -> Self {
         let mut g = Guacamole {
             nonce: 0,
             index: 0,
             buffer: MashOutput { blocks: [0; 16] },
         };
-        // intentionally redundant
+        // Need to seek to mash the buffer.
         g.seek(0);
         g
     }
