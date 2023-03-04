@@ -21,12 +21,12 @@ pub fn urandom() -> Option<[u8; BYTES]> {
     Some(id)
 }
 
-/// Encode 16B of random data in something aesthetically better.
+/// Encode 16B of random data in something aesthetically better, like UUID format.
 pub fn encode(id: &[u8; BYTES]) -> String {
     let mut s = String::with_capacity(36);
     for &(start, limit) in SLICES.iter() {
         if start > 0 {
-            s.push_str("-");
+            s.push('-');
         }
         for i in start..limit {
             write!(&mut s, "{:02x}", id[i]).expect("unable to write to string");
@@ -60,7 +60,7 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
             index += 1;
         }
         let dash = chars.next();
-        if (limit < 16 && dash != Some('-')) || (limit == 16 && dash != None) {
+        if (limit < 16 && dash != Some('-')) || (limit == 16 && dash.is_some()) {
             return None;
         }
     }
