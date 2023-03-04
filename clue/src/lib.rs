@@ -110,7 +110,7 @@ impl Trace {
             return self
         }
         click!("clue.trace.with_stopwatch");
-        self.stopwatch = Some(Stopwatch::new());
+        self.stopwatch = Some(Stopwatch::default());
         self
     }
 

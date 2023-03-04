@@ -14,6 +14,7 @@ static ACTIVELY_LOCKING: Mutex<Vec<(dev_t, ino_t)>> = Mutex::new(Vec::new());
 
 ///////////////////////////////////////////// Lockfile /////////////////////////////////////////////
 
+/// Lock a local file on a local filesystem.
 pub struct Lockfile {
     file: Option<File>,
     dev: dev_t,
@@ -21,10 +22,12 @@ pub struct Lockfile {
 }
 
 impl Lockfile {
+    /// Try to acquire a lock, but don't block to wait for one.
     pub fn lock<P: AsRef<Path>>(path: P) -> Result<Option<Self>, Error> {
         Lockfile::_lock(path, libc::F_SETLK)
     }
 
+    /// Block to wait for the [Lockfile].
     pub fn wait<P: AsRef<Path>>(path: P) -> Result<Option<Self>, Error> {
         Lockfile::_lock(path, libc::F_SETLKW)
     }
@@ -70,6 +73,7 @@ impl Lockfile {
         }))
     }
 
+    /// Unlock the lockfile, allowing the next-waiting file to take it.
     pub fn unlock(&mut self) {
         let mut lock_table = ACTIVELY_LOCKING.lock().unwrap();
         for idx in 0..lock_table.len() {

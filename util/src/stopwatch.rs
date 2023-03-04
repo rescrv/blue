@@ -2,19 +2,24 @@ use std::time::Instant;
 
 ///////////////////////////////////////////// Stopwatch ////////////////////////////////////////////
 
+/// A stopwatch measuring from one instant to another.  A loose wrapper around std::time::Instant.
 pub struct Stopwatch {
     start: Instant,
 }
 
 impl Stopwatch {
-    pub fn new() -> Self {
+    /// Measure the time that the stopwatch has been running, as a value suitable for putting into
+    /// e.g. a gauge.
+    pub fn since(&self) -> f64 {
+        self.start.elapsed().as_millis() as f64 / 1_000.
+    }
+}
+
+impl Default for Stopwatch {
+    fn default() -> Self {
         Self {
             start: Instant::now(),
         }
-    }
-
-    pub fn since(&self) -> f64 {
-        self.start.elapsed().as_millis() as f64 / 1_000.
     }
 }
 
@@ -29,7 +34,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let stopwatch = Stopwatch::new();
+        let stopwatch = Stopwatch::default();
         sleep(Duration::from_millis(1));
         assert!(stopwatch.since() > 0.0);
         sleep(Duration::from_millis(100));
