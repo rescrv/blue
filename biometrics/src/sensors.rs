@@ -56,23 +56,6 @@ impl Sensor for Counter {
     }
 }
 
-impl Eq for &'static Counter {
-}
-
-impl PartialEq for &'static Counter {
-    fn eq(&self, rhs: &&'static Counter) -> bool {
-        *self as *const Counter == *rhs as *const Counter
-    }
-}
-
-impl std::hash::Hash for &'static Counter {
-    fn hash<H>(&self, state: &mut H)
-        where H: std::hash::Hasher
-        {
-            (*self as *const Counter).hash(state)
-        }
-}
-
 /////////////////////////////////////////////// Gauge //////////////////////////////////////////////
 
 const GAUGE_INIT: u64 = 0;
@@ -122,23 +105,6 @@ impl Sensor for Gauge {
     }
 }
 
-impl Eq for &'static Gauge {
-}
-
-impl PartialEq for &'static Gauge {
-    fn eq(&self, rhs: &&'static Gauge) -> bool {
-        *self as *const Gauge == *rhs as *const Gauge
-    }
-}
-
-impl std::hash::Hash for &'static Gauge {
-    fn hash<H>(&self, state: &mut H)
-        where H: std::hash::Hasher
-        {
-            (*self as *const Gauge).hash(state)
-        }
-}
-
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
 pub struct Moments {
@@ -186,23 +152,6 @@ impl Sensor for Moments {
     }
 }
 
-impl Eq for &'static Moments {
-}
-
-impl PartialEq for &'static Moments {
-    fn eq(&self, rhs: &&'static Moments) -> bool {
-        *self as *const Moments == *rhs as *const Moments
-    }
-}
-
-impl std::hash::Hash for &'static Moments {
-    fn hash<H>(&self, state: &mut H)
-        where H: std::hash::Hasher
-        {
-            (*self as *const Moments).hash(state)
-        }
-}
-
 ////////////////////////////////////////////// TDigest /////////////////////////////////////////////
 
 pub struct TDigest {
@@ -248,23 +197,6 @@ impl Sensor for TDigest {
     fn mark_registered(&'static self) {
         self.init.store(true, Ordering::Relaxed);
     }
-}
-
-impl Eq for &'static TDigest {
-}
-
-impl PartialEq for &'static TDigest {
-    fn eq(&self, rhs: &&'static TDigest) -> bool {
-        *self as *const TDigest == *rhs as *const TDigest
-    }
-}
-
-impl std::hash::Hash for &'static TDigest {
-    fn hash<H>(&self, state: &mut H)
-        where H: std::hash::Hasher
-        {
-            (*self as *const TDigest).hash(state)
-        }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////

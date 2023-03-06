@@ -1,5 +1,11 @@
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
+/// Moments are the statistical moments of mean (m1), standard deviation (m2), skewness (m3) and
+/// kurtosis (m4).  When a distribution goes long tailed, skewness and kurtosis blow up, so the
+/// hope is that this type will be good for monitoring general "no bad tail" insights.
+///
+/// The type itelf is algebraic.  Take two readings separated by time and subtract them to get
+/// perfectly recorded moments for the interval between the points.
 #[derive(Clone,Default,Debug)]
 pub struct Moments {
     pub n: u64,
@@ -10,6 +16,7 @@ pub struct Moments {
 }
 
 impl Moments {
+    /// Create a new [Moments] with zero values.
     pub const fn new() -> Self {
         Moments {
             n: 0,
@@ -20,6 +27,7 @@ impl Moments {
         }
     }
 
+    /// Add `x` to the sequence of values the moments captures.
     pub fn push(&mut self, x: f64) {
         let n1: f64 = self.n as f64;
         self.n += 1;
@@ -35,26 +43,33 @@ impl Moments {
         self.m1 += delta_n;
     }
 
+    /// How many values does this statistical summary represent?
     pub fn n(&self) -> u64 {
         self.n
     }
 
+    /// Average of values.
     pub fn mean(&self) -> f64 {
         self.m1
     }
 
+    /// Square of standard deviation.
     pub fn variance(&self) -> f64 {
         self.m2 / (self.n as f64 - 1.)
     }
 
+    /// How much the distance moves one way or another.
     pub fn skewness(&self) -> f64 {
         (self.n as f64).sqrt() * self.m3 / self.m2.powf(1.5)
     }
 
+    /// Say something about the tail of the distribution.
     pub fn kurtosis(&self) -> f64 {
         (self.n as f64) * self.m4 / (self.m2 * self.m2)
     }
 
+    /// Add two [Moments] together to get the equivalent of one that had the same set of values
+    /// pushed.
     pub fn add(lhs: &Self, rhs: &Self) -> Self {
         let delta: f64 = rhs.m1 - lhs.m1;
         let delta2: f64 = delta * delta;
@@ -81,6 +96,7 @@ impl Moments {
         }
     }
 
+    /// Compute lhs - rhs.
     pub fn sub(lhs: &Self, rhs: &Self) -> Self {
         let lhs_n: f64 = lhs.n as f64;
         let rhs_n: f64 = rhs.n as f64;
@@ -99,7 +115,7 @@ impl Moments {
             - 6. * delta2 * (n * n * rhs.m2 + rhs_n * rhs_n * m2) / (lhs_n*lhs_n)
             - 4. * delta * (n * rhs.m3 - rhs_n * m3) / lhs_n;
         Self {
-            n: lhs.n + rhs.n,
+            n: lhs.n - rhs.n,
             m1,
             m2,
             m3,

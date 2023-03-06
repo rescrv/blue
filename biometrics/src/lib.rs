@@ -79,7 +79,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         {
             let sensors_guard = self.sensors.lock().unwrap();
             for s in sensors_guard.iter() {
-                sensors.push(s.clone());
+                sensors.push(*s);
             }
         }
         let mut result = Ok(());
@@ -107,12 +107,9 @@ thread_local! {
 /// Register a [Counter] with the default Collector.
 pub fn register_counter(counter: &'static Counter) -> bool {
     let mut result = false;
-    COLLECT.with(|f| match f.borrow().as_ref() {
-        Some(collector) => {
-            collector.register_counter(counter);
-            result = true
-        }
-        None => {}
+    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
+        collector.register_counter(counter);
+        result = true
     });
     if result {
         counter.mark_registered();
@@ -123,12 +120,9 @@ pub fn register_counter(counter: &'static Counter) -> bool {
 /// Register a [Gauge] with the default Collector.
 pub fn register_gauge(gauge: &'static Gauge) -> bool {
     let mut result = false;
-    COLLECT.with(|f| match f.borrow().as_ref() {
-        Some(collector) => {
-            collector.register_gauge(gauge);
-            result = true
-        }
-        None => {}
+    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
+        collector.register_gauge(gauge);
+        result = true
     });
     if result {
         gauge.mark_registered();
@@ -139,12 +133,9 @@ pub fn register_gauge(gauge: &'static Gauge) -> bool {
 /// Register [Moments] with the default [Collector].
 pub fn register_moments(moments: &'static Moments) -> bool {
     let mut result = false;
-    COLLECT.with(|f| match f.borrow().as_ref() {
-        Some(collector) => {
-            collector.register_moments(moments);
-            result = true
-        }
-        None => {}
+    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
+        collector.register_moments(moments);
+        result = true
     });
     if result {
         moments.mark_registered();
@@ -155,12 +146,9 @@ pub fn register_moments(moments: &'static Moments) -> bool {
 /// Register [TDigest] with the default [Collector].
 pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
     let mut result = false;
-    COLLECT.with(|f| match f.borrow().as_ref() {
-        Some(collector) => {
-            collector.register_t_digest(t_digest);
-            result = true
-        }
-        None => {}
+    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
+        collector.register_t_digest(t_digest);
+        result = true
     });
     if result {
         t_digest.mark_registered();
@@ -170,6 +158,7 @@ pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
 
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
 
+/// Collect and register sensors of all types.  One registry per sensor type.
 pub struct Collector {
     counters: SensorRegistry<Counter>,
     gauges: SensorRegistry<Gauge>,
@@ -190,6 +179,8 @@ static COLLECTOR_EMIT_FAILURE: Counter = Counter::new("collector.emit.failure");
 static COLLECTOR_TIME_FAILURE: Counter = Counter::new("collector.time.failure");
 
 impl Collector {
+    /// Get a new [Collector].  The collector will use the global registries and emit to the
+    /// COLLECTOR_* counters for easy monitoring.
     pub fn new() -> Rc<Self> {
         let collector = Self {
             counters: SensorRegistry::new(
@@ -230,6 +221,7 @@ impl Collector {
         Rc::new(collector)
     }
 
+    /// Make the provided collector the thread local collector for this thread.
     pub fn register_with_thread(self: Rc<Collector>) {
         COLLECTOR_REGISTER_THREAD.click();
         COLLECT.with(|f| {
@@ -237,29 +229,33 @@ impl Collector {
         });
     }
 
+    /// Register `counter` with the Collector.
     pub fn register_counter(&self, counter: &'static Counter) {
         self.counters.register(counter);
     }
 
+    /// Register `gauge` with the Collector.
     pub fn register_gauge(&self, gauge: &'static Gauge) {
         self.gauges.register(gauge);
     }
 
+    /// Register `moments` with the Collector.
     pub fn register_moments(&self, moments: &'static Moments) {
         self.moments.register(moments);
     }
 
+    /// Register `t_digest` with the Collector.
     pub fn register_t_digest(&self, t_digest: &'static TDigest) {
         self.t_digests.register(t_digest);
     }
 
+    /// Output the sensors registered to this emitter.
     pub fn emit<EM: Emitter<Error = ERR>, ERR>(&self, emitter: &mut EM) -> Result<(), ERR> {
         let result = Ok(());
         let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &|| { self.now() }));
         let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &|| { self.now() }));
         let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &|| { self.now() }));
-        let result = result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &|| { self.now() }));
-        result
+        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &|| { self.now() }))
     }
 
     fn now(&self) -> f64 {
@@ -287,17 +283,23 @@ macro_rules! click {
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
+/// [Emitter] outputs the sensor state via I/O.
 pub trait Emitter {
     type Error;
 
+    /// Read the provided [Counter].
     fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), Self::Error>;
+    /// Read the provided [Gauge].
     fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), Self::Error>;
+    /// Read the provided [Moments].
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), Self::Error>;
+    /// Read the provided [TDigest].
     fn emit_t_digest(&mut self, t_digest: &'static TDigest, now: f64) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
 
+/// An emitter that puts readings one-per-line.
 pub struct PlainTextEmitter {
     output: File,
 }

@@ -63,7 +63,7 @@ impl TDigest {
         if self.buffer.len() > self.delta as usize {
             std::mem::swap(&mut compact, &mut self.buffer);
         }
-        if compact.len() > 0 {
+        if !compact.is_empty() {
             let to_merge = TDigest::centroids_from_points(compact);
             TDigest::merge_centroids(self.delta, &mut self.centroids, &to_merge);
         }
@@ -81,7 +81,7 @@ impl TDigest {
     }
 
     #[allow(non_snake_case)]
-    fn merge_centroids(delta: u64, into: &mut Vec<Centroid>, from: &Vec<Centroid>) {
+    fn merge_centroids(delta: u64, into: &mut Vec<Centroid>, from: &[Centroid]) {
         for point in from.iter() {
             into.push(point.clone());
         }
@@ -97,7 +97,7 @@ impl TDigest {
                 sigma.sum += point.sum;
                 sigma.count += point.count;
             } else {
-                q0 = q0 + sigma.count as f64 / S;
+                q0 += sigma.count as f64 / S;
                 q_limit = TDigest::inverse_scale(TDigest::scale(q0, delta) + 1.0, delta);
                 C.push(sigma);
                 sigma = point.clone();
