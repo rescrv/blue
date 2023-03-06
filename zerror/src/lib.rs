@@ -1,31 +1,39 @@
+//! zerror is a module for creating rich error types.
+
 use std::backtrace::Backtrace;
-use std::collections::btree_map::BTreeMap;
 use std::error::Error;
 use std::fmt::Debug;
 
 use biometrics::Counter;
 
+use prototk_derive::Message;
+
 ///////////////////////////////////////////////// Z ////////////////////////////////////////////////
 
+/// The core type of zerror.  Implement this trait, or wrap and proxy ErrorCore, to create rich
+/// errors in the long_form.  This integrates with the error handling "monad" over Result<T, Z>.
 pub trait Z {
     type Error;
 
-    // Convert an error to a string free from "="*80.
+    /// Convert an error to a string free from "="*80.
     fn long_form(&self) -> String;
 
-    // What caused this error.
+    /// What caused this error.
     fn source(&self) -> Option<&(dyn Error + 'static)>;
-    // Set the source that caused the error.
+    /// Set the source that caused the error.
     fn set_source<E: Error + 'static>(&mut self, err: E);
 
-    // Add a token.
+    /// Add a token.
     fn with_token(self, identifier: &str, value: &str) -> Self::Error;
+    /// Add a token.
     fn set_token(&mut self, identifier: &str, value: &str);
-    // Add a URL.
+    /// Add a URL.
     fn with_url(self, identifier: &str, url: &str) -> Self::Error;
+    /// Add a URL.
     fn set_url(&mut self, identifier: &str, url: &str);
-    // Add debug formatting of a local variable.
+    /// Add debug formatting of a local variable.
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
+    /// Add debug formatting of a local variable.
     fn set_variable<X: Debug>(&mut self, variable: &str, x: X);
 }
 
@@ -99,18 +107,53 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 
 ///////////////////////////////////////////// ErrorCore ////////////////////////////////////////////
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Message)]
+struct Token {
+    #[prototk(1, string)]
+    identifier: String,
+    #[prototk(2, string)]
+    value: String,
+}
+
+#[derive(Clone, Debug, Default, Message)]
+struct Url {
+    #[prototk(1, string)]
+    identifier: String,
+    #[prototk(2, string)]
+    url: String,
+}
+
+#[derive(Clone, Debug, Default, Message)]
+struct Variable {
+    #[prototk(1, string)]
+    identifier: String,
+    #[prototk(2, string)]
+    value: String,
+}
+
+/// [ErrorCore] implements 100% of Z for easy error reporting.  It's intended that people will wrap
+/// and proxy ErrorCore and then implement a short summary on top that descends from an error enum.
+#[derive(Debug, Default, Message)]
 pub struct ErrorCore {
+    #[prototk(1, string)]
     email: String,
+    #[prototk(2, string)]
     short: String,
+    #[prototk(3, string)]
     backtrace: String,
-    toks: BTreeMap<String, String>,
-    urls: Vec<(String, String)>,
-    vars: Vec<(String, String)>,
+    #[prototk(4, message)]
+    toks: Vec<Token>,
+    #[prototk(5, message)]
+    urls: Vec<Url>,
+    #[prototk(6, message)]
+    vars: Vec<Variable>,
     source: Option<Box<dyn Error + 'static>>,
 }
 
 impl ErrorCore {
+    /// Create a new ErrorCore with the provided email and short summary.  The provided counter
+    /// will be clicked each time a new error is created, to give people insight into the error.
+    /// It's advisable to have a separate counter for different conditions.
     pub fn new(email: &str, short: &str, counter: &'static Counter) -> Self {
         counter.click();
         let backtrace = format!("{}", Backtrace::force_capture());
@@ -118,7 +161,7 @@ impl ErrorCore {
             email: email.to_owned(),
             short: short.to_owned(),
             backtrace,
-            toks: BTreeMap::new(),
+            toks: Vec::new(),
             urls: Vec::new(),
             vars: Vec::new(),
             source: None,
@@ -132,16 +175,16 @@ impl Z for ErrorCore {
     fn long_form(&self) -> String {
         let mut s = String::default();
         s += &format!("{}\n\nOWNER: {}", self.short, self.email);
-        for (key, val) in self.toks.iter() {
-            s += &format!("\n{}: {}", key, val);
+        for token in self.toks.iter() {
+            s += &format!("\n{}: {}", token.identifier, token.value);
         }
-        for (key, val) in self.urls.iter() {
-            s += &format!("\n{}: {}", key, val);
+        for url in self.urls.iter() {
+            s += &format!("\n{}: {}", url.identifier, url.url);
         }
         if !self.vars.is_empty() {
-            s += &format!("\n");
-            for (key, val) in self.vars.iter() {
-                s += &format!("\n{} = {}", key, val);
+            s += "\n";
+            for variable in self.vars.iter() {
+                s += &format!("\n{} = {}", variable.identifier, variable.value);
             }
         }
         s += &format!("\n\nbacktrace:\n{}", self.backtrace);
@@ -168,7 +211,7 @@ impl Z for ErrorCore {
     }
 
     fn set_token(&mut self, identifier: &str, value: &str) {
-        self.toks.insert(identifier.to_owned(), value.to_owned());
+        self.toks.push(Token { identifier: identifier.to_owned(), value: value.to_owned() });
     }
 
     fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
@@ -177,7 +220,7 @@ impl Z for ErrorCore {
     }
 
     fn set_url(&mut self, identifier: &str, url: &str) {
-        self.urls.push((identifier.to_owned(), url.to_owned()));
+        self.urls.push(Url { identifier: identifier.to_owned(), url: url.to_owned() });
     }
 
     fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error {
@@ -186,6 +229,6 @@ impl Z for ErrorCore {
     }
 
     fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        self.vars.push((variable.to_owned(), format!("{:?}", x)));
+        self.vars.push(Variable { identifier: variable.to_owned(), value: format!("{:?}", x) });
     }
 }
