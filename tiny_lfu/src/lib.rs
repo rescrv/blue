@@ -3,7 +3,6 @@ use std::hash::Hasher;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bloom;
 use cache::AdmissionPolicy;
 
 mod vector;
@@ -48,6 +47,7 @@ const KEYS: [u64; MAX_KEYS] = [
 
 ////////////////////////////////////////// TinyLFUOptions //////////////////////////////////////////
 
+/// [TinyLFUOptions] controls the layout of the [TinyLFU].
 #[derive(Clone, Debug)]
 pub struct TinyLFUOptions {
     target_memory_usage: usize,
@@ -55,11 +55,14 @@ pub struct TinyLFUOptions {
 }
 
 impl TinyLFUOptions {
+    /// Use up to `target_memory_usage` bytes of memory for the TinyLFU instance.
     pub fn target_memory_usage(mut self, target_memory_usage: usize) -> Self {
         self.target_memory_usage = target_memory_usage;
         self
     }
 
+    /// Track a window of `window_sz` admissions.  If this is not a power of two, it may be
+    /// increased to the next-largest power of two.
     pub fn window_size(mut self, window_size: u32) -> Self {
         self.window_size = window_size;
         self
@@ -68,16 +71,19 @@ impl TinyLFUOptions {
 
 impl Default for TinyLFUOptions {
     fn default() -> Self {
-        // TODO(rescrv): Make this a sensible default.
         Self {
-            target_memory_usage: 1usize << 20,
-            window_size: 1u32 << 20,
+            // Use 2GiB to track...
+            target_memory_usage: 1usize << 31,
+            // ... the last billion or so requests.
+            window_size: 1u32 << 30,
         }
     }
 }
 
 ////////////////////////////////////////////// TinyLFU /////////////////////////////////////////////
 
+/// [TinyLFU] is a [AdmissionPolicy] that can recommend when one element is more popular than
+/// another.
 pub struct TinyLFU {
     opts: TinyLFUOptions,
     keys: &'static [u64],
@@ -88,6 +94,7 @@ pub struct TinyLFU {
 }
 
 impl TinyLFU {
+    /// Create a new [TinyLFU] using the [TinyLFUOptions] provided.
     pub fn new(mut opts: TinyLFUOptions) -> Result<Self, &'static str> {
         opts.window_size = match opts.window_size.checked_next_power_of_two() {
             Some(x) => x,

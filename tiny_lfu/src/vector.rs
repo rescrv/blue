@@ -87,7 +87,7 @@ impl Vector {
         let u64_index = bit_index / 64;
         let lower_shift = (bit_index - u64_index * 64) as u64;
         let lower_bits = if 64 - lower_shift < self.elem_bits as u64 {
-            64 - lower_shift as u64
+            64 - lower_shift
         } else {
             self.elem_bits as u64
         };
