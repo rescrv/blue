@@ -9,7 +9,7 @@ use lp::sst::{SSTBuilder, SSTBuilderOptions};
 use lp::Builder;
 
 fn main() {
-    let app = App::new("lp-sst-from-plaintext")
+    let app = App::new("zataods-lp-sst-from-plaintext")
         .version("0.1.0")
         .about("Convert a plaintext \"table\" to an SST.");
     let app = app.arg(

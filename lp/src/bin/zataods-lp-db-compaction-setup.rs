@@ -3,7 +3,7 @@ use clap::{App, Arg};
 use lp::cli::{db_args, parse_db_args, parse_db_options, sst_args, parse_sst_args};
 
 fn main() {
-    let app = App::new("lp-db-compaction-setup")
+    let app = App::new("zataods-lp-db-compaction-setup")
         .version("0.1.0")
         .about("Setup the inputs for a single compaction.");
     let app = db_args(app);

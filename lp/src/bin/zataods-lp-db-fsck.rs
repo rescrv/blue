@@ -5,7 +5,7 @@ use lp::cli::{db_args, parse_db_name, parse_db_options};
 use lp::db::DB;
 
 fn main() {
-    let app = App::new("lp-db-fsck")
+    let app = App::new("zataods-lp-db-fsck")
         .version("0.1.0")
         .about("Output a debug dump of an LP database.");
     let app = db_args(app);

@@ -8,7 +8,7 @@ use lp::options::CompactionOptions;
 use lp::Cursor;
 
 fn main() {
-    let app = App::new("lp-sst-compact")
+    let app = App::new("zataods-lp-sst-compact")
         .version("0.1.0")
         .about("Compact the listed SSTs to a new set of SSTs without dropping anything.");
     let app = app.arg(

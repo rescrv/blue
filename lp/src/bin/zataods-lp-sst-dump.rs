@@ -4,7 +4,7 @@ use lp::sst::SST;
 use lp::Cursor;
 
 fn main() {
-    let app = App::new("lp-sst-dump")
+    let app = App::new("zataods-lp-sst-dump")
         .version("0.1.0")
         .about("Dump an SST to stdout using escaped strings.");
     let app = app.arg(
