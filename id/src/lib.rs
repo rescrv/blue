@@ -28,8 +28,8 @@ pub fn encode(id: &[u8; BYTES]) -> String {
         if start > 0 {
             s.push('-');
         }
-        for i in start..limit {
-            write!(&mut s, "{:02x}", id[i]).expect("unable to write to string");
+        for c in &id[start..limit] {
+            write!(&mut s, "{:02x}", c).expect("unable to write to string");
         }
     }
     s
