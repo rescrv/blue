@@ -28,7 +28,6 @@ generate_id!{TraceID, "trace:"}
 
 pub struct Trace {
     id: Option<TraceID>,
-    proto: ProtoTKBuilder,
     human: String,
     stopwatch: Option<Stopwatch>,
 }
@@ -44,7 +43,6 @@ impl Trace {
         });
         let trace = Self {
             id: id.clone(),
-            proto: ProtoTKBuilder::default(),
             human: String::default(),
             stopwatch: None,
         };
@@ -78,7 +76,7 @@ impl Trace {
         self
     }
 
-    pub fn with_protobuf<'a, F, const N: u32>(mut self, field_value: F::Native) -> Self
+    pub fn with_protobuf<'a, F, const N: u32>(self, _field_value: F::Native) -> Self
     where
         F: FieldType<'a> + 'a,
         F::Native: FieldPackHelper<'a, F> + 'a,
