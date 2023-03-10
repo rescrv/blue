@@ -76,19 +76,19 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics buffertk::Packable for #ty_name #ty_generics #where_clause {
             fn pack_sz(&self) -> usize {
                 use buffertk::v64;
-                use prototk::{FieldPackHelper, FieldType, Message};
+                use prototk::{FieldPacker, FieldPackHelper, FieldType, Message};
                 #pack_reqd_bytes
             }
 
             fn pack(&self, buf: &mut [u8]) {
                 use buffertk::v64;
-                use prototk::{FieldPackHelper, FieldType, Message};
+                use prototk::{FieldPacker, FieldPackHelper, FieldType, Message};
                 #pack_into_slice
             }
 
             fn stream<W: std::io::Write>(&self, writer: &mut W) -> std::result::Result<usize, std::io::Error> {
                 use buffertk::v64;
-                use prototk::{FieldPackHelper, FieldType, Message};
+                use prototk::{FieldPacker, FieldPackHelper, FieldType, Message};
                 #message_stream
             }
         }
