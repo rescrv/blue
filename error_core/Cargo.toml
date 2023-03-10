@@ -1,0 +1,12 @@
+[package]
+name = "error_core"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+
+[dependencies]
+biometrics = { path = "../biometrics" }
+buffertk = { path = "../buffertk" }
+prototk = { path = "../prototk" }
+prototk_derive = { path = "../prototk_derive" }
+zerror = { path = "../zerror" }

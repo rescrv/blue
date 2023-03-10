@@ -9,7 +9,8 @@ use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
 use prototk::field_types::*;
 
-use zerror::{ErrorCore, Z};
+use zerror::Z;
+use error_core::ErrorCore;
 
 use super::block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use super::file_manager::{open_without_manager, FileHandle};

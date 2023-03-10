@@ -10,7 +10,8 @@ use prototk::field_types::*;
 
 use util::time::now;
 
-use zerror::{ErrorCore, Z};
+use zerror::Z;
+use error_core::ErrorCore;
 
 use super::super::file_manager::open_without_manager;
 use super::super::merging_cursor::MergingCursor;

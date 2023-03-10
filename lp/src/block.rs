@@ -7,7 +7,8 @@ use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 use prototk::field_types::*;
 use prototk_derive::Message;
 
-use zerror::{ErrorCore, Z};
+use zerror::Z;
+use error_core::ErrorCore;
 
 use super::{
     LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
