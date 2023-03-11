@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use cache::AdmissionPolicy;
 
@@ -164,7 +164,7 @@ impl TinyLFU {
         let _hold = self.mtx.lock().unwrap();
         let counter = self.counter.load(Ordering::Relaxed);
         if counter < self.opts.window_size as u64 {
-            return
+            return;
         }
         self.counter.store(counter / 2, Ordering::Relaxed);
         self.epoch.fetch_add(1, Ordering::Relaxed);
