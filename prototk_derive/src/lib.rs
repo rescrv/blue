@@ -94,9 +94,9 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         impl #exp_impl_generics buffertk::Unpackable<#lifetime> for #ty_name #ty_generics #where_clause {
-            type Error = prototk::Error;
+            type Error = ::prototk::Error;
 
-            fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), prototk::Error>
+            fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), ::prototk::Error>
                 where
                     'b: #lifetime,
             {
@@ -571,22 +571,16 @@ impl ProtoTKVisitor for PackMessageVisitor {
         field_type: &TokenStream,
     ) -> TokenStream {
         quote_spanned! { field.span() =>
-            let tag = prototk::Tag {
-                field_number: prototk::FieldNumber::must(#field_number),
-                wire_type: prototk::field_types::#field_type::WIRE_TYPE,
-            };
-            let fp = prototk::FieldPacker::new(tag, &self.#field_ident,
-                std::marker::PhantomData::<&prototk::field_types::#field_type>{});
-            let pa = pa.pack(fp);
+            let prototk_pa = prototk_pa.pack(::prototk::field_types::#field_type::field_packer(::prototk::FieldNumber::must(#field_number), &self.#field_ident));
         }
     }
 
     fn struct_snippet(&mut self, _ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         let call = &self.call;
         quote! {
-            let pa = buffertk::stack_pack(());
+            let prototk_pa = ::buffertk::stack_pack(());
             #(#fields;)*
-            pa.#call
+            prototk_pa.#call
         }
     }
 
@@ -600,38 +594,25 @@ impl ProtoTKVisitor for PackMessageVisitor {
     ) -> TokenStream {
         let mut enum_names = Vec::new();
         let mut field_decls = Vec::new();
-        let mut field_pack = Vec::new();
         for field in fields.named.iter() {
             let enum_name = field.ident.clone();
             enum_names.push(field.ident.clone());
-            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream()), field.span());
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
             let decl = quote! {
-                let tag = prototk::Tag {
-                    field_number: prototk::FieldNumber::must(#enum_number),
-                    wire_type: prototk::field_types::#enum_type::WIRE_TYPE,
-                };
-                let #field_name = FieldPacker::new(tag, #enum_name,
-                    std::marker::PhantomData::<&::prototk::field_types::#enum_type>{});
+                let prototk_pa = prototk_pa.pack(::prototk::field_types::#enum_type::field_packer(::prototk::FieldNumber::must(#enum_number), #enum_name));
             };
             field_decls.push(decl);
-            let pack = quote! {
-                let pa = pa.pack(#field_name);
-            };
-            field_pack.push(pack);
         }
         let call = &self.call;
         quote! {
             #ctor { #(#enum_names,)* } => {
+                let prototk_pa = ::buffertk::stack_pack(());
                 #(#field_decls;)*
-                let tag = prototk::Tag {
-                    field_number: prototk::FieldNumber::must(#field_number),
-                    wire_type: prototk::WireType::LengthDelimited,
-                };
-                let pa = stack_pack(());
-                #(#field_pack;)*
-                stack_pack(tag).pack(pa.length_prefixed()).#call
+                ::buffertk::stack_pack(::prototk::Tag {
+                    field_number: ::prototk::FieldNumber::must(#field_number),
+                    wire_type: ::prototk::WireType::LengthDelimited,
+                }).pack(prototk_pa.length_prefixed()).#call
             },
         }
     }
@@ -646,14 +627,7 @@ impl ProtoTKVisitor for PackMessageVisitor {
         let call = &self.call;
         quote_spanned! { variant.span() =>
             #ctor(v) => {
-                let tag = prototk::Tag {
-                    field_number: prototk::FieldNumber::must(#field_number),
-                    wire_type: prototk::field_types::#field_type::WIRE_TYPE,
-                };
-                let fp = prototk::FieldPacker::new(tag, v,
-                    std::marker::PhantomData::<&prototk::field_types::#field_type>{});
-                let pa = buffertk::stack_pack(fp);
-                pa.#call
+                ::buffertk::stack_pack(::prototk::field_types::#field_type::field_packer(::prototk::FieldNumber::must(#field_number), v)).#call
             },
         }
     }
@@ -667,15 +641,8 @@ impl ProtoTKVisitor for PackMessageVisitor {
         let call = &self.call;
         quote_spanned! { variant.span() =>
             #ctor => {
-                let tag = prototk::Tag {
-                    field_number: prototk::FieldNumber::must(#field_number),
-                    wire_type: prototk::field_types::bytes::WIRE_TYPE,
-                };
-                let empty: &[u8] = &[];
-                let fp = prototk::FieldPacker::new(tag, &empty,
-                    std::marker::PhantomData::<&prototk::field_types::bytes>{});
-                let pa = buffertk::stack_pack(fp);
-                pa.#call
+                let prototk_empty: &[u8] = &[];
+                ::buffertk::stack_pack(::prototk::field_types::bytes::field_packer(::prototk::FieldNumber::must(#field_number), &prototk_empty)).#call
             },
         }
     }
@@ -704,9 +671,9 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         field_type: &TokenStream,
     ) -> TokenStream {
         quote_spanned! { field.span() =>
-            (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
-                let (tmp, _): (prototk::field_types::#field_type, _) = Unpackable::unpack(field_value)?;
-                ret.#field_ident.merge_field(tmp);
+            (#field_number, ::prototk::field_types::#field_type::WIRE_TYPE) => {
+                let (prototk_tmp, _): (::prototk::field_types::#field_type, _) = Unpackable::unpack(field_value)?;
+                ret.#field_ident.merge_field(prototk_tmp);
             },
         }
     }
@@ -714,8 +681,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         quote! {
             let mut ret: #ty_name = #ty_name::default();
-            let mut error: Option<prototk::Error> = None;
-            let fields = prototk::FieldIterator::new(buf, &mut error);
+            let mut error: Option<::prototk::Error> = None;
+            let fields = ::prototk::FieldIterator::new(buf, &mut error);
             for (tag, field_value) in fields {
                 let num: u32 = tag.field_number.into();
                 match (num, tag.wire_type) {
@@ -742,7 +709,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         for field in fields.named.iter() {
             let enum_name = field.ident.clone();
             enum_names.push(field.ident.clone());
-            let field_name = syn::Ident::new(&format!("field_{}", field.ident.to_token_stream()), field.span());
+            let field_name = syn::Ident::new(&format!("prototk_field_{}", field.ident.to_token_stream()), field.span());
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
             let decl = quote! {
@@ -763,16 +730,17 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote! {
             (#field_number, ::prototk::WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
-                let mut error: Option<prototk::Error> = None;
-                let fields = ::prototk::FieldIterator::new(&up.remain()[0..length.into()], &mut error);
+                let mut error: Option<::prototk::Error> = None;
+                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 up.advance(length.into());
+                let fields = ::prototk::FieldIterator::new(local_buf, &mut error);
                 #(#field_decls;)*
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
                     match (num, tag.wire_type) {
                         #(#field_blocks)*
                         (_, _) => {
-                            return Err(prototk::Error::UnknownDiscriminant { discriminant: num }.into());
+                            return Err(::prototk::Error::UnknownDiscriminant { discriminant: num }.into());
                         },
                     }
                 }
@@ -792,8 +760,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         field_type: &TokenStream,
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
-            (#field_number, prototk::field_types::#field_type::WIRE_TYPE) => {
-                let tmp: prototk::field_types::#field_type = up.unpack()?;
+            (#field_number, ::prototk::field_types::#field_type::WIRE_TYPE) => {
+                let tmp: ::prototk::field_types::#field_type = up.unpack()?;
                 Ok((#ctor(tmp.into_native().into()), up.remain()))
             },
         }
@@ -806,7 +774,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         field_number: &syn::LitInt,
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
-            (#field_number, prototk::WireType::LengthDelimited) => {
+            (#field_number, ::prototk::WireType::LengthDelimited) => {
                 up.advance(1);
                 Ok((#ctor, up.remain()))
             },
@@ -815,14 +783,14 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
 
     fn enum_snippet(&mut self, _ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream {
         quote! {
-            let mut up = buffertk::Unpacker::new(buf);
-            let tag: prototk::Tag = up.unpack()?;
+            let mut up = ::buffertk::Unpacker::new(buf);
+            let tag: ::prototk::Tag = up.unpack()?;
             let num: u32 = tag.field_number.into();
-            let wire_type: prototk::WireType = tag.wire_type;
+            let wire_type: ::prototk::WireType = tag.wire_type;
             match (num, wire_type) {
                 #(#variants)*
                 _ => {
-                    return Err(prototk::Error::UnknownDiscriminant { discriminant: num }.into());
+                    return Err(::prototk::Error::UnknownDiscriminant { discriminant: num }.into());
                 },
             }
         }

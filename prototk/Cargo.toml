@@ -7,3 +7,4 @@ edition = "2021"
 [dependencies]
 buffertk = { path = "../buffertk" }
 prototk_derive = { path = "../prototk_derive" }
+zerror = { path = "../zerror" }
