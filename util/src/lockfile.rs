@@ -36,7 +36,12 @@ impl Lockfile {
         // Hold ACTIVELY_LOCKING during the entire lock protocol.
         let mut lock_table = ACTIVELY_LOCKING.lock().unwrap();
         // Open the lock.  It doesn't matter if the lock file already exists.
-        let file = OpenOptions::new().read(true).write(true).create(true).mode(0o600).open(path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .open(path)?;
         // Use the metadata to see if this process already holds a lock.
         let metadata = file.metadata()?;
         for (dev, ino) in lock_table.iter() {
@@ -59,10 +64,12 @@ impl Lockfile {
                 } else if unsafe { *libc::__errno_location() == libc::EINTR } {
                     continue;
                 } else {
-                    return Err(Error::from_raw_os_error(unsafe { *libc::__errno_location() }));
+                    return Err(Error::from_raw_os_error(unsafe {
+                        *libc::__errno_location()
+                    }));
                 }
             } else {
-                break
+                break;
             }
         }
         lock_table.push((metadata.dev(), metadata.ino()));

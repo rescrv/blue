@@ -17,7 +17,8 @@ fn main() {
     // Return child exit status.
     let mut child = Command::new(args[2].clone())
         .args(&args[3..])
-        .spawn().expect("exec failed");
+        .spawn()
+        .expect("exec failed");
     let exit_status = child.wait().expect("wait failed");
     std::process::exit(exit_status.code().unwrap_or(-1));
 }
