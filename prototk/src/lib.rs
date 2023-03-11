@@ -110,12 +110,6 @@ impl Z for Error {
         format!("{}", self)
     }
 
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-
-    fn set_source<E: std::error::Error + 'static>(&mut self, _: E) {}
-
     fn with_token(self, _: &str, _: &str) -> Self::Error {
         self
     }

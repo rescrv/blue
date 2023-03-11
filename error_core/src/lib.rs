@@ -52,7 +52,6 @@ pub struct ErrorCore {
     urls: Vec<Url>,
     #[prototk(6, message)]
     vars: Vec<Variable>,
-    source: Option<Box<dyn Error + 'static>>,
 }
 
 impl ErrorCore {
@@ -69,7 +68,6 @@ impl ErrorCore {
             toks: Vec::new(),
             urls: Vec::new(),
             vars: Vec::new(),
-            source: None,
         }
     }
 }
@@ -93,21 +91,7 @@ impl Z for ErrorCore {
             }
         }
         s += &format!("\n\nbacktrace:\n{}", self.backtrace);
-        if let Some(source) = &self.source {
-            s += &format!("\n\nsource error:\n{}", source);
-        }
         s
-    }
-
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match &self.source {
-            Some(e) => { Some(e.as_ref()) },
-            None => { None },
-        }
-    }
-
-    fn set_source<E: Error + 'static>(&mut self, err: E) {
-        self.source = Some(Box::new(err));
     }
 
     fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {

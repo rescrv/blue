@@ -1,6 +1,5 @@
 //! zerror is a module for creating rich error types.
 
-use std::error::Error;
 use std::fmt::Debug;
 
 ///////////////////////////////////////////////// Z ////////////////////////////////////////////////
@@ -12,11 +11,6 @@ pub trait Z {
 
     /// Convert an error to a string free from "="*80.
     fn long_form(&self) -> String;
-
-    /// What caused this error.
-    fn source(&self) -> Option<&(dyn Error + 'static)>;
-    /// Set the source that caused the error.
-    fn set_source<E: Error + 'static>(&mut self, err: E);
 
     /// Add a token.
     fn with_token(self, identifier: &str, value: &str) -> Self::Error;
@@ -41,22 +35,6 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
                 panic!("called \"<Result<T, E> as Z>.long_form()\" on Ok Result");
             },
             Err(e) => { e.long_form() },
-        }
-    }
-
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Ok(_) => { None },
-            Err(e) => { e.source() },
-        }
-    }
-
-    fn set_source<R: Error + 'static>(&mut self, err: R) {
-        match self {
-            Ok(_) => {
-                panic!("called \"<Result<T, E> as Z>.set_source()\" on Ok Result");
-            },
-            Err(e) => { e.set_source(err) },
         }
     }
 

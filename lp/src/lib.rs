@@ -298,14 +298,6 @@ impl Z for Error {
         format!("{}", self) + "\n" + &self.core().long_form()
     }
 
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.core().source()
-    }
-
-    fn set_source<E: std::error::Error + 'static>(&mut self, err: E) {
-        self.core_mut().set_source(err)
-    }
-
     fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
         self.set_token(identifier, value);
         self
