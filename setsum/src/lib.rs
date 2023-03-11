@@ -141,9 +141,7 @@ impl Setsum {
             }
             state[col] = u32::from_le_bytes(buf);
         }
-        Self {
-            state,
-        }
+        Self { state }
     }
 
     /// Computes an ASCII/hex representation of setsum for comparison or use in other situations.
@@ -163,9 +161,11 @@ impl Setsum {
         }
         let mut bytes: [u8; SETSUM_BYTES] = [0u8; SETSUM_BYTES];
         for idx in 0..SETSUM_BYTES {
-            bytes[idx] = match u8::from_str_radix(&digest[idx*2..idx*2+2], 16) {
-                Ok(b) => { b },
-                Err(_) => { return None; },
+            bytes[idx] = match u8::from_str_radix(&digest[idx * 2..idx * 2 + 2], 16) {
+                Ok(b) => b,
+                Err(_) => {
+                    return None;
+                }
             }
         }
         Some(Self::from_digest(bytes))
@@ -413,7 +413,11 @@ mod tests {
 
     #[test]
     fn setsum_from_hexdigest() {
-        const SEVEN_HEX_VALUES: &str = "553aac2fea6c5e4106e61cb10f4f18150173497f6cf961e9f9fb0c72ff0fefa5";
-        assert_eq!(Setsum::from_digest(SEVEN_VALUES), Setsum::from_hexdigest(SEVEN_HEX_VALUES).unwrap());
+        const SEVEN_HEX_VALUES: &str =
+            "553aac2fea6c5e4106e61cb10f4f18150173497f6cf961e9f9fb0c72ff0fefa5";
+        assert_eq!(
+            Setsum::from_digest(SEVEN_VALUES),
+            Setsum::from_hexdigest(SEVEN_HEX_VALUES).unwrap()
+        );
     }
 }
