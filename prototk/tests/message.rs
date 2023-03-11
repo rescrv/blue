@@ -316,8 +316,10 @@ fn vector_messages() {
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
-    let exp: &[u8] = &[122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1,
-                       122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[
+        122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1, 122, 13, 8, 42, 17, 110, 134,
+        27, 240, 249, 33, 9, 64, 24, 1,
+    ];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -341,13 +343,11 @@ struct OptionOfMessages {
 #[test]
 fn option_messages() {
     let vm = OptionOfMessages {
-        messages: Some(
-            NamedStruct {
-                x: 42,
-                y: 3.14159,
-                z: -1,
-            },
-        ),
+        messages: Some(NamedStruct {
+            x: 42,
+            y: 3.14159,
+            z: -1,
+        }),
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();

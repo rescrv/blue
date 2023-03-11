@@ -40,15 +40,14 @@ impl Default for Error {
 #[test]
 fn three_kinds_of_enum() {
     let exp1 = Error::Success;
-    let exp2 = Error::BlockTooSmall { length: 5, required: 10 };
+    let exp2 = Error::BlockTooSmall {
+        length: 5,
+        required: 10,
+    };
     let exp3 = Error::DetailedError(Details { x: 42, y: 99 });
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack((&exp1, &exp2, &exp3)).to_vec();
-    let exp: &[u8] = &[
-        10, 0,
-        18, 4, 8, 5, 16, 10,
-        26, 4, 8, 42, 16, 99,
-    ];
+    let exp: &[u8] = &[10, 0, 18, 4, 8, 5, 16, 10, 26, 4, 8, 42, 16, 99];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
 

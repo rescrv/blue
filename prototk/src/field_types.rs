@@ -1157,7 +1157,9 @@ mod tests {
         let mut up = Unpacker::new(expect);
         let unpacked: T = match up.unpack() {
             Ok(x) => x,
-            Err(_) => { panic!("up.unpack() failed"); }
+            Err(_) => {
+                panic!("up.unpack() failed");
+            }
         };
         let mut field = H::default();
         field.merge_field(unpacked.clone());
@@ -1166,8 +1168,14 @@ mod tests {
 
     #[test]
     fn int32() {
-        helper_test::<int32, i32>(i32::min_value(), &[0x80, 0x80, 0x80, 0x80, 0xf8, 0xff, 0xff, 0xff, 0xff, 1]);
-        helper_test::<int32, i32>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<int32, i32>(
+            i32::min_value(),
+            &[0x80, 0x80, 0x80, 0x80, 0xf8, 0xff, 0xff, 0xff, 0xff, 1],
+        );
+        helper_test::<int32, i32>(
+            -1,
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
+        );
         helper_test::<int32, i32>(0, &[0]);
         helper_test::<int32, i32>(1, &[1]);
         helper_test::<int32, i32>(i32::max_value(), &[0xff, 0xff, 0xff, 0xff, 0x07]);
@@ -1175,11 +1183,20 @@ mod tests {
 
     #[test]
     fn int64() {
-        helper_test::<int64, i64>(i64::min_value(), &[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1]);
-        helper_test::<int64, i64>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<int64, i64>(
+            i64::min_value(),
+            &[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1],
+        );
+        helper_test::<int64, i64>(
+            -1,
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
+        );
         helper_test::<int64, i64>(0, &[0]);
         helper_test::<int64, i64>(1, &[1]);
-        helper_test::<int64, i64>(i64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]);
+        helper_test::<int64, i64>(
+            i64::max_value(),
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f],
+        );
     }
 
     #[test]
@@ -1193,7 +1210,10 @@ mod tests {
     fn uint64() {
         helper_test::<uint64, u64>(0, &[0]);
         helper_test::<uint64, u64>(1, &[1]);
-        helper_test::<uint64, u64>(u64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<uint64, u64>(
+            u64::max_value(),
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
+        );
     }
 
     #[test]
@@ -1207,11 +1227,17 @@ mod tests {
 
     #[test]
     fn sint64() {
-        helper_test::<sint64, i64>(i64::min_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<sint64, i64>(
+            i64::min_value(),
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
+        );
         helper_test::<sint64, i64>(-1, &[1]);
         helper_test::<sint64, i64>(0, &[0]);
         helper_test::<sint64, i64>(1, &[2]);
-        helper_test::<sint64, i64>(i64::max_value(), &[0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1]);
+        helper_test::<sint64, i64>(
+            i64::max_value(),
+            &[0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
+        );
     }
 
     #[test]
@@ -1225,7 +1251,10 @@ mod tests {
     fn fixed64() {
         helper_test::<fixed64, u64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
         helper_test::<fixed64, u64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
-        helper_test::<fixed64, u64>(u64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        helper_test::<fixed64, u64>(
+            u64::max_value(),
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        );
     }
 
     #[test]
@@ -1243,7 +1272,10 @@ mod tests {
         helper_test::<sfixed64, i64>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         helper_test::<sfixed64, i64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
         helper_test::<sfixed64, i64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
-        helper_test::<sfixed64, i64>(i64::max_value(), &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]);
+        helper_test::<sfixed64, i64>(
+            i64::max_value(),
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f],
+        );
     }
 
     #[test]
@@ -1267,7 +1299,9 @@ mod tests {
         let mut up = Unpacker::new(expect);
         let unpacked: float = match up.unpack() {
             Ok(x) => x,
-            Err(_) => { panic!("up.unpack() failed"); }
+            Err(_) => {
+                panic!("up.unpack() failed");
+            }
         };
         let mut field: f32 = f32::default();
         field.merge_field(unpacked.clone());
@@ -1295,7 +1329,9 @@ mod tests {
         let mut up = Unpacker::new(expect);
         let unpacked: double = match up.unpack() {
             Ok(x) => x,
-            Err(_) => { panic!("up.unpack() failed"); }
+            Err(_) => {
+                panic!("up.unpack() failed");
+            }
         };
         let mut field: f64 = f64::default();
         field.merge_field(unpacked.clone());
@@ -1336,7 +1372,17 @@ mod tests {
 
     #[test]
     fn string() {
-        helper_test::<string, String>("string \u{1F600}".to_owned(), &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
-        helper_test::<string, &str>("string \u{1F600}", &[0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80]);
+        helper_test::<string, String>(
+            "string \u{1F600}".to_owned(),
+            &[
+                0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80,
+            ],
+        );
+        helper_test::<string, &str>(
+            "string \u{1F600}",
+            &[
+                0xb, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0xf0, 0x9f, 0x98, 0x80,
+            ],
+        );
     }
 }

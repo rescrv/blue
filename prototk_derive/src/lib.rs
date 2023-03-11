@@ -163,7 +163,7 @@ fn find_lifetimes(
 ) -> Option<TokenStream> {
     match find_lifetime_in_generics(ty_generics) {
         Some(x) => Some(x),
-        None => { find_lifetime_in_generics(impl_generics) }
+        None => find_lifetime_in_generics(impl_generics),
     }
 }
 
@@ -338,7 +338,7 @@ fn parse_attribute(attr: &syn::Attribute) -> Option<(syn::LitInt, syn::Path)> {
         ) => {
             validate_field_number(field_number.base10_parse().unwrap());
             Some((field_number.clone(), field_type.clone()))
-        },
+        }
         _ => panic!("{}", USAGE),
     }
 }
@@ -410,15 +410,16 @@ fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream 
         let ret = ToTokens::into_token_stream(field_type);
         let ty = &field.ty;
         if let syn::Type::Path(path) = ty {
-            if !path.path.segments.is_empty() && (
-                path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
-                || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span())) {
+            if !path.path.segments.is_empty()
+                && (path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
+                    || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span()))
+            {
                 let tokens = ToTokens::into_token_stream(ty);
                 let tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
                 let tokens = &tokens[2];
                 return quote! {
                     #ret::<#tokens>
-                }
+                };
             }
         }
         quote! {
@@ -437,8 +438,10 @@ fn visit_attribute<V: ProtoTKVisitor>(
     v: &mut V,
 ) -> Option<TokenStream> {
     let (field_number, field_type) = match parse_attribute(attr) {
-        Some(x) => { x },
-        None => { panic!("{}", USAGE); },
+        Some(x) => x,
+        None => {
+            panic!("{}", USAGE);
+        }
     };
     let field_type = &field_type_tokens(field, &field_type);
     let ctor = quote! { ctor };
@@ -709,7 +712,10 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         for field in fields.named.iter() {
             let enum_name = field.ident.clone();
             enum_names.push(field.ident.clone());
-            let field_name = syn::Ident::new(&format!("prototk_field_{}", field.ident.to_token_stream()), field.span());
+            let field_name = syn::Ident::new(
+                &format!("prototk_field_{}", field.ident.to_token_stream()),
+                field.span(),
+            );
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
             let decl = quote! {

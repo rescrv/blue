@@ -20,9 +20,7 @@ fn serialize_error() {
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&we).to_vec();
-    let exp: &[u8] = &[
-        10,  9, 138, 128, 128, 8, 4, 8, 10, 16, 5,
-    ];
+    let exp: &[u8] = &[10, 9, 138, 128, 128, 8, 4, 8, 10, 16, 5];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
 

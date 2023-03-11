@@ -24,24 +24,45 @@ pub enum Error {
     Success,
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
-    BufferTooShort { required: usize, had: usize },
+    BufferTooShort {
+        required: usize,
+        had: usize,
+    },
     /// InvalidFieldNumber indicates that the field is not a user-assignable field.
-    InvalidFieldNumber { field_number: u32, what: String },
-    UnhandledWireType { wire_type: u32 },
+    InvalidFieldNumber {
+        field_number: u32,
+        what: String,
+    },
+    UnhandledWireType {
+        wire_type: u32,
+    },
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge { tag: u64 },
+    TagTooLarge {
+        tag: u64,
+    },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow { bytes: usize },
+    VarintOverflow {
+        bytes: usize,
+    },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow { value: u64 },
+    UnsignedOverflow {
+        value: u64,
+    },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow { value: i64 },
+    SignedOverflow {
+        value: i64,
+    },
     /// WrongLength indicates that a bytes32 did not have 32 bytes.
-    WrongLength { required: usize, had: usize },
+    WrongLength {
+        required: usize,
+        had: usize,
+    },
     /// StringEncoding indicates that a value is not UTF-8 friendly.
     StringEncoding,
     /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant { discriminant: u32 },
+    UnknownDiscriminant {
+        discriminant: u32,
+    },
 }
 
 impl Default for Error {
@@ -416,7 +437,7 @@ impl Packable for Error {
 impl<'a> Unpackable<'a> for Error {
     type Error = Error;
 
-    fn unpack<'b>( buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
+    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
     where
         'b: 'a,
     {
@@ -434,7 +455,8 @@ impl<'a> Unpackable<'a> for Error {
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_required: field_types::uint64 = field_types::uint64::default();
+                let mut prototk_field_required: field_types::uint64 =
+                    field_types::uint64::default();
                 let mut prototk_field_had: field_types::uint64 = field_types::uint64::default();
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
@@ -446,11 +468,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_had, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -465,7 +483,8 @@ impl<'a> Unpackable<'a> for Error {
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_field_number: field_types::uint32 = field_types::uint32::default();
+                let mut prototk_field_field_number: field_types::uint32 =
+                    field_types::uint32::default();
                 let mut prototk_field_what: field_types::string = field_types::string::default();
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
@@ -477,11 +496,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_what, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -496,7 +511,8 @@ impl<'a> Unpackable<'a> for Error {
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_wire_type: field_types::uint32 = field_types::uint32::default();
+                let mut prototk_field_wire_type: field_types::uint32 =
+                    field_types::uint32::default();
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
                     match (num, tag.wire_type) {
@@ -504,11 +520,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_wire_type, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -530,11 +542,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_tag, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -556,11 +564,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_bytes, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -582,11 +586,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_value, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -608,11 +608,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_value, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -626,7 +622,8 @@ impl<'a> Unpackable<'a> for Error {
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_required: field_types::uint64 = field_types::uint64::default();
+                let mut prototk_field_required: field_types::uint64 =
+                    field_types::uint64::default();
                 let mut prototk_field_had: field_types::uint64 = field_types::uint64::default();
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
@@ -638,11 +635,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_had, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -661,7 +654,8 @@ impl<'a> Unpackable<'a> for Error {
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_discriminant: field_types::uint32 = field_types::uint32::default();
+                let mut prototk_field_discriminant: field_types::uint32 =
+                    field_types::uint32::default();
                 for (tag, buf) in fields {
                     let num: u32 = tag.field_number.into();
                     match (num, tag.wire_type) {
@@ -669,11 +663,7 @@ impl<'a> Unpackable<'a> for Error {
                             (prototk_field_discriminant, _) = Unpackable::unpack(buf)?;
                         }
                         (_, _) => {
-                            return Err(
-                                Error::UnknownDiscriminant {
-                                    discriminant: num,
-                                }
-                            );
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
                         }
                     }
                 }
@@ -682,9 +672,7 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            _ => {
-                Err(Error::UnknownDiscriminant { discriminant: num })
-            }
+            _ => Err(Error::UnknownDiscriminant { discriminant: num }),
         }
     }
 }
@@ -1053,55 +1041,61 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
             return None;
         }
         let tag: Tag = match self.up.unpack() {
-            Ok(tag) => { tag },
+            Ok(tag) => tag,
             Err(e) => {
                 *self.err = Some(e);
                 return None;
-            },
+            }
         };
         match tag.wire_type {
             WireType::Varint => {
                 let buf: &[u8] = self.up.remain();
                 let x: v64 = match self.up.unpack() {
-                    Ok(x) => { x },
+                    Ok(x) => x,
                     Err(e) => {
                         *self.err = Some(e.into());
                         return None;
-                    },
+                    }
                 };
                 Some((tag, &buf[0..x.pack_sz()]))
-            },
+            }
             WireType::SixtyFour => {
                 let buf: &[u8] = self.up.remain();
                 if buf.len() < 8 {
-                    *self.err = Some(Error::BufferTooShort { required: 8, had: buf.len() });
+                    *self.err = Some(Error::BufferTooShort {
+                        required: 8,
+                        had: buf.len(),
+                    });
                     return None;
                 }
                 self.up.advance(8);
                 Some((tag, &buf[0..8]))
-            },
+            }
             WireType::LengthDelimited => {
                 let buf: &[u8] = self.up.remain();
                 let x: v64 = match self.up.unpack() {
-                    Ok(x) => { x },
+                    Ok(x) => x,
                     Err(e) => {
                         *self.err = Some(e.into());
                         return None;
-                    },
+                    }
                 };
                 let sz: usize = x.into();
                 self.up.advance(sz);
                 Some((tag, &buf[0..x.pack_sz() + sz]))
-            },
+            }
             WireType::ThirtyTwo => {
                 let buf: &[u8] = self.up.remain();
                 if buf.len() < 4 {
-                    *self.err = Some(Error::BufferTooShort { required: 4, had: buf.len() });
+                    *self.err = Some(Error::BufferTooShort {
+                        required: 4,
+                        had: buf.len(),
+                    });
                     return None;
                 }
                 self.up.advance(4);
                 Some((tag, &buf[0..4]))
-            },
+            }
         }
     }
 }
