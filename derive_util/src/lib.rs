@@ -165,7 +165,11 @@ mod structs {
             output
         }
 
-        fn visit_struct_unit(&mut self, ty_name: &syn::Ident, _ds: &syn::DataStruct) -> Self::Output {
+        fn visit_struct_unit(
+            &mut self,
+            ty_name: &syn::Ident,
+            _ds: &syn::DataStruct,
+        ) -> Self::Output {
             format!("struct {};", ty_name.to_string())
         }
     }
@@ -173,11 +177,15 @@ mod structs {
     fn test_struct(expect: &str) {
         let token_stream = TokenStream::from_str(expect).unwrap();
         let input: DeriveInput = syn::parse2(token_stream).unwrap();
-        let mut visitor = TestStructVisitor{};
+        let mut visitor = TestStructVisitor {};
         let output = match input.data {
             syn::Data::Struct(ref ds) => visitor.visit_struct(&input.ident, ds),
-            syn::Data::Enum(_) => { panic!("did not expect an enum"); },
-            syn::Data::Union(_) => { panic!("did not expect a union"); },
+            syn::Data::Enum(_) => {
+                panic!("did not expect an enum");
+            }
+            syn::Data::Union(_) => {
+                panic!("did not expect a union");
+            }
         };
         assert_eq!(expect, output);
     }
@@ -235,17 +243,21 @@ mod enums {
             variant: &syn::Variant,
             fields: &syn::FieldsNamed,
         ) -> Self::VariantOutput {
-            let mut output  = format!("    {} {{", variant.ident.to_string());
+            let mut output = format!("    {} {{", variant.ident.to_string());
             let mut first = true;
             for field in fields.named.iter() {
                 if first {
-                    output += &format!(" {}: {}",
+                    output += &format!(
+                        " {}: {}",
                         field.ident.as_ref().unwrap().to_string(),
-                        field.ty.clone().into_token_stream().to_string());
+                        field.ty.clone().into_token_stream().to_string()
+                    );
                 } else {
-                    output += &format!(", {}: {}",
+                    output += &format!(
+                        ", {}: {}",
                         field.ident.as_ref().unwrap().to_string(),
-                        field.ty.clone().into_token_stream().to_string());
+                        field.ty.clone().into_token_stream().to_string()
+                    );
                 }
                 first = false;
             }
@@ -260,7 +272,7 @@ mod enums {
             variant: &syn::Variant,
             fields: &syn::FieldsUnnamed,
         ) -> Self::VariantOutput {
-            let mut output  = format!("    {}(", variant.ident.to_string());
+            let mut output = format!("    {}(", variant.ident.to_string());
             let mut first = true;
             for field in fields.unnamed.iter() {
                 if first {
@@ -289,9 +301,13 @@ mod enums {
         let input: DeriveInput = syn::parse2(token_stream).unwrap();
         let mut visitor = TestEnumVisitor {};
         let output = match input.data {
-            syn::Data::Struct(_) => { panic!("did not expect a struct"); },
+            syn::Data::Struct(_) => {
+                panic!("did not expect a struct");
+            }
             syn::Data::Enum(ref de) => visitor.visit_enum(&input.ident, de),
-            syn::Data::Union(_) => { panic!("did not expect a union"); },
+            syn::Data::Union(_) => {
+                panic!("did not expect a union");
+            }
         };
         assert_eq!(expect, output);
     }
