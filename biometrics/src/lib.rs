@@ -72,7 +72,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         &self,
         emitter: &mut EM,
         emit: &dyn Fn(&mut EM, &'static S, f64) -> Result<(), ERR>,
-        now: &dyn Fn() -> f64
+        now: &dyn Fn() -> f64,
     ) -> Result<(), ERR> {
         let num_sensors = { self.sensors.lock().unwrap().len() };
         let mut sensors: Vec<&'static S> = Vec::with_capacity(num_sensors);
@@ -107,9 +107,11 @@ thread_local! {
 /// Register a [Counter] with the default Collector.
 pub fn register_counter(counter: &'static Counter) -> bool {
     let mut result = false;
-    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
-        collector.register_counter(counter);
-        result = true
+    COLLECT.with(|f| {
+        if let Some(collector) = f.borrow().as_ref() {
+            collector.register_counter(counter);
+            result = true
+        }
     });
     if result {
         counter.mark_registered();
@@ -120,9 +122,11 @@ pub fn register_counter(counter: &'static Counter) -> bool {
 /// Register a [Gauge] with the default Collector.
 pub fn register_gauge(gauge: &'static Gauge) -> bool {
     let mut result = false;
-    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
-        collector.register_gauge(gauge);
-        result = true
+    COLLECT.with(|f| {
+        if let Some(collector) = f.borrow().as_ref() {
+            collector.register_gauge(gauge);
+            result = true
+        }
     });
     if result {
         gauge.mark_registered();
@@ -133,9 +137,11 @@ pub fn register_gauge(gauge: &'static Gauge) -> bool {
 /// Register [Moments] with the default [Collector].
 pub fn register_moments(moments: &'static Moments) -> bool {
     let mut result = false;
-    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
-        collector.register_moments(moments);
-        result = true
+    COLLECT.with(|f| {
+        if let Some(collector) = f.borrow().as_ref() {
+            collector.register_moments(moments);
+            result = true
+        }
     });
     if result {
         moments.mark_registered();
@@ -146,9 +152,11 @@ pub fn register_moments(moments: &'static Moments) -> bool {
 /// Register [TDigest] with the default [Collector].
 pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
     let mut result = false;
-    COLLECT.with(|f| if let Some(collector) = f.borrow().as_ref() {
-        collector.register_t_digest(t_digest);
-        result = true
+    COLLECT.with(|f| {
+        if let Some(collector) = f.borrow().as_ref() {
+            collector.register_t_digest(t_digest);
+            result = true
+        }
     });
     if result {
         t_digest.mark_registered();
@@ -252,10 +260,19 @@ impl Collector {
     /// Output the sensors registered to this emitter.
     pub fn emit<EM: Emitter<Error = ERR>, ERR>(&self, emitter: &mut EM) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &|| { self.now() }));
-        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &|| { self.now() }));
-        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &|| { self.now() }));
-        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &|| { self.now() }))
+        let result = result.and(
+            self.counters
+                .emit(emitter, &EM::emit_counter, &|| self.now()),
+        );
+        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &|| self.now()));
+        let result = result.and(
+            self.moments
+                .emit(emitter, &EM::emit_moments, &|| self.now()),
+        );
+        result.and(
+            self.t_digests
+                .emit(emitter, &EM::emit_t_digest, &|| self.now()),
+        )
     }
 
     fn now(&self) -> f64 {

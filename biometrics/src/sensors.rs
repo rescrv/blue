@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use crate::moments;
 use crate::t_digest;
-use crate::{register_counter,register_gauge,register_moments, register_t_digest, Sensor};
+use crate::{register_counter, register_gauge, register_moments, register_t_digest, Sensor};
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 

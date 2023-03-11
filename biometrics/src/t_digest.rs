@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 ///////////////////////////////////////////// Centroid /////////////////////////////////////////////
 
-#[derive(Clone,Debug,Default)]
+#[derive(Clone, Debug, Default)]
 struct Centroid {
     sum: f64,
     count: u64,
@@ -12,7 +12,8 @@ impl Eq for Centroid {}
 
 impl Ord for Centroid {
     fn cmp(&self, rhs: &Self) -> Ordering {
-        self.sum.partial_cmp(&rhs.sum)
+        self.sum
+            .partial_cmp(&rhs.sum)
             .unwrap_or(Ordering::Equal)
             .then(self.count.cmp(&rhs.count).reverse())
     }
@@ -73,7 +74,10 @@ impl TDigest {
         let mut centroids = Vec::new();
         for point in points {
             if point.is_normal() || (0.0 - f64::EPSILON < point && f64::EPSILON > point) {
-                centroids.push(Centroid { sum: point, count: 1 });
+                centroids.push(Centroid {
+                    sum: point,
+                    count: 1,
+                });
             }
         }
         centroids.sort();

@@ -6,7 +6,7 @@
 ///
 /// The type itelf is algebraic.  Take two readings separated by time and subtract them to get
 /// perfectly recorded moments for the interval between the points.
-#[derive(Clone,Default,Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Moments {
     pub n: u64,
     pub m1: f64,
@@ -80,11 +80,14 @@ impl Moments {
         let n: f64 = (lhs.n + rhs.n) as f64;
         let m1: f64 = (lhs_n * lhs.m1 + rhs_n * rhs.m1) / n;
         let m2: f64 = lhs.m2 + rhs.m2 + delta2 * lhs_n * rhs_n / n;
-        let m3: f64 = lhs.m3 + rhs.m3
+        let m3: f64 = lhs.m3
+            + rhs.m3
             + delta3 * lhs_n * rhs_n * (lhs_n - rhs_n) / (n * n)
             + 3. * delta * (lhs_n * rhs.m2 - rhs_n * lhs.m2) / n;
-        let m4: f64 = lhs.m4 + rhs.m4
-            + delta4 * lhs_n * rhs_n * (lhs_n * lhs_n - lhs_n * rhs_n + rhs_n * rhs_n) / (n * n * n)
+        let m4: f64 = lhs.m4
+            + rhs.m4
+            + delta4 * lhs_n * rhs_n * (lhs_n * lhs_n - lhs_n * rhs_n + rhs_n * rhs_n)
+                / (n * n * n)
             + 6. * delta2 * (lhs_n * lhs_n * rhs.m2 + rhs_n * rhs_n * lhs.m2) / (n * n)
             + 4. * delta * (lhs_n * rhs.m3 - rhs_n * lhs.m3) / n;
         Self {
@@ -103,16 +106,18 @@ impl Moments {
         let n: f64 = (rhs.n - lhs.n) as f64;
         let m1: f64 = (lhs_n * lhs.m1 - rhs_n * rhs.m1) / n;
         let delta: f64 = rhs.m1 - m1;
-        let delta2: f64 = delta*delta;
-        let delta3: f64 = delta*delta2;
-        let delta4: f64 = delta2*delta2;
+        let delta2: f64 = delta * delta;
+        let delta3: f64 = delta * delta2;
+        let delta4: f64 = delta2 * delta2;
         let m2: f64 = lhs.m2 - rhs.m2 - delta2 * rhs_n * n / lhs_n;
-        let m3: f64 = lhs.m3 - rhs.m3
-            - delta3 * rhs_n * n * (n - rhs_n)/lhs_n.powf(2.)
+        let m3: f64 = lhs.m3
+            - rhs.m3
+            - delta3 * rhs_n * n * (n - rhs_n) / lhs_n.powf(2.)
             - 3. * delta * (n * rhs.m2 - rhs_n * m2) / lhs_n;
-        let m4: f64 = lhs.m4 - rhs.m4
+        let m4: f64 = lhs.m4
+            - rhs.m4
             - delta4 * n * rhs_n * (n * n - n * rhs_n + rhs_n * rhs_n) / (lhs_n * lhs_n * lhs_n)
-            - 6. * delta2 * (n * n * rhs.m2 + rhs_n * rhs_n * m2) / (lhs_n*lhs_n)
+            - 6. * delta2 * (n * n * rhs.m2 + rhs_n * rhs_n * m2) / (lhs_n * lhs_n)
             - 4. * delta * (n * rhs.m3 - rhs_n * m3) / lhs_n;
         Self {
             n: lhs.n - rhs.n,
@@ -133,6 +138,12 @@ mod tests {
     #[test]
     fn moments_may_be_static() {
         static MOMENTS: Moments = Moments::new();
-        println!("MOMENTS = {} {} {} {}", MOMENTS.n(), MOMENTS.mean(), MOMENTS.skewness(), MOMENTS.kurtosis());
+        println!(
+            "MOMENTS = {} {} {} {}",
+            MOMENTS.n(),
+            MOMENTS.mean(),
+            MOMENTS.skewness(),
+            MOMENTS.kurtosis()
+        );
     }
 }
