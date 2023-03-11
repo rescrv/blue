@@ -26,22 +26,22 @@ pub trait Z {
     fn set_variable<X: Debug>(&mut self, variable: &str, x: X);
 }
 
-impl<T, E: Z<Error=E>> Z for Result<T, E> {
+impl<T, E: Z<Error = E>> Z for Result<T, E> {
     type Error = Result<T, E>;
 
     fn long_form(&self) -> String {
         match self {
             Ok(_) => {
                 panic!("called \"<Result<T, E> as Z>.long_form()\" on Ok Result");
-            },
-            Err(e) => { e.long_form() },
+            }
+            Err(e) => e.long_form(),
         }
     }
 
     fn with_token(self, identifier: &str, value: &str) -> Self::Error {
         match self {
-            Ok(_) => { self },
-            Err(e) => { Err(e.with_token(identifier, value)) },
+            Ok(_) => self,
+            Err(e) => Err(e.with_token(identifier, value)),
         }
     }
 
@@ -53,8 +53,8 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 
     fn with_url(self, identifier: &str, url: &str) -> Self::Error {
         match self {
-            Ok(_) => { self },
-            Err(e) => { Err(e.with_url(identifier, url)) },
+            Ok(_) => self,
+            Err(e) => Err(e.with_url(identifier, url)),
         }
     }
 
@@ -66,8 +66,8 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error {
         match self {
-            Ok(_) => { self },
-            Err(e) => { Err(e.with_variable(variable, x)) },
+            Ok(_) => self,
+            Err(e) => Err(e.with_variable(variable, x)),
         }
     }
 
