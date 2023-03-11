@@ -781,7 +781,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
             (#field_number, ::prototk::WireType::LengthDelimited) => {
-                up.advance(1);
+                let x: v64 = up.unpack()?;
+                up.advance(x.into());
                 Ok((#ctor, up.remain()))
             },
         }
