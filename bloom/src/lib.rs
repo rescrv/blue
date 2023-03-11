@@ -67,16 +67,31 @@ mod tests {
     use super::*;
 
     struct TestParams {
-		n: N,
-		p: P,
-		m: M,
-		k: K,
+        n: N,
+        p: P,
+        m: M,
+        k: K,
     }
 
     const TEST_PARAMS: &[TestParams] = &[
-		TestParams {n: N(100.0), p: P(0.01), m: M(958.505837736744), k: K(6.643856189774724)},
-		TestParams {n: N(1000.0), p: P(0.001), m: M(14377.58756605116), k: K(9.965784284662087)},
-		TestParams {n: N(2718281.0), p: P(0.0314159), m: M(19578296.19763294), k: K(4.99236127889529)},
+        TestParams {
+            n: N(100.0),
+            p: P(0.01),
+            m: M(958.505837736744),
+            k: K(6.643856189774724),
+        },
+        TestParams {
+            n: N(1000.0),
+            p: P(0.001),
+            m: M(14377.58756605116),
+            k: K(9.965784284662087),
+        },
+        TestParams {
+            n: N(2718281.0),
+            p: P(0.0314159),
+            m: M(19578296.19763294),
+            k: K(4.99236127889529),
+        },
     ];
 
     fn approximately_correct(expected: f64, returned: f64) -> bool {
