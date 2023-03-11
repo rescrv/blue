@@ -18,6 +18,7 @@ use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
 
 /// Error captures the possible error conditions for packing and unpacking.
 // TODO(rescrv):  Some notion of the error context so that these can be tracked down.
+// NOTE(rescrv):  When extending this, add a test to tests/error.rs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     /// The default error is succes.
@@ -156,7 +157,7 @@ impl Packable for Error {
             Error::Success => {
                 let prototk_empty: &[u8] = &[];
                 stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(2097152),
+                    FieldNumber::must(262144),
                     &prototk_empty,
                 ))
                 .pack_sz()
@@ -169,7 +170,7 @@ impl Packable for Error {
                 ));
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097153),
+                    field_number: FieldNumber::must(262145),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -186,7 +187,7 @@ impl Packable for Error {
                     what,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097154),
+                    field_number: FieldNumber::must(262146),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -199,7 +200,7 @@ impl Packable for Error {
                     wire_type,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097155),
+                    field_number: FieldNumber::must(262147),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -209,7 +210,7 @@ impl Packable for Error {
                 let pa = stack_pack(());
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(1), tag));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097156),
+                    field_number: FieldNumber::must(262148),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -222,7 +223,7 @@ impl Packable for Error {
                     bytes,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097157),
+                    field_number: FieldNumber::must(262149),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -235,7 +236,7 @@ impl Packable for Error {
                     value,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097158),
+                    field_number: FieldNumber::must(262150),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -248,7 +249,7 @@ impl Packable for Error {
                     value,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097159),
+                    field_number: FieldNumber::must(262151),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -262,7 +263,7 @@ impl Packable for Error {
                 ));
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097160),
+                    field_number: FieldNumber::must(262152),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -271,7 +272,7 @@ impl Packable for Error {
             Error::StringEncoding => {
                 let prototk_empty: &[u8] = &[];
                 stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(2097161),
+                    FieldNumber::must(262153),
                     &prototk_empty,
                 ))
                 .pack_sz()
@@ -283,7 +284,7 @@ impl Packable for Error {
                     discriminant,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097162),
+                    field_number: FieldNumber::must(262154),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -297,7 +298,7 @@ impl Packable for Error {
             Error::Success => {
                 let prototk_empty: &[u8] = &[];
                 stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(2097152),
+                    FieldNumber::must(262144),
                     &prototk_empty,
                 ))
                 .into_slice(buf);
@@ -310,7 +311,7 @@ impl Packable for Error {
                 ));
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097153),
+                    field_number: FieldNumber::must(262145),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -327,7 +328,7 @@ impl Packable for Error {
                     what,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097154),
+                    field_number: FieldNumber::must(262146),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -340,7 +341,7 @@ impl Packable for Error {
                     wire_type,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097155),
+                    field_number: FieldNumber::must(262147),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -350,7 +351,7 @@ impl Packable for Error {
                 let pa = stack_pack(());
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(1), tag));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097156),
+                    field_number: FieldNumber::must(262148),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -363,7 +364,7 @@ impl Packable for Error {
                     bytes,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097157),
+                    field_number: FieldNumber::must(262149),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -376,7 +377,7 @@ impl Packable for Error {
                     value,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097158),
+                    field_number: FieldNumber::must(262150),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -389,7 +390,7 @@ impl Packable for Error {
                     value,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097159),
+                    field_number: FieldNumber::must(262151),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -403,7 +404,7 @@ impl Packable for Error {
                 ));
                 let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097160),
+                    field_number: FieldNumber::must(262152),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -412,7 +413,7 @@ impl Packable for Error {
             Error::StringEncoding => {
                 let prototk_empty: &[u8] = &[];
                 stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(2097161),
+                    FieldNumber::must(262153),
                     &prototk_empty,
                 ))
                 .into_slice(buf);
@@ -424,7 +425,7 @@ impl Packable for Error {
                     discriminant,
                 ));
                 stack_pack(Tag {
-                    field_number: FieldNumber::must(2097162),
+                    field_number: FieldNumber::must(262154),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -446,14 +447,16 @@ impl<'a> Unpackable<'a> for Error {
         let num: u32 = tag.field_number.into();
         let wire_type: WireType = tag.wire_type;
         match (num, wire_type) {
-            (2097152, WireType::LengthDelimited) => {
-                up.advance(1);
+            (262144, WireType::LengthDelimited) => {
+                let x: v64 = up.unpack()?;
+                up.advance(x.into());
                 Ok((Error::Success, up.remain()))
             }
-            (2097153, WireType::LengthDelimited) => {
+            (262145, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_required: field_types::uint64 =
                     field_types::uint64::default();
@@ -478,10 +481,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097154, WireType::LengthDelimited) => {
+            (262146, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_field_number: field_types::uint32 =
                     field_types::uint32::default();
@@ -506,10 +510,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097155, WireType::LengthDelimited) => {
+            (262147, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_wire_type: field_types::uint32 =
                     field_types::uint32::default();
@@ -529,10 +534,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097156, WireType::LengthDelimited) => {
+            (262148, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_tag: field_types::uint64 = field_types::uint64::default();
                 for (tag, buf) in fields {
@@ -551,10 +557,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097157, WireType::LengthDelimited) => {
+            (262149, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_bytes: field_types::uint64 = field_types::uint64::default();
                 for (tag, buf) in fields {
@@ -573,10 +580,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097158, WireType::LengthDelimited) => {
+            (262150, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_value: field_types::uint64 = field_types::uint64::default();
                 for (tag, buf) in fields {
@@ -595,10 +603,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097159, WireType::LengthDelimited) => {
+            (262151, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_value: field_types::int64 = field_types::int64::default();
                 for (tag, buf) in fields {
@@ -617,10 +626,11 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097160, WireType::LengthDelimited) => {
+            (262152, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_required: field_types::uint64 =
                     field_types::uint64::default();
@@ -645,14 +655,16 @@ impl<'a> Unpackable<'a> for Error {
                 };
                 Ok((ret, up.remain()))
             }
-            (2097161, WireType::LengthDelimited) => {
-                up.advance(1);
+            (262153, WireType::LengthDelimited) => {
+                let x: v64 = up.unpack()?;
+                up.advance(x.into());
                 Ok((Error::StringEncoding, up.remain()))
             }
-            (2097162, WireType::LengthDelimited) => {
+            (262154, WireType::LengthDelimited) => {
                 let length: v64 = up.unpack()?;
                 let mut error: Option<Error> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
                 let fields = FieldIterator::new(local_buf, &mut error);
                 let mut prototk_field_discriminant: field_types::uint32 =
                     field_types::uint32::default();
