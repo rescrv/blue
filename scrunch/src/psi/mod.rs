@@ -24,14 +24,18 @@ pub trait Psi {
     where
         T: Copy + Clone + Eq + Hash + Ord,
         B: crate::bit_vector::BitVector;
-    fn constrain<T, B>(&self, sigma: &crate::Sigma<T, B>, range: (usize, usize), into: (usize, usize)) -> (usize, usize)
+    fn constrain<T, B>(
+        &self,
+        sigma: &crate::Sigma<T, B>,
+        range: (usize, usize),
+        into: (usize, usize),
+    ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
         B: crate::bit_vector::BitVector;
 }
 
-pub struct ReferencePsi
-{
+pub struct ReferencePsi {
     psi: Vec<usize>,
 }
 
@@ -51,12 +55,17 @@ impl Psi for ReferencePsi {
     fn lookup<T, B>(&self, _sigma: &Sigma<T, B>, idx: usize) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector
+        B: crate::bit_vector::BitVector,
     {
         self.psi[idx]
     }
 
-    fn constrain<T, B>(&self, _sigma: &crate::Sigma<T, B>, range: (usize, usize), into: (usize, usize)) -> (usize, usize)
+    fn constrain<T, B>(
+        &self,
+        _sigma: &crate::Sigma<T, B>,
+        range: (usize, usize),
+        into: (usize, usize),
+    ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
         B: crate::bit_vector::BitVector,
@@ -99,10 +108,7 @@ mod tests {
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(
-            &['i', 'm', 'p', 's'],
-            &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0],
-        );
+        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         assert_eq!(12, psi.len());
     }
@@ -111,10 +117,7 @@ mod tests {
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(
-            &['i', 'm', 'p', 's'],
-            &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0],
-        );
+        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         for i in 0..PSI.len() {
             assert_eq!(PSI[i], psi.lookup(&sigma, i));
@@ -125,10 +128,7 @@ mod tests {
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(
-            &['i', 'm', 'p', 's'],
-            &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0],
-        );
+        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         for (expect, range, into) in CONSTRAIN {
             let result = psi.constrain(&sigma, *range, *into);
@@ -171,5 +171,11 @@ mod tests {
     use crate::dictionary::ReferenceDictionary;
     use crate::psi::wavelet_tree::WaveletTreePsi;
     use crate::wavelet_tree::ReferenceWaveletTree;
-    test_Psi!(wavelet_tree, WaveletTreePsi::<ReferenceDictionary<ReferenceBitVector, (usize,usize)>, ReferenceWaveletTree>::new);
+    test_Psi!(
+        wavelet_tree,
+        WaveletTreePsi::<
+            ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
+            ReferenceWaveletTree,
+        >::new
+    );
 }

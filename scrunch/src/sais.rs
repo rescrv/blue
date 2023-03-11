@@ -50,8 +50,13 @@ fn is_lms(T: &[LSType], i: usize) -> bool {
 ///
 /// And because we because we only fill in L-type suffixes, they are by definition larger than (to
 /// the right of) the index used to construct the suffix.
-fn induce_L<T, B>(sigma: &Sigma<T, B>, S: &[usize], SA: &mut [usize], T: &[LSType], buckets: &mut [usize])
-where
+fn induce_L<T, B>(
+    sigma: &Sigma<T, B>,
+    S: &[usize],
+    SA: &mut [usize],
+    T: &[LSType],
+    buckets: &mut [usize],
+) where
     T: Copy + Eq + Hash + Ord,
     B: BitVector,
 {
@@ -68,8 +73,13 @@ where
 /// induce_S does a right-to-left induced sort to fill in S-type symbols.  The reasoning for what
 /// this does is similar to how induce_L works, except it works right-to-left, is monotonically
 /// decreasing, and fills buckets from the right.
-fn induce_S<T, B>(sigma: &Sigma<T, B>, S: &[usize], SA: &mut [usize], T: &[LSType], buckets: &mut [usize])
-where
+fn induce_S<T, B>(
+    sigma: &Sigma<T, B>,
+    S: &[usize],
+    SA: &mut [usize],
+    T: &[LSType],
+    buckets: &mut [usize],
+) where
     T: Copy + Eq + Hash + Ord,
     B: BitVector,
 {
@@ -92,14 +102,14 @@ where
 /// - S.len() == 0
 /// - S is not termintated by a zero
 pub fn sais<T, B>(sigma: &Sigma<T, B>, S: &[usize], SA: &mut [usize])
-    where 
+where
     T: Copy + Eq + Hash + Ord,
     B: BitVector,
 {
     // We need some space for sentinels in the lang.
     assert!(sigma.K() <= S.len());
     assert!(sigma.K() < usize::max_value()); // should never fire
-                                     // The input and "output" must be aligned.
+                                             // The input and "output" must be aligned.
     assert!(S.len() == SA.len());
     // The last character should be zero, which also requires there to be a last character.
     assert!(S.len() > 0);
@@ -346,7 +356,8 @@ mod tests {
     use super::*;
 
     fn check_get_types(t: &TestCase) {
-        let types: Vec<LSType> = t.lstype
+        let types: Vec<LSType> = t
+            .lstype
             .chars()
             .map(|c| if c == 'L' { LSType::L } else { LSType::S })
             .collect();

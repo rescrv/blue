@@ -1,9 +1,9 @@
 //! Sigma is the greek character often used to represent an alphabet when dealing with languages.
 //! The sigma module provides a data structure for describing the alphabet used in a piece of text.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::iter::FromIterator;
 
@@ -34,7 +34,7 @@ where
     T: Copy + Eq + Hash + Ord,
     B: BitVector,
 {
-    fn from_iter<I: IntoIterator<Item=T>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         // count each character
         let mut counts: HashMap<T, usize> = HashMap::new();
         for t in iter {
@@ -53,7 +53,9 @@ where
         for t in sigma_to_char.iter() {
             total += match counts.get(t) {
                 Some(x) => x,
-                None => { panic!("there is a durability bug or the text changed underneath us"); },
+                None => {
+                    panic!("there is a durability bug or the text changed underneath us");
+                }
             };
             buckets.push(total);
         }
@@ -61,8 +63,12 @@ where
         let mut char_to_sigma = counts;
         for (idx, t) in sigma_to_char.iter().enumerate() {
             match char_to_sigma.entry(*t) {
-                Entry::Occupied(mut entry) => { *entry.get_mut() = idx + 1; },
-                Entry::Vacant(_) => { panic!("there is a durability bug or the text changed underneath us"); },
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() = idx + 1;
+                }
+                Entry::Vacant(_) => {
+                    panic!("there is a durability bug or the text changed underneath us");
+                }
             }
         }
         // sanity checks on the way out the door.
@@ -117,8 +123,12 @@ where
         let mut sigma = Vec::with_capacity(text.len() + 1);
         for t in text.iter() {
             match self.char_to_sigma(*t) {
-                Some(x) => { sigma.push(x); },
-                None => { return None; },
+                Some(x) => {
+                    sigma.push(x);
+                }
+                None => {
+                    return None;
+                }
             };
         }
         sigma.push(0);
@@ -127,7 +137,7 @@ where
 
     /// bucket_starts fills in the provided slice of buckets (with length K) with the indices at
     /// which each of the K symbols will first appear in the suffix array.
-    pub fn bucket_starts(&self, buckets: &mut[usize]) {
+    pub fn bucket_starts(&self, buckets: &mut [usize]) {
         assert_eq!(self.K(), buckets.len());
         for i in 0..buckets.len() {
             buckets[i] = self.columns.select(i);
@@ -136,7 +146,7 @@ where
 
     /// bucket_limits fills in the provided slice of buckets (with length K) with the indices one
     /// past the last occurrence of each of the K symbols in the suffix array.
-    pub fn bucket_limits(&self, buckets: &mut[usize]) {
+    pub fn bucket_limits(&self, buckets: &mut [usize]) {
         assert_eq!(self.K(), buckets.len());
         for i in 0..buckets.len() {
             buckets[i] = self.columns.select(i + 1);
@@ -223,8 +233,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::test_cases_for;
     use crate::bit_vector::ReferenceBitVector;
+    use crate::test_cases_for;
     use crate::testutil::TestCase;
 
     use super::*;
@@ -239,9 +249,14 @@ mod tests {
         // check the boundaries
         assert_eq!(0, sigma.columns.rank(0));
         for i in 0..t.boundaries.len() {
-            assert_eq!(i + 1, sigma.columns.rank(t.boundaries[i]),
+            assert_eq!(
+                i + 1,
+                sigma.columns.rank(t.boundaries[i]),
                 "sigma.columns.rank(t.boundaries[i={}] = {}) = {}",
-                i, t.boundaries[i],  sigma.columns.rank(t.boundaries[i]));
+                i,
+                t.boundaries[i],
+                sigma.columns.rank(t.boundaries[i])
+            );
         }
     }
 
@@ -251,7 +266,12 @@ mod tests {
         let sigma_new: Sigma<char, ReferenceBitVector> = Sigma::dirty_hack(t.sigma2text, t.S);
         let sigma_from = t.sigma();
         for i in 0..std::cmp::min(sigma_from.columns.len(), sigma_new.columns.len()) {
-            assert_eq!(sigma_new.columns.rank(i), sigma_from.columns.rank(i), "i={}", i);
+            assert_eq!(
+                sigma_new.columns.rank(i),
+                sigma_from.columns.rank(i),
+                "i={}",
+                i
+            );
         }
         assert_eq!(sigma_new.columns.len(), sigma_from.columns.len());
     }
@@ -271,11 +291,22 @@ mod tests {
         let sigma = t.sigma();
         // characters that should be there
         for i in 0..t.sigma2text.len() {
-            assert_eq!(Some(i+1), sigma.char_to_sigma(t.sigma2text[i]), "i={} == char_to_sigma[{}]", i, t.sigma2text[i]);
+            assert_eq!(
+                Some(i + 1),
+                sigma.char_to_sigma(t.sigma2text[i]),
+                "i={} == char_to_sigma[{}]",
+                i,
+                t.sigma2text[i]
+            );
         }
         // characters that should not be there
         for i in 0..t.not_in_str.len() {
-            assert_eq!(None, sigma.char_to_sigma(t.not_in_str[i]), "None == char_to_sigma[{}]", t.not_in_str[i]);
+            assert_eq!(
+                None,
+                sigma.char_to_sigma(t.not_in_str[i]),
+                "None == char_to_sigma[{}]",
+                t.not_in_str[i]
+            );
         }
     }
 
@@ -319,10 +350,18 @@ mod tests {
         for i in 0..t.deref_SA.len() {
             assert_eq!(Some(t.deref_SA[i]), sigma.sa_index_to_sigma(i), "i={}", i);
         }
-        assert_eq!(None, sigma.sa_index_to_sigma(t.deref_SA.len()), "i={}", t.deref_SA.len());
+        assert_eq!(
+            None,
+            sigma.sa_index_to_sigma(t.deref_SA.len()),
+            "i={}",
+            t.deref_SA.len()
+        );
     }
 
-    test_cases_for!(sa_index_to_sigma, crate::sigma::tests::check_sa_index_to_sigma);
+    test_cases_for!(
+        sa_index_to_sigma,
+        crate::sigma::tests::check_sa_index_to_sigma
+    );
 
     fn check_sa_index_to_t(t: &TestCase) {
         let sigma = t.sigma();
@@ -337,9 +376,19 @@ mod tests {
             assert!(t.deref_SA[i] > 0);
             assert!(t.deref_SA[i] - 1 < t.sigma2text.len());
             // evaluate
-            assert_eq!(Some(t.sigma2text[t.deref_SA[i] - 1]), sigma.sa_index_to_t(i), "i={}", i);
+            assert_eq!(
+                Some(t.sigma2text[t.deref_SA[i] - 1]),
+                sigma.sa_index_to_t(i),
+                "i={}",
+                i
+            );
         }
-        assert_eq!(None, sigma.sa_index_to_t(t.deref_SA.len()), "i={}", t.deref_SA.len());
+        assert_eq!(
+            None,
+            sigma.sa_index_to_t(t.deref_SA.len()),
+            "i={}",
+            t.deref_SA.len()
+        );
     }
 
     test_cases_for!(sa_index_to_t, crate::sigma::tests::check_sa_index_to_t);
@@ -348,11 +397,19 @@ mod tests {
         let sigma = t.sigma();
         // existing characters
         for i in 0..t.sigma2text.len() {
-            assert_eq!((t.bucket_starts[i + 1], t.bucket_limits[i + 1]), sigma.sa_range_for(t.sigma2text[i]));
+            assert_eq!(
+                (t.bucket_starts[i + 1], t.bucket_limits[i + 1]),
+                sigma.sa_range_for(t.sigma2text[i])
+            );
         }
         // non-existent characters
         for i in 0..t.not_in_str.len() {
-            assert_eq!((0, 0), sigma.sa_range_for(t.not_in_str[i]), "(0, 0) == sa_range_for[{}]", t.not_in_str[i]);
+            assert_eq!(
+                (0, 0),
+                sigma.sa_range_for(t.not_in_str[i]),
+                "(0, 0) == sa_range_for[{}]",
+                t.not_in_str[i]
+            );
         }
     }
 

@@ -45,7 +45,7 @@ where
             assert!(d[i - 1].0 < d[i].0);
             keys.push(d[i].0 - 1 - offset);
         }
-        ReferenceDictionary{
+        ReferenceDictionary {
             offset,
             keys: B::sparse(&keys),
             values: values,
@@ -127,7 +127,16 @@ mod tests {
     }
 
     fn bug_selectup_rankup_1<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
-        const INPUT: &[(usize, u64)] = &[(2, 2), (3, 3), (5, 5), (6, 6), (7, 7), (8, 8), (10, 10), (12, 12)];
+        const INPUT: &[(usize, u64)] = &[
+            (2, 2),
+            (3, 3),
+            (5, 5),
+            (6, 6),
+            (7, 7),
+            (8, 8),
+            (10, 10),
+            (12, 12),
+        ];
         let dict = new(INPUT);
         for i in 0..INPUT.len() {
             let (select, &expect) = dict.selectup(i);

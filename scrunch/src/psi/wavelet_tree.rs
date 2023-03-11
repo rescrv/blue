@@ -1,5 +1,5 @@
-use std::hash::Hash;
 use crate::psi::Psi;
+use std::hash::Hash;
 
 const CTX: usize = 1;
 
@@ -144,10 +144,18 @@ where
         let (start_of_cell, context) = *self.cells.lookup(idx);
         let column: usize = sigma.sa_index_to_sigma(idx).unwrap();
         // answer
-        self.table[context].start + self.table[context].tree.select_q(idx - start_of_cell, column)
+        self.table[context].start
+            + self.table[context]
+                .tree
+                .select_q(idx - start_of_cell, column)
     }
 
-    fn constrain<T, B>(&self, sigma: &crate::Sigma<T, B>, range: (usize, usize), into: (usize, usize)) -> (usize, usize)
+    fn constrain<T, B>(
+        &self,
+        sigma: &crate::Sigma<T, B>,
+        range: (usize, usize),
+        into: (usize, usize),
+    ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
         B: crate::bit_vector::BitVector,
@@ -159,11 +167,11 @@ where
         // empty table case
         if self.table.len() == 0 {
             // XXX test
-            return (0, 0)
+            return (0, 0);
         }
         // empty range case
         if into.0 >= into.1 {
-            return into
+            return into;
         }
         let lower = self.binary_search(sigma, into.0, range);
         let upper = self.binary_search(sigma, into.1, range);
@@ -177,7 +185,12 @@ where
     WT: crate::wavelet_tree::WaveletTree,
 {
     // find the highest index of psi in the range [into.0, into.1) s.t. psi[idx] <= point
-    fn binary_search<T, B>(&self, sigma: &crate::Sigma<T, B>, point: usize, into: (usize, usize)) -> usize
+    fn binary_search<T, B>(
+        &self,
+        sigma: &crate::Sigma<T, B>,
+        point: usize,
+        into: (usize, usize),
+    ) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
         B: crate::bit_vector::BitVector,
@@ -187,7 +200,7 @@ where
         assert!(into.1 <= self.len());
         // empty range case
         if into.0 >= into.1 {
-            return into.0
+            return into.0;
         }
         // this transforms from [) to ambiguous [)/[] intervals
         let mut cells = (self.cells.rank(into.0), self.cells.rank(into.1));
@@ -201,7 +214,7 @@ where
             // [] interval of psi that corresponds to the cell `mid`
             // closed interval is necessary to cover case when mid is last cell of column
             let psi_mid_lower = self.lookup(sigma, self.cells.select(mid));
-            let psi_mid_upper = self.lookup(sigma, self.cells.select(mid+1) - 1);
+            let psi_mid_upper = self.lookup(sigma, self.cells.select(mid + 1) - 1);
             if psi_mid_lower > point && mid < cells.1 {
                 cells.1 = mid - 1;
             } else if psi_mid_upper < point && cells.0 < mid {

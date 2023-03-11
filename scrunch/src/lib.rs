@@ -108,8 +108,6 @@ where
     pub fn new(input: &[T]) -> SearchIndex<T, SA, ISA, SIG, PSI> {
         let sigma: Sigma<T, SIG> = Sigma::from(input);
 
-
-
         // convert the text into a compacted alphabet
         let (text, _) = sigma::to_compact_alphabet(input);
         let text: &[usize] = &text;
@@ -287,7 +285,7 @@ pub mod testutil {
         boundaries: &[1, 4, 5, 9, 10, 12, 14, 18],
         not_in_str: &['C', 'D', 'E'],
         S: &[4, 3, 7, 7, 3, 7, 7, 3, 6, 6, 3, 2, 1, 5, 1, 5, 1, 0],
-        SA: &[ 17, 16, 14, 12, 11, 10, 7, 4, 1, 0, 15, 13, 9, 8, 6, 3, 5, 2],
+        SA: &[17, 16, 14, 12, 11, 10, 7, 4, 1, 0, 15, 13, 9, 8, 6, 3, 5, 2],
         bucket_starts: &[0, 1, 4, 5, 9, 10, 12, 14],
         bucket_limits: &[1, 4, 5, 9, 10, 12, 14, 18],
         deref_SA: &[0, 1, 1, 1, 2, 3, 3, 3, 3, 4, 5, 5, 6, 6, 7, 7, 7, 7],
@@ -320,11 +318,17 @@ pub mod testutil {
         sigma2text: &['A', 'B', 'C', 'N'],
         boundaries: &[1, 8, 10, 13, 23],
         not_in_str: &['D', 'E', 'F'],
-        S: &[1, 4, 2, 4, 1, 4, 1, 4, 3, 1, 4, 2, 4, 3, 4, 1, 4, 1, 4, 3, 4, 1, 0],
-        SA: &[22, 21, 4, 15, 0, 9, 6, 17, 2, 11, 8, 19, 13, 20, 3, 14, 5, 16, 1, 10, 7, 18, 12],
+        S: &[
+            1, 4, 2, 4, 1, 4, 1, 4, 3, 1, 4, 2, 4, 3, 4, 1, 4, 1, 4, 3, 4, 1, 0,
+        ],
+        SA: &[
+            22, 21, 4, 15, 0, 9, 6, 17, 2, 11, 8, 19, 13, 20, 3, 14, 5, 16, 1, 10, 7, 18, 12,
+        ],
         bucket_starts: &[0, 1, 8, 10, 13],
         bucket_limits: &[1, 8, 10, 13, 23],
-        deref_SA: &[0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        deref_SA: &[
+            0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        ],
         lstype: "SLSLSLSLLSLSLSLSLSLSLLS",
         lmspos: "  * * *  * * * * * *  *",
     };
