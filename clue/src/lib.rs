@@ -1,7 +1,7 @@
 use std::backtrace::Backtrace;
 use std::cell::RefCell;
-use std::io::Write;
 use std::fmt::{Debug, Display};
+use std::io::Write;
 use std::rc::Rc;
 
 use biometrics::{click, Counter};
@@ -13,7 +13,7 @@ use id::generate_id;
 use util::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
-use prototk::{FieldNumber, FieldPacker, FieldPackHelper, FieldType, Tag};
+use prototk::{FieldNumber, FieldPackHelper, FieldPacker, FieldType, Tag};
 
 pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
 pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
@@ -22,7 +22,7 @@ pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 6;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
-generate_id!{TraceID, "trace:"}
+generate_id! {TraceID, "trace:"}
 
 /////////////////////////////////////////////// Trace //////////////////////////////////////////////
 
@@ -47,21 +47,29 @@ impl Trace {
             stopwatch: None,
         };
         if let Some(trace_id) = id {
-            trace.with_context::<string, LABEL_FIELD_NUMBER>("label", label)
-                .with_context::<string, TRACE_ID_FIELD_NUMBER>("trace_id", &trace_id.human_readable())
+            trace
+                .with_context::<string, LABEL_FIELD_NUMBER>("label", label)
+                .with_context::<string, TRACE_ID_FIELD_NUMBER>(
+                    "trace_id",
+                    &trace_id.human_readable(),
+                )
         } else {
             trace.with_context::<string, LABEL_FIELD_NUMBER>("label", label)
         }
     }
 
-    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(self, field_name: &str, field_value: F::Native) -> Self
+    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(
+        self,
+        field_name: &str,
+        field_value: F::Native,
+    ) -> Self
     where
         F: FieldType<'a> + 'a,
         F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
     {
         if self.id.is_none() {
             click!("clue.trace.context_not_logged");
-            return self
+            return self;
         }
         self.with_protobuf::<F, N>(field_value.clone())
             .with_human::<F::Native>(field_name, field_value)
@@ -70,7 +78,7 @@ impl Trace {
     pub fn with_human<'a, F: Display>(mut self, field_name: &str, field_value: F) -> Self {
         if self.id.is_none() {
             click!("clue.trace.human_not_logged");
-            return self
+            return self;
         }
         self.human += &format!("{} = {}\n", field_name, field_value);
         self
@@ -95,7 +103,7 @@ impl Trace {
     pub fn with_backtrace(self) -> Self {
         if self.id.is_none() {
             click!("clue.trace.backtrace_not_logged");
-            return self
+            return self;
         }
         click!("clue.trace.with_backtrace");
         let backtrace = format!("{}", Backtrace::force_capture());
@@ -105,7 +113,7 @@ impl Trace {
     pub fn with_stopwatch(mut self) -> Self {
         if self.id.is_none() {
             click!("clue.trace.stopwatch_not_logged");
-            return self
+            return self;
         }
         click!("clue.trace.with_stopwatch");
         self.stopwatch = Some(Stopwatch::default());
@@ -183,9 +191,7 @@ impl Tracer {
     }
 
     const fn new() -> Self {
-        Self {
-            emitter: None,
-        }
+        Self { emitter: None }
     }
 
     fn set_emitter(&mut self, emitter: Rc<dyn Emitter>) {
@@ -261,10 +267,14 @@ impl<W: Write> Emitter for PlainTextEmitter<W> {
             None => {
                 click!("clue.plaintext.dropped");
                 return;
-            },
+            }
         };
         let mut fout = self.fout.borrow_mut();
-        if let Err(e) = write!(fout, "TraceID: {} ===================================\n", trace_id.human_readable()) {
+        if let Err(e) = write!(
+            fout,
+            "TraceID: {} ===================================\n",
+            trace_id.human_readable()
+        ) {
             CLUE_PLAINTEXT_NOT_WRITTEN.click();
             eprintln!("plaintext emitter failure: {}", e);
         }
