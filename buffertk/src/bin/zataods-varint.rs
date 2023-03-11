@@ -9,7 +9,7 @@ fn main() {
             Err(e) => {
                 eprintln!("don't know how to parse {}: {}", argument, e);
                 continue;
-            },
+            }
         };
         let v: buffertk::v64 = x.into();
         let mut pirate = [0u8; 10];

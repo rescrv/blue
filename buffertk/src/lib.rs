@@ -28,7 +28,7 @@ impl std::fmt::Display for Error {
             }
             Error::VarintOverflow { bytes } => {
                 write!(f, "varint did not fit in space={} bytes", bytes)
-            },
+            }
             Error::UnsignedOverflow { value } => {
                 write!(f, "unsigned integer cannot hold value={}", value)
             }
@@ -74,17 +74,13 @@ pub trait Packable {
     fn stream<W: std::io::Write>(&self, writer: &mut W) -> Result<usize, std::io::Error>
     where
         Self: std::marker::Sized,
-        for <'a> &'a Self: Packable,
+        for<'a> &'a Self: Packable,
     {
         let pa = stack_pack(self);
         let vec: Vec<u8> = pa.to_vec();
         match writer.write_all(&vec) {
-            Ok(_) => {
-                Ok(vec.len())
-            },
-            Err(x) => {
-                Err(x)
-            },
+            Ok(_) => Ok(vec.len()),
+            Err(x) => Err(x),
         }
     }
 }
@@ -121,10 +117,7 @@ const EMPTY: () = ();
 
 /// `stack_pack` begins a tree of packable data on the stack.
 pub fn stack_pack<'a, T: Packable + 'a>(t: T) -> StackPacker<'a, (), T> {
-    StackPacker {
-        prefix: &EMPTY,
-        t,
-    }
+    StackPacker { prefix: &EMPTY, t }
 }
 
 /// [StackPacker] is the type returned by StackPack.  It's a pointer to something packable (usually
@@ -212,8 +205,7 @@ where
     }
 
     fn pack(&self, out: &mut [u8]) {
-        let (prefix, suffix): (&mut [u8], &mut [u8]) =
-            out.split_at_mut(self.prefix.pack_sz());
+        let (prefix, suffix): (&mut [u8], &mut [u8]) = out.split_at_mut(self.prefix.pack_sz());
         self.prefix.pack(prefix);
         self.t.pack(suffix);
     }
@@ -234,8 +226,8 @@ impl<'a> Unpacker<'a> {
     }
 
     /// Unpack from buf into an object of type T.
-    pub fn unpack<'b, E, T: Unpackable<'b, Error=E>>(&mut self) -> Result<T, E>
-        where
+    pub fn unpack<'b, E, T: Unpackable<'b, Error = E>>(&mut self) -> Result<T, E>
+    where
         'a: 'b,
     {
         let (t, buf): (T, &'a [u8]) = Unpackable::unpack(self.buf)?;
@@ -371,19 +363,17 @@ packable_with_to_bits_to_le_bytes!(f64, u64);
 
 /// Pack a byte slice without a length prefix.  The resulting format is equivalent to concatenating
 /// the individual packings.
-pub fn length_free<P:Packable>(slice: &[P]) -> LengthFree<P> {
-    LengthFree {
-        slice,
-    }
+pub fn length_free<P: Packable>(slice: &[P]) -> LengthFree<P> {
+    LengthFree { slice }
 }
 
 /// A type that packs a slice of objects by concatenating their packed representations.  Does not
 /// prepend a length.
-pub struct LengthFree<'a, P:Packable> {
+pub struct LengthFree<'a, P: Packable> {
     slice: &'a [P],
 }
 
-impl<'a, P:Packable> Packable for LengthFree<'a, P> {
+impl<'a, P: Packable> Packable for LengthFree<'a, P> {
     fn pack_sz(&self) -> usize {
         self.slice.iter().map(|x| x.pack_sz()).sum()
     }
@@ -420,8 +410,7 @@ where
 
     fn pack(&self, out: &mut [u8]) {
         let vsz: v64 = self.size.into();
-        let (prefix, suffix): (&mut [u8], &mut[u8]) =
-            out.split_at_mut(vsz.pack_sz());
+        let (prefix, suffix): (&mut [u8], &mut [u8]) = out.split_at_mut(vsz.pack_sz());
         vsz.pack(prefix);
         self.body.pack(suffix);
     }
@@ -437,8 +426,7 @@ impl Packable for &[u8] {
 
     fn pack(&self, out: &mut [u8]) {
         let vsz: v64 = self.len().into();
-        let (prefix, suffix): (&mut [u8], &mut[u8]) =
-            out.split_at_mut(vsz.pack_sz());
+        let (prefix, suffix): (&mut [u8], &mut [u8]) = out.split_at_mut(vsz.pack_sz());
         vsz.pack(prefix);
         suffix.copy_from_slice(self);
     }
@@ -646,13 +634,17 @@ mod tests {
         // pass the type checker.  Need a test that has tuple with remainder as it's not the
         // typical, or even expected case.
         let (a, b, c, d) = (42u8, 13u8, 73u8, 32u8);
-        let mut buf = [0u8;4];
+        let mut buf = [0u8; 4];
         (a, b, c, d).pack(&mut buf);
         assert_eq!([a, b, c, d], buf, "human got serialization wrong?");
         let mut up = Unpacker::new(&buf);
         let (ap, bp): (u8, u8) = up.unpack().unwrap();
         let (cp, dp): (u8, u8) = up.unpack().unwrap();
-        assert_eq!([a, b, c, d], [ap, bp, cp, dp], "human got deserialization wrong?");
+        assert_eq!(
+            [a, b, c, d],
+            [ap, bp, cp, dp],
+            "human got deserialization wrong?"
+        );
     }
 
     #[test]
