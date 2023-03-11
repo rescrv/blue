@@ -146,15 +146,11 @@ union MashOutput {
 
 impl MashOutput {
     fn as_bytes(&mut self) -> &mut [u8; 64] {
-        unsafe {
-            &mut self.bytes
-        }
+        unsafe { &mut self.bytes }
     }
 
     fn as_blocks(&mut self) -> &mut [u32; 16] {
-        unsafe {
-            &mut self.blocks
-        }
+        unsafe { &mut self.blocks }
     }
 }
 
@@ -201,7 +197,7 @@ impl Guacamole {
         }
         assert!(bytes.len() < self.remaining_len());
         let rem = bytes.len();
-        bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..self.index+rem]);
+        bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..self.index + rem]);
         self.index += rem;
         assert!(self.index < 64);
     }
@@ -227,7 +223,7 @@ impl Default for Guacamole {
 }
 
 impl RngCore for Guacamole {
-    fn fill_bytes(&mut self, buf: &mut[u8]) {
+    fn fill_bytes(&mut self, buf: &mut [u8]) {
         Guacamole::generate(self, buf)
     }
 

@@ -1,8 +1,7 @@
 use clap::{App, Arg};
 
-use guacamole::Guacamole;
 use guacamole::zipf::Zipf;
-
+use guacamole::Guacamole;
 
 /// Choose numbers [0, n) from a zipf distribution.
 fn main() {
@@ -19,19 +18,19 @@ fn main() {
         Arg::with_name("alpha")
             .long("alpha")
             .takes_value(true)
-            .help("Alpha value for the zipf distribution.")
+            .help("Alpha value for the zipf distribution."),
     );
     let app = app.arg(
         Arg::with_name("theta")
             .long("theta")
             .takes_value(true)
-            .help("Theta value for the zipf distribution.")
+            .help("Theta value for the zipf distribution."),
     );
     let app = app.arg(
         Arg::with_name("seed")
             .long("seed")
             .takes_value(true)
-            .help("Guacamole seed.")
+            .help("Guacamole seed."),
     );
     let args = app.get_matches();
     let n = args.value_of("n").unwrap_or("1000");
@@ -40,17 +39,15 @@ fn main() {
         Some(x) => {
             let theta = x.parse::<f64>().expect("could not parse theta");
             Zipf::from_theta(n, theta)
-        },
-        None => {
-            match args.value_of("alpha") {
-                Some(x) => {
-                    let alpha = x.parse::<f64>().expect("could not parse alpha");
-                    Zipf::from_alpha(n, alpha)
-                },
-                None => {
-                    let theta = 0.5;
-                    Zipf::from_theta(n, theta)
-                }
+        }
+        None => match args.value_of("alpha") {
+            Some(x) => {
+                let alpha = x.parse::<f64>().expect("could not parse alpha");
+                Zipf::from_alpha(n, alpha)
+            }
+            None => {
+                let theta = 0.5;
+                Zipf::from_theta(n, theta)
             }
         },
     };
