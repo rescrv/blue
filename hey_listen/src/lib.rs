@@ -10,7 +10,7 @@ use prototk::field_types::*;
 
 ///////////////////////////////////////////// FiringID /////////////////////////////////////////////
 
-generate_id!{FiringID, "firing:"}
+generate_id! {FiringID, "firing:"}
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
 
@@ -45,7 +45,10 @@ impl Condition {
         let ctx = &format!("{} = {}\n", field_name, field_value);
         match &mut self {
             Condition::Stable { context } => context.push_str(ctx),
-            Condition::Firing { description: _, context } => context.push_str(ctx),
+            Condition::Firing {
+                description: _,
+                context,
+            } => context.push_str(ctx),
         };
         self
     }
@@ -53,14 +56,20 @@ impl Condition {
     pub fn description(&self) -> &str {
         match &self {
             Condition::Stable { context: _ } => "success",
-            Condition::Firing { description, context: _ } => description,
+            Condition::Firing {
+                description,
+                context: _,
+            } => description,
         }
     }
 
     pub fn context(&self) -> &str {
         match &self {
             Condition::Stable { context } => context,
-            Condition::Firing { description: _, context } => context,
+            Condition::Firing {
+                description: _,
+                context,
+            } => context,
         }
     }
 }
@@ -119,7 +128,11 @@ impl<M: Monitor + 'static> State<M> {
     fn evaluate(&mut self) -> Condition {
         let condition = self.monitor.evaluate(&mut self.state);
         self.state = self.monitor.witness();
-        if let Condition::Firing { description, context } = &condition {
+        if let Condition::Firing {
+            description,
+            context,
+        } = &condition
+        {
             if self.sticky.is_none() {
                 let firing = FiringID::generate().unwrap_or(FiringID::default());
                 self.sticky = Some(StickyCondition {
@@ -156,7 +169,7 @@ impl<M: Monitor + 'static> State<M> {
                     .finish();
                 self.sticky = None;
                 true
-            },
+            }
             Some(sticky) => {
                 Trace::new("hey_listen.reset.wrong_id")
                     .with_context::<string, 1>("label", self.monitor.label())
@@ -164,13 +177,13 @@ impl<M: Monitor + 'static> State<M> {
                     .with_context::<string, 3>("provided", &firing.human_readable())
                     .finish();
                 false
-            },
+            }
             None => {
                 Trace::new("hey_listen.reset.nothing_to_reset")
                     .with_context::<string, 1>("label", self.monitor.label())
                     .with_context::<string, 2>("provided", &firing.human_readable());
                 false
-            },
+            }
         }
     }
 }
@@ -225,7 +238,7 @@ impl HeyListen {
         }
     }
 
-    pub fn firing(&self) -> impl Iterator<Item=(&'static str, FiringID, Condition, Condition)> {
+    pub fn firing(&self) -> impl Iterator<Item = (&'static str, FiringID, Condition, Condition)> {
         let mut iter = Vec::new();
         self.firing_one(&self.success_rate, &mut iter);
         self.firing_one(&self.stationary, &mut iter);
@@ -234,7 +247,11 @@ impl HeyListen {
         iter.into_iter()
     }
 
-    fn firing_one<M: Monitor>(&self, v: &Vec<State<M>>, out: &mut Vec<(&'static str, FiringID, Condition, Condition)>) {
+    fn firing_one<M: Monitor>(
+        &self,
+        v: &Vec<State<M>>,
+        out: &mut Vec<(&'static str, FiringID, Condition, Condition)>,
+    ) {
         for state in v.iter() {
             if let Some(sticky) = &state.sticky {
                 let label = state.monitor.label();
@@ -314,10 +331,7 @@ impl Monitor for SuccessRate {
     fn witness(&self) -> Self::State {
         let success: u64 = self.success.read();
         let failure: u64 = self.failure.read();
-        Self::State {
-            success,
-            failure,
-        }
+        Self::State { success, failure }
     }
 
     fn evaluate(&self, previous: &Self::State) -> Condition {
@@ -395,14 +409,8 @@ pub struct Stationary {
 }
 
 impl Stationary {
-    pub const fn new(
-        label: &'static str,
-        counter: &'static Counter,
-    ) -> Self {
-        Self {
-            label,
-            counter,
-        }
+    pub const fn new(label: &'static str, counter: &'static Counter) -> Self {
+        Self { label, counter }
     }
 }
 
@@ -415,9 +423,7 @@ impl Monitor for Stationary {
 
     fn witness(&self) -> Self::State {
         let count: u64 = self.counter.read();
-        Self::State {
-            count,
-        }
+        Self::State { count }
     }
 
     fn evaluate(&self, previous: &Self::State) -> Condition {
@@ -436,8 +442,7 @@ impl Monitor for Stationary {
                 .with_context("previous", previous.count);
         }
         // Return success.
-        Condition::stable()
-            .with_context("count", current.count)
+        Condition::stable().with_context("count", current.count)
     }
 }
 
@@ -450,11 +455,7 @@ pub struct BelowThreshold {
 }
 
 impl BelowThreshold {
-    pub const fn new(
-        label: &'static str,
-        gauge: &'static Gauge,
-        threshold: f64,
-    ) -> Self {
+    pub const fn new(label: &'static str, gauge: &'static Gauge, threshold: f64) -> Self {
         Self {
             label,
             gauge,
@@ -477,8 +478,7 @@ impl Monitor for BelowThreshold {
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();
         if current < self.threshold {
-            return Condition::stable()
-                .with_context("current", current);
+            return Condition::stable().with_context("current", current);
         } else {
             return Condition::firing("value exceeds threshold")
                 .with_context("current", current)
@@ -496,11 +496,7 @@ pub struct AboveThreshold {
 }
 
 impl AboveThreshold {
-    pub const fn new(
-        label: &'static str,
-        gauge: &'static Gauge,
-        threshold: f64,
-    ) -> Self {
+    pub const fn new(label: &'static str, gauge: &'static Gauge, threshold: f64) -> Self {
         Self {
             label,
             gauge,
@@ -523,8 +519,7 @@ impl Monitor for AboveThreshold {
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();
         if current > self.threshold {
-            return Condition::stable()
-                .with_context("current", current);
+            return Condition::stable().with_context("current", current);
         } else {
             return Condition::firing("value below threshold")
                 .with_context("current", current)
