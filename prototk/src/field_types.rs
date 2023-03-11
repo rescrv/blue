@@ -1127,6 +1127,12 @@ where
     }
 }
 
+impl<'a, M: Default> Default for message<M> {
+    fn default() -> Self {
+        message::from_native(M::default())
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
