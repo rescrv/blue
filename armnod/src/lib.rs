@@ -47,8 +47,7 @@ pub trait SeedChooser {
 /// [RandomStringChooser] skips seeding entirely.  This saves on CPU for when all that's needed are
 /// pseudo-random strings.
 #[derive(Default)]
-pub struct RandomStringChooser {
-}
+pub struct RandomStringChooser {}
 
 impl SeedChooser for RandomStringChooser {
     fn which_seed(&mut self, _: &mut Guacamole) -> SeedChoice {
@@ -69,9 +68,7 @@ impl SetStringChooser {
     /// Create a new [SetStringChooser] with `cardinality`.  Strings are on `[0, cardinality)` and
     /// will be generated using two levels of [Guacamole].
     pub fn new(cardinality: u64) -> Self {
-        Self {
-            cardinality,
-        }
+        Self { cardinality }
     }
 }
 
@@ -98,10 +95,7 @@ impl SetStringChooserOnce {
     /// between [start, limit), which is assumed to be a chunk of `[0, n)`.
     pub fn new(start: u64, limit: u64) -> Self {
         assert!(start <= limit);
-        Self {
-            start,
-            limit,
-        }
+        Self { start, limit }
     }
 }
 
@@ -165,9 +159,7 @@ pub struct ConstantLengthChooser {
 impl ConstantLengthChooser {
     /// Create a new [ConstantLengthChooser] that will generate strings of `length` characters.
     pub fn new(length: u32) -> Self {
-        Self {
-            length,
-        }
+        Self { length }
     }
 }
 
@@ -231,7 +223,7 @@ pub trait CharacterChooser {
 
 /// Choose characters from alphabets of up to 96 characters.
 pub struct CharSetChooser {
-    chars: [char; 256]
+    chars: [char; 256],
 }
 
 impl CharSetChooser {
@@ -248,9 +240,7 @@ impl CharSetChooser {
             table[i] = s[d];
         }
 
-        Self {
-            chars: table,
-        }
+        Self { chars: table }
     }
 }
 
@@ -297,9 +287,9 @@ impl ARMNOD {
     /// Choose the next string from the provided guacamole.
     pub fn choose(&mut self, guac: &mut Guacamole) -> Option<String> {
         match self.string.which_seed(guac) {
-            SeedChoice::Seed(seed) => { self.choose_seeded(&mut Guacamole::new(seed)) },
-            SeedChoice::SkipSeeding => { self.choose_seeded(guac) },
-            SeedChoice::StopIterating => { None },
+            SeedChoice::Seed(seed) => self.choose_seeded(&mut Guacamole::new(seed)),
+            SeedChoice::SkipSeeding => self.choose_seeded(guac),
+            SeedChoice::StopIterating => None,
         }
     }
 
