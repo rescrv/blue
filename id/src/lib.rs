@@ -10,7 +10,9 @@ const SLICES: [(usize, usize); 5] = [(0, 4), (4, 6), (6, 8), (8, 10), (10, 16)];
 pub fn urandom() -> Option<[u8; BYTES]> {
     let mut f = match File::open("/dev/urandom") {
         Ok(f) => f,
-        Err(_) => { return None; },
+        Err(_) => {
+            return None;
+        }
     };
     let mut id: [u8; BYTES] = [0u8; BYTES];
     let mut amt = 0;
@@ -76,13 +78,17 @@ macro_rules! generate_id {
         }
 
         impl $what {
-            pub const BOTTOM: $what = $what { id: [0u8; $crate::BYTES] };
-            pub const TOP: $what = $what { id: [0xffu8; $crate::BYTES], };
+            pub const BOTTOM: $what = $what {
+                id: [0u8; $crate::BYTES],
+            };
+            pub const TOP: $what = $what {
+                id: [0xffu8; $crate::BYTES],
+            };
 
             pub fn generate() -> Option<$what> {
                 match $crate::urandom() {
                     Some(id) => Some($what { id }),
-                    None => None
+                    None => None,
                 }
             }
 
@@ -107,9 +113,7 @@ macro_rules! generate_id {
             }
 
             pub fn new(id: [u8; $crate::BYTES]) -> Self {
-                Self {
-                    id
-                }
+                Self { id }
             }
         }
 
@@ -124,7 +128,7 @@ macro_rules! generate_id {
                 write!(f, "{}{}", $prefix, $crate::encode(&self.id))
             }
         }
-    }
+    };
 }
 
 #[macro_export]
@@ -133,12 +137,16 @@ macro_rules! generate_id_prototk {
         impl buffertk::Packable for $what {
             fn pack_sz(&self) -> usize {
                 let id_buf: &[u8] = &self.id;
-                buffertk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).pack_sz()
+                buffertk::stack_pack(prototk::tag!(1, LengthDelimited))
+                    .pack(id_buf)
+                    .pack_sz()
             }
 
             fn pack(&self, buf: &mut [u8]) {
                 let id_buf: &[u8] = &self.id;
-                buffertk::stack_pack(prototk::tag!(1, LengthDelimited)).pack(id_buf).into_slice(buf);
+                buffertk::stack_pack(prototk::tag!(1, LengthDelimited))
+                    .pack(id_buf)
+                    .into_slice(buf);
             }
         }
 
@@ -152,7 +160,10 @@ macro_rules! generate_id_prototk {
                 let v: usize = v.into();
                 let rem = up.remain();
                 if rem.len() < v {
-                    return Err(prototk::Error::BufferTooShort{ required: v, had: rem.len() });
+                    return Err(prototk::Error::BufferTooShort {
+                        required: v,
+                        had: rem.len(),
+                    });
                 }
                 // TODO(rescrv): Have an error if v != 16.
                 let id = $what {
@@ -162,9 +173,8 @@ macro_rules! generate_id_prototk {
             }
         }
 
-        impl<'a> prototk::Message<'a> for $what {
-        }
-    }
+        impl<'a> prototk::Message<'a> for $what {}
+    };
 }
 
 #[cfg(test)]
@@ -199,9 +209,18 @@ mod tests {
     fn generate_id() {
         let _x = FooID::generate().unwrap();
         let id = FooID::new([0xffu8; BYTES]);
-        assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.human_readable());
-        assert_eq!("ffffffff-ffff-ffff-ffff-ffffffffffff", id.prefix_free_readable());
-        assert_eq!(Some(id), FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff"));
+        assert_eq!(
+            "foo:ffffffff-ffff-ffff-ffff-ffffffffffff",
+            id.human_readable()
+        );
+        assert_eq!(
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            id.prefix_free_readable()
+        );
+        assert_eq!(
+            Some(id),
+            FooID::from_human_readable("foo:ffffffff-ffff-ffff-ffff-ffffffffffff")
+        );
         assert_eq!([0x00u8; BYTES], FooID::BOTTOM.id);
         assert_eq!([0xffu8; BYTES], FooID::TOP.id);
     }
