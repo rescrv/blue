@@ -14,12 +14,9 @@ struct WrappedError {
 
 fn test_helper(err: Error, exp: &[u8]) {
     let we = WrappedError { err };
-    let buf: Vec<u8> = stack_pack(&we).to_vec();
-    let got: &[u8] = &buf;
-    assert_eq!(exp, got, "buffer did not match expectations");
 
     // test packing
-    let buf: Vec<u8> = buffertk::stack_pack(&we).to_vec();
+    let buf: Vec<u8> = stack_pack(&we).to_vec();
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
 

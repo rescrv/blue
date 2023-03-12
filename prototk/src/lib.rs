@@ -34,6 +34,8 @@ pub enum Error {
         field_number: u32,
         what: String,
     },
+    /// UnhandledWireType indicates that the wire_type is not understood by this process and cannot
+    /// be skipped.
     UnhandledWireType {
         wire_type: u32,
     },
@@ -121,6 +123,8 @@ impl From<buffertk::Error> for Error {
             buffertk::Error::VarintOverflow { bytes } => Error::VarintOverflow { bytes },
             buffertk::Error::UnsignedOverflow { value } => Error::UnsignedOverflow { value },
             buffertk::Error::SignedOverflow { value } => Error::SignedOverflow { value },
+            buffertk::Error::TagTooLarge { tag } => Error::TagTooLarge { tag },
+            buffertk::Error::UnknownDiscriminant { discriminant } => Error::UnknownDiscriminant { discriminant },
         }
     }
 }
@@ -959,6 +963,34 @@ where
     }
 }
 
+impl<'a, T, E> FieldPackHelper<'a, field_types::message<Result<T, E>>> for Result<T, E>
+where
+    T: FieldPackHelper<'a, field_types::message<T>> + 'a,
+    E: FieldPackHelper<'a, field_types::message<E>> + 'a,
+{
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        match self {
+            Ok(x) => {
+                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(1), x)).length_prefixed()).pack_sz()
+            },
+            Err(e) => {
+                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(2), e)).length_prefixed()).pack_sz()
+            },
+        }
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        match self {
+            Ok(x) => {
+                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(1), x)).length_prefixed()).into_slice(out);
+            },
+            Err(e) => {
+                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(2), e)).length_prefixed()).into_slice(out);
+            },
+        }
+    }
+}
+
 ///////////////////////////////////////// FieldUnpackHelper ////////////////////////////////////////
 
 pub trait FieldUnpackHelper<'a, T: FieldType<'a>> {
@@ -982,6 +1014,12 @@ where
 {
     fn merge_field(&mut self, proto: T) {
         *self = Some(proto.into());
+    }
+}
+
+impl<'a, T, E> FieldUnpackHelper<'a, field_types::message<Result<T, E>>> for Result<T, E> {
+    fn merge_field(&mut self, proto: field_types::message<Result<T, E>>) {
+        *self = proto.unwrap_message();
     }
 }
 
