@@ -1,7 +1,6 @@
 //! error_core is a default implementation of [zerror::Z].
 
 use std::backtrace::Backtrace;
-use std::error::Error;
 use std::fmt::Debug;
 
 use biometrics::Counter;
