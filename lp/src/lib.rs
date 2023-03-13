@@ -328,6 +328,7 @@ impl Z for Error {
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // TODO(rescrv):  Make sure this isn't infinitely co-recursive with long_form
         write!(fmt, "{}", self.long_form())
     }
 }
