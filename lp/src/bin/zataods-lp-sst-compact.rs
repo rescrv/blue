@@ -43,6 +43,6 @@ fn main() {
         cursors.push(Box::new(sst.cursor()));
     }
     let compaction = Compaction::from_inputs(options, metadatas, 0/*XXX*/);
-    let mut cursor = MergingCursor::new(cursors).expect("compaction");
+    let cursor = MergingCursor::new(cursors).expect("compaction");
     losslessly_compact(cursor, compaction, output_prefix).expect("compaction");
 }

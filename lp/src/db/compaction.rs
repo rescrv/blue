@@ -422,7 +422,9 @@ impl Compaction {
         create_dir(&compaction_root.join("outputs"))
             .from_io()
             .with_variable("root", compaction_root.to_string_lossy())?;
-        std::fs::write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot));
+        std::fs::write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot))
+            .from_io()
+            .with_variable("root", compaction_root.to_string_lossy())?;
         for sst in self.inputs.iter() {
             let target = &root.as_ref().join("sst").join(sst.setsum() + ".sst");
             let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");

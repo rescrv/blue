@@ -1,4 +1,4 @@
-use clap::{App, Arg};
+use clap::App;
 
 use lp::cli::{db_args, parse_db_args, parse_db_options, sst_args, parse_sst_args};
 

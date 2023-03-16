@@ -151,7 +151,6 @@ pub struct DBOptions {
     // TODO(rescrv): Unify options feel and make these public.
     create_if_missing: bool,
     error_if_exists: bool,
-    paranoid_checks: bool,
     wait_for_lock: bool,
     max_open_files: usize,
     pub compaction: CompactionOptions,
@@ -162,7 +161,6 @@ impl Default for DBOptions {
         Self {
             create_if_missing: true,
             error_if_exists: false,
-            paranoid_checks: true,
             wait_for_lock: true,
             max_open_files: 1 << 20,
             compaction: CompactionOptions::default(),
