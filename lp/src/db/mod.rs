@@ -14,8 +14,6 @@ use biometrics::Counter;
 
 use hey_listen::{HeyListen, Stationary};
 
-use clue::Trace;
-
 use zerror::Z;
 use zerror_core::ErrorCore;
 
@@ -107,25 +105,16 @@ pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, Err
     if !root.is_dir() && !options.create_if_missing {
         return Err(Error::DBNotExist { core: ErrorCore::default(), path: root.clone() });
     } else if !root.is_dir() {
-        Trace::new("lp.db.create")
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .finish();
         create_dir(&root)
             .from_io()
             .with_variable("root", root.to_string_lossy())?;
     }
     // Deal with the lockfile first.
     let lockfile = if options.wait_for_lock {
-        Trace::new("lp.db.wait_lockfile")
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .finish();
         Lockfile::wait(LOCKFILE(&root))
             .from_io()
             .with_variable("root", root.to_string_lossy())?
     } else {
-        Trace::new("lp.db.nowait_lockfile")
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .finish();
         Lockfile::lock(LOCKFILE(&root))
             .from_io()
             .with_variable("root", root.to_string_lossy())?
@@ -138,9 +127,6 @@ pub fn get_lockfile(options: &DBOptions, root: &PathBuf) -> Result<Lockfile, Err
         };
         return Err(err);
     }
-    Trace::new("lp.db.lock_obtained")
-        .with_context::<string, 1>("root", &root.to_string_lossy())
-        .finish();
     Ok(lockfile.unwrap())
 }
 
@@ -227,9 +213,6 @@ impl DB {
                 .with_variable("meta", Self::META(&root))?;
         }
         // DB.
-        Trace::new("lp.db.open")
-            .with_context::<string, 1>("root", &root.to_string_lossy())
-            .finish();
         let db = Self {
             root: root,
             options,

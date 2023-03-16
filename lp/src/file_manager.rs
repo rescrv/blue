@@ -13,8 +13,6 @@ use biometrics::Counter;
 
 use hey_listen::{HeyListen, Stationary};
 
-use clue::Trace;
-
 use zerror::Z;
 use zerror_core::ErrorCore;
 
@@ -91,31 +89,21 @@ impl State {
     fn close_file(&mut self, fd: c_int) {
         assert!(fd >= 0);
         if self.files.len() <= fd as usize {
-            Trace::new("unmanaged fd")
-                .with_context::<int32, 2>("fd", fd)
-                .with_context::<uint64, 3>("self.files.len()", self.files.len() as u64)
-                .panic(format!("self.files.len() <= fd"));
+            panic!("self.files.len() <= fd");
         }
         let (path, file) = match self.files[fd as usize].take() {
             Some((path, file)) => (path, file),
             None => {
-                Trace::new("unmanaged fd")
-                    .with_context::<int32, 2>("fd", fd)
-                    .panic(format!("self.file[{}] is None", fd));
+                panic!("self.file[{}] is None", fd);
             }
         };
         if file.as_raw_fd() != fd {
-            Trace::new("mismanaged fd")
-                .with_context::<int32, 2>("fd", fd)
-                .with_context::<int32, 3>("file.as_raw_fd()", file.as_raw_fd())
-                .panic(format!("file.as_raw_fd() != fd"));
+            panic!("file.as_raw_fd() != fd");
         }
         match self.names.remove(&path) {
             Some(_) => {},
             None => {
-                Trace::new("missing fd")
-                    .with_context::<string, 1>("path", &path.to_string_lossy())
-                    .panic("path missing from names map".to_string());
+                panic!("path missing from names map");
             }
         };
         // TODO(rescrv) click!("lp.file_manager.close");
