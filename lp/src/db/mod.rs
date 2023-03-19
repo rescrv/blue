@@ -1,15 +1,13 @@
 use std::cmp::Ordering;
-use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file, File};
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 
 use util::lockfile::Lockfile;
 use util::time::now;
 
 use buffertk::{stack_pack, Buffer, Unpacker};
-
-use prototk::field_types::*;
 
 use biometrics::Counter;
 
@@ -22,7 +20,6 @@ use super::file_manager::FileManager;
 use super::merging_cursor::MergingCursor;
 use super::options::CompactionOptions;
 use super::pruning_cursor::PruningCursor;
-use super::setsum::Setsum;
 use super::sst::{SSTBuilder, SSTMetadata, SST};
 use super::{compare_bytes, Builder, Cursor, Error, FromIO};
 

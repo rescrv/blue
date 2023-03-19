@@ -13,7 +13,7 @@ pub fn db_args<'a>(app: App<'a, 'a>) -> App<'a, 'a> {
     app
 }
 
-pub fn parse_db_options(args: &ArgMatches) -> DBOptions  {
+pub fn parse_db_options(_: &ArgMatches) -> DBOptions  {
     DBOptions::default()
 }
 

@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 
-use prototk::field_types::*;
 use prototk_derive::Message;
 
 use zerror::Z;

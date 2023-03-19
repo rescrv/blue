@@ -7,9 +7,9 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 
-use prototk::field_types::*;
-
 use biometrics::Counter;
+
+use prototk::field_types::*;
 
 use hey_listen::{HeyListen, Stationary};
 

@@ -4,8 +4,6 @@ use biometrics::{Counter, Gauge, Sensor};
 
 use id::generate_id;
 
-use prototk::field_types::*;
-
 ///////////////////////////////////////////// FiringID /////////////////////////////////////////////
 
 generate_id! {FiringID, "firing:"}
@@ -127,8 +125,8 @@ impl<M: Monitor + 'static> State<M> {
         let condition = self.monitor.evaluate(&mut self.state);
         self.state = self.monitor.witness();
         if let Condition::Firing {
-            description,
-            context,
+            description: _,
+            context: _,
         } = &condition
         {
             if self.sticky.is_none() {
@@ -152,7 +150,7 @@ impl<M: Monitor + 'static> State<M> {
                 self.sticky = None;
                 true
             }
-            Some(sticky) => {
+            Some(_) => {
                 false
             }
             None => {

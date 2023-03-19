@@ -2,13 +2,11 @@ use std::cmp::{max, min, Ordering, Reverse};
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
-use std::fs::{create_dir, hard_link, read_dir, read_to_string};
+use std::fs::{create_dir, hard_link};
 use std::ops::Bound;
 use std::path::Path;
 
 use buffertk::stack_pack;
-
-use prototk::field_types::*;
 
 use util::time::now;
 
@@ -385,7 +383,6 @@ impl Compaction {
     }
 
     pub fn load<P: AsRef<Path>>(compaction_root: P) -> Result<Self, Error> {
-        todo!();
         /*
         let mut inputs = Vec::new();
         for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
@@ -467,7 +464,7 @@ impl Compaction {
         Self::load(compaction_root)
     }
 
-    fn perform(&mut self, file_mgr: &FileManager) -> Result<(), Error> {
+    pub fn perform(&mut self, file_mgr: &FileManager) -> Result<(), Error> {
         let mut cursors: Vec<Box<dyn Cursor>> = Vec::new();
         for input in self.inputs() {
             let handle = self.open_file_handle(file_mgr, input.setsum())?;
@@ -479,6 +476,13 @@ impl Compaction {
     }
 
     fn open_file_handle(&self, file_mgr: &FileManager, setsum: String) -> Result<FileHandle, Error> {
+        let base = setsum + ".sst";
+        /*
+        file_mgr.open(Self::SST(
+    pub fn path(&self) -> Result<PathBuf, Error> {
+    pub fn open(&self, path: PathBuf) -> Result<FileHandle, Error> {
+
+    */
         todo!();
     }
 
