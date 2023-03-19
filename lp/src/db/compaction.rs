@@ -6,6 +6,8 @@ use std::fs::{create_dir, hard_link, read_dir, read_to_string};
 use std::ops::Bound;
 use std::path::Path;
 
+use buffertk::stack_pack;
+
 use prototk::field_types::*;
 
 use util::time::now;
@@ -13,7 +15,7 @@ use util::time::now;
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::super::file_manager::open_without_manager;
+use super::super::file_manager::{FileHandle, FileManager};
 use super::super::merging_cursor::MergingCursor;
 use super::super::options::CompactionOptions;
 use super::super::setsum::Setsum;
@@ -359,6 +361,8 @@ pub struct Compaction {
     inputs: Vec<SSTMetadata>,
     #[prototk(3, uint64)]
     smallest_snapshot: u64,
+    #[prototk(4, message)]
+    overlap: Vec<SSTMetadata>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -371,12 +375,38 @@ pub struct CompactionStats {
 }
 
 impl Compaction {
-    pub fn from_inputs(options: CompactionOptions, inputs: Vec<SSTMetadata>, smallest_snapshot: u64) -> Self {
+    pub fn from_inputs(options: CompactionOptions, inputs: Vec<SSTMetadata>, smallest_snapshot: u64, overlap: Vec<SSTMetadata>) -> Self {
         Self {
             options,
             inputs,
             smallest_snapshot,
+            overlap,
         }
+    }
+
+    pub fn load<P: AsRef<Path>>(compaction_root: P) -> Result<Self, Error> {
+        todo!();
+        /*
+        let mut inputs = Vec::new();
+        for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
+            let path = input.from_io()?.path();
+            let file = open_without_manager(path)?;
+            let sst = SST::from_file_handle(file)?;
+            inputs.push(sst.metadata()?);
+        }
+        let snapshot = read_to_string(compaction_root.as_ref().to_path_buf().join("SNAPSHOT")).from_io()?;
+        let smallest_snapshot = snapshot.parse::<u64>().map_err(|e| Error::Corruption {
+            core: ErrorCore::default(),
+            context: "could not parse snapshot file".to_string(),
+        }
+        .with_variable("root", compaction_root.as_ref().to_string_lossy()))?;
+        Ok(Self {
+            inputs,
+            options,
+            smallest_snapshot,
+        })
+        */
+        todo!();
     }
 
     pub fn inputs(&self) -> &[SSTMetadata] {
@@ -409,7 +439,7 @@ impl Compaction {
         stats
     }
 
-    pub fn setup<P: AsRef<Path>>(&self, options: CompactionOptions, root: P) -> Result<Self, Error> {
+    pub fn setup<P: AsRef<Path>>(&self, root: P) -> Result<Self, Error> {
         let compaction_time = now::millis();
         let compaction_base = format!("compaction:{}", compaction_time);
         let compaction_root = root.as_ref().to_path_buf().join(&compaction_base);
@@ -422,39 +452,38 @@ impl Compaction {
         create_dir(&compaction_root.join("outputs"))
             .from_io()
             .with_variable("root", compaction_root.to_string_lossy())?;
-        std::fs::write(&compaction_root.join("SNAPSHOT"), format!("{}", self.smallest_snapshot))
-            .from_io()
-            .with_variable("root", compaction_root.to_string_lossy())?;
         for sst in self.inputs.iter() {
-            let target = &root.as_ref().join("sst").join(sst.setsum() + ".sst");
-            let link_name = &compaction_root.join("inputs").join(sst.setsum() + ".sst");
+            let name = sst.setsum() + ".sst";
+            let target = &root.as_ref().join("sst").join(&name);
+            let link_name = &compaction_root.join("inputs").join(&name);
             hard_link(target, link_name)
                 .from_io()
                 .with_variable("target", target.to_string_lossy())
                 .with_variable("link_name", link_name.to_string_lossy())?;
         }
-        Self::load(options, compaction_root)
+        std::fs::write(&compaction_root.join("config.pb"), stack_pack(self).to_buffer())
+            .from_io()
+            .with_variable("root", compaction_root.to_string_lossy())?;
+        Self::load(compaction_root)
     }
 
-    pub fn load<P: AsRef<Path>>(options: CompactionOptions, compaction_root: P) -> Result<Self, Error> {
-        let mut inputs = Vec::new();
-        for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
-            let path = input.from_io()?.path();
-            let file = open_without_manager(path)?;
-            let sst = SST::from_file_handle(file)?;
-            inputs.push(sst.metadata()?);
+    fn perform(&mut self, file_mgr: &FileManager) -> Result<(), Error> {
+        let mut cursors: Vec<Box<dyn Cursor>> = Vec::new();
+        for input in self.inputs() {
+            let handle = self.open_file_handle(file_mgr, input.setsum())?;
+            let sst = SST::from_file_handle(handle)?;
+            cursors.push(Box::new(sst.cursor()));
         }
-        let snapshot = read_to_string(compaction_root.as_ref().to_path_buf().join("SNAPSHOT")).from_io()?;
-        let smallest_snapshot = snapshot.parse::<u64>().map_err(|e| Error::Corruption {
-            core: ErrorCore::default(),
-            context: "could not parse snapshot file".to_string(),
-        }
-        .with_variable("root", compaction_root.as_ref().to_string_lossy()))?;
-        Ok(Self {
-            inputs,
-            options,
-            smallest_snapshot,
-        })
+        let cursor = MergingCursor::new(cursors)?;
+        gc_compact(cursor, self.clone(), &|key| self.is_base_level_for_key(key), "outputs/".to_string())
+    }
+
+    fn open_file_handle(&self, file_mgr: &FileManager, setsum: String) -> Result<FileHandle, Error> {
+        todo!();
+    }
+
+    fn is_base_level_for_key(&self, key: &[u8]) -> bool {
+        todo!();
     }
 }
 

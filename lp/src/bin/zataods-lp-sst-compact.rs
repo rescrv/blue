@@ -42,7 +42,7 @@ fn main() {
         metadatas.push(sst.metadata().expect("sst metadata"));
         cursors.push(Box::new(sst.cursor()));
     }
-    let compaction = Compaction::from_inputs(options, metadatas, 0/*XXX*/);
+    let compaction = Compaction::from_inputs(options, metadatas, 0, Vec::new());
     let cursor = MergingCursor::new(cursors).expect("compaction");
     losslessly_compact(cursor, compaction, output_prefix).expect("compaction");
 }

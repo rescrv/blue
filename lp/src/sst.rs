@@ -7,8 +7,6 @@ use crc32c;
 
 use buffertk::{stack_pack, Buffer, Packable, Unpacker};
 
-use prototk::field_types::*;
-
 use zerror::Z;
 use zerror_core::ErrorCore;
 

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fs::{create_dir, hard_link, read_dir, remove_dir, remove_file, File};
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -6,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use util::lockfile::Lockfile;
 use util::time::now;
 
-use buffertk::{stack_pack, Unpacker};
+use buffertk::{stack_pack, Buffer, Unpacker};
 
 use prototk::field_types::*;
 
@@ -343,8 +344,16 @@ impl DB {
     pub fn compaction_setup(&self, options: CompactionOptions, inputs: &[&str], smallest_snapshot: u64) -> Result<Compaction, Error> {
         let state = self.get_state();
         let mut setsums = Vec::new();
+        let mut min_key: Option<Buffer> = None;
+        let mut max_key: Option<Buffer> = None;
         for input in inputs.into_iter() {
             if let Some(metadata) = state.get_metadata_by_setsum(input) {
+                if min_key.is_none() || compare_bytes(min_key.as_ref().unwrap().as_bytes(), metadata.first_key.as_bytes()) != Ordering::Less {
+                    min_key = Some(metadata.first_key.clone());
+                }
+                if max_key.is_none() || compare_bytes(max_key.as_ref().unwrap().as_bytes(), metadata.last_key.as_bytes()) != Ordering::Greater {
+                    max_key = Some(metadata.last_key.clone());
+                }
                 setsums.push(metadata);
             } else {
                 return Err(Error::SSTNotFound {
@@ -353,8 +362,18 @@ impl DB {
                 });
             }
         }
-        let compaction = Compaction::from_inputs(options.clone(), setsums, smallest_snapshot);
-        compaction.setup(options, &self.root)?;
+        let mut bases = Vec::new();
+        for potential_base in state.sst_metadata.iter() {
+            if let (Some(min_key), Some(max_key)) = (&min_key, &max_key) {
+                if compare_bytes(potential_base.first_key.as_bytes(), max_key.as_bytes()) != Ordering::Greater
+                    && compare_bytes(min_key.as_bytes(), potential_base.last_key.as_bytes()) != Ordering::Greater
+                {
+                    bases.push(potential_base.clone());
+                }
+            }
+        }
+        let compaction = Compaction::from_inputs(options.clone(), setsums, smallest_snapshot, bases);
+        compaction.setup(&self.root)?;
         Ok(compaction)
     }
 
