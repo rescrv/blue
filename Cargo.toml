@@ -6,6 +6,7 @@ members = [
     "buffertk",
     "busybee",
     "cache",
+    "ci",
     "clue",
     "databuf",
     "derive_util",
