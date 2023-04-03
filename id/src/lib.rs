@@ -174,6 +174,32 @@ macro_rules! generate_id_prototk {
         }
 
         impl<'a> prototk::Message<'a> for $what {}
+
+        impl<'a> prototk::FieldPackHelper<'a, ::prototk::field_types::message<$what>> for $what {
+            fn field_pack_sz(&self, tag: &::prototk::Tag) -> usize {
+                use buffertk::{stack_pack, Packable};
+                use prototk::{FieldPackHelper, FieldType, Message};
+                stack_pack(tag).pack(stack_pack(self).length_prefixed()).pack_sz()
+            }
+
+            fn field_pack(&self, tag: &::prototk::Tag, out: &mut [u8]) {
+                use buffertk::{stack_pack, Packable};
+                use prototk::{FieldPackHelper, FieldType, Message};
+                stack_pack(tag).pack(stack_pack(self).length_prefixed()).into_slice(out);
+            }
+        }
+
+        impl<'a> ::prototk::FieldUnpackHelper<'a, ::prototk::field_types::message<$what>> for $what {
+            fn merge_field(&mut self, proto: ::prototk::field_types::message<$what>) {
+                *self = proto.unwrap_message();
+            }
+        }
+
+        impl From<::prototk::field_types::message<$what>> for $what {
+            fn from(proto: ::prototk::field_types::message<$what>) -> Self {
+                proto.unwrap_message()
+            }
+        }
     };
 }
 
