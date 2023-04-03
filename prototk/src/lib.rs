@@ -19,9 +19,10 @@ use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
 /// Error captures the possible error conditions for packing and unpacking.
 // TODO(rescrv):  Some notion of the error context so that these can be tracked down.
 // NOTE(rescrv):  When extending this, add a test to tests/error.rs.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Error {
     /// The default error is succes.
+    #[default]
     Success,
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
@@ -66,12 +67,6 @@ pub enum Error {
     UnknownDiscriminant {
         discriminant: u32,
     },
-}
-
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success
-    }
 }
 
 impl std::fmt::Display for Error {
