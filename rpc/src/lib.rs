@@ -181,13 +181,13 @@ pub trait Service {
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
 pub trait Server {
-    fn call(&self, ctx: Context, method: &str, req: &[u8]) -> Result<Buffer, Error>;
+    fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Result<Buffer, Error>;
 }
 
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
 pub trait Client {
-    fn call(&self, ctx: Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Error>;
+    fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Error>;
 }
 
 ////////////////////////////////////////////// Request /////////////////////////////////////////////
@@ -229,7 +229,7 @@ macro_rules! service {
     (name = $service:ident; server = $server:ident; client = $client:ident; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         trait $service {
             $(
-                fn $method(&self, ctx: rpc::Context, req: $req) -> Result<$resp, Error>;
+                fn $method(&self, ctx: &rpc::Context, req: $req) -> Result<$resp, Error>;
             )*
         }
 
@@ -264,7 +264,7 @@ macro_rules! service {
 #[macro_export]
 macro_rules! client_method {
     ($service:ident, $method:ident, $req:ident, $resp:ident) => {
-        fn $method(&self, ctx: rpc::Context, req: $req) -> Result<$resp, Error> {
+        fn $method(&self, ctx: &rpc::Context, req: $req) -> Result<$resp, Error> {
             use buffertk::{Packable, Unpackable};
             let req = buffertk::stack_pack(req).to_vec();
             let buf = self.client.call(ctx, stringify!($service), stringify!($method), &req)?;
@@ -278,7 +278,7 @@ macro_rules! client_method {
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $($method:ident, $req:ident, $resp:ident),+) => {
-        fn call(&self, ctx: rpc::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc::Error> {
+        fn call(&self, ctx: &rpc::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc::Error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             match method {
                 $(
