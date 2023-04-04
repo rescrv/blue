@@ -62,6 +62,8 @@ service! {
     rpc store(CacheStore) -> CacheEmpty;
 }
 
+////////////////////////////////////////// Implementation //////////////////////////////////////////
+
 struct CachedRegister {
     value: Mutex<(Vec<u8>, Vec<u8>)>,
 }
