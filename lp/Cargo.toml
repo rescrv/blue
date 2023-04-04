@@ -15,7 +15,7 @@ armnod = { path = "../armnod" }
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
 clue = { path = "../clue" }
-guacamole = { path = "../guacamole" }
+guacamole = { path = "../guacamole", version = "0.1.0" }
 hey_listen = { path = "../hey_listen" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }

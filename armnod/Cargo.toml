@@ -8,4 +8,4 @@ edition = "2021"
 clap = "2.33"
 rand = "0.7"
 
-guacamole = { path = "../guacamole" }
+guacamole = { path = "../guacamole", version = "0.1.0" }
