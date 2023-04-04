@@ -11,7 +11,7 @@ clap = "2.33"
 crc32c = "0.6"
 rand = "0.7"
 
-armnod = { path = "../armnod" }
+armnod = { path = "../armnod", version = "0.1.0" }
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
 clue = { path = "../clue" }
