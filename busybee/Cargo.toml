@@ -10,7 +10,7 @@ edition = "2021"
 clap = "2.33"
 
 biometrics = { path = "../biometrics", version = "0.1.0" }
-buffertk = { path = "../buffertk" }
+buffertk = { path = "../buffertk", version = "0.1.0" }
 guacamole = { path = "../guacamole", version = "0.1.0" }
 hey_listen = { path = "../hey_listen" }
 id = { path = "../id" }

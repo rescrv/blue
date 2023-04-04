@@ -5,6 +5,6 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 
 [dependencies]
-buffertk = { path = "../buffertk" }
+buffertk = { path = "../buffertk", version = "0.1.0" }
 prototk_derive = { path = "../prototk_derive" }
 zerror = { path = "../zerror" }
