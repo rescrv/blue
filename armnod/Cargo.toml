@@ -3,6 +3,8 @@ name = "armnod"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "Armnod provides a random string generator."
+license = "Apache-2.0"
 
 [dependencies]
 clap = "2.33"
