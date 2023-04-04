@@ -3,5 +3,7 @@ name = "zerror"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "zerror provides an error interface for context-aware error-reporting."
+license = "Apache-2.0"
 
 [dependencies]
