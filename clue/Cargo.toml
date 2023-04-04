@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-biometrics = { path = "../biometrics" }
+biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk" }
 id = { path = "../id" }
 prototk = { path = "../prototk" }

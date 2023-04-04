@@ -12,7 +12,7 @@ crc32c = "0.6"
 rand = "0.7"
 
 armnod = { path = "../armnod", version = "0.1.0" }
-biometrics = { path = "../biometrics" }
+biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk" }
 clue = { path = "../clue" }
 guacamole = { path = "../guacamole", version = "0.1.0" }

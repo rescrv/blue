@@ -9,7 +9,7 @@ edition = "2021"
 [dependencies]
 clap = "2.33"
 
-biometrics = { path = "../biometrics" }
+biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk" }
 guacamole = { path = "../guacamole", version = "0.1.0" }
 hey_listen = { path = "../hey_listen" }

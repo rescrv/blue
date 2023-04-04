@@ -5,7 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 
 [dependencies]
-biometrics = { path = "../biometrics" }
+biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
