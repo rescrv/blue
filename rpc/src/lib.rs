@@ -14,9 +14,20 @@ use error_core::ErrorCore;
 id::generate_id! {TraceID, "trace:"}
 id::generate_id_prototk! {TraceID}
 
+id::generate_id! {ClientID, "client:"}
+id::generate_id_prototk! {ClientID}
+
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
-pub struct Context {}
+pub struct Context {
+    trace_id: Option<TraceID>,
+}
+
+impl Context {
+    pub fn trace_id(&self) -> Option<TraceID> {
+        self.trace_id.clone()
+    }
+}
 
 ////////////////////////////////////////// ResponseHolder //////////////////////////////////////////
 
@@ -219,8 +230,8 @@ pub struct Request<'a> {
     pub issued_ms: u64,
     #[prototk(6, uint64)]
     pub expires_ms: u64,
-    #[prototk(7, string)]
-    pub caller: &'a str,
+    #[prototk(7, message)]
+    pub caller: ClientID,
     #[prototk(8, message)]
     pub trace: Option<TraceID>,
 }
