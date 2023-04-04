@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use zerror::Z;
-use error_core::ErrorCore;
+use zerror_core::ErrorCore;
 
 use super::{compare_bytes, Cursor, Error, KeyRef, KeyValueRef};
 

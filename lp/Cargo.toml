@@ -15,7 +15,6 @@ armnod = { path = "../armnod" }
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
 clue = { path = "../clue" }
-error_core = { path = "../error_core" }
 guacamole = { path = "../guacamole" }
 hey_listen = { path = "../hey_listen" }
 prototk = { path = "../prototk" }
@@ -23,3 +22,4 @@ prototk_derive = { path = "../prototk_derive" }
 setsum = { path = "../setsum" }
 util = { path = "../util" }
 zerror = { path = "../zerror" }
+zerror_core = { path = "../zerror_core" }

@@ -10,7 +10,6 @@ members = [
     "clue",
     "databuf",
     "derive_util",
-    "error_core",
     "guacamole",
     "hey_listen",
     "id",
@@ -21,6 +20,7 @@ members = [
     "tiny_lfu",
     "util",
     "zerror",
+    "zerror_core",
 ]
 
 [profile.release]

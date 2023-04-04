@@ -14,7 +14,7 @@ use biometrics::Counter;
 use hey_listen::{HeyListen, Stationary};
 
 use zerror::Z;
-use error_core::ErrorCore;
+use zerror_core::ErrorCore;
 
 pub mod block;
 pub mod cli;
