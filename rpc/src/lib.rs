@@ -231,7 +231,7 @@ pub struct Request<'a> {
     #[prototk(6, uint64)]
     pub expires_ms: u64,
     #[prototk(7, message)]
-    pub caller: ClientID,
+    pub caller: Vec<ClientID>,
     #[prototk(8, message)]
     pub trace: Option<TraceID>,
 }
