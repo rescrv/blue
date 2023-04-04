@@ -55,12 +55,20 @@ pub enum Error {
         name: String,
     },
     #[prototk(278532, message)]
+    RequestTooLarge {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, uint64)]
+        size: u64,
+    },
+    // TODO(rescrv):  This seems like a catch-all.  Make a better one.
+    #[prototk(278533, message)]
     Errno {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, int32)]
         errno: i32,
-    }
+    },
 }
 
 impl Error {
@@ -70,6 +78,7 @@ impl Error {
             Error::SerializationError { core, .. } => { core } ,
             Error::UnknownServerName { core, .. } => { core } ,
             Error::UnknownMethodName { core, .. } => { core } ,
+            Error::RequestTooLarge { core, .. } => { core } ,
             Error::Errno { core, .. } => { core } ,
         }
     }
@@ -80,6 +89,7 @@ impl Error {
             Error::SerializationError { core, .. } => { core } ,
             Error::UnknownServerName { core, .. } => { core } ,
             Error::UnknownMethodName { core, .. } => { core } ,
+            Error::RequestTooLarge { core, .. } => { core } ,
             Error::Errno { core, .. } => { core } ,
         }
     }
@@ -110,6 +120,9 @@ impl Display for Error {
             },
             Error::UnknownMethodName { core: _, name } => {
                 write!(f, "unknown method {}", name)
+            },
+            Error::RequestTooLarge { core: _, size } => {
+                write!(f, "request too large: {} bytes", size)
             },
             Error::Errno { core: _, errno } => {
                 write!(f, "errno {}", errno)
