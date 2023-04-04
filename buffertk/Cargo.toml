@@ -3,5 +3,7 @@ name = "buffertk"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "Buffertk provides tooling for serializing and deserializing data by hand."
+license = "Apache-2.0"
 
 [dependencies]
