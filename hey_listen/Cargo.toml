@@ -10,4 +10,4 @@ rand = "0.7"
 biometrics = { path = "../biometrics", version = "0.1.0" }
 clue = { path = "../clue" }
 id = { path = "../id" }
-prototk = { path = "../prototk" }
+prototk = { path = "../prototk", version = "0.1.0" }

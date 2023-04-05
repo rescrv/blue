@@ -9,6 +9,6 @@ edition = "2021"
 biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk", version = "0.1.0" }
 id = { path = "../id" }
-prototk = { path = "../prototk" }
+prototk = { path = "../prototk", version = "0.1.0" }
 util = { path = "../util" }
 zerror = { path = "../zerror", version = "0.1.0" }
