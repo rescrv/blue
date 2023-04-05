@@ -3,6 +3,8 @@ name = "prototk"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "prototk provides a toolkit for prototcol buffers"
+license = "Apache-2.0"
 
 [dependencies]
 buffertk = { path = "../buffertk", version = "0.1.0" }
