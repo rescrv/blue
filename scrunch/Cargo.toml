@@ -3,5 +3,7 @@ name = "scrunch"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "Scrunch provides full-text-searching compression."
+license = "Apache-2.0"
 
 [dependencies]
