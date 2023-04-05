@@ -17,4 +17,4 @@ id = { path = "../id" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
 util = { path = "../util" }
-zerror = { path = "../zerror" }
+zerror = { path = "../zerror", version = "0.1.0" }

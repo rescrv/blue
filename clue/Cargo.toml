@@ -11,4 +11,4 @@ buffertk = { path = "../buffertk", version = "0.1.0" }
 id = { path = "../id" }
 prototk = { path = "../prototk" }
 util = { path = "../util" }
-zerror = { path = "../zerror" }
+zerror = { path = "../zerror", version = "0.1.0" }
