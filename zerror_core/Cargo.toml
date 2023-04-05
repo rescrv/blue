@@ -3,6 +3,8 @@ name = "zerror_core"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "A complete implementation of the zerror:Z trait."
+license = "Apache-2.0"
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.1.0" }
