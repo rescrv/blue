@@ -3,6 +3,8 @@ name = "prototk_derive"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "Derive macro for prototk::Message"
+license = "Apache-2.0"
 
 [lib]
 proc-macro = true
