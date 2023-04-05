@@ -15,6 +15,6 @@ guacamole = { path = "../guacamole", version = "0.1.0" }
 hey_listen = { path = "../hey_listen" }
 id = { path = "../id" }
 prototk = { path = "../prototk" }
-prototk_derive = { path = "../prototk_derive" }
+prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
 util = { path = "../util" }
 zerror = { path = "../zerror", version = "0.1.0" }

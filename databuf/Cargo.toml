@@ -11,4 +11,4 @@ lalrpop-util = "0.19.8"
 regex = "1"
 
 prototk = { path = "../prototk" }
-prototk_derive = { path = "../prototk_derive" }
+prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
