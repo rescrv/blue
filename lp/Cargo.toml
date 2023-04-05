@@ -19,7 +19,7 @@ guacamole = { path = "../guacamole", version = "0.1.0" }
 hey_listen = { path = "../hey_listen" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
-setsum = { path = "../setsum" }
+setsum = { path = "../setsum", version = "0.1.0" }
 util = { path = "../util" }
 zerror = { path = "../zerror" }
 zerror_core = { path = "../zerror_core" }
