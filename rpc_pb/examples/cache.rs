@@ -5,7 +5,7 @@ use buffertk::Buffer;
 
 use prototk_derive::Message;
 
-use rpc::{service, Context};
+use rpc_pb::{service, Context};
 
 mod common;
 

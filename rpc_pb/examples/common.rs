@@ -16,7 +16,7 @@ pub enum Error {
     #[prototk(3, message)]
     TransportError {
         #[prototk(1, message)]
-        err: rpc::Error,
+        err: rpc_pb::Error,
         #[prototk(2, string)]
         context: String,
     },
@@ -46,8 +46,8 @@ impl From<prototk::Error> for Error {
     }
 }
 
-impl From<rpc::Error> for Error {
-    fn from(err: rpc::Error) -> Error {
+impl From<rpc_pb::Error> for Error {
+    fn from(err: rpc_pb::Error) -> Error {
         Error::TransportError {
             err,
             context: "prototk unpack error".to_string(),

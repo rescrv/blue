@@ -1,6 +1,6 @@
 use prototk_derive::Message;
 
-use rpc::service;
+use rpc_pb::service;
 
 mod common;
 

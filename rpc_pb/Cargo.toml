@@ -1,5 +1,5 @@
 [package]
-name = "rpc"
+name = "rpc_pb"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
@@ -7,7 +7,6 @@ edition = "2021"
 [dependencies]
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
-error_core = { path = "../error_core" }
 guacamole = { path = "../guacamole" }
 hey_listen = { path = "../hey_listen" }
 id = { path = "../id" }
@@ -15,3 +14,4 @@ prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
 util = { path = "../util" }
 zerror = { path = "../zerror" }
+zerror_core = { path = "../zerror_core" }

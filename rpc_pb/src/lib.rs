@@ -7,7 +7,12 @@ use buffertk::Buffer;
 
 use zerror:: Z;
 
-use error_core::ErrorCore;
+use zerror_core::ErrorCore;
+
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
+
+pub const MAX_REQUEST_SIZE: usize = 1usize << 20;
+pub const MAX_RESPONSE_SIZE: usize = 1usize << 20;
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
@@ -20,10 +25,15 @@ id::generate_id_prototk! {ClientID}
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
 pub struct Context {
+    clients: Vec<ClientID>,
     trace_id: Option<TraceID>,
 }
 
 impl Context {
+    pub fn clients(&self) -> Vec<ClientID> {
+        self.clients.clone()
+    }
+
     pub fn trace_id(&self) -> Option<TraceID> {
         self.trace_id.clone()
     }
@@ -72,13 +82,12 @@ pub enum Error {
         #[prototk(2, uint64)]
         size: u64,
     },
-    // TODO(rescrv):  This seems like a catch-all.  Make a better one.
     #[prototk(278533, message)]
-    Errno {
+    TransportFailure {
         #[prototk(1, message)]
         core: ErrorCore,
-        #[prototk(2, int32)]
-        errno: i32,
+        #[prototk(1, string)]
+        what: String,
     },
 }
 
@@ -90,7 +99,7 @@ impl Error {
             Error::UnknownServerName { core, .. } => { core } ,
             Error::UnknownMethodName { core, .. } => { core } ,
             Error::RequestTooLarge { core, .. } => { core } ,
-            Error::Errno { core, .. } => { core } ,
+            Error::TransportFailure { core, .. } => { core } ,
         }
     }
 
@@ -101,7 +110,7 @@ impl Error {
             Error::UnknownServerName { core, .. } => { core } ,
             Error::UnknownMethodName { core, .. } => { core } ,
             Error::RequestTooLarge { core, .. } => { core } ,
-            Error::Errno { core, .. } => { core } ,
+            Error::TransportFailure { core, .. } => { core } ,
         }
     }
 }
@@ -135,8 +144,8 @@ impl Display for Error {
             Error::RequestTooLarge { core: _, size } => {
                 write!(f, "request too large: {} bytes", size)
             },
-            Error::Errno { core: _, errno } => {
-                write!(f, "errno {}", errno)
+            Error::TransportFailure { core: _, what } => {
+                write!(f, "transport failure: {}", what)
             }
         }
     }
@@ -158,6 +167,15 @@ impl From<prototk::Error> for Error {
             core: ErrorCore::default(),
             err,
             context: "prototk unpack error".to_string(),
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Error {
+        Error::TransportFailure {
+            core: ErrorCore::default(),
+            what: format!("{}", err),
         }
     }
 }
@@ -214,6 +232,16 @@ pub trait Client {
     fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Error>;
 }
 
+/////////////////////////////////////////////// Frame //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+pub struct Frame {
+    #[prototk(1, uint64)]
+    pub size: u64,
+    #[prototk(3, fixed32)]
+    pub crc32c: u32,
+}
+
 ////////////////////////////////////////////// Request /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
@@ -253,17 +281,17 @@ macro_rules! service {
     (name = $service:ident; server = $server:ident; client = $client:ident; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         trait $service {
             $(
-                fn $method(&self, ctx: &rpc::Context, req: $req) -> Result<$resp, Error>;
+                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, Error>;
             )*
         }
 
-        struct $client<C: rpc::Client> {
+        struct $client<C: rpc_pb::Client> {
             client: C,
         }
 
-        impl<C: rpc::Client> $service for $client<C> {
+        impl<C: rpc_pb::Client> $service for $client<C> {
             $(
-                rpc::client_method! { $service, $method, $req, $resp }
+                rpc_pb::client_method! { $service, $method, $req, $resp }
             )*
         }
 
@@ -279,8 +307,8 @@ macro_rules! service {
             }
         }
 
-        impl<S: $service> rpc::Server for $server<S> {
-            rpc::server_methods! { $service, $($method, $req, $resp),* }
+        impl<S: $service> rpc_pb::Server for $server<S> {
+            rpc_pb::server_methods! { $service, $($method, $req, $resp),* }
         }
     };
 }
@@ -288,7 +316,7 @@ macro_rules! service {
 #[macro_export]
 macro_rules! client_method {
     ($service:ident, $method:ident, $req:ident, $resp:ident) => {
-        fn $method(&self, ctx: &rpc::Context, req: $req) -> Result<$resp, Error> {
+        fn $method(&self, ctx: &rpc_pb::Context, req: $req, ) -> Result<$resp, Error> {
             use buffertk::{Packable, Unpackable};
             let req = buffertk::stack_pack(req).to_vec();
             let buf = self.client.call(ctx, stringify!($service), stringify!($method), &req)?;
@@ -302,19 +330,19 @@ macro_rules! client_method {
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $($method:ident, $req:ident, $resp:ident),+) => {
-        fn call(&self, ctx: &rpc::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc::Error> {
+        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc_pb::Error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             match method {
                 $(
                 stringify!($method) => {
                     let req = <$req as buffertk::Unpackable>::unpack(req)?.0;
                     let resp = self.server.$method(ctx, req);
-                    Ok::<buffertk::Buffer, rpc::Error>(buffertk::stack_pack(resp).to_buffer())
+                    Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
                 }
                 ),*
                 _ => {
-                    Err(rpc::Error::UnknownMethodName {
-                        core: error_core::ErrorCore::default(),
+                    Err(rpc_pb::Error::UnknownMethodName {
+                        core: zerror_core::ErrorCore::default(),
                         name: method.to_string(),
                     })
                 }
