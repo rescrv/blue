@@ -9,7 +9,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use prototk::field_types::*;
 
-use biometrics::{click, Counter};
+use biometrics::Counter;
 
 use hey_listen::{HeyListen, Stationary};
 
@@ -118,7 +118,7 @@ impl State {
                     .panic("path missing from names map".to_string());
             }
         };
-        click!("lp.file_manager.close");
+        // TODO(rescrv) click!("lp.file_manager.close");
     }
 }
 
@@ -243,7 +243,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
 
 fn open(path: PathBuf) -> Result<File, Error> {
     // Open the file
-    click!("lp.file_manager.open");
+    // TODO(rescrv) click!("lp.file_manager.open");
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {

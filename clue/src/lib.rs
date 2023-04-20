@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use std::io::Write;
 use std::rc::Rc;
 
-use biometrics::{click, Counter};
+use biometrics::Counter;
 
 use buffertk::stack_pack;
 
@@ -34,7 +34,7 @@ pub struct Trace {
 
 impl Trace {
     pub fn new(label: &str) -> Self {
-        click!("clue.trace.instantiations");
+        // TODO(rescrv) click!("clue.trace.instantiations");
         // If the id is None we won't record in the finish.
         // The start call will take care of sampling.
         let mut id = None;
@@ -68,7 +68,7 @@ impl Trace {
         F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
     {
         if self.id.is_none() {
-            click!("clue.trace.context_not_logged");
+            // TODO(rescrv) click!("clue.trace.context_not_logged");
             return self;
         }
         self.with_protobuf::<F, N>(field_value.clone())
@@ -77,7 +77,7 @@ impl Trace {
 
     pub fn with_human<'a, F: Display>(mut self, field_name: &str, field_value: F) -> Self {
         if self.id.is_none() {
-            click!("clue.trace.human_not_logged");
+            // TODO(rescrv) click!("clue.trace.human_not_logged");
             return self;
         }
         self.human += &format!("{} = {}\n", field_name, field_value);
@@ -102,20 +102,20 @@ impl Trace {
 
     pub fn with_backtrace(self) -> Self {
         if self.id.is_none() {
-            click!("clue.trace.backtrace_not_logged");
+            // TODO(rescrv) click!("clue.trace.backtrace_not_logged");
             return self;
         }
-        click!("clue.trace.with_backtrace");
+        // TODO(rescrv) click!("clue.trace.with_backtrace");
         let backtrace = format!("{}", Backtrace::force_capture());
         self.with_context::<string, BACKTRACE_FIELD_NUMBER>("backtrace", &backtrace)
     }
 
     pub fn with_stopwatch(mut self) -> Self {
         if self.id.is_none() {
-            click!("clue.trace.stopwatch_not_logged");
+            // TODO(rescrv) click!("clue.trace.stopwatch_not_logged");
             return self;
         }
-        click!("clue.trace.with_stopwatch");
+        // TODO(rescrv) click!("clue.trace.with_stopwatch");
         self.stopwatch = Some(Stopwatch::default());
         self
     }
@@ -156,7 +156,7 @@ impl Tracer {
         match TraceID::generate() {
             Some(id) => Some(id),
             None => {
-                click!("clue.trace.id_generate_failed");
+                // TODO(rescrv) click!("clue.trace.id_generate_failed");
                 Some(TraceID::default())
             }
         }
@@ -164,17 +164,17 @@ impl Tracer {
 
     pub fn finish(&mut self, trace: Trace) {
         if trace.id.is_none() {
-            click!("clue.trace.drop");
+            // TODO(rescrv) click!("clue.trace.drop");
             return;
         }
         let emitter = match &self.emitter {
             Some(e) => e,
             None => {
-                click!("clue.trace.drop.no_emitter");
+                // TODO(rescrv) click!("clue.trace.drop.no_emitter");
                 return;
             }
         };
-        click!("clue.trace.emit");
+        // TODO(rescrv) click!("clue.trace.emit");
         emitter.emit(trace);
     }
 
@@ -182,11 +182,11 @@ impl Tracer {
         let emitter = match &self.emitter {
             Some(e) => e,
             None => {
-                click!("clue.trace.flush.no_emitter");
+                // TODO(rescrv) click!("clue.trace.flush.no_emitter");
                 return;
             }
         };
-        click!("clue.trace.flush");
+        // TODO(rescrv) click!("clue.trace.flush");
         emitter.flush();
     }
 
@@ -265,7 +265,7 @@ impl<W: Write> Emitter for PlainTextEmitter<W> {
         let trace_id = match trace.id {
             Some(id) => id,
             None => {
-                click!("clue.plaintext.dropped");
+                // TODO(rescrv) click!("clue.plaintext.dropped");
                 return;
             }
         };

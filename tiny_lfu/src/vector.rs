@@ -1,7 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use biometrics::click;
-
 ////////////////////////////////////////////// Vector //////////////////////////////////////////////
 
 pub struct Vector {
@@ -55,7 +53,7 @@ impl Vector {
                 break;
             }
             if !self.compare_and_swap(index + 1, upper, new_upper) {
-                click!("tiny_lfu.increment_collision");
+                // TODO(rescrv) click!("tiny_lfu.increment_collision");
             }
             break;
         }
@@ -75,7 +73,7 @@ impl Vector {
                 continue;
             }
             if !self.compare_and_swap(index, lower, new_lower) {
-                click!("tiny_lfu.divide_two_collision");
+                // TODO(rescrv) click!("tiny_lfu.divide_two_collision");
             }
             break;
         }

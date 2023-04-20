@@ -3,8 +3,6 @@ extern crate prototk_derive;
 use std::ops::Deref;
 use std::sync::Mutex;
 
-use biometrics::click;
-
 use buffertk::{stack_pack, Buffer, Packable, Unpackable};
 
 use prototk::Error as ProtoTKError;

@@ -288,16 +288,6 @@ impl Collector {
     }
 }
 
-/////////////////////////////////////////////// click //////////////////////////////////////////////
-
-#[macro_export]
-macro_rules! click {
-    ($name:literal) => {
-        static COUNTER: $crate::Counter = $crate::Counter::new($name);
-        COUNTER.click();
-    };
-}
-
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
 /// [Emitter] outputs the sensor state via I/O.

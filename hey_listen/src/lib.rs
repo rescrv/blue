@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use biometrics::{click, Counter, Gauge, Sensor};
+use biometrics::{Counter, Gauge, Sensor};
 
 use clue::Trace;
 
@@ -27,14 +27,14 @@ pub enum Condition {
 
 impl Condition {
     pub fn stable() -> Self {
-        click!("hey_listen.condition.stable");
+        // TODO(rescrv): click!("hey_listen.condition.stable");
         Condition::Stable {
             context: String::default(),
         }
     }
 
     pub fn firing(description: &'static str) -> Self {
-        click!("hey_listen.condition.firing");
+        // TODO(rescrv): click!("hey_listen.condition.firing");
         Condition::Firing {
             description,
             context: String::default(),
