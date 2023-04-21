@@ -2,10 +2,8 @@
 //! A sensor is an object that maintains a view of the system.  Threads active in the system
 //! cooperate to update the view, and background threads output the view to elsewhere for analysis.
 
-use std::cell::RefCell;
 use std::fs::File;
 use std::io::Write;
-use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -29,14 +27,12 @@ pub trait Sensor {
     fn label(&'static self) -> &'static str;
     /// Return a linearlizable view of the sensor.
     fn read(&'static self) -> Self::Reading;
-    /// Mark that the sensor has been registered to at least one registry.
-    fn mark_registered(&'static self);
 }
 
 ////////////////////////////////////////// SensorRegistry //////////////////////////////////////////
 
 /// [SensorRegistry] refers to a set of sensors of the same type.
-pub struct SensorRegistry<S: Sensor + 'static> {
+struct SensorRegistry<S: Sensor + 'static> {
     sensors: Mutex<Vec<&'static S>>,
     register: &'static Counter,
     emit: &'static Counter,
@@ -63,7 +59,6 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
             sensors.push(sensor);
         }
         self.register.click();
-        sensor.mark_registered();
     }
 
     /// Emit readings all sensors through `emitter`+`emit`, recording each sensor reading as close
@@ -98,72 +93,6 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
     }
 }
 
-/////////////////////////////////////////// thread locals //////////////////////////////////////////
-
-thread_local! {
-    pub static COLLECT: RefCell<Option<Rc<Collector>>> = RefCell::new(None);
-}
-
-/// Register a [Counter] with the default Collector.
-pub fn register_counter(counter: &'static Counter) -> bool {
-    let mut result = false;
-    COLLECT.with(|f| {
-        if let Some(collector) = f.borrow().as_ref() {
-            collector.register_counter(counter);
-            result = true
-        }
-    });
-    if result {
-        counter.mark_registered();
-    }
-    result
-}
-
-/// Register a [Gauge] with the default Collector.
-pub fn register_gauge(gauge: &'static Gauge) -> bool {
-    let mut result = false;
-    COLLECT.with(|f| {
-        if let Some(collector) = f.borrow().as_ref() {
-            collector.register_gauge(gauge);
-            result = true
-        }
-    });
-    if result {
-        gauge.mark_registered();
-    }
-    result
-}
-
-/// Register [Moments] with the default [Collector].
-pub fn register_moments(moments: &'static Moments) -> bool {
-    let mut result = false;
-    COLLECT.with(|f| {
-        if let Some(collector) = f.borrow().as_ref() {
-            collector.register_moments(moments);
-            result = true
-        }
-    });
-    if result {
-        moments.mark_registered();
-    }
-    result
-}
-
-/// Register [TDigest] with the default [Collector].
-pub fn register_t_digest(t_digest: &'static TDigest) -> bool {
-    let mut result = false;
-    COLLECT.with(|f| {
-        if let Some(collector) = f.borrow().as_ref() {
-            collector.register_t_digest(t_digest);
-            result = true
-        }
-    });
-    if result {
-        t_digest.mark_registered();
-    }
-    result
-}
-
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
 
 /// Collect and register sensors of all types.  One registry per sensor type.
@@ -174,7 +103,6 @@ pub struct Collector {
     t_digests: SensorRegistry<TDigest>,
 }
 
-static COLLECTOR_REGISTER_THREAD: Counter = Counter::new("collector.register.thread");
 static COLLECTOR_REGISTER_COUNTER: Counter = Counter::new("collector.register.counter");
 static COLLECTOR_REGISTER_GAUGE: Counter = Counter::new("collector.register.gauge");
 static COLLECTOR_REGISTER_MOMENTS: Counter = Counter::new("collector.register.moments");
@@ -189,7 +117,7 @@ static COLLECTOR_TIME_FAILURE: Counter = Counter::new("collector.time.failure");
 impl Collector {
     /// Get a new [Collector].  The collector will use the global registries and emit to the
     /// COLLECTOR_* counters for easy monitoring.
-    pub fn new() -> Rc<Self> {
+    pub fn new() -> Self {
         let collector = Self {
             counters: SensorRegistry::new(
                 &COLLECTOR_REGISTER_COUNTER,
@@ -213,7 +141,6 @@ impl Collector {
             ),
         };
         // Register counters with the collector.
-        collector.register_counter(&COLLECTOR_REGISTER_THREAD);
         collector.register_counter(&COLLECTOR_REGISTER_COUNTER);
         collector.register_counter(&COLLECTOR_REGISTER_GAUGE);
         collector.register_counter(&COLLECTOR_REGISTER_MOMENTS);
@@ -224,17 +151,8 @@ impl Collector {
         collector.register_counter(&COLLECTOR_EMIT_T_DIGEST);
         collector.register_counter(&COLLECTOR_EMIT_FAILURE);
         collector.register_counter(&COLLECTOR_TIME_FAILURE);
-        // Return the collector with counters initialized.  All collectors will return the global
-        // counters.
-        Rc::new(collector)
-    }
-
-    /// Make the provided collector the thread local collector for this thread.
-    pub fn register_with_thread(self: Rc<Collector>) {
-        COLLECTOR_REGISTER_THREAD.click();
-        COLLECT.with(|f| {
-            *f.borrow_mut() = Some(Rc::clone(&self));
-        });
+        // Return the collector with counters initialized.
+        collector
     }
 
     /// Register `counter` with the Collector.
@@ -258,33 +176,29 @@ impl Collector {
     }
 
     /// Output the sensors registered to this emitter.
-    pub fn emit<EM: Emitter<Error = ERR>, ERR>(&self, emitter: &mut EM) -> Result<(), ERR> {
+    pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(&self, emitter: &mut EM) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(
-            self.counters
-                .emit(emitter, &EM::emit_counter, &|| self.now()),
-        );
-        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &|| self.now()));
-        let result = result.and(
-            self.moments
-                .emit(emitter, &EM::emit_moments, &|| self.now()),
-        );
-        result.and(
-            self.t_digests
-                .emit(emitter, &EM::emit_t_digest, &|| self.now()),
-        )
+        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &Self::now));
+        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now));
+        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now));
+        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &Self::now))
     }
 
-    fn now(&self) -> f64 {
+    fn now() -> f64 {
         // TODO(rescrv):  Make this monotonic with std::time::Instant.
-        let now = SystemTime::now().duration_since(UNIX_EPOCH);
-        match now {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(now) => now.as_millis() as f64,
             Err(_) => {
                 COLLECTOR_TIME_FAILURE.click();
                 f64::NAN
             }
         }
+    }
+}
+
+impl Default for Collector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -311,12 +225,20 @@ pub struct PlainTextEmitter {
     output: File,
 }
 
+impl PlainTextEmitter {
+    pub fn new(output: File) -> Self {
+        Self {
+            output,
+        }
+    }
+}
+
 impl Emitter for PlainTextEmitter {
     type Error = std::io::Error;
 
     fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
-            "{} {} {}",
+            "{} {} {}\n",
             counter.label(),
             now,
             counter.read()
@@ -325,14 +247,14 @@ impl Emitter for PlainTextEmitter {
 
     fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), std::io::Error> {
         self.output
-            .write_fmt(format_args!("{} {} {}", gauge.label(), now, gauge.read()))
+            .write_fmt(format_args!("{} {} {}\n", gauge.label(), now, gauge.read()))
     }
 
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
         self.output.write_fmt(format_args!(
-            "{} {} {} {} {} {} {}",
+            "{} {} {} {} {} {} {}\n",
             label,
             now,
             moments.n(),
@@ -356,10 +278,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn register_thread() {
-        let c: Rc<Collector> = Collector::new();
-        c.register_with_thread();
-        let mut x: Option<Rc<Collector>> = None;
-        COLLECT.with(|f| x = f.borrow().as_ref().cloned());
+    fn collector_new() {
+        let _: Collector = Collector::new();
     }
 }

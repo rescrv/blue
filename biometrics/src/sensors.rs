@@ -1,16 +1,15 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::moments;
 use crate::t_digest;
-use crate::{register_counter, register_gauge, register_moments, register_t_digest, Sensor};
+use crate::Sensor;
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
 pub struct Counter {
     label: &'static str,
     count: AtomicU64,
-    init: AtomicBool,
 }
 
 impl Counter {
@@ -18,7 +17,6 @@ impl Counter {
         Counter {
             label,
             count: AtomicU64::new(0),
-            init: AtomicBool::new(false),
         }
     }
 
@@ -29,10 +27,6 @@ impl Counter {
 
     #[inline(always)]
     pub fn count(&'static self, x: u64) {
-        if !self.init.load(Ordering::Relaxed) {
-            // This can race.  That is OK.
-            self.init.store(register_counter(self), Ordering::Relaxed);
-        }
         self.count.fetch_add(x, Ordering::Relaxed);
     }
 }
@@ -49,11 +43,6 @@ impl Sensor for Counter {
     fn read(&'static self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
-
-    #[inline(always)]
-    fn mark_registered(&'static self) {
-        self.init.store(true, Ordering::Relaxed);
-    }
 }
 
 /////////////////////////////////////////////// Gauge //////////////////////////////////////////////
@@ -63,7 +52,6 @@ const GAUGE_INIT: u64 = 0;
 pub struct Gauge {
     label: &'static str,
     value: AtomicU64,
-    init: AtomicBool,
 }
 
 impl Gauge {
@@ -71,16 +59,11 @@ impl Gauge {
         Gauge {
             label,
             value: AtomicU64::new(GAUGE_INIT),
-            init: AtomicBool::new(false),
         }
     }
 
     #[inline(always)]
     pub fn set(&'static self, x: f64) {
-        if !self.init.load(Ordering::Relaxed) {
-            // This can race.  That is OK.
-            self.init.store(register_gauge(self), Ordering::Relaxed);
-        }
         self.value.store(x.to_bits(), Ordering::Relaxed);
     }
 }
@@ -98,11 +81,6 @@ impl Sensor for Gauge {
         let u = self.value.load(Ordering::Relaxed);
         f64::from_bits(u)
     }
-
-    #[inline(always)]
-    fn mark_registered(&'static self) {
-        self.init.store(true, Ordering::Relaxed);
-    }
 }
 
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
@@ -110,7 +88,6 @@ impl Sensor for Gauge {
 pub struct Moments {
     label: &'static str,
     value: Mutex<moments::Moments>,
-    init: AtomicBool,
 }
 
 impl Moments {
@@ -118,15 +95,10 @@ impl Moments {
         Self {
             label,
             value: Mutex::new(moments::Moments::new()),
-            init: AtomicBool::new(false),
         }
     }
 
     pub fn add(&'static self, x: f64) {
-        if !self.init.load(Ordering::Relaxed) {
-            // This can race.  That is OK.
-            self.init.store(register_moments(self), Ordering::Relaxed);
-        }
         let mut value = self.value.lock().unwrap();
         value.push(x);
     }
@@ -145,11 +117,6 @@ impl Sensor for Moments {
         let value = self.value.lock().unwrap();
         value.clone()
     }
-
-    #[inline(always)]
-    fn mark_registered(&'static self) {
-        self.init.store(true, Ordering::Relaxed);
-    }
 }
 
 ////////////////////////////////////////////// TDigest /////////////////////////////////////////////
@@ -157,23 +124,17 @@ impl Sensor for Moments {
 pub struct TDigest {
     label: &'static str,
     value: Mutex<t_digest::TDigest>,
-    init: AtomicBool,
 }
 
 impl TDigest {
     pub const fn new(label: &'static str, delta: u64) -> Self {
         Self {
             label,
-            init: AtomicBool::new(false),
             value: Mutex::new(t_digest::TDigest::new(delta)),
         }
     }
 
     pub fn add(&'static self, point: f64) {
-        if !self.init.load(Ordering::Relaxed) {
-            // This can race.  That is OK.
-            self.init.store(register_t_digest(self), Ordering::Relaxed);
-        }
         let mut value = self.value.lock().unwrap();
         value.add(point);
     }
@@ -191,11 +152,6 @@ impl Sensor for TDigest {
     fn read(&'static self) -> t_digest::TDigest {
         let value = self.value.lock().unwrap();
         value.clone()
-    }
-
-    #[inline(always)]
-    fn mark_registered(&'static self) {
-        self.init.store(true, Ordering::Relaxed);
     }
 }
 
