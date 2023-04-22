@@ -18,6 +18,8 @@ members = [
     "prototk_derive",
     "setsum",
     "tiny_lfu",
+    "tuple_key",
+    "tuple_key_derive",
     "util",
     "zerror",
     "zerror_core",

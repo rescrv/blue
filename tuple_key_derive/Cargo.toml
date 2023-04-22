@@ -1,0 +1,19 @@
+[package]
+name = "tuple_key_derive"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "Derive macro for tuple_key::FromIntoTupleKey"
+license = "Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "1.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+
+buffertk = { path = "../buffertk", version = "0.1.0" }
+derive_util = { path = "../derive_util" }
+prototk = { path = "../prototk", version = "0.1.0" }
