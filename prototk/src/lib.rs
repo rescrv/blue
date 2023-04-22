@@ -804,6 +804,11 @@ impl FieldNumber {
         }
         Ok(FieldNumber { field_number })
     }
+
+    /// Return the field number as a u32.
+    pub fn get(&self) -> u32 {
+        self.field_number
+    }
 }
 
 impl From<FieldNumber> for u32 {
