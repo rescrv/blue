@@ -16,6 +16,7 @@ members = [
     "lp",
     "prototk",
     "prototk_derive",
+    "rivulet",
     "setsum",
     "tiny_lfu",
     "tuple_key",

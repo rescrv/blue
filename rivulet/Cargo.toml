@@ -1,0 +1,21 @@
+[package]
+name = "rivulet"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "Rivulet provides a stream-of-messages abstraction."
+license = "Apache-2.0"
+
+[dependencies]
+libc = "0.2"
+boring = "2.1.0"
+crc32c = "0.6"
+
+biometrics = { path = "../biometrics", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.1.0" }
+prototk = { path = "../prototk", version = "0.1.0" }
+prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
+rpc_pb = { path = "../rpc_pb" }
+util = { path = "../util" }
+zerror = { path = "../zerror", version = "0.1.0" }
+zerror_core = { path = "../zerror_core", version = "0.1.0" }
