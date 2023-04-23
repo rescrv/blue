@@ -71,7 +71,7 @@ struct CachedRegister {
 impl Cache for CachedRegister {
     fn load(
         &self,
-        _: Context,
+        _: &Context,
         req: CacheLoad,
     ) -> Result<CacheResponse, Error> {
         let guard = self.value.lock().unwrap();
@@ -86,7 +86,7 @@ impl Cache for CachedRegister {
 
     fn store(
         &self,
-        _: Context,
+        _: &Context,
         req: CacheStore,
     ) -> Result<CacheEmpty, Error> {
         let key = req.key.to_vec();
