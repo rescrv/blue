@@ -86,7 +86,14 @@ pub enum Error {
     TransportFailure {
         #[prototk(1, message)]
         core: ErrorCore,
-        #[prototk(1, string)]
+        #[prototk(2, string)]
+        what: String,
+    },
+    #[prototk(278534, message)]
+    EncryptionMisconfiguration {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
         what: String,
     },
 }
@@ -100,6 +107,7 @@ impl Error {
             Error::UnknownMethodName { core, .. } => { core } ,
             Error::RequestTooLarge { core, .. } => { core } ,
             Error::TransportFailure { core, .. } => { core } ,
+            Error::EncryptionMisconfiguration { core, .. } => { core } ,
         }
     }
 
@@ -111,6 +119,7 @@ impl Error {
             Error::UnknownMethodName { core, .. } => { core } ,
             Error::RequestTooLarge { core, .. } => { core } ,
             Error::TransportFailure { core, .. } => { core } ,
+            Error::EncryptionMisconfiguration { core, .. } => { core } ,
         }
     }
 }
@@ -146,6 +155,9 @@ impl Display for Error {
             },
             Error::TransportFailure { core: _, what } => {
                 write!(f, "transport failure: {}", what)
+            }
+            Error::EncryptionMisconfiguration { core: _, what } => {
+                write!(f, "encyrption misconfiguration: {}", what)
             }
         }
     }
