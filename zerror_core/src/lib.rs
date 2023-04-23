@@ -35,10 +35,8 @@ struct Variable {
     value: String,
 }
 
-/// [ErrorCore] implements 100% of Z for easy error reporting.  It's intended that people will wrap
-/// and proxy ErrorCore and then implement a short summary on top that descends from an error enum.
-#[derive(Debug, Default, Message)]
-pub struct ErrorCore {
+#[derive(Clone, Debug, Default, Message)]
+struct Internals {
     #[prototk(1, string)]
     email: String,
     #[prototk(2, string)]
@@ -53,6 +51,13 @@ pub struct ErrorCore {
     vars: Vec<Variable>,
 }
 
+/// [ErrorCore] implements 100% of Z for easy error reporting.  It's intended that people will wrap
+/// and proxy ErrorCore and then implement a short summary on top that descends from an error enum.
+#[derive(Debug, Default, Message)]
+pub struct ErrorCore {
+    internals: Box<Internals>,
+}
+
 impl ErrorCore {
     /// Create a new ErrorCore with the provided email and short summary.  The provided counter
     /// will be clicked each time a new error is created, to give people insight into the error.
@@ -60,13 +65,16 @@ impl ErrorCore {
     pub fn new(email: &str, short: &str, counter: &'static Counter) -> Self {
         counter.click();
         let backtrace = format!("{}", Backtrace::force_capture());
-        Self {
+        let internals = Internals {
             email: email.to_owned(),
             short: short.to_owned(),
             backtrace,
             toks: Vec::new(),
             urls: Vec::new(),
             vars: Vec::new(),
+        };
+        Self {
+            internals: Box::new(internals),
         }
     }
 }
@@ -76,20 +84,20 @@ impl Z for ErrorCore {
 
     fn long_form(&self) -> String {
         let mut s = String::default();
-        s += &format!("{}\n\nOWNER: {}", self.short, self.email);
-        for token in self.toks.iter() {
+        s += &format!("{}\n\nOWNER: {}", self.internals.short, self.internals.email);
+        for token in self.internals.toks.iter() {
             s += &format!("\n{}: {}", token.identifier, token.value);
         }
-        for url in self.urls.iter() {
+        for url in self.internals.urls.iter() {
             s += &format!("\n{}: {}", url.identifier, url.url);
         }
-        if !self.vars.is_empty() {
+        if !self.internals.vars.is_empty() {
             s += "\n";
-            for variable in self.vars.iter() {
+            for variable in self.internals.vars.iter() {
                 s += &format!("\n{} = {}", variable.identifier, variable.value);
             }
         }
-        s += &format!("\n\nbacktrace:\n{}", self.backtrace);
+        s += &format!("\n\nbacktrace:\n{}", self.internals.backtrace);
         s
     }
 
@@ -99,7 +107,7 @@ impl Z for ErrorCore {
     }
 
     fn set_token(&mut self, identifier: &str, value: &str) {
-        self.toks.push(Token {
+        self.internals.toks.push(Token {
             identifier: identifier.to_owned(),
             value: value.to_owned(),
         });
@@ -111,7 +119,7 @@ impl Z for ErrorCore {
     }
 
     fn set_url(&mut self, identifier: &str, url: &str) {
-        self.urls.push(Url {
+        self.internals.urls.push(Url {
             identifier: identifier.to_owned(),
             url: url.to_owned(),
         });
@@ -123,7 +131,7 @@ impl Z for ErrorCore {
     }
 
     fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        self.vars.push(Variable {
+        self.internals.vars.push(Variable {
             identifier: variable.to_owned(),
             value: format!("{:?}", x),
         });
