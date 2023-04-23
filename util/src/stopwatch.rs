@@ -11,7 +11,7 @@ impl Stopwatch {
     /// Measure the time that the stopwatch has been running, as a value suitable for putting into
     /// e.g. a gauge.
     pub fn since(&self) -> f64 {
-        self.start.elapsed().as_millis() as f64 / 1_000.
+        self.start.elapsed().as_micros() as f64 / 1_000_000.0
     }
 }
 
