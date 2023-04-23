@@ -1,13 +1,6 @@
 extern crate prototk_derive;
 
-use std::ops::Deref;
-use std::sync::Mutex;
-
-use buffertk::{stack_pack, Buffer, Packable, Unpackable};
-
-use prototk::Error as ProtoTKError;
-use prototk::field_types::*;
-use prototk_derive::Message;
+use buffertk::{Buffer, Packable, Unpackable};
 
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
