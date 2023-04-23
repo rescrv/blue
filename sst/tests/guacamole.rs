@@ -1,4 +1,4 @@
-extern crate lp;
+extern crate sst;
 
 use rand::{Rng, RngCore};
 
@@ -6,10 +6,10 @@ use guacamole::Guacamole;
 
 use buffertk::Buffer;
 
-use lp::block::{Block, BlockBuilder, BlockCursor};
-use lp::reference::ReferenceBuilder;
-use lp::sst::{SSTBuilder, SSTCursor, SST};
-use lp::{Builder, Cursor};
+use sst::block::{Block, BlockBuilder, BlockCursor};
+use sst::reference::ReferenceBuilder;
+use sst::sst::{SSTBuilder, SSTCursor, SST};
+use sst::{Builder, Cursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 

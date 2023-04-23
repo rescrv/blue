@@ -13,12 +13,12 @@ use util::time::now;
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::super::file_manager::{FileHandle, FileManager};
-use super::super::merging_cursor::MergingCursor;
-use super::super::options::CompactionOptions;
-use super::super::setsum::Setsum;
-use super::super::sst::{SST, SSTMetadata, SSTMultiBuilder};
-use super::super::{compare_bytes, Builder, Cursor, Error, FromIO};
+use sst::file_manager::{FileHandle, FileManager};
+use sst::merging_cursor::MergingCursor;
+use sst::options::CompactionOptions;
+use sst::setsum::Setsum;
+use sst::sst::{SST, SSTMetadata, SSTMultiBuilder};
+use sst::{compare_bytes, Builder, Cursor, Error, FromIO};
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 

@@ -9,8 +9,6 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use biometrics::Counter;
 
-use prototk::field_types::*;
-
 use hey_listen::{HeyListen, Stationary};
 
 use zerror::Z;

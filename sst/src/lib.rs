@@ -16,8 +16,16 @@ use hey_listen::{HeyListen, Stationary};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
+pub mod block;
 pub mod cli;
-pub mod db;
+pub mod file_manager;
+pub mod merging_cursor;
+pub mod options;
+pub mod pruning_cursor;
+pub mod reference;
+pub mod sequence_cursor;
+pub mod setsum;
+pub mod sst;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -43,7 +51,60 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&VALUE_TOO_LARGE_MONITOR);
     hey_listen.register_stationary(&TABLE_FULL_MONITOR);
 
-    db::register_monitors(hey_listen);
+    file_manager::register_monitors(hey_listen);
+}
+
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
+
+pub const MAX_KEY_LEN: usize = 1usize << 14; /* 16KiB */
+pub const MAX_VALUE_LEN: usize = 1usize << 15; /* 32KiB */
+
+// NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
+// but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
+// general pattern is that the block will exceed this size by up to one key-value pair, so subtract
+// some slop.  64MiB is overkill, but will last for awhile.
+pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
+
+fn check_key_len(key: &[u8]) -> Result<(), Error> {
+    if key.len() > MAX_KEY_LEN {
+        KEY_TOO_LARGE.click();
+        let err = Error::KeyTooLarge {
+            core: ErrorCore::default(),
+            length: key.len(),
+            limit: MAX_KEY_LEN,
+        };
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+fn check_value_len(value: &[u8]) -> Result<(), Error> {
+    if value.len() > MAX_VALUE_LEN {
+        VALUE_TOO_LARGE.click();
+        let err = Error::ValueTooLarge {
+            core: ErrorCore::default(),
+            length: value.len(),
+            limit: MAX_VALUE_LEN,
+        };
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+fn check_table_size(size: usize) -> Result<(), Error> {
+    if size >= TABLE_FULL_SIZE {
+        TABLE_FULL.click();
+        let err = Error::TableFull {
+            core: ErrorCore::default(),
+            size,
+            limit: TABLE_FULL_SIZE,
+        };
+        Err(err)
+    } else {
+        Ok(())
+    }
 }
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////

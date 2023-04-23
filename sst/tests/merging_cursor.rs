@@ -1,8 +1,8 @@
-extern crate lp;
+extern crate sst;
 
-use lp::merging_cursor::MergingCursor;
-use lp::reference::ReferenceBuilder;
-use lp::Cursor;
+use sst::merging_cursor::MergingCursor;
+use sst::reference::ReferenceBuilder;
+use sst::Cursor;
 
 mod alphabet;
 

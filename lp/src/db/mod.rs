@@ -16,12 +16,12 @@ use hey_listen::{HeyListen, Stationary};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::file_manager::FileManager;
-use super::merging_cursor::MergingCursor;
-use super::options::CompactionOptions;
-use super::pruning_cursor::PruningCursor;
-use super::sst::{SSTBuilder, SSTMetadata, SST};
-use super::{compare_bytes, Builder, Cursor, Error, FromIO};
+use sst::file_manager::FileManager;
+use sst::merging_cursor::MergingCursor;
+use sst::options::CompactionOptions;
+use sst::pruning_cursor::PruningCursor;
+use sst::sst::{SSTBuilder, SSTMetadata, SST};
+use sst::{compare_bytes, Builder, Cursor, Error, FromIO};
 
 pub mod compaction;
 pub use compaction::Compaction;

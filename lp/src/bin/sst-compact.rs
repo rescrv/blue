@@ -1,11 +1,12 @@
 use clap::{App, Arg};
 
+use sst::merging_cursor::MergingCursor;
+use sst::sst::{SST, SSTBuilderOptions};
+use sst::options::CompactionOptions;
+use sst::Cursor;
+
 use lp::cli::{sst_args, parse_sst_args};
 use lp::db::compaction::{losslessly_compact, Compaction};
-use lp::merging_cursor::MergingCursor;
-use lp::sst::{SST, SSTBuilderOptions};
-use lp::options::CompactionOptions;
-use lp::Cursor;
 
 fn main() {
     let app = App::new("zataods-lp-sst-compact")

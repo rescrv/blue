@@ -1,7 +1,7 @@
-extern crate lp;
+extern crate sst;
 
-use lp::pruning_cursor::PruningCursor;
-use lp::reference::{ReferenceBuilder, ReferenceCursor};
+use sst::pruning_cursor::PruningCursor;
+use sst::reference::{ReferenceBuilder, ReferenceCursor};
 
 mod alphabet;
 

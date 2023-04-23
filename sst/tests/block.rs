@@ -1,7 +1,7 @@
-extern crate lp;
+extern crate sst;
 
-use lp::block::{BlockBuilder, BlockBuilderOptions, BlockCursor};
-use lp::Builder;
+use sst::block::{BlockBuilder, BlockBuilderOptions, BlockCursor};
+use sst::Builder;
 
 mod alphabet;
 mod guacamole;

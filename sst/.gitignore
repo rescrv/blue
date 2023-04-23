@@ -1,0 +1,7 @@
+# wildcards
+**/*.rs.bk
+/*.sst
+# specific files
+/Cargo.lock
+/db/
+/target/

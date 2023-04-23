@@ -1,11 +1,11 @@
-extern crate lp;
+extern crate sst;
 
 use std::fs::remove_file;
 use std::path::PathBuf;
 
-use lp::block::BlockBuilderOptions;
-use lp::sst::{BlockCompression, SSTBuilder, SSTBuilderOptions, SSTCursor};
-use lp::Builder;
+use sst::block::BlockBuilderOptions;
+use sst::sst::{BlockCompression, SSTBuilder, SSTBuilderOptions, SSTCursor};
+use sst::Builder;
 
 mod alphabet;
 mod guacamole;
