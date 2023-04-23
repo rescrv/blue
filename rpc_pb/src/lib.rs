@@ -284,6 +284,8 @@ pub struct Response<'a> {
     pub seq_no: u64,
     #[prototk(4, bytes)]
     pub body: &'a [u8],
+    #[prototk(8, message)]
+    pub trace: Option<TraceID>,
 }
 
 ///////////////////////////////////////////// The Macro ////////////////////////////////////////////
