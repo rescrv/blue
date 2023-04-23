@@ -2,7 +2,7 @@ use std::net::TcpStream;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex};
 
-use boring::ssl::{ErrorCode, SslConnector, SslFiletype, SslMethod, SslStream};
+use boring::ssl::{ErrorCode, SslConnector, SslMethod, SslStream};
 
 use crc32c;
 
