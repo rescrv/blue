@@ -2,8 +2,7 @@ use clap::{App, Arg};
 
 use sst::cli::{parse_sst_args, sst_args};
 use sst::setsum::Setsum;
-use sst::sst::SST;
-use sst::Cursor;
+use sst::{Cursor, SST};
 
 fn fast_setsum(sst: &str) -> String {
     let sst = SST::new(sst).expect("open SST");

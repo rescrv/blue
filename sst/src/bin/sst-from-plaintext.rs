@@ -5,8 +5,7 @@ use clap::{App, Arg};
 
 use util::time::now;
 
-use sst::sst::{SSTBuilder, SSTBuilderOptions};
-use sst::Builder;
+use sst::{Builder, SSTBuilder, SSTBuilderOptions};
 
 fn main() {
     let app = App::new("zataods-lp-sst-from-plaintext")

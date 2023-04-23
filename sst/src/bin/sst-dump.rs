@@ -1,7 +1,6 @@
 use clap::{App, Arg};
 
-use sst::sst::SST;
-use sst::Cursor;
+use sst::{Cursor, SST};
 
 fn main() {
     let app = App::new("zataods-lp-sst-dump")

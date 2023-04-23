@@ -8,8 +8,7 @@ use buffertk::Buffer;
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::sst::{SSTBuilder, SSTCursor, SST};
-use sst::{Builder, Cursor};
+use sst::{Builder, Cursor, SSTBuilder, SSTCursor, SST};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 

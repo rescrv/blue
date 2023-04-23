@@ -4,8 +4,7 @@ use std::fs::remove_file;
 use std::path::PathBuf;
 
 use sst::block::BlockBuilderOptions;
-use sst::sst::{BlockCompression, SSTBuilder, SSTBuilderOptions, SSTCursor};
-use sst::Builder;
+use sst::{BlockCompression, Builder, SSTBuilder, SSTBuilderOptions, SSTCursor};
 
 mod alphabet;
 mod guacamole;
