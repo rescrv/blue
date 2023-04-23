@@ -18,6 +18,7 @@ members = [
     "prototk_derive",
     "rivulet",
     "setsum",
+    "sst",
     "tiny_lfu",
     "tuple_key",
     "tuple_key_derive",
