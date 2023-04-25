@@ -50,7 +50,7 @@ struct Target {
 #[serde(deny_unknown_fields)]
 struct Profile {
     opt_level: String,
-    debuginfo: u64,
+    debuginfo: Option<u64>,
     debug_assertions: bool,
     overflow_checks: bool,
     test: bool,
