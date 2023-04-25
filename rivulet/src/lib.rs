@@ -75,6 +75,12 @@ impl RecvChannel {
             self.do_work_recv(limit)?;
         }
         let buf = Buffer::from(&self.recv_buf[start..limit]);
+        if crc32c::crc32c(buf.as_bytes()) != frame.crc32c {
+            return Err(rpc_pb::Error::TransportFailure {
+                core: ErrorCore::default(),
+                what: "crc32c failed".to_string(),
+            });
+        }
         self.recv_buf.rotate_left(limit);
         self.recv_buf.resize(self.recv_buf.len() - limit, 0u8);
         MESSAGES_RECV.click();
