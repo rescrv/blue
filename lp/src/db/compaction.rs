@@ -15,10 +15,11 @@ use zerror_core::ErrorCore;
 
 use sst::file_manager::{FileHandle, FileManager};
 use sst::merging_cursor::MergingCursor;
-use sst::options::CompactionOptions;
 use sst::setsum::Setsum;
-use sst::sst::{SST, SSTMetadata, SSTMultiBuilder};
+use sst::{SST, SSTMetadata, SSTMultiBuilder};
 use sst::{compare_bytes, Builder, Cursor, Error, FromIO};
+
+use super::CompactionOptions;
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 

@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use clap::{App, Arg};
 
-use lp::cli::{db_args, parse_db_args, parse_db_options};
+//use lp::cli::{db_args, parse_db_args, parse_db_options};
 
 fn main() {
+    /*
     let app = App::new("zataods-lp-db-sst-ingest")
         .version("0.1.0")
         .about("Ingest a set of SSTs into a database.");
@@ -25,4 +26,5 @@ fn main() {
         .collect();
 
     db.ingest(&ssts).expect("could not ingest SSTs");
+    */
 }

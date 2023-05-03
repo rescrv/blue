@@ -1,11 +1,11 @@
 use clap::{App, Arg};
 
 use sst::merging_cursor::MergingCursor;
-use sst::sst::{SST, SSTBuilderOptions};
-use sst::options::CompactionOptions;
+use sst::{SST, SSTBuilderOptions};
 use sst::Cursor;
 
 use lp::cli::{sst_args, parse_sst_args};
+use lp::db::CompactionOptions;
 use lp::db::compaction::{losslessly_compact, Compaction};
 
 fn main() {

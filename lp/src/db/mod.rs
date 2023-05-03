@@ -18,13 +18,21 @@ use zerror_core::ErrorCore;
 
 use sst::file_manager::FileManager;
 use sst::merging_cursor::MergingCursor;
-use sst::options::CompactionOptions;
 use sst::pruning_cursor::PruningCursor;
-use sst::sst::{SSTBuilder, SSTMetadata, SST};
+use sst::{SSTBuilder, SSTMetadata, SST};
 use sst::{compare_bytes, Builder, Cursor, Error, FromIO};
 
 pub mod compaction;
 pub use compaction::Compaction;
+
+// TODO(rescrv):  This should just be builder options.
+#[derive(Clone, Debug, Default, Message)]
+pub struct CompactionOptions {
+    #[prototk(1, message)]
+    pub sst_options: sst::SSTBuilderOptions,
+    #[prototk(2, uint64)]
+    pub max_compaction_bytes: u64,
+}
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 

@@ -1,8 +1,9 @@
 use clap::App;
 
-use lp::cli::{db_args, parse_db_args, parse_db_options};
+//use lp::cli::{db_args, parse_db_args, parse_db_options};
 
 fn main() {
+    /*
     let app = App::new("zataods-lp-db-compactions")
         .version("0.1.0")
         .about("List the most efficient compactions recommended for the database.");
@@ -25,4 +26,5 @@ fn main() {
         }
         print!("\n");
     }
+    */
 }

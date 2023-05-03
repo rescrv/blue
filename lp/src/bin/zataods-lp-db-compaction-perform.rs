@@ -1,8 +1,9 @@
 use clap::{App, Arg};
 
-use lp::db::Compaction;
+//use lp::db::Compaction;
 
 fn main() {
+    /*
     let app = App::new("zataods-lp-db-compaction-perform")
         .version("0.1.0")
         .about("Process a previously-setup compaction.");
@@ -19,4 +20,5 @@ fn main() {
     let compaction = Compaction::load(compaction).unwrap();
 
     // TODO(rescrv): run compaction here
+    */
 }
