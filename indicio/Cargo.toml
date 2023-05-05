@@ -1,9 +1,10 @@
 [package]
 name = "indicio"
 version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Indicio provides a framework for emitting clues that may be used for debugging."
+license = "Apache-2.0"
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.1.0" }

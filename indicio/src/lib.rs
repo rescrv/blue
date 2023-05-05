@@ -1,8 +1,6 @@
 use std::backtrace::Backtrace;
-use std::cell::RefCell;
 use std::fmt::{Debug, Display};
-use std::io::Write;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use biometrics::Counter;
 
@@ -13,12 +11,26 @@ use id::generate_id;
 use util::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
-use prototk::{FieldNumber, FieldPackHelper, FieldPacker, FieldType, Tag};
+use prototk::{FieldNumber, FieldPackHelper, FieldType};
 
-pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
-pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 4;
-pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 5;
-pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 6;
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
+
+pub const LABEL_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER;
+pub const TRACE_ID_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 1;
+pub const BACKTRACE_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 8;
+pub const STOPWATCH_FIELD_NUMBER: u32 = prototk::LAST_FIELD_NUMBER - 9;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static TRACE_INSTANTIATIONS: Counter = Counter::new("indicio.trace.instantiation");
+static TRACE_ID_GENERATE_FAILED: Counter = Counter::new("indicio.trace.id_generate_failed");
+static TRACE_NOT_SAMPLED: Counter = Counter::new("indicio.trace.not_sampled");
+static TRACE_DROPPED: Counter = Counter::new("indicio.trace.dropped");
+static TRACE_EMIT: Counter = Counter::new("indicio.trace.emit");
+static TRACE_FLUSH: Counter = Counter::new("indicio.trace.flush");
+static TRACE_WITH_VALUE: Counter = Counter::new("indicio.trace.with_value");
+static TRACE_WITH_BACKTRACE: Counter = Counter::new("indicio.trace.with_backtrace");
+static TRACE_WITH_STOPWATCH: Counter = Counter::new("indicio.trace.with_stopwatch");
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
@@ -28,94 +40,61 @@ generate_id! {TraceID, "trace:"}
 
 pub struct Trace {
     id: Option<TraceID>,
-    human: String,
     stopwatch: Option<Stopwatch>,
+    value: Vec<u8>,
 }
 
 impl Trace {
     pub fn new(label: &str) -> Self {
-        // TODO(rescrv) click!("clue.trace.instantiations");
+        TRACE_INSTANTIATIONS.click();
         // If the id is None we won't record in the finish.
         // The start call will take care of sampling.
         let mut id = None;
         TRACER.with(|t| {
-            id = t.borrow_mut().start();
+            id = t.lock().unwrap().start();
         });
         let trace = Self {
-            id: id.clone(),
-            human: String::default(),
+            id,
             stopwatch: None,
+            value: Vec::new(),
         };
+        let trace = trace.with_value::<string, LABEL_FIELD_NUMBER>(label);
         if let Some(trace_id) = id {
-            trace
-                .with_context::<string, LABEL_FIELD_NUMBER>("label", label)
-                .with_context::<string, TRACE_ID_FIELD_NUMBER>(
-                    "trace_id",
-                    &trace_id.human_readable(),
-                )
+            trace.with_value::<string, TRACE_ID_FIELD_NUMBER>(&trace_id.human_readable())
         } else {
-            trace.with_context::<string, LABEL_FIELD_NUMBER>("label", label)
+            trace
         }
     }
 
-    pub fn with_context<'a, F: FieldType<'a>, const N: u32>(
-        self,
-        field_name: &str,
+    pub fn with_value<'a, F: FieldType<'a>, const N: u32>(
+        mut self,
         field_value: F::Native,
     ) -> Self
     where
         F: FieldType<'a> + 'a,
         F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
     {
-        if self.id.is_none() {
-            // TODO(rescrv) click!("clue.trace.context_not_logged");
-            return self;
+        if self.id.is_some() {
+            TRACE_WITH_VALUE.click();
+            stack_pack(F::field_packer(FieldNumber::must(N), &field_value)).append_to_vec(&mut self.value);
         }
-        self.with_protobuf::<F, N>(field_value.clone())
-            .with_human::<F::Native>(field_name, field_value)
-    }
-
-    pub fn with_human<'a, F: Display>(mut self, field_name: &str, field_value: F) -> Self {
-        if self.id.is_none() {
-            // TODO(rescrv) click!("clue.trace.human_not_logged");
-            return self;
-        }
-        self.human += &format!("{} = {}\n", field_name, field_value);
-        self
-    }
-
-    pub fn with_protobuf<'a, F, const N: u32>(self, _field_value: F::Native) -> Self
-    where
-        F: FieldType<'a> + 'a,
-        F::Native: FieldPackHelper<'a, F> + 'a,
-    {
-        // TODO(rescrv): implement something here or remove the method.
-        /*
-        if self.id.is_none() {
-            click!("clue.trace.protobuf_not_logged");
-            return self
-        }
-        self.proto.push::<F, N>(field_value);
-        */
         self
     }
 
     pub fn with_backtrace(self) -> Self {
-        if self.id.is_none() {
-            // TODO(rescrv) click!("clue.trace.backtrace_not_logged");
+        if self.id.is_some() {
             return self;
         }
-        // TODO(rescrv) click!("clue.trace.with_backtrace");
+        TRACE_WITH_BACKTRACE.click();
         let backtrace = format!("{}", Backtrace::force_capture());
-        self.with_context::<string, BACKTRACE_FIELD_NUMBER>("backtrace", &backtrace)
+        self.with_value::<string, BACKTRACE_FIELD_NUMBER>(&backtrace)
     }
 
     pub fn with_stopwatch(mut self) -> Self {
         if self.id.is_none() {
-            // TODO(rescrv) click!("clue.trace.stopwatch_not_logged");
             return self;
         }
-        // TODO(rescrv) click!("clue.trace.with_stopwatch");
+        TRACE_WITH_STOPWATCH.click();
         self.stopwatch = Some(Stopwatch::default());
         self
     }
@@ -123,31 +102,30 @@ impl Trace {
     pub fn finish(mut self) {
         if let Some(stopwatch) = &self.stopwatch {
             let time_ms: f64 = stopwatch.since();
-            self = self.with_context::<double, STOPWATCH_FIELD_NUMBER>("elapsed", time_ms);
+            self = self.with_value::<double, STOPWATCH_FIELD_NUMBER>(time_ms);
         }
         TRACER.with(|t| {
-            t.borrow_mut().finish(self);
+            t.lock().unwrap().finish(self);
         });
     }
 
     pub fn panic<S: AsRef<str>>(self, message: S) -> ! {
-        let panic_extras = self.human.clone();
         self.finish();
         TRACER.with(|t| {
-            t.borrow_mut().flush();
+            t.lock().unwrap().flush();
         });
-        panic!("{}\n{}", message.as_ref(), panic_extras);
+        panic!("{}\n", message.as_ref());
     }
 }
 
 ////////////////////////////////////////////// Tracer //////////////////////////////////////////////
 
 thread_local! {
-    static TRACER: Rc<RefCell<Tracer>> = Rc::new(RefCell::new(Tracer::new()));
+    static TRACER: Arc<Mutex<Tracer>> = Arc::new(Mutex::new(Tracer::new()));
 }
 
 struct Tracer {
-    emitter: Option<Rc<dyn Emitter>>,
+    emitter: Option<Arc<dyn Emitter>>,
 }
 
 impl Tracer {
@@ -156,7 +134,7 @@ impl Tracer {
         match TraceID::generate() {
             Some(id) => Some(id),
             None => {
-                // TODO(rescrv) click!("clue.trace.id_generate_failed");
+                TRACE_ID_GENERATE_FAILED.click();
                 Some(TraceID::default())
             }
         }
@@ -164,17 +142,17 @@ impl Tracer {
 
     pub fn finish(&mut self, trace: Trace) {
         if trace.id.is_none() {
-            // TODO(rescrv) click!("clue.trace.drop");
+            TRACE_NOT_SAMPLED.click();
             return;
         }
         let emitter = match &self.emitter {
             Some(e) => e,
             None => {
-                // TODO(rescrv) click!("clue.trace.drop.no_emitter");
+                TRACE_DROPPED.click();
                 return;
             }
         };
-        // TODO(rescrv) click!("clue.trace.emit");
+        TRACE_EMIT.click();
         emitter.emit(trace);
     }
 
@@ -182,11 +160,11 @@ impl Tracer {
         let emitter = match &self.emitter {
             Some(e) => e,
             None => {
-                // TODO(rescrv) click!("clue.trace.flush.no_emitter");
+                TRACE_DROPPED.click();
                 return;
             }
         };
-        // TODO(rescrv) click!("clue.trace.flush");
+        TRACE_FLUSH.click();
         emitter.flush();
     }
 
@@ -194,40 +172,8 @@ impl Tracer {
         Self { emitter: None }
     }
 
-    fn set_emitter(&mut self, emitter: Rc<dyn Emitter>) {
+    fn set_emitter(&mut self, emitter: Arc<dyn Emitter>) {
         self.emitter = Some(emitter);
-    }
-}
-
-////////////////////////////////////////// ProtoTKBuilder //////////////////////////////////////////
-
-#[derive(Clone, Debug, Default)]
-pub struct ProtoTKBuilder {
-    buffer: Vec<u8>,
-}
-
-impl ProtoTKBuilder {
-    pub fn push<'a, T, const N: u32>(&mut self, field_value: T::Native) -> &mut Self
-    where
-        T: FieldType<'a> + 'a,
-        T::Native: Default + FieldPackHelper<'a, T> + 'a,
-    {
-        let tag = Tag {
-            field_number: FieldNumber::must(N),
-            wire_type: T::WIRE_TYPE,
-        };
-        let packer = FieldPacker::new(tag, &field_value, std::marker::PhantomData::<&T>);
-        stack_pack(packer).append_to_vec(&mut self.buffer);
-        self
-    }
-
-    pub fn append(&mut self, buffer: &[u8]) -> &mut Self {
-        self.buffer.extend_from_slice(buffer);
-        self
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer
     }
 }
 
@@ -240,70 +186,6 @@ pub trait Emitter {
 
 pub fn register_emitter<E: Emitter + 'static>(emitter: E) {
     TRACER.with(|t| {
-        t.borrow_mut().set_emitter(Rc::new(emitter));
+        t.lock().unwrap().set_emitter(Arc::new(emitter));
     });
-}
-
-///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
-
-pub struct PlainTextEmitter<W: Write> {
-    fout: RefCell<W>,
-}
-
-impl<W: Write> PlainTextEmitter<W> {
-    pub fn new(fout: W) -> Self {
-        Self {
-            fout: RefCell::new(fout),
-        }
-    }
-}
-
-static CLUE_PLAINTEXT_NOT_WRITTEN: Counter = Counter::new("clue.plaintext.not_written");
-
-impl<W: Write> Emitter for PlainTextEmitter<W> {
-    fn emit(&self, trace: Trace) {
-        let trace_id = match trace.id {
-            Some(id) => id,
-            None => {
-                // TODO(rescrv) click!("clue.plaintext.dropped");
-                return;
-            }
-        };
-        let mut fout = self.fout.borrow_mut();
-        if let Err(e) = write!(
-            fout,
-            "TraceID: {} ===================================\n",
-            trace_id.human_readable()
-        ) {
-            CLUE_PLAINTEXT_NOT_WRITTEN.click();
-            eprintln!("plaintext emitter failure: {}", e);
-        }
-        if let Err(e) = write!(fout, "{}\n", trace.human) {
-            CLUE_PLAINTEXT_NOT_WRITTEN.click();
-            eprintln!("plaintext emitter failure: {}", e);
-        }
-    }
-
-    fn flush(&self) {
-        // Intentionally do nothing.
-    }
-}
-
-/////////////////////////////////////////////// tests //////////////////////////////////////////////
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn plaintext() {
-        let emitter = PlainTextEmitter::new(std::io::stdout());
-        register_emitter(emitter);
-        let trace = Trace::new("test")
-            .with_backtrace()
-            .with_stopwatch()
-            .with_context::<fixed64, 1>("field_one", 0x1eaff00dc0ffeeu64);
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        trace.finish();
-    }
 }
