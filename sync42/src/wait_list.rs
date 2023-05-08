@@ -213,6 +213,17 @@ impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
         t
     }
 
+    pub fn is_head(&mut self) -> bool {
+        let state = self.list.state.lock().unwrap();
+        assert_ne!(self.list.waiters.len(), self.index);
+        state.head == self.index
+    }
+
+    pub fn count(&mut self) -> usize {
+        let state = self.list.state.lock().unwrap();
+        (state.tail + self.list.waiters.len() - state.head) % self.list.waiters.len()
+    }
+
     pub fn naked_wait<'b, M>(&self, guard: MutexGuard<'b, M>) -> MutexGuard<'b, M> {
         assert_ne!(self.list.waiters.len(), self.index);
         self.list.waiters[self.index].naked_wait(guard)
