@@ -115,7 +115,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
 
     pub fn link<'a, 'b: 'a>(&'b self, t: T) -> WaitGuard<'a, T> {
         let mut state = self.state.lock().unwrap();
-        while (state.tail + 1) % self.waiters.len() == state.head {
+        while state.head + self.waiters.len() <= state.tail {
             state = self.assert_invariants(state);
             state.waiting_for_available += 1;
             WAITING_FOR_WAITERS.click();
@@ -124,8 +124,8 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
             state = self.assert_invariants(state);
         }
         let index = state.tail;
-        state.tail = (state.tail + 1) % self.waiters.len();
-        state = self.waiters[index].initialize(state, t);
+        state.tail += 1;
+        state = self.index_waitlist(index).initialize(state, t);
         let _state = self.assert_invariants(state);
         LINK.click();
         WaitGuard {
@@ -137,15 +137,15 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
 
     pub fn unlink(&self, mut guard: WaitGuard<T>) {
         let index = guard.index;
-        assert!(index < self.waiters.len());
         let notify = {
             let mut state = self.state.lock().unwrap();
             state = self.assert_invariants(state);
-            assert!(self.waiters[index].linked.load(Ordering::Relaxed));
-            self.waiters[index].linked.store(false, Ordering::SeqCst);
-            while state.head != state.tail && !self.waiters[state.head].linked.load(Ordering::SeqCst) {
-                state = self.waiters[state.head].deinitialize(state);
-                state.head = (state.head + 1) % self.waiters.len();
+            let waiter = self.index_waitlist(index);
+            assert!(waiter.linked.load(Ordering::Relaxed));
+            waiter.linked.store(false, Ordering::SeqCst);
+            while state.head < state.tail && !self.index_waitlist(state.head).linked.load(Ordering::SeqCst) {
+                state = self.index_waitlist(state.head).deinitialize(state);
+                state.head += 1;
             }
             state = self.assert_invariants(state);
             state.waiting_for_available > 0
@@ -153,7 +153,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
         if notify {
             self.wait_waiter_available.notify_one();
         }
-        guard.index = guard.list.waiters.len();
+        guard.index = usize::max_value();
         UNLINK.click();
     }
 
@@ -161,17 +161,21 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
     pub fn notify_head(&self) {
         let mut state = self.state.lock().unwrap();
         state = self.assert_invariants(state);
-        if state.head != state.tail {
+        if state.head < state.tail {
             NOTIFY_HEAD.click();
-            self.waiters[state.head].cond.notify_one();
+            self.index_waitlist(state.head).cond.notify_one();
         } else {
             NOTIFY_HEAD_DROPPED.click();
         }
     }
 
+    fn index_waitlist(&self, index: usize) -> &Waiter<T> {
+        &self.waiters[index % self.waiters.len()]
+    }
+
     // Call with the lock held.
     fn assert_invariants<'a>(&self, state: MutexGuard<'a, WaitListState>) -> MutexGuard<'a, WaitListState> {
-        assert!(state.head == state.tail || self.waiters[state.head].linked.load(Ordering::Relaxed));
+        assert!(state.head == state.tail || self.index_waitlist(state.head).linked.load(Ordering::Relaxed));
         state
     }
 }
@@ -202,42 +206,37 @@ impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
 
     pub fn store(&mut self, t: T) {
         let state = self.list.state.lock().unwrap();
-        assert_ne!(self.list.waiters.len(), self.index);
-        let _state = self.list.waiters[self.index].store(state, t);
+        let _state = self.list.index_waitlist(self.index).store(state, t);
     }
 
     pub fn load(&mut self) -> Option<T> {
         let state = self.list.state.lock().unwrap();
-        assert_ne!(self.list.waiters.len(), self.index);
-        let (_state, t) = self.list.waiters[self.index].load(state);
+        let (_state, t) = self.list.index_waitlist(self.index).load(state);
         t
     }
 
     pub fn is_head(&mut self) -> bool {
         let state = self.list.state.lock().unwrap();
-        assert_ne!(self.list.waiters.len(), self.index);
         state.head == self.index
     }
 
     pub fn count(&mut self) -> usize {
         let state = self.list.state.lock().unwrap();
-        (state.tail + self.list.waiters.len() - state.head) % self.list.waiters.len()
+        state.tail - state.head
     }
 
     pub fn naked_wait<'b, M>(&self, guard: MutexGuard<'b, M>) -> MutexGuard<'b, M> {
-        assert_ne!(self.list.waiters.len(), self.index);
-        self.list.waiters[self.index].naked_wait(guard)
+        self.list.index_waitlist(self.index).naked_wait(guard)
     }
 
     pub fn wait_for_store<'b, M>(&self, guard: MutexGuard<'b, M>) -> (MutexGuard<'b, M>, Option<T>) {
-        assert_ne!(self.list.waiters.len(), self.index);
-        self.list.waiters[self.index].wait_for_store(guard)
+        self.list.index_waitlist(self.index).wait_for_store(guard)
     }
 }
 
 impl<'a, T: Clone + Send + Sync + 'static> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
-        assert!(!self.owned || self.list.waiters.len() == self.index, "unlink not called on dropped guard");
+        assert!(!self.owned || usize::max_value() == self.index, "unlink not called on dropped guard");
     }
 }
 
@@ -250,16 +249,19 @@ pub struct WaitIterator<'a, T: Clone + Send + Sync + 'static>
     index: usize,
 }
 
+impl<'a, T: Clone + Send + Sync + 'static> WaitIterator<'a, T> {
+}
+
 impl<'a, T: Clone + Send + Sync + 'static> Iterator for WaitIterator<'a, T> {
     type Item = WaitGuard<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let state = self.guard.list.state.lock().unwrap();
         let index = self.index;
-        if index == state.tail {
+        if index >= state.tail {
             None
         } else {
-            self.index = (self.index + 1) % self.guard.list.waiters.len();
+            self.index += 1;
             Some(WaitGuard {
                 list: self.guard.list,
                 index,
