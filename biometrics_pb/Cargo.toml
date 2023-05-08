@@ -1,0 +1,15 @@
+[package]
+name = "biometrics_pb"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "biometrics_pb provides protobuf definitions for biometrics sensors"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+biometrics = { path = "../biometrics", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.1.0" }
+prototk = { path = "../prototk", version = "0.1.0" }
+prototk_derive = { path = "../prototk_derive", version = "0.1.0" }

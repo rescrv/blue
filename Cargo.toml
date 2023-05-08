@@ -2,6 +2,7 @@
 members = [
     "armnod",
     "biometrics",
+    "biometrics_pb",
     "bloom",
     "buffertk",
     "busybee",
