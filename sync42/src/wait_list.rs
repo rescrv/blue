@@ -1,7 +1,26 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
 
+use biometrics::Counter;
+
 use super::MAX_CONCURRENCY;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static NOTIFY_HEAD: Counter = Counter::new("sync42.wait_list.notify_head");
+static NOTIFY_HEAD_DROPPED: Counter = Counter::new("sync42.wait_list.notify_head_dropped");
+static WAITING_FOR_WAITERS: Counter = Counter::new("sync42.wait_list.waiting_for_waiters");
+
+static LINK: Counter = Counter::new("sync42.wait_list.link");
+static UNLINK: Counter = Counter::new("sync42.wait_list.unlink");
+
+pub fn register_biometrics(collector: &mut biometrics::Collector) {
+    collector.register_counter(&NOTIFY_HEAD);
+    collector.register_counter(&NOTIFY_HEAD_DROPPED);
+    collector.register_counter(&WAITING_FOR_WAITERS);
+    collector.register_counter(&LINK);
+    collector.register_counter(&UNLINK);
+}
 
 ////////////////////////////////////////////// Waiter //////////////////////////////////////////////
 
@@ -99,6 +118,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
         while (state.tail + 1) % self.waiters.len() == state.head {
             state = self.assert_invariants(state);
             state.waiting_for_available += 1;
+            WAITING_FOR_WAITERS.click();
             state = self.wait_waiter_available.wait(state).unwrap();
             state.waiting_for_available -= 1;
             state = self.assert_invariants(state);
@@ -107,6 +127,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
         state.tail = (state.tail + 1) % self.waiters.len();
         state = self.waiters[index].initialize(state, t);
         let _state = self.assert_invariants(state);
+        LINK.click();
         WaitGuard {
             list: self,
             index,
@@ -133,6 +154,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
             self.wait_waiter_available.notify_one();
         }
         guard.index = guard.list.waiters.len();
+        UNLINK.click();
     }
 
     /// Notify the first waiter in the list.  Notification is dropped if there is no waiter.
@@ -140,7 +162,10 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
         let mut state = self.state.lock().unwrap();
         state = self.assert_invariants(state);
         if state.head != state.tail {
+            NOTIFY_HEAD.click();
             self.waiters[state.head].cond.notify_one();
+        } else {
+            NOTIFY_HEAD_DROPPED.click();
         }
     }
 
