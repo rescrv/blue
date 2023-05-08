@@ -204,6 +204,10 @@ impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
         }
     }
 
+    pub fn index(&mut self) -> usize {
+        self.index
+    }
+
     pub fn store(&mut self, t: T) {
         let state = self.list.state.lock().unwrap();
         let _state = self.list.index_waitlist(self.index).store(state, t);
@@ -223,6 +227,18 @@ impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
     pub fn count(&mut self) -> usize {
         let state = self.list.state.lock().unwrap();
         state.tail - state.head
+    }
+
+    pub fn get_waiter<'c, 'b: 'c>(&'b mut self, index: usize) -> Option<WaitGuard<'c, T>> {
+        let state = self.list.state.lock().unwrap();
+        if index < self.index || index >= state.tail || !self.list.index_waitlist(index).linked.load(Ordering::Relaxed) {
+            return None;
+        }
+        Some(WaitGuard {
+            list: self.list,
+            index,
+            owned: false,
+        })
     }
 
     pub fn naked_wait<'b, M>(&self, guard: MutexGuard<'b, M>) -> MutexGuard<'b, M> {
