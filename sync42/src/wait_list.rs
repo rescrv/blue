@@ -81,8 +81,8 @@ impl<T: Clone + 'static> Waiter<T> {
 
 #[derive(Debug)]
 struct WaitListState {
-    head: usize,
-    tail: usize,
+    head: u64,
+    tail: u64,
     waiting_for_available: u64,
 }
 
@@ -115,7 +115,7 @@ impl<T: Clone + 'static> WaitList<T> {
 
     pub fn link<'a, 'b: 'a>(&'b self, t: T) -> WaitGuard<'a, T> {
         let mut state = self.state.lock().unwrap();
-        while state.head + self.waiters.len() <= state.tail {
+        while state.head + (self.waiters.len() as u64) <= state.tail {
             state = self.assert_invariants(state);
             state.waiting_for_available += 1;
             WAITING_FOR_WAITERS.click();
@@ -153,7 +153,7 @@ impl<T: Clone + 'static> WaitList<T> {
         if notify {
             self.wait_waiter_available.notify_one();
         }
-        guard.index = usize::max_value();
+        guard.index = u64::max_value();
         UNLINK.click();
     }
 
@@ -169,8 +169,9 @@ impl<T: Clone + 'static> WaitList<T> {
         }
     }
 
-    fn index_waitlist(&self, index: usize) -> &Waiter<T> {
-        &self.waiters[index % self.waiters.len()]
+    fn index_waitlist(&self, index: u64) -> &Waiter<T> {
+        let index = index % (self.waiters.len() as u64);
+        &self.waiters[index as usize]
     }
 
     // Call with the lock held.
@@ -191,7 +192,7 @@ impl<T: Clone + 'static> Default for WaitList<T> {
 #[derive(Debug)]
 pub struct WaitGuard<'a, T: Clone + 'static> {
     list: &'a WaitList<T>,
-    index: usize,
+    index: u64,
     owned: bool,
 }
 
@@ -204,7 +205,7 @@ impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
         }
     }
 
-    pub fn index(&mut self) -> usize {
+    pub fn index(&mut self) -> u64 {
         self.index
     }
 
@@ -224,12 +225,12 @@ impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
         state.head == self.index
     }
 
-    pub fn count(&mut self) -> usize {
+    pub fn count(&mut self) -> u64 {
         let state = self.list.state.lock().unwrap();
         state.tail - state.head
     }
 
-    pub fn get_waiter<'c, 'b: 'c>(&'b mut self, index: usize) -> Option<WaitGuard<'c, T>> {
+    pub fn get_waiter<'c, 'b: 'c>(&'b mut self, index: u64) -> Option<WaitGuard<'c, T>> {
         let state = self.list.state.lock().unwrap();
         if index < self.index || index >= state.tail || !self.list.index_waitlist(index).linked.load(Ordering::Relaxed) {
             return None;
@@ -252,7 +253,7 @@ impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
 
 impl<'a, T: Clone + 'static> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
-        assert!(!self.owned || usize::max_value() == self.index, "unlink not called on dropped guard");
+        assert!(!self.owned || u64::max_value() == self.index, "unlink not called on dropped guard");
     }
 }
 
@@ -262,7 +263,7 @@ impl<'a, T: Clone + 'static> Drop for WaitGuard<'a, T> {
 pub struct WaitIterator<'a, T: Clone + 'static>
 {
     guard: &'a WaitGuard<'a, T>,
-    index: usize,
+    index: u64,
 }
 
 impl<'a, T: Clone + 'static> WaitIterator<'a, T> {
