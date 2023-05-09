@@ -53,7 +53,7 @@ struct Internals {
 
 /// [ErrorCore] implements 100% of Z for easy error reporting.  It's intended that people will wrap
 /// and proxy ErrorCore and then implement a short summary on top that descends from an error enum.
-#[derive(Debug, Default, Message)]
+#[derive(Clone, Debug, Default, Message)]
 pub struct ErrorCore {
     internals: Box<Internals>,
 }
