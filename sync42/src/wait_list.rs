@@ -25,14 +25,14 @@ pub fn register_biometrics(collector: &mut biometrics::Collector) {
 ////////////////////////////////////////////// Waiter //////////////////////////////////////////////
 
 #[derive(Debug)]
-struct Waiter<T: Clone + Send + Sync + 'static> {
+struct Waiter<T: Clone + 'static> {
     cond: Condvar,
     value: Mutex<Option<T>>,
     seq_no: AtomicU64,
     linked: AtomicBool,
 }
 
-impl<T: Clone + Send + Sync + 'static> Waiter<T> {
+impl<T: Clone + 'static> Waiter<T> {
     fn new() -> Self {
         Self {
             cond: Condvar::new(),
@@ -89,13 +89,13 @@ struct WaitListState {
 ///////////////////////////////////////////// WaitList /////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct WaitList<T: Clone + Send + Sync + 'static> {
+pub struct WaitList<T: Clone + 'static> {
     state: Mutex<WaitListState>,
     waiters: Vec<Waiter<T>>,
     wait_waiter_available: Condvar,
 }
 
-impl<T: Clone + Send + Sync + 'static> WaitList<T> {
+impl<T: Clone + 'static> WaitList<T> {
     pub fn new() -> Self {
         let mut waiters: Vec<Waiter<T>> = Vec::new();
         for _ in 0..MAX_CONCURRENCY {
@@ -180,7 +180,7 @@ impl<T: Clone + Send + Sync + 'static> WaitList<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> Default for WaitList<T> {
+impl<T: Clone + 'static> Default for WaitList<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -189,13 +189,13 @@ impl<T: Clone + Send + Sync + 'static> Default for WaitList<T> {
 ///////////////////////////////////////////// WaitGuard ////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct WaitGuard<'a, T: Clone + Send + Sync + 'static> {
+pub struct WaitGuard<'a, T: Clone + 'static> {
     list: &'a WaitList<T>,
     index: usize,
     owned: bool,
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
+impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
     pub fn iter<'b: 'a>(&'b self) -> WaitIterator<'b, T> {
         let index = self.index;
         WaitIterator {
@@ -250,7 +250,7 @@ impl<'a, T: Clone + Send + Sync + 'static> WaitGuard<'a, T> {
     }
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> Drop for WaitGuard<'a, T> {
+impl<'a, T: Clone + 'static> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
         assert!(!self.owned || usize::max_value() == self.index, "unlink not called on dropped guard");
     }
@@ -259,16 +259,16 @@ impl<'a, T: Clone + Send + Sync + 'static> Drop for WaitGuard<'a, T> {
 /////////////////////////////////////////// WaitIterator ///////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct WaitIterator<'a, T: Clone + Send + Sync + 'static>
+pub struct WaitIterator<'a, T: Clone + 'static>
 {
     guard: &'a WaitGuard<'a, T>,
     index: usize,
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> WaitIterator<'a, T> {
+impl<'a, T: Clone + 'static> WaitIterator<'a, T> {
 }
 
-impl<'a, T: Clone + Send + Sync + 'static> Iterator for WaitIterator<'a, T> {
+impl<'a, T: Clone + 'static> Iterator for WaitIterator<'a, T> {
     type Item = WaitGuard<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
