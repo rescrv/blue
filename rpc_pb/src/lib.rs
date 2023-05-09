@@ -24,6 +24,7 @@ id::generate_id_prototk! {ClientID}
 
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
 pub struct Context {
     clients: Vec<ClientID>,
     trace_id: Option<TraceID>,
