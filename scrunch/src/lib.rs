@@ -1,5 +1,6 @@
 use std::hash::Hash;
 
+pub mod bit_array;
 pub mod bit_vector;
 pub mod dictionary;
 pub mod psi;
