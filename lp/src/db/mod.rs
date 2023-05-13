@@ -231,6 +231,8 @@ impl DB {
     }
 
     pub fn fsck<P: AsRef<Path>>(options: DBOptions, root: P) -> Vec<Error> {
+        _ = options;
+        _ = root;
         todo!();
     }
 

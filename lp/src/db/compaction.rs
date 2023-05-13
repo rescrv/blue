@@ -383,7 +383,7 @@ impl Compaction {
         }
     }
 
-    pub fn load<P: AsRef<Path>>(compaction_root: P) -> Result<Self, Error> {
+    pub fn load<P: AsRef<Path>>(_compaction_root: P) -> Result<Self, Error> {
         /*
         let mut inputs = Vec::new();
         for input in read_dir(compaction_root.as_ref().to_path_buf().join("inputs")).from_io()? {
@@ -476,9 +476,9 @@ impl Compaction {
         gc_compact(cursor, self.clone(), &|key| self.is_base_level_for_key(key), "outputs/".to_string())
     }
 
-    fn open_file_handle(&self, file_mgr: &FileManager, setsum: String) -> Result<FileHandle, Error> {
-        let base = setsum + ".sst";
+    fn open_file_handle(&self, _file_mgr: &FileManager, _setsum: String) -> Result<FileHandle, Error> {
         /*
+        let base = setsum + ".sst";
         file_mgr.open(Self::SST(
     pub fn path(&self) -> Result<PathBuf, Error> {
     pub fn open(&self, path: PathBuf) -> Result<FileHandle, Error> {
@@ -487,7 +487,7 @@ impl Compaction {
         todo!();
     }
 
-    fn is_base_level_for_key(&self, key: &[u8]) -> bool {
+    fn is_base_level_for_key(&self, _key: &[u8]) -> bool {
         todo!();
     }
 }
