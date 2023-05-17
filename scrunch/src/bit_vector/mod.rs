@@ -61,83 +61,191 @@ impl BitVector for ReferenceBitVector {
     }
 }
 
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod tests {
+    pub mod evens {
+        use super::super::BitVector;
 
-    fn simple_evens<BV: BitVector>(new: fn(&[bool]) -> BV) {
-        // try 010101
-        let b = new(&[false, true, false, true, false, true]);
-        assert_eq!(0, b.rank(0));
-        assert_eq!(0, b.rank(1));
-        assert_eq!(1, b.rank(2));
-        assert_eq!(1, b.rank(3));
-        assert_eq!(2, b.rank(4));
-        assert_eq!(2, b.rank(5));
-        assert_eq!(3, b.rank(6));
+        pub const EVENS: &[bool] = &[false, true, false, true, false, true];
 
-        assert_eq!(0, b.select(0));
-        assert_eq!(2, b.select(1));
-        assert_eq!(4, b.select(2));
-        assert_eq!(6, b.select(3));
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(EVENS[0], bv.access(0));
+            assert_eq!(EVENS[1], bv.access(1));
+            assert_eq!(EVENS[2], bv.access(2));
+            assert_eq!(EVENS[3], bv.access(3));
+            assert_eq!(EVENS[4], bv.access(4));
+            assert_eq!(EVENS[5], bv.access(5));
+        }
+
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.rank(0));
+            assert_eq!(0, bv.rank(1));
+            assert_eq!(1, bv.rank(2));
+            assert_eq!(1, bv.rank(3));
+            assert_eq!(2, bv.rank(4));
+            assert_eq!(2, bv.rank(5));
+            assert_eq!(3, bv.rank(6));
+        }
+
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.select(0));
+            assert_eq!(2, bv.select(1));
+            assert_eq!(4, bv.select(2));
+            assert_eq!(6, bv.select(3));
+        }
     }
 
-    fn simple_odds<BV: BitVector>(new: fn(&[bool]) -> BV) {
-        // try 101010
-        let b = new(&[true, false, true, false, true, false]);
-        assert_eq!(0, b.rank(0));
-        assert_eq!(1, b.rank(1));
-        assert_eq!(1, b.rank(2));
-        assert_eq!(2, b.rank(3));
-        assert_eq!(2, b.rank(4));
-        assert_eq!(3, b.rank(5));
-        assert_eq!(3, b.rank(6));
+    pub mod odds {
+        use super::super::BitVector;
 
-        assert_eq!(0, b.select(0));
-        assert_eq!(1, b.select(1));
-        assert_eq!(3, b.select(2));
-        assert_eq!(5, b.select(3));
+        pub const ODDS: &[bool] = &[true, false, true, false, true, false];
+
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(ODDS[0], bv.access(0));
+            assert_eq!(ODDS[1], bv.access(1));
+            assert_eq!(ODDS[2], bv.access(2));
+            assert_eq!(ODDS[3], bv.access(3));
+            assert_eq!(ODDS[4], bv.access(4));
+            assert_eq!(ODDS[5], bv.access(5));
+        }
+
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.rank(0));
+            assert_eq!(1, bv.rank(1));
+            assert_eq!(1, bv.rank(2));
+            assert_eq!(2, bv.rank(3));
+            assert_eq!(2, bv.rank(4));
+            assert_eq!(3, bv.rank(5));
+            assert_eq!(3, bv.rank(6));
+        }
+
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.select(0));
+            assert_eq!(1, bv.select(1));
+            assert_eq!(3, bv.select(2));
+            assert_eq!(5, bv.select(3));
+        }
     }
 
-    fn half_empty1<BV: BitVector>(new: fn(&[bool]) -> BV) {
-        // try 000111
-        let b = new(&[false, false, false, true, true, true]);
-        assert_eq!(0, b.rank(0));
-        assert_eq!(0, b.rank(1));
-        assert_eq!(0, b.rank(2));
-        assert_eq!(0, b.rank(3));
-        assert_eq!(1, b.rank(4));
-        assert_eq!(2, b.rank(5));
-        assert_eq!(3, b.rank(6));
+    pub mod half_empty {
+        use super::super::BitVector;
 
-        assert_eq!(0, b.select(0));
-        assert_eq!(4, b.select(1));
-        assert_eq!(5, b.select(2));
-        assert_eq!(6, b.select(3));
+        pub const HALF_EMPTY: &[bool] = &[false, false, false, true, true, true];
+
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(HALF_EMPTY[0], bv.access(0));
+            assert_eq!(HALF_EMPTY[1], bv.access(1));
+            assert_eq!(HALF_EMPTY[2], bv.access(2));
+            assert_eq!(HALF_EMPTY[3], bv.access(3));
+            assert_eq!(HALF_EMPTY[4], bv.access(4));
+            assert_eq!(HALF_EMPTY[5], bv.access(5));
+        }
+
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.rank(0));
+            assert_eq!(0, bv.rank(1));
+            assert_eq!(0, bv.rank(2));
+            assert_eq!(0, bv.rank(3));
+            assert_eq!(1, bv.rank(4));
+            assert_eq!(2, bv.rank(5));
+            assert_eq!(3, bv.rank(6));
+        }
+
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
+            assert_eq!(0, bv.select(0));
+            assert_eq!(4, bv.select(1));
+            assert_eq!(5, bv.select(2));
+            assert_eq!(6, bv.select(3));
+        }
     }
 
     macro_rules! test_BitVector {
-        ($name:ident, $BV:tt) => {
+        ($name:ident, $BV:path) => {
             mod $name {
-                use super::*;
+                mod evens {
+                    use $crate::bit_vector::BitVector;
+                    use $crate::reference::*;
 
-                #[test]
-                fn simple_evens() {
-                    super::simple_evens($BV::new);
+                    #[test]
+                    fn access() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::evens::access(bv);
+                    }
+
+                    #[test]
+                    fn rank() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::evens::rank(bv);
+                    }
+
+                    #[test]
+                    fn select() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::evens::select(bv);
+                    }
                 }
 
-                #[test]
-                fn simple_odds() {
-                    super::simple_odds($BV::new);
+                mod odds {
+                    use $crate::bit_vector::BitVector;
+                    use $crate::reference::*;
+
+                    #[test]
+                    fn access() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::odds::access(bv);
+                    }
+
+                    #[test]
+                    fn rank() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::odds::rank(bv);
+                    }
+
+                    #[test]
+                    fn select() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::odds::select(bv);
+                    }
                 }
 
-                #[test]
-                fn half_empty1() {
-                    super::half_empty1($BV::new);
+                mod half_empty {
+                    use $crate::bit_vector::BitVector;
+                    use $crate::reference::*;
+
+                    #[test]
+                    fn access() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::half_empty::access(bv);
+                    }
+
+                    #[test]
+                    fn rank() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::half_empty::rank(bv);
+                    }
+
+                    #[test]
+                    fn select() {
+                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
+                        let bv: $BV = <$BV>::new(bytes).unwrap();
+                        $crate::bit_vector::tests::half_empty::select(bv);
+                    }
                 }
             }
         };
     }
+
+    pub(crate) use test_BitVector;
 
     test_BitVector!(reference, ReferenceBitVector);
 }
