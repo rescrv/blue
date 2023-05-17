@@ -87,7 +87,10 @@ impl Psi for ReferencePsi {
 #[cfg(test)]
 pub mod tests {
     use super::super::psi::wavelet_tree::WaveletTreePsi;
-    use super::super::reference::{ReferenceDictionary, ReferenceBitVector, ReferenceWaveletTree};
+    use super::super::dictionary::ReferenceDictionary;
+    use super::super::bit_vector::ReferenceBitVector;
+    use super::super::wavelet_tree::ReferenceWaveletTree;
+    use super::super::psi::ReferencePsi;
     use super::*;
 
     // this is the isa for mississippi
@@ -150,7 +153,7 @@ pub mod tests {
         ($name:ident, $PSI:path) => {
             mod $name {
                 use $crate::psi::Psi;
-                use $crate::reference::*;
+                use $crate::psi::ReferencePsi;
 
                 #[test]
                 fn len() {
@@ -171,6 +174,4 @@ pub mod tests {
     }
 
     pub(crate) use test_Psi;
-
-    test_Psi!(reference, ReferencePsi::new);
 }

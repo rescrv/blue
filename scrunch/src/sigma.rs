@@ -188,8 +188,8 @@ where
         &self.columns
     }
 
-    // TODO(rescrv): deprecate
-    pub fn dirty_hack(sigma: &[T], text: &[usize]) -> Self {
+    #[cfg(test)]
+    pub fn test_hack(sigma: &[T], text: &[usize]) -> Self {
         let mut alt: Vec<T> = Vec::with_capacity(text.len() - 1);
         for i in 0..text.len() - 1 {
             alt.push(sigma[text[i] - 1]);
@@ -262,8 +262,8 @@ mod tests {
 
     test_cases_for!(sigma_from, crate::sigma::tests::check_sigma_from);
 
-    fn check_dirty_hack(t: &TestCase) {
-        let sigma_new: Sigma<char, ReferenceBitVector> = Sigma::dirty_hack(t.sigma2text, t.S);
+    fn check_test_hack(t: &TestCase) {
+        let sigma_new: Sigma<char, ReferenceBitVector> = Sigma::test_hack(t.sigma2text, t.S);
         let sigma_from = t.sigma();
         for i in 0..std::cmp::min(sigma_from.columns.len(), sigma_new.columns.len()) {
             assert_eq!(
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(sigma_new.columns.len(), sigma_from.columns.len());
     }
 
-    test_cases_for!(new_matches_from_XXX, crate::sigma::tests::check_dirty_hack);
+    test_cases_for!(new_matches_from_XXX, crate::sigma::tests::check_test_hack);
 
     #[allow(non_snake_case)]
     fn check_K(t: &TestCase) {

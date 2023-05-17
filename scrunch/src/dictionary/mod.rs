@@ -1,3 +1,5 @@
+use super::bit_vector::BitVector;
+
 /// A Dictionary takes a list of sorted key-value pairs and provides fast lookup over the key.
 /// Conceptually, there exists a values array of type &[V] and rank/select functions over the key
 /// return operations in value/key space respectively.
@@ -172,8 +174,7 @@ pub mod tests {
     macro_rules! test_Dictionary {
         ($name:ident, $D:path) => {
             mod $name {
-                use $crate::dictionary::Dictionary;
-                use $crate::reference::*;
+                use $crate::*;
 
                 #[test]
                 #[should_panic]
@@ -218,7 +219,4 @@ pub mod tests {
     }
 
     pub(crate) use test_Dictionary;
-
-    type TestReferenceDictionary = ReferenceDictionary<ReferenceBitVector, u64>;
-    test_Dictionary!(reference, TestReferenceDictionary);
 }

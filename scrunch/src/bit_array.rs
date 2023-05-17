@@ -21,7 +21,7 @@ impl<'a> BitArray<'a> {
         let mut x = 0u64;
         let mut xlen = 0usize;
         while bits > 0 {
-            /// We take the highest order bits from this byte.
+            // We take the highest order bits from this byte.
             let mut byte: u64 = (self.bytes[byte_index] >> bit_index) as u64;
             let bits_from_this_byte = std::cmp::min(8 - bit_index, bits);
             byte &= (1u64 << bits_from_this_byte) - 1;

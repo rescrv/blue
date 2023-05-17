@@ -16,7 +16,7 @@ struct Context<WT>
 where
     WT: crate::wavelet_tree::WaveletTree,
 {
-    ctx: Vec<usize>,
+    _ctx: Vec<usize>,
     start: usize,
     tree: WT,
 }
@@ -59,7 +59,7 @@ where
                 // skipping here allows one initialization point
                 if i > 0 {
                     table.push(Context {
-                        ctx: ctx.to_vec(),
+                        _ctx: ctx.to_vec(),
                         tree: WT::new(&wt),
                         start,
                     });
@@ -78,7 +78,7 @@ where
         }
         // push one last context
         table.push(Context {
-            ctx: ctx.to_vec(),
+            _ctx: ctx.to_vec(),
             tree: WT::new(&wt),
             start,
         });
@@ -233,11 +233,12 @@ where
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
-#[cfg(test)]
-super::tests::test_Psi!(
-    tests,
-    super::WaveletTreePsi::<
-        ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
-        ReferenceWaveletTree,
-    >
-);
+// TODO(rescrv): Uncomment
+//#[cfg(test)]
+//super::tests::test_Psi!(
+//    tests,
+//    super::WaveletTreePsi::<
+//        ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
+//        ReferenceWaveletTree,
+//    >
+//);

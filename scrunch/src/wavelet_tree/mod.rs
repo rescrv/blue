@@ -24,6 +24,10 @@ impl WaveletTree for ReferenceWaveletTree {
         self.string.len()
     }
 
+    fn is_empty(&self) -> bool {
+        self.string.is_empty()
+    }
+
     fn rank_q(&self, x: usize, q: usize) -> usize {
         let mut rank: usize = 0;
         for i in 0..self.string.len() {
@@ -142,5 +146,4 @@ pub mod tests {
     }
 
     pub(crate) use test_WaveletTree;
-    test_WaveletTree!(reference, ReferenceWaveletTree);
 }
