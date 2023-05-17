@@ -233,7 +233,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::bit_vector::ReferenceBitVector;
+    use crate::bit_vector::ReferenceOldBitVector;
     use crate::test_cases_for;
     use crate::testutil::TestCase;
 
@@ -263,7 +263,7 @@ mod tests {
     test_cases_for!(sigma_from, crate::sigma::tests::check_sigma_from);
 
     fn check_test_hack(t: &TestCase) {
-        let sigma_new: Sigma<char, ReferenceBitVector> = Sigma::test_hack(t.sigma2text, t.S);
+        let sigma_new: Sigma<char, ReferenceOldBitVector> = Sigma::test_hack(t.sigma2text, t.S);
         let sigma_from = t.sigma();
         for i in 0..std::cmp::min(sigma_from.columns.len(), sigma_new.columns.len()) {
             assert_eq!(

@@ -222,7 +222,7 @@ pub type Sigma<T, B> = crate::sigma::Sigma<T, B>;
 
 #[cfg(test)]
 pub mod testutil {
-    use crate::bit_vector::ReferenceBitVector;
+    use crate::bit_vector::ReferenceOldBitVector;
 
     use super::*;
 
@@ -247,7 +247,7 @@ pub mod testutil {
     }
 
     impl TestCase {
-        pub fn sigma(&self) -> Sigma<char, ReferenceBitVector> {
+        pub fn sigma(&self) -> Sigma<char, ReferenceOldBitVector> {
             self.text.chars().collect()
         }
     }
@@ -572,7 +572,7 @@ mod tests {
         char,
         UncompressedSuffixArray,
         UncompressedInverseSuffixArray,
-        bit_vector::ReferenceBitVector,
+        bit_vector::ReferenceOldBitVector,
         psi::ReferencePsi,
     > {
         SearchIndex::new(text)

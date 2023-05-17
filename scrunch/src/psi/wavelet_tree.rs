@@ -238,7 +238,7 @@ where
 //super::tests::test_Psi!(
 //    tests,
 //    super::WaveletTreePsi::<
-//        ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
+//        ReferenceDictionary<ReferenceOldBitVector, (usize, usize)>,
 //        ReferenceWaveletTree,
 //    >
 //);

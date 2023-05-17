@@ -88,7 +88,7 @@ impl Psi for ReferencePsi {
 pub mod tests {
     use super::super::psi::wavelet_tree::WaveletTreePsi;
     use super::super::dictionary::ReferenceDictionary;
-    use super::super::bit_vector::ReferenceBitVector;
+    use super::super::bit_vector::ReferenceOldBitVector;
     use super::super::wavelet_tree::ReferenceWaveletTree;
     use super::super::psi::ReferencePsi;
     use super::*;
@@ -111,7 +111,7 @@ pub mod tests {
         assert_eq!(PSI, returned);
     }
 
-    pub fn len<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
+    pub fn len<P>(new: fn(&Sigma<char, ReferenceOldBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {
@@ -120,7 +120,7 @@ pub mod tests {
         assert_eq!(12, psi.len());
     }
 
-    pub fn lookup<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
+    pub fn lookup<P>(new: fn(&Sigma<char, ReferenceOldBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {
@@ -131,7 +131,7 @@ pub mod tests {
         }
     }
 
-    pub fn constrain<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
+    pub fn constrain<P>(new: fn(&Sigma<char, ReferenceOldBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {

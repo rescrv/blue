@@ -22,16 +22,16 @@ pub trait OldBitVector {
     fn select(&self, x: usize) -> usize;
 }
 
-//////////////////////////////////////// ReferenceBitVector ////////////////////////////////////////
+/////////////////////////////////////// ReferenceOldBitVector //////////////////////////////////////
 
-/// A [ReferenceBitVector] provides an inefficient, but easy to understand and verify, bit vector.
-pub struct ReferenceBitVector {
+/// A [ReferenceOldBitVector] provides an inefficient, but easy to understand and verify, bit vector.
+pub struct ReferenceOldBitVector {
     bv: Vec<bool>,
     ranks: Vec<usize>,
     selects: Vec<usize>,
 }
 
-impl OldBitVector for ReferenceBitVector {
+impl OldBitVector for ReferenceOldBitVector {
     fn new(bv: &[bool]) -> Self {
         let mut ranks = Vec::with_capacity(bv.len() + 1);
         let mut selects = Vec::with_capacity(bv.len() + 1);
@@ -187,7 +187,7 @@ pub mod tests {
         ($name:ident, $BV:path) => {
             mod $name {
                 mod evens {
-                    use $crate::bit_vector::{OldBitVector, ReferenceBitVector};
+                    use $crate::bit_vector::{OldBitVector, ReferenceOldBitVector};
 
                     #[test]
                     fn access() {

@@ -9,7 +9,7 @@ fn simple_new(
     char,
     scrunch::UncompressedSuffixArray,
     scrunch::UncompressedInverseSuffixArray,
-    scrunch::bit_vector::ReferenceBitVector,
+    scrunch::bit_vector::ReferenceOldBitVector,
     scrunch::psi::ReferencePsi,
 > {
     scrunch::SearchIndex::new(text)
