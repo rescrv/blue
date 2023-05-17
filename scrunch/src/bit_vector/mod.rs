@@ -13,6 +13,8 @@ pub trait BitVector {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool { self.len() == 0 }
 
+    /// Computes `access[x]`, the value of the x'th bit.
+    fn access(&self, x: usize) -> bool;
     /// Computes `rank[x]`, the number of bits set at i < x.
     fn rank(&self, x: usize) -> usize;
     /// Select the x'th bit from this set.  An index.
@@ -64,6 +66,11 @@ impl BitVector for ReferenceBitVector {
         self.bv.len()
     }
 
+    fn access(&self, x: usize) -> bool {
+        assert!(x < self.bv.len());
+        self.bv[x]
+    }
+
     fn rank(&self, x: usize) -> usize {
         assert!(x <= self.bv.len());
         self.ranks[x]
@@ -85,13 +92,12 @@ pub mod tests {
         pub const EVENS: &[bool] = &[false, true, false, true, false, true];
 
         pub fn access<BV: BitVector>(bv: BV) {
-            // TODO(rescrv): Uncomment
-            //assert_eq!(EVENS[0], bv.access(0));
-            //assert_eq!(EVENS[1], bv.access(1));
-            //assert_eq!(EVENS[2], bv.access(2));
-            //assert_eq!(EVENS[3], bv.access(3));
-            //assert_eq!(EVENS[4], bv.access(4));
-            //assert_eq!(EVENS[5], bv.access(5));
+            assert_eq!(EVENS[0], bv.access(0));
+            assert_eq!(EVENS[1], bv.access(1));
+            assert_eq!(EVENS[2], bv.access(2));
+            assert_eq!(EVENS[3], bv.access(3));
+            assert_eq!(EVENS[4], bv.access(4));
+            assert_eq!(EVENS[5], bv.access(5));
         }
 
         pub fn rank<BV: BitVector>(bv: BV) {
@@ -118,13 +124,12 @@ pub mod tests {
         pub const ODDS: &[bool] = &[true, false, true, false, true, false];
 
         pub fn access<BV: BitVector>(bv: BV) {
-            // TODO(rescrv): Uncomment
-            //assert_eq!(ODDS[0], bv.access(0));
-            //assert_eq!(ODDS[1], bv.access(1));
-            //assert_eq!(ODDS[2], bv.access(2));
-            //assert_eq!(ODDS[3], bv.access(3));
-            //assert_eq!(ODDS[4], bv.access(4));
-            //assert_eq!(ODDS[5], bv.access(5));
+            assert_eq!(ODDS[0], bv.access(0));
+            assert_eq!(ODDS[1], bv.access(1));
+            assert_eq!(ODDS[2], bv.access(2));
+            assert_eq!(ODDS[3], bv.access(3));
+            assert_eq!(ODDS[4], bv.access(4));
+            assert_eq!(ODDS[5], bv.access(5));
         }
 
         pub fn rank<BV: BitVector>(bv: BV) {
@@ -151,13 +156,12 @@ pub mod tests {
         pub const HALF_EMPTY: &[bool] = &[false, false, false, true, true, true];
 
         pub fn access<BV: BitVector>(bv: BV) {
-            // TODO(rescrv): Uncomment
-            //assert_eq!(HALF_EMPTY[0], bv.access(0));
-            //assert_eq!(HALF_EMPTY[1], bv.access(1));
-            //assert_eq!(HALF_EMPTY[2], bv.access(2));
-            //assert_eq!(HALF_EMPTY[3], bv.access(3));
-            //assert_eq!(HALF_EMPTY[4], bv.access(4));
-            //assert_eq!(HALF_EMPTY[5], bv.access(5));
+            assert_eq!(HALF_EMPTY[0], bv.access(0));
+            assert_eq!(HALF_EMPTY[1], bv.access(1));
+            assert_eq!(HALF_EMPTY[2], bv.access(2));
+            assert_eq!(HALF_EMPTY[3], bv.access(3));
+            assert_eq!(HALF_EMPTY[4], bv.access(4));
+            assert_eq!(HALF_EMPTY[5], bv.access(5));
         }
 
         pub fn rank<BV: BitVector>(bv: BV) {
