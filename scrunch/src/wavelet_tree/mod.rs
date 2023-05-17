@@ -1,7 +1,10 @@
+//////////////////////////////////////////// WaveletTree ///////////////////////////////////////////
+
 pub trait WaveletTree {
     fn new(s: &[usize]) -> Self;
 
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
 
     fn rank_q(&self, x: usize, q: usize) -> usize;
     fn select_q(&self, x: usize, q: usize) -> usize;
@@ -50,10 +53,10 @@ impl WaveletTree for ReferenceWaveletTree {
 }
 
 #[cfg(test)]
-mod tests {
-    pub use super::*;
+pub mod tests {
+    use super::*;
 
-    fn simple_evens<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
+    pub fn simple_evens<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
         // try 010101
         let wt = new(&[0, 1, 0, 1, 0, 1]);
         assert_eq!(0, wt.rank_q(0, 1));
@@ -81,7 +84,7 @@ mod tests {
         assert_eq!(4, wt.select_q(2, 0));
     }
 
-    fn simple_odds<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
+    pub fn simple_odds<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
         // try 101010
         let wt = new(&[1, 0, 1, 0, 1, 0]);
         assert_eq!(0, wt.rank_q(0, 1));
@@ -109,37 +112,35 @@ mod tests {
         assert_eq!(5, wt.select_q(2, 0));
     }
 
-    fn bug_31_select_q_0_1<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
+    pub fn bug_31_select_q_0_1<WT: WaveletTree>(new: fn(&[usize]) -> WT) {
         let wt = new(&[3, 1]);
         assert_eq!(1, wt.select_q(0, 1));
     }
 
-    // TODO(rescrv): Test proper bounds
-    //  assert_eq!(6, wt.select_q(3, 1));
-    //  should panic
-
     macro_rules! test_WaveletTree {
-        ($name:ident, $WT:tt) => {
+        ($name:ident, $WT:path) => {
             mod $name {
-                use super::*;
+                use $crate::wavelet_tree::WaveletTree;
+                use $crate::reference::*;
 
                 #[test]
                 fn simple_evens() {
-                    super::simple_evens($WT::new);
+                    $crate::wavelet_tree::tests::simple_evens(<$WT>::new);
                 }
 
                 #[test]
                 fn simple_odds() {
-                    super::simple_odds($WT::new);
+                    $crate::wavelet_tree::tests::simple_odds(<$WT>::new);
                 }
 
                 #[test]
                 fn bug_31_select_q_0_1() {
-                    super::bug_31_select_q_0_1($WT::new);
+                    $crate::wavelet_tree::tests::bug_31_select_q_0_1(<$WT>::new);
                 }
             }
         };
     }
 
+    pub(crate) use test_WaveletTree;
     test_WaveletTree!(reference, ReferenceWaveletTree);
 }
