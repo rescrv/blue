@@ -385,11 +385,11 @@ pub mod testutil {
         };
     }
 
-    pub const TODO_BANANA: &str = "banana";
-    pub const TODO_MISSISSIPPI: &str = "mississippi";
-    pub const TODO_MISSISSIPPIBANANA: &str = "mississippibanana";
-    pub const TODO_MIISSISSISSIPPI: &str = "miissississippi";
-    pub const TODO_MUTANT_BANANA: &str = "anbnanancanbncnanancna";
+    pub const STRING_BANANA: &str = "banana";
+    pub const STRING_MISSISSIPPI: &str = "mississippi";
+    pub const STRING_MISSISSIPPIBANANA: &str = "mississippibanana";
+    pub const STRING_MIISSISSISSIPPI: &str = "miissississippi";
+    pub const STRING_MUTANT_BANANA: &str = "anbnanancanbncnanancna";
 
     pub struct SearchResult<'a> {
         pub input: &'a str,
@@ -466,37 +466,37 @@ pub mod testutil {
     }
 
     pub const BANANA_AN: SearchResult = SearchResult {
-        input: TODO_BANANA,
+        input: STRING_BANANA,
         needle: "an",
         offsets: &[1, 3],
     };
 
     pub const BANANA_NA: SearchResult = SearchResult {
-        input: TODO_BANANA,
+        input: STRING_BANANA,
         needle: "na",
         offsets: &[2, 4],
     };
 
     pub const MISSISSIPPI_ISS: SearchResult = SearchResult {
-        input: TODO_MISSISSIPPI,
+        input: STRING_MISSISSIPPI,
         needle: "iss",
         offsets: &[1, 4],
     };
 
     pub const MISSISSIPPIBANANA_ISS: SearchResult = SearchResult {
-        input: TODO_MISSISSIPPIBANANA,
+        input: STRING_MISSISSIPPIBANANA,
         needle: "iss",
         offsets: &[1, 4],
     };
 
     pub const MIISSISSISSIPPI_ISS: SearchResult = SearchResult {
-        input: TODO_MIISSISSISSIPPI,
+        input: STRING_MIISSISSISSIPPI,
         needle: "iss",
         offsets: &[2, 5, 8],
     };
 
     pub const MUTANT_BANANA_AN: SearchResult = SearchResult {
-        input: TODO_MUTANT_BANANA,
+        input: STRING_MUTANT_BANANA,
         needle: "an",
         offsets: &[0, 4, 6, 9, 15, 17],
     };
