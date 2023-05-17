@@ -1,18 +1,23 @@
-use crate::bit_vector::BitVector;
-
-// TODO(rescrv): this should inherit bitvector
+/// A Dictionary takes a list of sorted key-value pairs and provides fast lookup over the key.
+/// Conceptually, there exists a values array of type &[V] and rank/select functions over the key
+/// return operations in value/key space respectively.
 pub trait Dictionary<V> {
+    /// Construct a new dictionary given the provided values.  A list [(k, v)] is interpreted to
+    /// provide the dictionary {k: v} assuming that k is in ascending order.  For adjacent `k_i`
+    /// and `k_j`, all `[k_i..k_j-1]` will be the value of `v_i`.
     fn new(d: &[(usize, V)]) -> Self;
 
-    fn lookup(&self, x: usize) -> &V;
+    /// Lookup the value `k` in the dictionary.  An implementation with rank and an array of values
+    /// can get by with &self.values[self.rank(x)].
+    fn lookup(&self, k: usize) -> &V;
 
-    fn rank(&self, x: usize) -> usize;
+    // Return the rank of key `k`.  This will be the index of `k` in the values array.
+    fn rank(&self, k: usize) -> usize;
+
+    /// Return the index of the i'th value.
     fn select(&self, x: usize) -> usize;
 
-    fn rankup(&self, x: usize) -> (usize, &V) {
-        (self.rank(x), self.lookup(x))
-    }
-
+    /// Perform a select and lookup in one.  This returns the i'th value out of |V| values.
     fn selectup(&self, s: usize) -> (usize, &V) {
         let x = self.select(s);
         (x, self.lookup(x))
@@ -67,31 +72,31 @@ where
     }
 }
 
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
 #[cfg(test)]
-mod tests {
-    use crate::bit_vector::ReferenceBitVector;
+pub mod tests {
+    use super::Dictionary;
 
-    use super::*;
-
-    fn panic_if_empty<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn panic_if_empty<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         new(&[]);
     }
 
-    fn panic_if_not_sorted<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn panic_if_not_sorted<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         new(&[(0, 50), (2, 135), (1, 85)]);
     }
 
-    fn panic_if_rank_too_high<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn panic_if_rank_too_high<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         let d = new(&[(1, 35)]);
         d.lookup(2);
     }
 
-    fn panic_if_rank_too_low<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn panic_if_rank_too_low<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         let d = new(&[(1, 35)]);
         d.lookup(0);
     }
 
-    fn simple_zero<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn simple_zero<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         let d = new(&[(0, 35), (1, 50), (3, 85), (6, 70), (10, 200)]);
         assert_eq!(35, *d.lookup(0));
         assert_eq!(50, *d.lookup(1));
@@ -106,8 +111,9 @@ mod tests {
         assert_eq!(200, *d.lookup(10));
     }
 
-    fn simple_offset<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn simple_offset<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         let d = new(&[(1, 35), (2, 50), (4, 85), (8, 70), (16, 200)]);
+        // Lookup
         assert_eq!(35, *d.lookup(1));
         assert_eq!(50, *d.lookup(2));
         assert_eq!(50, *d.lookup(3));
@@ -124,9 +130,26 @@ mod tests {
         assert_eq!(70, *d.lookup(14));
         assert_eq!(70, *d.lookup(15));
         assert_eq!(200, *d.lookup(16));
+        // Rank
+        assert_eq!(0, d.rank(1));
+        assert_eq!(1, d.rank(2));
+        assert_eq!(1, d.rank(3));
+        assert_eq!(2, d.rank(4));
+        assert_eq!(2, d.rank(5));
+        assert_eq!(2, d.rank(6));
+        assert_eq!(2, d.rank(7));
+        assert_eq!(3, d.rank(8));
+        assert_eq!(3, d.rank(9));
+        assert_eq!(3, d.rank(10));
+        assert_eq!(3, d.rank(11));
+        assert_eq!(3, d.rank(12));
+        assert_eq!(3, d.rank(13));
+        assert_eq!(3, d.rank(14));
+        assert_eq!(3, d.rank(15));
+        assert_eq!(4, d.rank(16));
     }
 
-    fn bug_selectup_rankup_1<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
+    pub fn bug_selectup_rankup_1<D: Dictionary<u64>>(new: fn(&[(usize, u64)]) -> D) {
         const INPUT: &[(usize, u64)] = &[
             (2, 2),
             (3, 3),
@@ -147,51 +170,54 @@ mod tests {
     }
 
     macro_rules! test_Dictionary {
-        ($name:ident, $D:tt) => {
+        ($name:ident, $D:path) => {
             mod $name {
-                use super::*;
+                use $crate::dictionary::Dictionary;
+                use $crate::reference::*;
 
                 #[test]
                 #[should_panic]
                 fn panic_if_empty() {
-                    super::panic_if_empty($D::new);
+                    $crate::dictionary::tests::panic_if_empty(<$D>::new);
                 }
 
                 #[test]
                 #[should_panic]
                 fn panic_if_not_sorted() {
-                    super::panic_if_not_sorted($D::new);
+                    $crate::dictionary::tests::panic_if_not_sorted(<$D>::new);
                 }
 
                 #[test]
                 #[should_panic]
                 fn panic_if_rank_too_high() {
-                    super::panic_if_rank_too_high($D::new);
+                    $crate::dictionary::tests::panic_if_rank_too_high(<$D>::new);
                 }
 
                 #[test]
                 #[should_panic]
                 fn panic_if_rank_too_low() {
-                    super::panic_if_rank_too_low($D::new);
+                    $crate::dictionary::tests::panic_if_rank_too_low(<$D>::new);
                 }
 
                 #[test]
                 fn simple_zero() {
-                    super::simple_zero($D::new);
+                    $crate::dictionary::tests::simple_zero(<$D>::new);
                 }
 
                 #[test]
                 fn simple_offset() {
-                    super::simple_offset($D::new);
+                    $crate::dictionary::tests::simple_offset(<$D>::new);
                 }
 
                 #[test]
                 fn bug_selectup_rankup_1() {
-                    super::bug_selectup_rankup_1($D::new);
+                    $crate::dictionary::tests::bug_selectup_rankup_1(<$D>::new);
                 }
             }
         };
     }
+
+    pub(crate) use test_Dictionary;
 
     type TestReferenceDictionary = ReferenceDictionary<ReferenceBitVector, u64>;
     test_Dictionary!(reference, TestReferenceDictionary);
