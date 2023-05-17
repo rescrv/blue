@@ -1,13 +1,25 @@
+///////////////////////////////////////////// BitVector ////////////////////////////////////////////
+
+/// A [BitVector] is a sequence of 0 and 1 valued items.
 pub trait BitVector {
+    /// Create a new [BitVector] from the provided bits.  Can be assumed to be less than sparse.
     fn new(bv: &[bool]) -> Self;
+    /// Create a new sparse bit vector from the indexed bits.
     fn sparse(bv: &[usize]) -> Self;
 
+    /// The length of this [BitVector].  Always one more than the highest bit.
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool { self.len() == 0 }
 
+    /// Computes `rank[x]`, the number of bits set at i < x.
     fn rank(&self, x: usize) -> usize;
+    /// Select the x'th bit from this set.  An index.
     fn select(&self, x: usize) -> usize;
 }
 
+//////////////////////////////////////// ReferenceBitVector ////////////////////////////////////////
+
+/// A [ReferenceBitVector] provides an inefficient, but easy to understand and verify, bit vector.
 pub struct ReferenceBitVector {
     bv: Vec<bool>,
     ranks: Vec<usize>,
