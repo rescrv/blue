@@ -19,6 +19,7 @@ members = [
     "prototk",
     "prototk_derive",
     "rivulet",
+    "scrunch",
     "setsum",
     "sst",
     "sync42",
