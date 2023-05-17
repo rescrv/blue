@@ -334,6 +334,20 @@ pub mod testutil {
         lmspos: "  * * *  * * * * * *  *",
     };
 
+    pub const SAIS_EXAMPLE: &TestCase = &TestCase {
+        text: "baabababbab",
+        sigma2text: &['a', 'b'],
+        boundaries: &[1, 6, 12],
+        not_in_str: &['c', 'd', 'e'],
+        S: &[2, 1, 1, 2, 1, 2, 1, 2, 2, 1, 2, 0],
+        SA: &[11, 1, 9, 2, 4, 6, 10, 0, 8, 3, 5, 7],
+        bucket_starts: &[0, 1, 6],
+        bucket_limits: &[1, 6, 12],
+        deref_SA: &[0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
+        lstype: "LSSLSLSLLSLS",
+        lmspos: " *  * *  * *",
+    };
+
     #[macro_export]
     macro_rules! test_cases_for {
         ($name:ident, $check:path) => {
@@ -361,6 +375,11 @@ pub mod testutil {
                 #[test]
                 fn mutant_banana() {
                     $check($crate::testutil::MUTANT_BANANA);
+                }
+
+                #[test]
+                fn sais_example() {
+                    $check($crate::testutil::SAIS_EXAMPLE);
                 }
             }
         };
