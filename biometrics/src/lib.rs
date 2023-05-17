@@ -253,6 +253,7 @@ impl Emitter for PlainTextEmitter {
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
+        // TODO(rescrv):  Output the algebraic value, not the computed values.
         self.output.write_fmt(format_args!(
             "{} {} {} {} {} {} {}\n",
             label,
