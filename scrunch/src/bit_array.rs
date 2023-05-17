@@ -1,3 +1,5 @@
+use buffertk::Buffer;
+
 ///////////////////////////////////////////// BitArray /////////////////////////////////////////////
 
 /// A [BitArray] is a sequence of bits, from which variable-size words can be drawn from adjacent
@@ -7,6 +9,27 @@ pub struct BitArray<'a> {
 }
 
 impl<'a> BitArray<'a> {
+    pub fn construct<I: Iterator<Item=bool>>(iter: I) -> Buffer {
+        let mut bit = 0usize;
+        let mut byte = 0u8;
+        let mut bytes = Vec::new();
+        for b in iter {
+            if bit == 8 {
+                bytes.push(byte);
+                bit = 0;
+                byte = 0;
+            }
+            if b {
+                byte |= 1 << bit;
+            }
+            bit += 1;
+        }
+        if bit > 0 {
+            bytes.push(byte);
+        }
+        Buffer::from(&bytes)
+    }
+
     pub fn new(bytes: &'a [u8]) -> Self {
         Self {
             bytes,
@@ -140,5 +163,12 @@ mod tests {
         assert_eq!(0x1eaff00d00c0ffeeu64, ba.load(0, 62));
         assert_eq!(0x1eaff00d00c0ffeeu64, ba.load(0, 63));
         assert_eq!(0x1eaff00d00c0ffeeu64, ba.load(0, 64));
+    }
+
+    #[test]
+    fn construct() {
+        let fib = [true, true, false, true, false, false, true, false, false, false, false, true];
+        let buf = BitArray::construct(fib.iter().copied());
+        assert_eq!([75, 8], buf.as_bytes());
     }
 }
