@@ -2,13 +2,12 @@
 //! string in linear time in the length of the string.  A suffix array contains all possible
 //! suffixes of a string in sorted order such that SA[i] indicates that S[i..] would be the i'th
 //! suffix in sorted order.
-
 #![allow(non_snake_case)]
 
 use std::hash::Hash;
 
-use crate::bit_vector::BitVector;
-use crate::sigma::Sigma;
+use super::bit_vector::BitVector;
+use super::sigma::Sigma;
 
 /// LSType is an indication of how a character relates to those charcters that follow it.  An
 /// L-type character indicates the character is larger than the character that follows it.  An
@@ -25,9 +24,7 @@ fn get_types(S: &[usize]) -> Vec<LSType> {
     let mut prev = (LSType::S, 0);
     let mut types = Vec::with_capacity(S.len());
     for &s in S.iter().rev() {
-        prev = if s < prev.1 {
-            (LSType::S, s)
-        } else if s == prev.1 && prev.0 == LSType::S {
+        prev = if s < prev.1 || (s == prev.1 && prev.0 == LSType::S) {
             (LSType::S, s)
         } else {
             (LSType::L, s)
@@ -112,7 +109,7 @@ where
                                              // The input and "output" must be aligned.
     assert!(S.len() == SA.len());
     // The last character should be zero, which also requires there to be a last character.
-    assert!(S.len() > 0);
+    assert!(!S.is_empty());
     assert_eq!(S[S.len() - 1], 0);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -173,14 +170,14 @@ where
     let buckets: &mut [usize] = &mut vec![0; sigma.K()];
     sigma.bucket_limits(buckets);
     // We will use usize::max_value() as a sentinel to mean "empty" throughout the computation.
-    for i in 0..S.len() {
-        SA[i] = usize::max_value();
+    for item in SA.iter_mut().take(S.len()) {
+        *item = usize::max_value();
     }
     // Place the LMSes at the end of their respective buckets.
     // After this loop, SA will look like this:
     // SA = [11, _, 9, 6, 4, 1, _, _, _, _, _, _]
     for i in 0..S.len() {
-        if is_lms(&T, i) {
+        if is_lms(T, i) {
             buckets[S[i]] -= 1;
             SA[buckets[S[i]]] = i;
         }
@@ -189,26 +186,26 @@ where
     //
     // Do a left-to-right induced-L pass:
     // SA = [11, _, 9, 6, 4, 1, 10, 8, 5, 3, 0, 7]
-    induce_L(sigma, S, SA, &T, buckets);
+    induce_L(sigma, S, SA, T, buckets);
     // And then an induce-S pass:
     // SA = [11, 1, 9, 4, 2, 6, 10, 8, 5, 3, 0, 7]
     // Note how this differs from the expected SA:
     // SA = [11, 1, 9, 2, 4, 6, 10, 0, 8, 3, 5, 7]
-    induce_S(sigma, S, SA, &T, buckets);
+    induce_S(sigma, S, SA, T, buckets);
     // 3.  Construct a subproblem using the LMS suffixes.
     let mut substrings = 0;
     // First, collect the LMS suffixes in the order they appear in the almost-sorted SA.  After
     // this loop:
     // SA[..substrings] = [11, 1, 9, 4, 6]
     for i in 0..S.len() {
-        if is_lms(&T, SA[i]) {
+        if is_lms(T, SA[i]) {
             SA[substrings] = SA[i];
             substrings += 1;
         }
     }
     // Clear the rest of the SA so that we have scratch space.
-    for i in substrings..S.len() {
-        SA[i] = usize::max_value();
+    for item in SA.iter_mut().take(S.len()).skip(substrings) {
+        *item = usize::max_value();
     }
     let mut name = 0;
     let mut prev = usize::max_value(); // sentinel used on first pass
@@ -236,7 +233,7 @@ where
                 break;
             // One of the strings terminated earlier than the other, but their symbols are the
             // same.
-            } else if d > 0 && (is_lms(&T, pos + d) || is_lms(&T, prev + d)) {
+            } else if d > 0 && (is_lms(T, pos + d) || is_lms(T, prev + d)) {
                 break;
             }
         }
@@ -295,7 +292,7 @@ where
     // S1 = [1, 4, 6, 9, 11]
     let mut j = 0; // enumerate the substrings
     for i in 0..S.len() {
-        if is_lms(&T, i) {
+        if is_lms(T, i) {
             S1[j] = i;
             j += 1;
         }
@@ -315,8 +312,8 @@ where
     // We used other parts of SA, too, so wipe those parts and make them empty:
     //
     // SA = [11, 1, 9, 4, 6, _, _, _, _, _, _, _]
-    for i in substrings..S.len() {
-        SA[i] = usize::max_value();
+    for item in SA.iter_mut().take(S.len()).skip(substrings) {
+        *item = usize::max_value();
     }
     // Place the LMS strings into SA in reverse order.  We do this in reverse because the
     // subsolution (and thus the number of substrings to place) is guaranteed to be at most half of
@@ -342,16 +339,16 @@ where
     //
     // Here's what it looks like after the L-type pass:
     // SA = [11, _, 1, 9, 4, 6, 10, 0, 8, 3, 5, 7]
-    induce_L(sigma, S, SA, &T, buckets);
+    induce_L(sigma, S, SA, T, buckets);
     // Here's what it looks like after the S-type pass:
     // SA = [11, 1, 9, 2, 4, 6, 10, 0, 8, 3, 5, 7]
-    induce_S(sigma, S, SA, &T, buckets);
+    induce_S(sigma, S, SA, T, buckets);
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::test_cases_for;
-    use crate::testutil::TestCase;
+    use super::super::test_cases_for;
+    use super::super::testutil::TestCase;
 
     use super::*;
 
@@ -365,7 +362,7 @@ mod tests {
         assert_eq!(&types, &returned);
     }
 
-    test_cases_for!(get_types, crate::sais::tests::check_get_types);
+    test_cases_for!(get_types, super::super::super::sais::tests::check_get_types);
 
     fn check_is_lms(t: &TestCase) {
         let types = get_types(&t.S);
@@ -377,7 +374,7 @@ mod tests {
         assert_eq!(t.lmspos, returned);
     }
 
-    test_cases_for!(is_lms, crate::sais::tests::check_is_lms);
+    test_cases_for!(is_lms, super::super::super::sais::tests::check_is_lms);
 
     fn check_sais(t: &TestCase) {
         let sigma = t.sigma();
@@ -387,5 +384,5 @@ mod tests {
         assert_eq!(t.SA, SA);
     }
 
-    test_cases_for!(sais, crate::sais::tests::check_sais);
+    test_cases_for!(sais, super::super::super::sais::tests::check_sais);
 }
