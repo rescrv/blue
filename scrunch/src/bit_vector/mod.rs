@@ -2,8 +2,9 @@ pub mod rrr;
 
 ///////////////////////////////////////////// BitVector ////////////////////////////////////////////
 
-/// A [BitVector] is a sequence of 0 and 1 valued items.
-pub trait BitVector {
+/// An [OldBitVector] is a sequence of 0 and 1 valued items.  It is called old because it is the
+/// old interface.
+pub trait OldBitVector {
     /// Create a new [BitVector] from the provided bits.  Can be assumed to be less than sparse.
     fn new(bv: &[bool]) -> Self;
     /// Create a new sparse bit vector from the indexed bits.
@@ -30,7 +31,7 @@ pub struct ReferenceBitVector {
     selects: Vec<usize>,
 }
 
-impl BitVector for ReferenceBitVector {
+impl OldBitVector for ReferenceBitVector {
     fn new(bv: &[bool]) -> Self {
         let mut ranks = Vec::with_capacity(bv.len() + 1);
         let mut selects = Vec::with_capacity(bv.len() + 1);
@@ -87,11 +88,11 @@ impl BitVector for ReferenceBitVector {
 #[cfg(test)]
 pub mod tests {
     pub mod evens {
-        use super::super::BitVector;
+        use super::super::OldBitVector;
 
         pub const EVENS: &[bool] = &[false, true, false, true, false, true];
 
-        pub fn access<BV: BitVector>(bv: BV) {
+        pub fn access<BV: OldBitVector>(bv: BV) {
             assert_eq!(EVENS[0], bv.access(0));
             assert_eq!(EVENS[1], bv.access(1));
             assert_eq!(EVENS[2], bv.access(2));
@@ -100,7 +101,7 @@ pub mod tests {
             assert_eq!(EVENS[5], bv.access(5));
         }
 
-        pub fn rank<BV: BitVector>(bv: BV) {
+        pub fn rank<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(0, bv.rank(1));
             assert_eq!(1, bv.rank(2));
@@ -110,7 +111,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: BitVector>(bv: BV) {
+        pub fn select<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(2, bv.select(1));
             assert_eq!(4, bv.select(2));
@@ -119,11 +120,11 @@ pub mod tests {
     }
 
     pub mod odds {
-        use super::super::BitVector;
+        use super::super::OldBitVector;
 
         pub const ODDS: &[bool] = &[true, false, true, false, true, false];
 
-        pub fn access<BV: BitVector>(bv: BV) {
+        pub fn access<BV: OldBitVector>(bv: BV) {
             assert_eq!(ODDS[0], bv.access(0));
             assert_eq!(ODDS[1], bv.access(1));
             assert_eq!(ODDS[2], bv.access(2));
@@ -132,7 +133,7 @@ pub mod tests {
             assert_eq!(ODDS[5], bv.access(5));
         }
 
-        pub fn rank<BV: BitVector>(bv: BV) {
+        pub fn rank<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(1, bv.rank(1));
             assert_eq!(1, bv.rank(2));
@@ -142,7 +143,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: BitVector>(bv: BV) {
+        pub fn select<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(1, bv.select(1));
             assert_eq!(3, bv.select(2));
@@ -151,11 +152,11 @@ pub mod tests {
     }
 
     pub mod half_empty {
-        use super::super::BitVector;
+        use super::super::OldBitVector;
 
         pub const HALF_EMPTY: &[bool] = &[false, false, false, true, true, true];
 
-        pub fn access<BV: BitVector>(bv: BV) {
+        pub fn access<BV: OldBitVector>(bv: BV) {
             assert_eq!(HALF_EMPTY[0], bv.access(0));
             assert_eq!(HALF_EMPTY[1], bv.access(1));
             assert_eq!(HALF_EMPTY[2], bv.access(2));
@@ -164,7 +165,7 @@ pub mod tests {
             assert_eq!(HALF_EMPTY[5], bv.access(5));
         }
 
-        pub fn rank<BV: BitVector>(bv: BV) {
+        pub fn rank<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(0, bv.rank(1));
             assert_eq!(0, bv.rank(2));
@@ -174,7 +175,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: BitVector>(bv: BV) {
+        pub fn select<BV: OldBitVector>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(4, bv.select(1));
             assert_eq!(5, bv.select(2));
@@ -186,7 +187,7 @@ pub mod tests {
         ($name:ident, $BV:path) => {
             mod $name {
                 mod evens {
-                    use $crate::bit_vector::{BitVector, ReferenceBitVector};
+                    use $crate::bit_vector::{OldBitVector, ReferenceBitVector};
 
                     #[test]
                     fn access() {
@@ -211,7 +212,7 @@ pub mod tests {
                 }
 
                 mod odds {
-                    use $crate::bit_vector::BitVector;
+                    use $crate::bit_vector::OldBitVector;
                     use $crate::reference::*;
 
                     #[test]
@@ -237,7 +238,7 @@ pub mod tests {
                 }
 
                 mod half_empty {
-                    use $crate::bit_vector::BitVector;
+                    use $crate::bit_vector::OldBitVector;
                     use $crate::reference::*;
 
                     #[test]

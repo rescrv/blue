@@ -32,7 +32,7 @@ where
     T: Copy + Clone + Eq + Hash + Ord,
     SA: SuffixArray,
     ISA: InverseSuffixArray,
-    C: bit_vector::BitVector,
+    C: bit_vector::OldBitVector,
     P: psi::Psi,
 {
     // Translate indices to characters.
@@ -103,7 +103,7 @@ where
     T: Copy + Clone + Eq + Hash + Ord,
     SA: SuffixArray,
     ISA: InverseSuffixArray,
-    SIG: bit_vector::BitVector,
+    SIG: bit_vector::OldBitVector,
     PSI: psi::Psi,
 {
     pub fn new(input: &[T]) -> SearchIndex<T, SA, ISA, SIG, PSI> {
@@ -162,7 +162,7 @@ where
     T: Copy + Clone + Eq + Hash + Ord,
     SA: SuffixArray,
     ISA: InverseSuffixArray,
-    C: bit_vector::BitVector,
+    C: bit_vector::OldBitVector,
     P: psi::Psi,
 {
     type Item = T;

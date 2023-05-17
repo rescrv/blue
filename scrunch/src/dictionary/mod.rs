@@ -1,4 +1,4 @@
-use super::bit_vector::BitVector;
+use super::bit_vector::OldBitVector;
 
 /// A Dictionary takes a list of sorted key-value pairs and provides fast lookup over the key.
 /// Conceptually, there exists a values array of type &[V] and rank/select functions over the key
@@ -28,7 +28,7 @@ pub trait Dictionary<V> {
 
 pub struct ReferenceDictionary<B, V>
 where
-    B: BitVector,
+    B: OldBitVector,
 {
     offset: usize,
     keys: B,
@@ -37,7 +37,7 @@ where
 
 impl<B, V> Dictionary<V> for ReferenceDictionary<B, V>
 where
-    B: BitVector,
+    B: OldBitVector,
     V: Copy,
 {
     fn new(d: &[(usize, V)]) -> Self {

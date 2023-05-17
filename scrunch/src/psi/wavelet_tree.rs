@@ -29,7 +29,7 @@ where
     fn new<T, B>(sigma: &crate::Sigma<T, B>, psi: &[usize]) -> Self
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         let mut ctx: [usize; CTX] = [0; CTX];
         // compute the inverse of psi so that we can bounce around the columns in order
@@ -133,7 +133,7 @@ where
     fn lookup<T, B>(&self, sigma: &crate::Sigma<T, B>, idx: usize) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         assert!(idx == 0 || self.table.len() > 0);
         // empty table case
@@ -158,7 +158,7 @@ where
     ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         assert!(range.0 <= range.1);
         assert!(range.1 <= self.len());
@@ -193,7 +193,7 @@ where
     ) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         assert!(self.table.len() > 0);
         assert!(into.0 <= into.1);

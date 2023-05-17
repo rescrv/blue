@@ -18,12 +18,12 @@ pub trait Psi {
     fn new<T, B>(sigma: &Sigma<T, B>, psi: &[usize]) -> Self
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector;
+        B: crate::bit_vector::OldBitVector;
     fn len(&self) -> usize;
     fn lookup<T, B>(&self, sigma: &crate::Sigma<T, B>, idx: usize) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector;
+        B: crate::bit_vector::OldBitVector;
     fn constrain<T, B>(
         &self,
         sigma: &crate::Sigma<T, B>,
@@ -32,7 +32,7 @@ pub trait Psi {
     ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector;
+        B: crate::bit_vector::OldBitVector;
 }
 
 pub struct ReferencePsi {
@@ -43,7 +43,7 @@ impl Psi for ReferencePsi {
     fn new<T, B>(_sigma: &Sigma<T, B>, psi: &[usize]) -> Self
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         Self { psi: psi.to_vec() }
     }
@@ -55,7 +55,7 @@ impl Psi for ReferencePsi {
     fn lookup<T, B>(&self, _sigma: &Sigma<T, B>, idx: usize) -> usize
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         self.psi[idx]
     }
@@ -68,7 +68,7 @@ impl Psi for ReferencePsi {
     ) -> (usize, usize)
     where
         T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::BitVector,
+        B: crate::bit_vector::OldBitVector,
     {
         let start = match self.psi[range.0..range.1].binary_search_by(|probe| probe.cmp(&into.0)) {
             Ok(x) => x,

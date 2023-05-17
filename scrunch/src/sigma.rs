@@ -7,12 +7,12 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::iter::FromIterator;
 
-use crate::bit_vector::BitVector;
+use crate::bit_vector::OldBitVector;
 
 /// Sigma represents an alphabet.
 pub struct Sigma<T, B>
 where
-    B: BitVector,
+    B: OldBitVector,
 {
     sigma_to_char: Vec<T>,
     char_to_sigma: HashMap<T, usize>,
@@ -22,7 +22,7 @@ where
 impl<T, B> From<&[T]> for Sigma<T, B>
 where
     T: Copy + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     fn from(text: &[T]) -> Self {
         text.iter().map(|&x| x).collect()
@@ -32,7 +32,7 @@ where
 impl<T, B> FromIterator<T> for Sigma<T, B>
 where
     T: Copy + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         // count each character
@@ -84,7 +84,7 @@ where
 
 impl<B> Sigma<usize, B>
 where
-    B: BitVector,
+    B: OldBitVector,
 {
     /// from_subproblem creates a Sigma suitable for representing the provided subproblem of the
     /// suffix array-induced sort algorithm (see module sais).
@@ -103,7 +103,7 @@ where
 impl<T, B> Sigma<T, B>
 where
     T: Copy + Clone + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     /// K is the number of unique characters (including sentinels) in this alphabet.
     #[allow(non_snake_case)]

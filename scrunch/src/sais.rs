@@ -6,7 +6,7 @@
 
 use std::hash::Hash;
 
-use super::bit_vector::BitVector;
+use super::bit_vector::OldBitVector;
 use super::sigma::Sigma;
 
 /// LSType is an indication of how a character relates to those charcters that follow it.  An
@@ -55,7 +55,7 @@ fn induce_L<T, B>(
     buckets: &mut [usize],
 ) where
     T: Copy + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     sigma.bucket_starts(buckets);
     for i in 0..S.len() {
@@ -78,7 +78,7 @@ fn induce_S<T, B>(
     buckets: &mut [usize],
 ) where
     T: Copy + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     sigma.bucket_limits(buckets);
     for i in (0..S.len()).rev() {
@@ -101,7 +101,7 @@ fn induce_S<T, B>(
 pub fn sais<T, B>(sigma: &Sigma<T, B>, S: &[usize], SA: &mut [usize])
 where
     T: Copy + Eq + Hash + Ord,
-    B: BitVector,
+    B: OldBitVector,
 {
     // We need some space for sentinels in the lang.
     assert!(sigma.K() <= S.len());
