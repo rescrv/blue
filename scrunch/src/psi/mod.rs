@@ -82,8 +82,12 @@ impl Psi for ReferencePsi {
     }
 }
 
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
 #[cfg(test)]
-mod tests {
+pub mod tests {
+    use super::super::psi::wavelet_tree::WaveletTreePsi;
+    use super::super::reference::{ReferenceDictionary, ReferenceBitVector, ReferenceWaveletTree};
     use super::*;
 
     // this is the isa for mississippi
@@ -104,31 +108,31 @@ mod tests {
         assert_eq!(PSI, returned);
     }
 
-    fn len<P>(new: fn(&Sigma<char, crate::bit_vector::ReferenceBitVector>, &[usize]) -> P)
+    pub fn len<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
+        let sigma = Sigma::test_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         assert_eq!(12, psi.len());
     }
 
-    fn lookup<P>(new: fn(&Sigma<char, crate::bit_vector::ReferenceBitVector>, &[usize]) -> P)
+    pub fn lookup<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
+        let sigma = Sigma::test_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         for i in 0..PSI.len() {
             assert_eq!(PSI[i], psi.lookup(&sigma, i));
         }
     }
 
-    fn constrain<P>(new: fn(&Sigma<char, crate::bit_vector::ReferenceBitVector>, &[usize]) -> P)
+    pub fn constrain<P>(new: fn(&Sigma<char, ReferenceBitVector>, &[usize]) -> P)
     where
         P: Psi,
     {
-        let sigma = Sigma::dirty_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
+        let sigma = Sigma::test_hack(&['i', 'm', 'p', 's'], &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0]);
         let psi = new(&sigma, PSI);
         for (expect, range, into) in CONSTRAIN {
             let result = psi.constrain(&sigma, *range, *into);
@@ -143,39 +147,30 @@ mod tests {
     // TODO(rescrv): bad cases, like OOB and multi-column ranges
 
     macro_rules! test_Psi {
-        ($name:ident, $PSI:expr) => {
+        ($name:ident, $PSI:path) => {
             mod $name {
-                use super::*;
+                use $crate::psi::Psi;
+                use $crate::reference::*;
 
                 #[test]
                 fn len() {
-                    super::len($PSI);
+                    $crate::psi::tests::len(<$PSI>::new);
                 }
 
                 #[test]
                 fn lookup() {
-                    super::lookup($PSI);
+                    $crate::psi::tests::lookup(<$PSI>::new);
                 }
 
                 #[test]
                 fn constrain() {
-                    super::constrain($PSI);
+                    $crate::psi::tests::constrain(<$PSI>::new);
                 }
             }
         };
     }
 
-    test_Psi!(reference, ReferencePsi::new);
+    pub(crate) use test_Psi;
 
-    use crate::bit_vector::ReferenceBitVector;
-    use crate::dictionary::ReferenceDictionary;
-    use crate::psi::wavelet_tree::WaveletTreePsi;
-    use crate::wavelet_tree::ReferenceWaveletTree;
-    test_Psi!(
-        wavelet_tree,
-        WaveletTreePsi::<
-            ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
-            ReferenceWaveletTree,
-        >::new
-    );
+    test_Psi!(reference, ReferencePsi::new);
 }

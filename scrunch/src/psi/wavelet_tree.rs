@@ -230,3 +230,14 @@ where
         start_of_cell + wt.rank_q(point - self.table[*context].start, column)
     }
 }
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+super::tests::test_Psi!(
+    tests,
+    super::WaveletTreePsi::<
+        ReferenceDictionary<ReferenceBitVector, (usize, usize)>,
+        ReferenceWaveletTree,
+    >
+);
