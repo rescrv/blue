@@ -1,6 +1,95 @@
+use buffertk::{Buffer, Unpackable};
+
+use super::bit_array::BitArray;
+use super::Error;
+
 pub mod rrr;
 
 ///////////////////////////////////////////// BitVector ////////////////////////////////////////////
+
+pub trait BitVector<'a>: Unpackable<'a> {
+    /// Construct a new bit vector and return its representation as a vector of bytes.
+    fn construct<I: Iterator<Item=bool>>(iter: I) -> Buffer;
+
+    /// The length of this [BitVector].  Always one more than the highest bit.
+    fn len(&self) -> usize;
+    /// A [BitVector] `is_empty` when it has zero bits.
+    fn is_empty(&self) -> bool { self.len() == 0 }
+
+    /// Computes `access[x]`, the value of the x'th bit.
+    fn access(&self, x: usize) -> bool;
+    /// Computes `rank[x]`, the number of bits set at i < x.
+    fn rank(&self, x: usize) -> usize;
+    /// Select the x'th bit from this set.  An index.
+    fn select(&self, x: usize) -> usize;
+}
+
+//////////////////////////////////////// ReferenceBitVector ////////////////////////////////////////
+
+/// A [ReferenceBitVector] provides an inefficient, but easy to understand and verify, bit vector.
+pub struct ReferenceBitVector {
+    bits: Vec<bool>,
+    ranks: Vec<usize>,
+    selects: Vec<usize>,
+}
+
+impl<'a> Unpackable<'a> for ReferenceBitVector {
+    type Error = Error;
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let mut bits = Vec::with_capacity(buf.len() * 8);
+        for byte in buf {
+            for bit in 0..8 {
+                bits.push(byte & (1 << bit) != 0)
+            }
+        }
+        let mut ranks = Vec::with_capacity(bits.len() + 1);
+        let mut selects = Vec::with_capacity(bits.len() + 1);
+        let mut rank: usize = 0;
+        selects.push(0);
+        for i in 0..bits.len() {
+            ranks.push(rank);
+            if bits[i] {
+                rank += 1;
+                selects.push(i + 1);
+            }
+        }
+        ranks.push(rank);
+        Ok((Self {
+            bits,
+            ranks,
+            selects,
+        }, &[]))
+    }
+}
+
+impl<'a> BitVector<'a> for ReferenceBitVector {
+    fn construct<I: Iterator<Item=bool>>(iter: I) -> Buffer {
+        BitArray::construct(iter)
+    }
+
+    fn len(&self) -> usize {
+        self.bits.len()
+    }
+
+    fn access(&self, x: usize) -> bool {
+        assert!(x < self.bits.len());
+        self.bits[x]
+    }
+
+    fn rank(&self, x: usize) -> usize {
+        assert!(x <= self.bits.len());
+        self.ranks[x]
+    }
+
+    fn select(&self, x: usize) -> usize {
+        assert!(x <= self.rank(self.bits.len()));
+        self.selects[x]
+    }
+}
+
+
+
+/////////////////////////////////////////// OldBitVector ///////////////////////////////////////////
 
 /// An [OldBitVector] is a sequence of 0 and 1 valued items.  It is called old because it is the
 /// old interface.
@@ -88,11 +177,11 @@ impl OldBitVector for ReferenceOldBitVector {
 #[cfg(test)]
 pub mod tests {
     pub mod evens {
-        use super::super::OldBitVector;
+        use super::super::BitVector;
 
         pub const EVENS: &[bool] = &[false, true, false, true, false, true];
 
-        pub fn access<BV: OldBitVector>(bv: BV) {
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(EVENS[0], bv.access(0));
             assert_eq!(EVENS[1], bv.access(1));
             assert_eq!(EVENS[2], bv.access(2));
@@ -101,7 +190,7 @@ pub mod tests {
             assert_eq!(EVENS[5], bv.access(5));
         }
 
-        pub fn rank<BV: OldBitVector>(bv: BV) {
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(0, bv.rank(1));
             assert_eq!(1, bv.rank(2));
@@ -111,7 +200,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: OldBitVector>(bv: BV) {
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(2, bv.select(1));
             assert_eq!(4, bv.select(2));
@@ -120,11 +209,11 @@ pub mod tests {
     }
 
     pub mod odds {
-        use super::super::OldBitVector;
+        use super::super::BitVector;
 
         pub const ODDS: &[bool] = &[true, false, true, false, true, false];
 
-        pub fn access<BV: OldBitVector>(bv: BV) {
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(ODDS[0], bv.access(0));
             assert_eq!(ODDS[1], bv.access(1));
             assert_eq!(ODDS[2], bv.access(2));
@@ -133,7 +222,7 @@ pub mod tests {
             assert_eq!(ODDS[5], bv.access(5));
         }
 
-        pub fn rank<BV: OldBitVector>(bv: BV) {
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(1, bv.rank(1));
             assert_eq!(1, bv.rank(2));
@@ -143,7 +232,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: OldBitVector>(bv: BV) {
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(1, bv.select(1));
             assert_eq!(3, bv.select(2));
@@ -152,11 +241,11 @@ pub mod tests {
     }
 
     pub mod half_empty {
-        use super::super::OldBitVector;
+        use super::super::BitVector;
 
         pub const HALF_EMPTY: &[bool] = &[false, false, false, true, true, true];
 
-        pub fn access<BV: OldBitVector>(bv: BV) {
+        pub fn access<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(HALF_EMPTY[0], bv.access(0));
             assert_eq!(HALF_EMPTY[1], bv.access(1));
             assert_eq!(HALF_EMPTY[2], bv.access(2));
@@ -165,7 +254,7 @@ pub mod tests {
             assert_eq!(HALF_EMPTY[5], bv.access(5));
         }
 
-        pub fn rank<BV: OldBitVector>(bv: BV) {
+        pub fn rank<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.rank(0));
             assert_eq!(0, bv.rank(1));
             assert_eq!(0, bv.rank(2));
@@ -175,7 +264,7 @@ pub mod tests {
             assert_eq!(3, bv.rank(6));
         }
 
-        pub fn select<BV: OldBitVector>(bv: BV) {
+        pub fn select<'a, BV: BitVector<'a>>(bv: BV) {
             assert_eq!(0, bv.select(0));
             assert_eq!(4, bv.select(1));
             assert_eq!(5, bv.select(2));
@@ -187,79 +276,83 @@ pub mod tests {
         ($name:ident, $BV:path) => {
             mod $name {
                 mod evens {
-                    use $crate::bit_vector::{OldBitVector, ReferenceOldBitVector};
+                    use buffertk::Unpackable;
+                    use $crate::bit_vector::BitVector;
+
+                    fn bitvector() -> $BV {
+                        let iter = $crate::bit_vector::tests::evens::EVENS.iter().copied();
+                        let binding = <$BV>::construct(iter);
+                        let bytes: &[u8] = binding.as_bytes();
+                        <$BV>::unpack(bytes).unwrap().0
+                    }
 
                     #[test]
                     fn access() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::evens::access(bv);
+                        $crate::bit_vector::tests::evens::access(bitvector());
                     }
 
                     #[test]
                     fn rank() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::evens::rank(bv);
+                        $crate::bit_vector::tests::evens::rank(bitvector());
                     }
 
                     #[test]
                     fn select() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::evens::EVENS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::evens::select(bv);
+                        $crate::bit_vector::tests::evens::select(bitvector());
                     }
                 }
 
                 mod odds {
-                    use $crate::bit_vector::OldBitVector;
-                    use $crate::reference::*;
+                    use buffertk::Unpackable;
+                    use $crate::bit_vector::BitVector;
+
+                    fn bitvector() -> $BV {
+                        let iter = $crate::bit_vector::tests::odds::ODDS.iter().copied();
+                        let binding = <$BV>::construct(iter);
+                        let bytes: &[u8] = binding.as_bytes();
+                        <$BV>::unpack(bytes).unwrap().0
+                    }
 
                     #[test]
                     fn access() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::odds::access(bv);
+                        $crate::bit_vector::tests::odds::access(bitvector());
                     }
 
                     #[test]
                     fn rank() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::odds::rank(bv);
+                        $crate::bit_vector::tests::odds::rank(bitvector());
                     }
 
                     #[test]
                     fn select() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::odds::ODDS.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::odds::select(bv);
+                        $crate::bit_vector::tests::odds::select(bitvector());
                     }
                 }
 
                 mod half_empty {
-                    use $crate::bit_vector::OldBitVector;
-                    use $crate::reference::*;
+                    use buffertk::Unpackable;
+                    use $crate::bit_vector::BitVector;
+
+                    fn bitvector() -> $BV {
+                        let iter = $crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied();
+                        let binding = <$BV>::construct(iter);
+                        let bytes: &[u8] = binding.as_bytes();
+                        <$BV>::unpack(bytes).unwrap().0
+                    }
 
                     #[test]
                     fn access() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::half_empty::access(bv);
+                        $crate::bit_vector::tests::half_empty::access(bitvector());
                     }
 
                     #[test]
                     fn rank() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::half_empty::rank(bv);
+                        $crate::bit_vector::tests::half_empty::rank(bitvector());
                     }
 
                     #[test]
                     fn select() {
-                        let bytes: &[u8] = &<$BV>::create_from_dense($crate::bit_vector::tests::half_empty::HALF_EMPTY.iter().copied());
-                        let bv: $BV = <$BV>::new(bytes).unwrap();
-                        $crate::bit_vector::tests::half_empty::select(bv);
+                        $crate::bit_vector::tests::half_empty::select(bitvector());
                     }
                 }
             }
@@ -267,4 +360,6 @@ pub mod tests {
     }
 
     pub(crate) use test_BitVector;
+
+    test_BitVector!(reference, crate::bit_vector::ReferenceBitVector);
 }
