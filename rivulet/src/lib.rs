@@ -282,7 +282,7 @@ impl SendChannel {
         Ok(())
     }
 
-    /// Call blocking_send when it's OK to call into SSL_write with the given send_buf.
+    /// Call try_drain when it's OK to call into SSL_write with the given send_buf.
     pub fn try_drain(&mut self) -> Result<i16, Error> {
         while self.send_idx < self.send_buf.len() {
             let buf = &self.send_buf[self.send_idx..];

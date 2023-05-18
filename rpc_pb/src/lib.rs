@@ -52,6 +52,15 @@ impl Context {
     }
 }
 
+impl<'a> From<&Request<'a>> for Context {
+    fn from(req: &Request<'a>) -> Self {
+        Self {
+            clients: req.caller.clone(),
+            trace_id: req.trace.clone(),
+        }
+    }
+}
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Message)]
