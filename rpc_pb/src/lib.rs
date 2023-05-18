@@ -35,18 +35,26 @@ impl Context {
         self.clients.clone()
     }
 
+    pub fn with_client(&self, client: ClientID) -> Self {
+        let mut ctx = self.clone();
+        ctx.clients.push(client);
+        ctx
+    }
+
     pub fn trace_id(&self) -> Option<TraceID> {
         self.trace_id.clone()
     }
+
+    pub fn with_trace_id(&self, trace: TraceID) -> Self {
+        let mut ctx = self.clone();
+        ctx.trace_id = Some(trace);
+        ctx
+    }
 }
-
-////////////////////////////////////////// ResponseHolder //////////////////////////////////////////
-
-pub trait ResponseHolder {}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug, Message)]
+#[derive(Clone, Debug, Message)]
 pub enum Error {
     #[prototk(278528, message)]
     Success {
@@ -251,7 +259,7 @@ pub trait Client {
 pub struct Frame {
     #[prototk(1, uint64)]
     pub size: u64,
-    #[prototk(3, fixed32)]
+    #[prototk(2, fixed32)]
     pub crc32c: u32,
 }
 
@@ -267,13 +275,9 @@ pub struct Request<'a> {
     pub seq_no: u64,
     #[prototk(4, bytes)]
     pub body: &'a [u8],
-    #[prototk(5, uint64)]
-    pub issued_ms: u64,
-    #[prototk(6, uint64)]
-    pub expires_ms: u64,
-    #[prototk(7, message)]
+    #[prototk(5, message)]
     pub caller: Vec<ClientID>,
-    #[prototk(8, message)]
+    #[prototk(6, message)]
     pub trace: Option<TraceID>,
 }
 
@@ -285,7 +289,7 @@ pub struct Response<'a> {
     pub seq_no: u64,
     #[prototk(4, bytes)]
     pub body: &'a [u8],
-    #[prototk(8, message)]
+    #[prototk(6, message)]
     pub trace: Option<TraceID>,
 }
 
