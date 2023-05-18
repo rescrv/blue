@@ -39,6 +39,8 @@ static SEND_CALL_LATENCY: Moments = Moments::new("rivulet.send.call_latency");
 static RECV_POLL_LATENCY: Moments = Moments::new("rivulet.recv.poll_latency");
 static RECV_CALL_LATENCY: Moments = Moments::new("rivulet.recv.call_latency");
 
+static SEND_SHRINK_BUF: Counter = Counter::new("rivulet.send.shrink_buf");
+
 pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&CONNECT);
     collector.register_counter(&FROM_STREAM);
@@ -144,22 +146,32 @@ pub struct SendChannel {
 }
 
 impl SendChannel {
-    pub fn send(&mut self, buf: &[u8]) -> Result<(), rpc_pb::Error> {
+    pub fn send(&mut self, body: &[u8]) -> Result<(), rpc_pb::Error> {
+        self.enqueue(body)?;
+        self.blocking_drain()?;
+        MESSAGES_SENT.click();
+        Ok(())
+    }
+
+    pub fn enqueue(&mut self, body: &[u8]) -> Result<(), rpc_pb::Error> {
         let frame = Frame {
             size: buf.len() as u64,
             crc32c: crc32c::crc32c(buf),
         };
         assert!(frame.pack_sz() < 256);
-        let mut hdr: Vec<u8> = vec![frame.pack_sz() as u8];
-        stack_pack(frame).append_to_vec(&mut hdr);
-        self.send_raw(&hdr)?;
-        self.send_raw(buf)?;
-        MESSAGES_SENT.click();
+        self.send_buf.push(frame.pack_sz() as u8);
+        stack_pack(frame).append_to_vec(&mut self.send_buf);
+        self.send_buf.extend_from_slice(body);
         Ok(())
     }
 
-    fn send_raw(&mut self, mut buf: &[u8]) -> Result<(), rpc_pb::Error> {
-        while !buf.is_empty() {
+    pub fn blocking_drain(&mut self) -> Result<(), rpc_pb::Error> {
+        'draining:
+        while self.send_idx < self.send_buf.len() {
+            let events = self.try_drain()?;
+            if self.send_idx >= self.send_buf.len() {
+                continue 'draining;
+            }
             let mut pfd = libc::pollfd {
                 fd: self.state.lock().unwrap().as_raw_fd(),
                 events: libc::POLLOUT,
@@ -173,22 +185,53 @@ impl SendChannel {
                 }
                 SEND_POLL_LATENCY.add(sw.since());
             }
+            SEND_POLL_LATENCY.add(sw.since());
+            if self.send_idx > 64 && self.send_idx >= self.send_buf.len() / 2 {
+                SEND_SHRINK_BUF.click();
+                let size = self.send_buf.len() - self.send_idx;
+                self.send_buf.rotate_left(self.send_idx);
+                self.send_buf.shrink_to(size);
+                self.send_idx = 0;
+            }
+        }
+        self.send_buf.clear();
+        self.send_idx = 0;
+        Ok(())
+    }
+
+    /// Call blocking_send when it's OK to call into SSL_write with the given send_buf.
+    pub fn try_drain(&mut self) -> Result<i16, rpc_pb::Error> {
+        while self.send_idx < self.send_buf.len() {
+            let buf = &self.send_buf[self.send_idx..];
             let sw = Stopwatch::default();
             let mut state = self.state.lock().unwrap();
             match state.stream.ssl_write(buf) {
-                Ok(sz) => buf = &buf[sz..],
+                Ok(sz) => {
+                    SEND_CALL_LATENCY.add(sw.since());
+                    self.send_idx += sz;
+                },
                 Err(err) => {
-                    if err.code() != ErrorCode::WANT_READ && err.code() != ErrorCode::WANT_WRITE {
-                        return Err(rpc_pb::Error::TransportFailure {
-                            core: ErrorCore::default(),
-                            what: err.to_string(),
-                        });
+                    SEND_ERROR_LATENCY.add(sw.since());
+                    match err.code() {
+                        ErrorCode::WANT_READ => {
+                            SEND_WANT_READ.click();
+                            return Ok(POLLIN|POLLOUT);
+                        },
+                        ErrorCode::WANT_WRITE => {
+                            SEND_WANT_WRITE.click();
+                            return Ok(POLLOUT);
+                        },
+                        _ => {
+                            return Err(rpc_pb::Error::TransportFailure {
+                                core: ErrorCore::default(),
+                                what: err.to_string(),
+                            });
+                        },
                     }
-                }
-            }
-            SEND_CALL_LATENCY.add(sw.since());
+                },
+            };
         }
-        Ok(())
+        Ok(0)
     }
 }
 
