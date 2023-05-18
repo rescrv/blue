@@ -14,11 +14,9 @@ use util::stopwatch::Stopwatch;
 
 use zerror_core::ErrorCore;
 
-use rpc_pb::Frame;
+use rpc_pb::{Error, Frame};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
-
-const FRAME_SIZE_HINT: usize = 128;
 
 // These match Linux definitions.
 pub const POLLIN: i16 = 0x0001;
@@ -32,12 +30,21 @@ static FROM_STREAM: Counter = Counter::new("rivulet.from_stream");
 static MESSAGES_SENT: Counter = Counter::new("rivulet.messages_sent");
 static MESSAGES_RECV: Counter = Counter::new("rivulet.messages_recv");
 
-static ERROR_POLL: Counter = Counter::new("rivulet.poll.errors");
+static POLL_ERRORS: Counter = Counter::new("rivulet.poll.errors");
+static RECV_ERRORS: Counter = Counter::new("rivulet.recv.errors");
+static SEND_ERRORS: Counter = Counter::new("rivulet.send.errors");
 
 static SEND_POLL_LATENCY: Moments = Moments::new("rivulet.send.poll_latency");
 static SEND_CALL_LATENCY: Moments = Moments::new("rivulet.send.call_latency");
+static SEND_ERROR_LATENCY: Moments = Moments::new("rivulet.send.error_latency");
 static RECV_POLL_LATENCY: Moments = Moments::new("rivulet.recv.poll_latency");
 static RECV_CALL_LATENCY: Moments = Moments::new("rivulet.recv.call_latency");
+static RECV_ERROR_LATENCY: Moments = Moments::new("rivulet.recv.error_latency");
+
+static SEND_WANT_READ: Counter = Counter::new("rivulet.send.want_read");
+static SEND_WANT_WRITE: Counter = Counter::new("rivulet.send.want_write");
+static RECV_WANT_READ: Counter = Counter::new("rivulet.recv.want_read");
+static RECV_WANT_WRITE: Counter = Counter::new("rivulet.recv.want_write");
 
 static SEND_SHRINK_BUF: Counter = Counter::new("rivulet.send.shrink_buf");
 
@@ -46,14 +53,24 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&FROM_STREAM);
     collector.register_counter(&MESSAGES_SENT);
     collector.register_counter(&MESSAGES_RECV);
+    collector.register_counter(&POLL_ERRORS);
+    collector.register_counter(&RECV_ERRORS);
+    collector.register_counter(&SEND_ERRORS);
     collector.register_moments(&SEND_POLL_LATENCY);
     collector.register_moments(&SEND_CALL_LATENCY);
+    collector.register_moments(&SEND_ERROR_LATENCY);
     collector.register_moments(&RECV_POLL_LATENCY);
     collector.register_moments(&RECV_CALL_LATENCY);
+    collector.register_moments(&RECV_ERROR_LATENCY);
+    collector.register_counter(&SEND_WANT_READ);
+    collector.register_counter(&SEND_WANT_WRITE);
+    collector.register_counter(&RECV_WANT_READ);
+    collector.register_counter(&RECV_WANT_WRITE);
 }
 
 /////////////////////////////////////////// ChannelState ///////////////////////////////////////////
 
+#[derive(Debug)]
 struct ChannelState {
     stream: SslStream<TcpStream>,
 }
@@ -64,76 +81,140 @@ impl AsRawFd for ChannelState {
     }
 }
 
+///////////////////////////////////////////// WorkDone /////////////////////////////////////////////
+
+#[derive(Debug, Default)]
+enum WorkDone {
+    #[default]
+    ReadRequisiteAmount,
+    EncounteredEagain,
+    Error(Error),
+}
+
 //////////////////////////////////////////// RecvChannel ///////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct RecvChannel {
     state: Arc<Mutex<ChannelState>>,
     recv_buf: Vec<u8>,
+    recv_idx: usize,
 }
 
 impl RecvChannel {
-    pub fn recv(&mut self) -> Result<Buffer, rpc_pb::Error> {
-        while self.recv_buf.is_empty() || self.recv_buf[0] as usize + 1 < self.recv_buf.len() {
-            self.do_work_recv(16)?;
+    pub fn recv(&mut self) -> Result<Buffer, Error> {
+        loop {
+            if let Some(buf) = self.try_recv()? {
+                return Ok(buf);
+            }
+            let mut pfd = libc::pollfd {
+                fd: self.state.lock().unwrap().as_raw_fd(),
+                events: POLLIN,
+                revents: 0,
+            };
+            let sw = Stopwatch::default();
+            unsafe {
+                if libc::poll(&mut pfd, 1, 5_000) < 0 {
+                    POLL_ERRORS.click();
+                    return Err(std::io::Error::last_os_error().into());
+                }
+            }
+            RECV_POLL_LATENCY.add(sw.since());
+        }
+    }
+
+    /// Attempt to recv a buffer until either it succeeds or it hits EAGAIN.
+    pub fn try_recv(&mut self) -> Result<Option<Buffer>, Error> {
+        if self.recv_idx == 0 {
+            match self.work_recv(1) {
+                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::EncounteredEagain => {
+                    return Ok(None);
+                },
+                WorkDone::Error(err) => {
+                    return Err(err);
+                }
+            }
         }
         assert!(!self.recv_buf.is_empty());
+        assert!(self.recv_idx > 0);
         let frame_sz = self.recv_buf[0] as usize;
+        if frame_sz + 1 > self.recv_idx {
+            match self.work_recv(frame_sz + 1) {
+                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::EncounteredEagain => {
+                    return Ok(None);
+                },
+                WorkDone::Error(err) => {
+                    return Err(err);
+                }
+            }
+        }
         let (frame, _): (Frame, &[u8]) = Frame::unpack(&self.recv_buf[1..1 + frame_sz])?;
         let start = 1 + frame_sz;
         let limit = start + frame.size as usize;
-        while self.recv_buf.len() < limit {
-            self.do_work_recv(limit)?;
+        if self.recv_idx < limit {
+            match self.work_recv(limit) {
+                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::EncounteredEagain => {
+                    return Ok(None);
+                },
+                WorkDone::Error(err) => {
+                    return Err(err);
+                }
+            }
         }
         let buf = Buffer::from(&self.recv_buf[start..limit]);
         if crc32c::crc32c(buf.as_bytes()) != frame.crc32c {
-            return Err(rpc_pb::Error::TransportFailure {
+            RECV_ERRORS.click();
+            return Err(Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: "crc32c failed".to_string(),
             });
         }
         self.recv_buf.rotate_left(limit);
-        self.recv_buf.resize(self.recv_buf.len() - limit, 0u8);
+        self.recv_buf.shrink_to(self.recv_buf.len() - limit);
+        self.recv_idx -= limit;
         MESSAGES_RECV.click();
-        Ok(buf)
+        Ok(Some(buf))
     }
 
-    fn do_work_recv(&mut self, size_hint: usize) -> Result<usize, rpc_pb::Error> {
+    fn work_recv(&mut self, require: usize) -> WorkDone {
         loop {
-            let mut pfd = libc::pollfd {
-                fd: self.state.lock().unwrap().as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            unsafe {
-                let sw = Stopwatch::default();
-                if libc::poll(&mut pfd, 1, 50) < 0 {
-                    ERROR_POLL.click();
-                    return Err(std::io::Error::last_os_error().into());
-                }
-                RECV_POLL_LATENCY.add(sw.since());
+            let amt = std::cmp::max(require, 4096);
+            if self.recv_buf.len() - self.recv_idx < amt {
+                self.recv_buf.resize(self.recv_idx + amt, 0);
             }
             let sw = Stopwatch::default();
-            let recv_buf_starting_sz = self.recv_buf.len();
-            self.recv_buf.resize(recv_buf_starting_sz + size_hint, 0u8);
             let mut state = self.state.lock().unwrap();
-            match state
-                .stream
-                .ssl_read(&mut self.recv_buf[recv_buf_starting_sz..])
-            {
+            match state.stream.ssl_read(&mut self.recv_buf[self.recv_idx..]) {
                 Ok(sz) => {
-                    self.recv_buf.resize(recv_buf_starting_sz + sz, 0u8);
                     RECV_CALL_LATENCY.add(sw.since());
-                    return Ok(sz);
-                }
-                Err(err) => {
-                    if err.code() != ErrorCode::WANT_READ && err.code() != ErrorCode::WANT_WRITE {
-                        return Err(rpc_pb::Error::TransportFailure {
-                            core: ErrorCore::default(),
-                            what: err.to_string(),
-                        });
+                    self.recv_idx += sz;
+                    if self.recv_idx >= require {
+                        return WorkDone::ReadRequisiteAmount;
                     }
-                    RECV_CALL_LATENCY.add(sw.since());
-                }
+                },
+                Err(err) => {
+                    RECV_ERROR_LATENCY.add(sw.since());
+                    match err.code() {
+                        ErrorCode::WANT_READ => {
+                            RECV_WANT_READ.click();
+                            return WorkDone::EncounteredEagain;
+                        },
+                        ErrorCode::WANT_WRITE => {
+                            RECV_WANT_WRITE.click();
+                            return WorkDone::EncounteredEagain;
+                        },
+                        _ => {
+                            RECV_ERRORS.click();
+                            let err = Error::TransportFailure {
+                                core: ErrorCore::default(),
+                                what: err.to_string(),
+                            };
+                            return WorkDone::Error(err);
+                        },
+                    }
+                },
             }
         }
     }
@@ -141,22 +222,25 @@ impl RecvChannel {
 
 //////////////////////////////////////////// SendChannel ///////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct SendChannel {
     state: Arc<Mutex<ChannelState>>,
+    send_buf: Vec<u8>,
+    send_idx: usize,
 }
 
 impl SendChannel {
-    pub fn send(&mut self, body: &[u8]) -> Result<(), rpc_pb::Error> {
+    pub fn send(&mut self, body: &[u8]) -> Result<(), Error> {
         self.enqueue(body)?;
         self.blocking_drain()?;
         MESSAGES_SENT.click();
         Ok(())
     }
 
-    pub fn enqueue(&mut self, body: &[u8]) -> Result<(), rpc_pb::Error> {
+    pub fn enqueue(&mut self, body: &[u8]) -> Result<(), Error> {
         let frame = Frame {
-            size: buf.len() as u64,
-            crc32c: crc32c::crc32c(buf),
+            size: body.len() as u64,
+            crc32c: crc32c::crc32c(body),
         };
         assert!(frame.pack_sz() < 256);
         self.send_buf.push(frame.pack_sz() as u8);
@@ -165,7 +249,7 @@ impl SendChannel {
         Ok(())
     }
 
-    pub fn blocking_drain(&mut self) -> Result<(), rpc_pb::Error> {
+    pub fn blocking_drain(&mut self) -> Result<(), Error> {
         'draining:
         while self.send_idx < self.send_buf.len() {
             let events = self.try_drain()?;
@@ -174,16 +258,15 @@ impl SendChannel {
             }
             let mut pfd = libc::pollfd {
                 fd: self.state.lock().unwrap().as_raw_fd(),
-                events: libc::POLLOUT,
+                events: events,
                 revents: 0,
             };
+            let sw = Stopwatch::default();
             unsafe {
-                let sw = Stopwatch::default();
-                if libc::poll(&mut pfd, 1, 50) < 0 {
-                    ERROR_POLL.click();
+                if libc::poll(&mut pfd, 1, 5_000) < 0 {
+                    SEND_ERRORS.click();
                     return Err(std::io::Error::last_os_error().into());
                 }
-                SEND_POLL_LATENCY.add(sw.since());
             }
             SEND_POLL_LATENCY.add(sw.since());
             if self.send_idx > 64 && self.send_idx >= self.send_buf.len() / 2 {
@@ -200,7 +283,7 @@ impl SendChannel {
     }
 
     /// Call blocking_send when it's OK to call into SSL_write with the given send_buf.
-    pub fn try_drain(&mut self) -> Result<i16, rpc_pb::Error> {
+    pub fn try_drain(&mut self) -> Result<i16, Error> {
         while self.send_idx < self.send_buf.len() {
             let buf = &self.send_buf[self.send_idx..];
             let sw = Stopwatch::default();
@@ -222,7 +305,7 @@ impl SendChannel {
                             return Ok(POLLOUT);
                         },
                         _ => {
-                            return Err(rpc_pb::Error::TransportFailure {
+                            return Err(Error::TransportFailure {
                                 core: ErrorCore::default(),
                                 what: err.to_string(),
                             });
@@ -237,10 +320,10 @@ impl SendChannel {
 
 ////////////////////////////////////////////// connect /////////////////////////////////////////////
 
-pub fn connect(hostname: &str, port: u16) -> Result<(RecvChannel, SendChannel), rpc_pb::Error> {
+pub fn connect(hostname: &str, port: u16) -> Result<(RecvChannel, SendChannel), Error> {
     CONNECT.click();
     let mut builder =
-        SslConnector::builder(SslMethod::tls()).map_err(|err| rpc_pb::Error::TransportFailure {
+        SslConnector::builder(SslMethod::tls()).map_err(|err| Error::TransportFailure {
             core: ErrorCore::default(),
             what: format!("could not build connector builder: {}", err),
         })?;
@@ -251,7 +334,7 @@ pub fn connect(hostname: &str, port: u16) -> Result<(RecvChannel, SendChannel), 
     let stream =
         connector
             .connect(hostname, stream)
-            .map_err(|err| rpc_pb::Error::TransportFailure {
+            .map_err(|err| Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: format!("{}", err),
             })?;
@@ -262,7 +345,7 @@ pub fn connect(hostname: &str, port: u16) -> Result<(RecvChannel, SendChannel), 
 
 pub fn from_stream(
     stream: SslStream<TcpStream>,
-) -> Result<(RecvChannel, SendChannel), rpc_pb::Error> {
+) -> Result<(RecvChannel, SendChannel), Error> {
     FROM_STREAM.click();
     stream.get_ref().set_nonblocking(true)?;
     stream.get_ref().set_nodelay(true)?;
@@ -270,9 +353,12 @@ pub fn from_stream(
     let recv = RecvChannel {
         state: Arc::clone(&state),
         recv_buf: Vec::new(),
+        recv_idx: 0,
     };
     let send = SendChannel {
         state: Arc::clone(&state),
+        send_buf: Vec::new(),
+        send_idx: 0,
     };
     Ok((recv, send))
 }
