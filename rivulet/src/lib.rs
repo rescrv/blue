@@ -16,6 +16,14 @@ use zerror_core::ErrorCore;
 
 use rpc_pb::Frame;
 
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
+const FRAME_SIZE_HINT: usize = 128;
+
+// These match Linux definitions.
+pub const POLLIN: i16 = 0x0001;
+pub const POLLOUT: i16 = 0x0004;
+
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static CONNECT: Counter = Counter::new("rivulet.connect");
