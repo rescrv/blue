@@ -7,6 +7,7 @@ description = "BusyBee provides synchronous/thread-pool implementations of rpc_p
 license = "Apache-2.0"
 
 [dependencies]
+boring = "2.1.0"
 clap = "2.33"
 
 biometrics = { path = "../biometrics", version = "0.1.0" }
@@ -16,5 +17,9 @@ hey_listen = { path = "../hey_listen" }
 id = { path = "../id" }
 prototk = { path = "../prototk", version = "0.1.0" }
 prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
+rivulet = { path = "../rivulet" }
+rpc_pb = { path = "../rpc_pb" }
+sync42 = { path = "../sync42" }
 util = { path = "../util" }
 zerror = { path = "../zerror", version = "0.1.0" }
+zerror_core = { path = "../zerror_core", version = "0.1.0" }
