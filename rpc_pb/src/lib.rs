@@ -5,6 +5,8 @@ use std::fmt::{Debug, Display, Formatter};
 
 use buffertk::Buffer;
 
+use biometrics::Counter;
+
 use zerror:: Z;
 
 use zerror_core::ErrorCore;
@@ -13,6 +15,10 @@ use zerror_core::ErrorCore;
 
 pub const MAX_REQUEST_SIZE: usize = 1usize << 20;
 pub const MAX_RESPONSE_SIZE: usize = 1usize << 20;
+
+//////////////////////////////////////////// Biometrics ////////////////////////////////////////////
+
+pub static UNUSED_BUFFER: Counter = Counter::new("rpc_pb.unused_buffer");
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
@@ -306,10 +312,10 @@ pub struct Response<'a> {
 
 #[macro_export]
 macro_rules! service {
-    (name = $service:ident; server = $server:ident; client = $client:ident; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
+    (name = $service:ident; server = $server:ident; client = $client:ident; error = $error:ident; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         trait $service {
             $(
-                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, Error>;
+                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error>;
             )*
         }
 
@@ -319,7 +325,7 @@ macro_rules! service {
 
         impl<C: rpc_pb::Client> $service for $client<C> {
             $(
-                rpc_pb::client_method! { $service, $method, $req, $resp }
+                rpc_pb::client_method! { $service, $method, $req, $resp, $error }
             )*
         }
 
@@ -336,20 +342,22 @@ macro_rules! service {
         }
 
         impl<S: $service> rpc_pb::Server for $server<S> {
-            rpc_pb::server_methods! { $service, $($method, $req, $resp),* }
+            rpc_pb::server_methods! { $service, $error, $($method, $req, $resp),* }
         }
     };
 }
 
 #[macro_export]
 macro_rules! client_method {
-    ($service:ident, $method:ident, $req:ident, $resp:ident) => {
-        fn $method(&self, ctx: &rpc_pb::Context, req: $req, ) -> Result<$resp, Error> {
-            use buffertk::{Packable, Unpackable};
-            let req = buffertk::stack_pack(req).to_vec();
+    ($service:ident, $method:ident, $req:ident, $resp:ident, $error:ident) => {
+        fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, Error> {
+            use buffertk::{stack_pack, Packable, Unpackable};
+            let req = stack_pack(req).to_vec();
             let buf = self.client.call(ctx, stringify!($service), stringify!($method), &req)?;
-            let (resp, buf) = <Result<$resp, Error> as buffertk::Unpackable>::unpack(buf.as_bytes())?;
-            // TODO(rescrv): Log if buf is non-empty.
+            let (resp, buf): (Result<$resp, $error>, &[u8]) = <Result<$resp, $error> as Unpackable>::unpack(buf.as_bytes())?;
+            if !buf.is_empty() {
+                rpc_pb::UNUSED_BUFFER.click();
+            }
             resp
         }
     };
@@ -357,14 +365,15 @@ macro_rules! client_method {
 
 #[macro_export]
 macro_rules! server_methods {
-    ($service:ident, $($method:ident, $req:ident, $resp:ident),+) => {
+    ($service:ident, $error:ident, $($method:ident, $req:ident, $resp:ident),+) => {
+        /// Returns a buffer that encodes Result<$resp, $error>.
         fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc_pb::Error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             match method {
                 $(
                 stringify!($method) => {
                     let req = <$req as buffertk::Unpackable>::unpack(req)?.0;
-                    let resp = self.server.$method(ctx, req);
+                    let resp: Result<$resp, $error> = self.server.$method(ctx, req);
                     Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
                 }
                 ),*
