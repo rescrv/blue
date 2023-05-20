@@ -309,10 +309,10 @@ pub struct Response<'a> {
 
 #[macro_export]
 macro_rules! service {
-    (name = $service:ident; server = $server:ident; client = $client:ident; error = $err:ty; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
+    (name = $service:ident; server = $server:ident; client = $client:ident; error = $error:ty; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         trait $service {
             $(
-                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $err>;
+                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error>;
             )*
         }
 
@@ -322,7 +322,7 @@ macro_rules! service {
 
         impl<C: rpc_pb::Client> $service for $client<C> where {
             $(
-                rpc_pb::client_method! { $service, $method, $req, $resp, $err }
+                rpc_pb::client_method! { $service, $method, $req, $resp, $error }
             )*
         }
 
@@ -339,7 +339,7 @@ macro_rules! service {
         }
 
         impl<S: $service> rpc_pb::Server for $server<S> {
-            rpc_pb::server_methods! { $service, $err, $($method, $req, $resp),* }
+            rpc_pb::server_methods! { $service, $error, $($method, $req, $resp),* }
         }
     };
 }
