@@ -256,15 +256,13 @@ pub trait Service {
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
 pub trait Server {
-    type Error: From<Error>;
-    fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Result<Buffer, Self::Error>;
+    fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Result<Buffer, Error>;
 }
 
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
 pub trait Client {
-    type Error: From<Error>;
-    fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Self::Error>;
+    fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Error>;
 }
 
 /////////////////////////////////////////////// Frame //////////////////////////////////////////////
@@ -313,7 +311,6 @@ pub struct Response<'a> {
 macro_rules! service {
     (name = $service:ident; server = $server:ident; client = $client:ident; error = $err:ty; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         trait $service {
-            type Error;
             $(
                 fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $err>;
             )*
@@ -323,8 +320,7 @@ macro_rules! service {
             client: C,
         }
 
-        impl<C: rpc_pb::Client> $service for $client<C> where $err: From<<C as rpc_pb::Client>::Error> {
-            type Error = $err;
+        impl<C: rpc_pb::Client> $service for $client<C> where {
             $(
                 rpc_pb::client_method! { $service, $method, $req, $resp, $err }
             )*
@@ -367,15 +363,14 @@ macro_rules! client_method {
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $error:ty, $($method:ident, $req:ident, $resp:ident),+) => {
-        type Error = $error;
-        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, Self::Error> {
+        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc_pb::Error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             match method {
                 $(
                 stringify!($method) => {
                     let req = <$req as buffertk::Unpackable>::unpack(req)?.0;
                     let resp: Result<$resp, $error> = self.server.$method(ctx, req);
-                    Ok::<buffertk::Buffer, $error>(buffertk::stack_pack(resp).to_buffer())
+                    Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
                 }
                 ),*
                 _ => {
@@ -383,7 +378,7 @@ macro_rules! server_methods {
                         core: zerror_core::ErrorCore::default(),
                         name: method.to_string(),
                     }));
-                    Ok::<buffertk::Buffer, $error>(buffertk::stack_pack(resp).to_buffer())
+                    Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
                 },
             }
         }

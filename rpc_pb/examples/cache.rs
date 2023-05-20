@@ -70,8 +70,6 @@ struct CachedRegister {
 }
 
 impl Cache for CachedRegister {
-    type Error = Error;
-
     fn load(
         &self,
         _: &Context,
