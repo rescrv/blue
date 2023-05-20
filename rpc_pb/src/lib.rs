@@ -48,7 +48,7 @@ impl Context {
     }
 
     pub fn trace_id(&self) -> Option<TraceID> {
-        self.trace_id.clone()
+        self.trace_id
     }
 
     pub fn with_trace_id(&self, trace: TraceID) -> Self {
@@ -62,7 +62,7 @@ impl<'a> From<&Request<'a>> for Context {
     fn from(req: &Request<'a>) -> Self {
         Self {
             clients: req.caller.clone(),
-            trace_id: req.trace.clone(),
+            trace_id: req.trace,
         }
     }
 }
