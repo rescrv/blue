@@ -5,6 +5,8 @@ use std::cmp;
 use std::fmt;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
+use super::{stack_pack, Packable};
+
 ////////////////////////////////////////////// Buffer //////////////////////////////////////////////
 
 /// A Buffer is a mutable, fixed-size, contiguous slice of bytes.
@@ -68,6 +70,16 @@ impl Drop for Buffer {
 impl fmt::Debug for Buffer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.as_bytes())
+    }
+}
+
+impl Packable for Buffer {
+    fn pack_sz(&self) -> usize {
+        stack_pack(stack_pack(self.as_bytes()).length_prefixed()).pack_sz()
+    }
+
+    fn pack(&self, buf: &mut [u8]) {
+        stack_pack(stack_pack(self.as_bytes()).length_prefixed()).into_slice(buf);
     }
 }
 
