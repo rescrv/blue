@@ -120,6 +120,20 @@ pub enum Error {
         #[prototk(2, string)]
         what: String,
     },
+    #[prototk(278535, message)]
+    UlimitParseError {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
+    #[prototk(278536, message)]
+    OsError {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
 }
 
 impl Error {
@@ -132,6 +146,8 @@ impl Error {
             Error::RequestTooLarge { core, .. } => { core } ,
             Error::TransportFailure { core, .. } => { core } ,
             Error::EncryptionMisconfiguration { core, .. } => { core } ,
+            Error::UlimitParseError { core, .. } => { core } ,
+            Error::OsError { core, .. } => { core } ,
         }
     }
 
@@ -144,6 +160,8 @@ impl Error {
             Error::RequestTooLarge { core, .. } => { core } ,
             Error::TransportFailure { core, .. } => { core } ,
             Error::EncryptionMisconfiguration { core, .. } => { core } ,
+            Error::UlimitParseError { core, .. } => { core } ,
+            Error::OsError { core, .. } => { core } ,
         }
     }
 }
@@ -180,6 +198,12 @@ impl Display for Error {
             Error::EncryptionMisconfiguration { core: _, what } => {
                 write!(f, "encyrption misconfiguration: {}", what)
             }
+            Error::UlimitParseError { core: _, what } => {
+                write!(f, "ulimit parse failure: {}", what)
+            }
+            Error::OsError { core: _, what } => {
+                write!(f, "os error: {}", what)
+            }
         }
     }
 }
@@ -206,7 +230,7 @@ impl From<prototk::Error> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Error {
-        Error::TransportFailure {
+        Error::OsError {
             core: ErrorCore::default(),
             what: format!("{}", err),
         }
