@@ -16,11 +16,9 @@ use zerror_core::ErrorCore;
 
 use rpc_pb::{Error, Frame};
 
-///////////////////////////////////////////// constants ////////////////////////////////////////////
+mod polling;
 
-// These match Linux definitions.
-pub const POLLIN: i16 = 0x0001;
-pub const POLLOUT: i16 = 0x0004;
+pub use polling::*;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -91,6 +89,12 @@ enum WorkDone {
     Error(Error),
 }
 
+/////////////////////////////////////////// ProcessEvents //////////////////////////////////////////
+
+pub trait ProcessEvents {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error>;
+}
+
 //////////////////////////////////////////// RecvChannel ///////////////////////////////////////////
 
 #[derive(Debug)]
@@ -103,17 +107,18 @@ pub struct RecvChannel {
 impl RecvChannel {
     pub fn recv(&mut self) -> Result<Buffer, Error> {
         loop {
-            if let Some(buf) = self.try_recv()? {
+            let mut events = POLLIN;
+            if let Some(buf) = self.process_events(&mut events)? {
                 return Ok(buf);
             }
             let mut pfd = libc::pollfd {
                 fd: self.state.lock().unwrap().as_raw_fd(),
-                events: POLLIN,
+                events: libc::POLLIN,
                 revents: 0,
             };
             let sw = Stopwatch::default();
             unsafe {
-                if libc::poll(&mut pfd, 1, 5_000) < 0 {
+                if libc::poll(&mut pfd, 1, 30_000) < 0 {
                     POLL_ERRORS.click();
                     return Err(std::io::Error::last_os_error().into());
                 }
@@ -122,10 +127,53 @@ impl RecvChannel {
         }
     }
 
-    /// Attempt to recv a buffer until either it succeeds or it hits EAGAIN.
-    pub fn try_recv(&mut self) -> Result<Option<Buffer>, Error> {
+    fn work_recv(&mut self, require: usize, events: &mut u32) -> WorkDone {
+        loop {
+            let amt = std::cmp::max(require, 4096);
+            if self.recv_buf.len() - self.recv_idx < amt {
+                self.recv_buf.resize(self.recv_idx + amt, 0);
+            }
+            let sw = Stopwatch::default();
+            let mut state = self.state.lock().unwrap();
+            match state.stream.ssl_read(&mut self.recv_buf[self.recv_idx..]) {
+                Ok(sz) => {
+                    RECV_CALL_LATENCY.add(sw.since());
+                    self.recv_idx += sz;
+                    if self.recv_idx >= require {
+                        return WorkDone::ReadRequisiteAmount;
+                    }
+                },
+                Err(err) => {
+                    RECV_ERROR_LATENCY.add(sw.since());
+                    match err.code() {
+                        ErrorCode::WANT_READ => {
+                            RECV_WANT_READ.click();
+                            *events &= !POLLIN;
+                            return WorkDone::EncounteredEagain;
+                        },
+                        ErrorCode::WANT_WRITE => {
+                            RECV_WANT_WRITE.click();
+                            return WorkDone::EncounteredEagain;
+                        },
+                        _ => {
+                            RECV_ERRORS.click();
+                            let err = Error::TransportFailure {
+                                core: ErrorCore::default(),
+                                what: err.to_string(),
+                            };
+                            return WorkDone::Error(err);
+                        },
+                    }
+                },
+            }
+        }
+    }
+}
+
+impl ProcessEvents for RecvChannel {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error> {
         if self.recv_idx == 0 {
-            match self.work_recv(1) {
+            match self.work_recv(1, events) {
                 WorkDone::ReadRequisiteAmount => {},
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
@@ -139,7 +187,7 @@ impl RecvChannel {
         assert!(self.recv_idx > 0);
         let frame_sz = self.recv_buf[0] as usize;
         if frame_sz + 1 > self.recv_idx {
-            match self.work_recv(frame_sz + 1) {
+            match self.work_recv(frame_sz + 1, events) {
                 WorkDone::ReadRequisiteAmount => {},
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
@@ -153,7 +201,7 @@ impl RecvChannel {
         let start = 1 + frame_sz;
         let limit = start + frame.size as usize;
         if self.recv_idx < limit {
-            match self.work_recv(limit) {
+            match self.work_recv(limit, events) {
                 WorkDone::ReadRequisiteAmount => {},
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
@@ -176,47 +224,6 @@ impl RecvChannel {
         self.recv_idx -= limit;
         MESSAGES_RECV.click();
         Ok(Some(buf))
-    }
-
-    fn work_recv(&mut self, require: usize) -> WorkDone {
-        loop {
-            let amt = std::cmp::max(require, 4096);
-            if self.recv_buf.len() - self.recv_idx < amt {
-                self.recv_buf.resize(self.recv_idx + amt, 0);
-            }
-            let sw = Stopwatch::default();
-            let mut state = self.state.lock().unwrap();
-            match state.stream.ssl_read(&mut self.recv_buf[self.recv_idx..]) {
-                Ok(sz) => {
-                    RECV_CALL_LATENCY.add(sw.since());
-                    self.recv_idx += sz;
-                    if self.recv_idx >= require {
-                        return WorkDone::ReadRequisiteAmount;
-                    }
-                },
-                Err(err) => {
-                    RECV_ERROR_LATENCY.add(sw.since());
-                    match err.code() {
-                        ErrorCode::WANT_READ => {
-                            RECV_WANT_READ.click();
-                            return WorkDone::EncounteredEagain;
-                        },
-                        ErrorCode::WANT_WRITE => {
-                            RECV_WANT_WRITE.click();
-                            return WorkDone::EncounteredEagain;
-                        },
-                        _ => {
-                            RECV_ERRORS.click();
-                            let err = Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            };
-                            return WorkDone::Error(err);
-                        },
-                    }
-                },
-            }
-        }
     }
 }
 
@@ -252,13 +259,14 @@ impl SendChannel {
     pub fn blocking_drain(&mut self) -> Result<(), Error> {
         'draining:
         while self.send_idx < self.send_buf.len() {
-            let events = self.try_drain()?;
+            let mut events = POLLOUT;
+            self.process_events(&mut events)?;
             if self.send_idx >= self.send_buf.len() {
                 continue 'draining;
             }
             let mut pfd = libc::pollfd {
                 fd: self.state.lock().unwrap().as_raw_fd(),
-                events: events,
+                events: poll_constants(events),
                 revents: 0,
             };
             let sw = Stopwatch::default();
@@ -281,9 +289,10 @@ impl SendChannel {
         self.send_idx = 0;
         Ok(())
     }
+}
 
-    /// Call try_drain when it's OK to call into SSL_write with the given send_buf.
-    pub fn try_drain(&mut self) -> Result<i16, Error> {
+impl ProcessEvents for SendChannel {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error> {
         while self.send_idx < self.send_buf.len() {
             let buf = &self.send_buf[self.send_idx..];
             let sw = Stopwatch::default();
@@ -298,11 +307,11 @@ impl SendChannel {
                     match err.code() {
                         ErrorCode::WANT_READ => {
                             SEND_WANT_READ.click();
-                            return Ok(POLLIN|POLLOUT);
+                            return Ok(None);
                         },
                         ErrorCode::WANT_WRITE => {
                             SEND_WANT_WRITE.click();
-                            return Ok(POLLOUT);
+                            return Ok(None);
                         },
                         _ => {
                             return Err(Error::TransportFailure {
@@ -314,7 +323,8 @@ impl SendChannel {
                 },
             };
         }
-        Ok(0)
+        *events &= !POLLOUT;
+        Ok(None)
     }
 }
 
