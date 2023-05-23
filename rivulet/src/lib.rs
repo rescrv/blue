@@ -262,6 +262,44 @@ impl SendChannel {
         Ok(())
     }
 
+    // Flush until either the flushing would block or the buffer is entirely flushed.
+    pub fn flush(&mut self, events: &mut u32) -> Result<(), Error> {
+        while self.send_idx < self.send_buf.len() {
+            let buf = &self.send_buf[self.send_idx..];
+            let sw = Stopwatch::default();
+            let mut state = self.state.lock().unwrap();
+            match state.stream.ssl_write(buf) {
+                Ok(sz) => {
+                    SEND_CALL_LATENCY.add(sw.since());
+                    self.send_idx += sz;
+                },
+                Err(err) => {
+                    SEND_ERROR_LATENCY.add(sw.since());
+                    match err.code() {
+                        ErrorCode::WANT_READ => {
+                            SEND_WANT_READ.click();
+                            *events |= POLLIN;
+                            return Ok(());
+                        },
+                        ErrorCode::WANT_WRITE => {
+                            SEND_WANT_WRITE.click();
+                            *events &= !POLLOUT;
+                            return Ok(());
+                        },
+                        _ => {
+                            return Err(Error::TransportFailure {
+                                core: ErrorCore::default(),
+                                what: err.to_string(),
+                            });
+                        },
+                    }
+                },
+            };
+        }
+        *events &= !POLLOUT;
+        Ok(())
+    }
+
     pub fn blocking_drain(&mut self) -> Result<(), Error> {
         'draining:
         while self.send_idx < self.send_buf.len() {
@@ -299,37 +337,7 @@ impl SendChannel {
 
 impl ProcessEvents for SendChannel {
     fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error> {
-        while self.send_idx < self.send_buf.len() {
-            let buf = &self.send_buf[self.send_idx..];
-            let sw = Stopwatch::default();
-            let mut state = self.state.lock().unwrap();
-            match state.stream.ssl_write(buf) {
-                Ok(sz) => {
-                    SEND_CALL_LATENCY.add(sw.since());
-                    self.send_idx += sz;
-                },
-                Err(err) => {
-                    SEND_ERROR_LATENCY.add(sw.since());
-                    match err.code() {
-                        ErrorCode::WANT_READ => {
-                            SEND_WANT_READ.click();
-                            return Ok(None);
-                        },
-                        ErrorCode::WANT_WRITE => {
-                            SEND_WANT_WRITE.click();
-                            return Ok(None);
-                        },
-                        _ => {
-                            return Err(Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            });
-                        },
-                    }
-                },
-            };
-        }
-        *events &= !POLLOUT;
+        self.flush(events)?;
         Ok(None)
     }
 }
