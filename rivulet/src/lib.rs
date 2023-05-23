@@ -227,6 +227,12 @@ impl ProcessEvents for RecvChannel {
     }
 }
 
+impl AsRawFd for RecvChannel {
+    fn as_raw_fd(&self) -> RawFd {
+        self.state.lock().unwrap().as_raw_fd()
+    }
+}
+
 //////////////////////////////////////////// SendChannel ///////////////////////////////////////////
 
 #[derive(Debug)]
