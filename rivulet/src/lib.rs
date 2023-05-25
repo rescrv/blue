@@ -64,6 +64,7 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&SEND_WANT_WRITE);
     collector.register_counter(&RECV_WANT_READ);
     collector.register_counter(&RECV_WANT_WRITE);
+    polling::register_biometrics(collector);
 }
 
 /////////////////////////////////////////// ChannelState ///////////////////////////////////////////
@@ -144,7 +145,6 @@ impl RecvChannel {
                     }
                 },
                 Err(err) => {
-                    RECV_ERROR_LATENCY.add(sw.since());
                     match err.code() {
                         ErrorCode::WANT_READ => {
                             RECV_WANT_READ.click();
@@ -156,6 +156,7 @@ impl RecvChannel {
                             return WorkDone::EncounteredEagain;
                         },
                         _ => {
+                            RECV_ERROR_LATENCY.add(sw.since());
                             RECV_ERRORS.click();
                             let err = Error::TransportFailure {
                                 core: ErrorCore::default(),
@@ -244,9 +245,9 @@ pub struct SendChannel {
 
 impl SendChannel {
     pub fn send(&mut self, body: &[u8]) -> Result<(), Error> {
+        // send piggy backs on enqueues counters
         self.enqueue(body)?;
         self.blocking_drain()?;
-        MESSAGES_SENT.click();
         Ok(())
     }
 
@@ -259,6 +260,7 @@ impl SendChannel {
         self.send_buf.push(frame.pack_sz() as u8);
         stack_pack(frame).append_to_vec(&mut self.send_buf);
         self.send_buf.extend_from_slice(body);
+        MESSAGES_SENT.click();
         Ok(())
     }
 
@@ -287,6 +289,7 @@ impl SendChannel {
                             return Ok(());
                         },
                         _ => {
+                            SEND_ERRORS.click();
                             return Err(Error::TransportFailure {
                                 core: ErrorCore::default(),
                                 what: err.to_string(),
@@ -297,6 +300,8 @@ impl SendChannel {
             };
         }
         *events &= !POLLOUT;
+        self.send_buf.clear();
+        self.send_idx = 0;
         Ok(())
     }
 

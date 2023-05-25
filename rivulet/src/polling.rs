@@ -3,7 +3,7 @@ use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use biometrics::Counter;
+use biometrics::{Collector, Counter};
 
 use hey_listen::{HeyListen, Stationary};
 
@@ -54,6 +54,22 @@ pub fn epoll_constants(x: u32) -> i32 {
 
 static FD_TRUNCATED: Counter = Counter::new("rivulet.fd_truncated");
 static FD_TRUNCATED_MONITOR: Stationary = Stationary::new("rivulet.fd_truncated", &FD_TRUNCATED);
+
+static NEW_THREAD: Counter = Counter::new("rivulet.new_thread");
+
+static CONSERVE_POLLIN: Counter = Counter::new("rivulet.conserve_pollin");
+static CONSERVE_POLLOUT: Counter = Counter::new("rivulet.conserve_pollout");
+static RETURN_CONSERVED_POLLIN: Counter = Counter::new("rivulet.return_pollin");
+static RETURN_CONSERVED_POLLOUT: Counter = Counter::new("rivulet.return_pollout");
+
+pub fn register_biometrics(collector: &mut Collector) {
+    collector.register_counter(&FD_TRUNCATED);
+    collector.register_counter(&NEW_THREAD);
+    collector.register_counter(&CONSERVE_POLLIN);
+    collector.register_counter(&CONSERVE_POLLOUT);
+    collector.register_counter(&RETURN_CONSERVED_POLLIN);
+    collector.register_counter(&RETURN_CONSERVED_POLLOUT);
+}
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&FD_TRUNCATED_MONITOR);
@@ -110,6 +126,7 @@ impl OsPoll for Epoll {
         } else {
             (index + 1).ilog2() as usize
         };
+        NEW_THREAD.click();
         ThreadState {
             ratio,
             offset: 0,
@@ -175,6 +192,12 @@ impl<P: OsPoll> OsPoll for ConservingWrapper<P> {
         if ts.offset < ts.ratio {
             let conserved = self.conserved.lock().unwrap().pop_front();
             if let Some((fd, events)) = conserved {
+                if events & POLLIN != 0 {
+                    RETURN_CONSERVED_POLLIN.click();
+                }
+                if events & POLLOUT != 0 {
+                    RETURN_CONSERVED_POLLOUT.click();
+                }
                 ts.offset += 1;
                 return Ok(Some((fd, events)))
             }
@@ -186,8 +209,14 @@ impl<P: OsPoll> OsPoll for ConservingWrapper<P> {
 }
 
 impl<P: OsPoll> Poll for ConservingWrapper<P> {
-    fn conserve(&self, ts: &mut ThreadState, fd: RawFd, events: u32) {
+    fn conserve(&self, _: &mut ThreadState, fd: RawFd, events: u32) {
         assert_ne!(0, events);
+        if events & POLLIN != 0 {
+            CONSERVE_POLLIN.click();
+        }
+        if events & POLLOUT != 0 {
+            CONSERVE_POLLOUT.click();
+        }
         self.conserved.lock().unwrap().push_back((fd, events))
     }
 }
