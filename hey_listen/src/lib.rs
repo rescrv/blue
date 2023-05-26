@@ -122,7 +122,7 @@ impl<M: Monitor + 'static> State<M> {
     }
 
     fn evaluate(&mut self) -> Condition {
-        let condition = self.monitor.evaluate(&mut self.state);
+        let condition = self.monitor.evaluate(&self.state);
         self.state = self.monitor.witness();
         if let Condition::Firing {
             description: _,
@@ -132,7 +132,7 @@ impl<M: Monitor + 'static> State<M> {
             if self.sticky.is_none() {
                 let firing = FiringID::generate().unwrap_or(FiringID::default());
                 self.sticky = Some(StickyCondition {
-                    firing: firing.clone(),
+                    firing,
                     sticky: condition.clone(),
                     recent: None,
                 });
@@ -221,7 +221,7 @@ impl HeyListen {
 
     fn firing_one<M: Monitor>(
         &self,
-        v: &Vec<State<M>>,
+        v: &[State<M>],
         out: &mut Vec<(&'static str, FiringID, Condition, Condition)>,
     ) {
         for state in v.iter() {
@@ -259,6 +259,12 @@ impl HeyListen {
                 state.reset(firing);
             }
         }
+    }
+}
+
+impl Default for HeyListen {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -444,17 +450,16 @@ impl Monitor for BelowThreshold {
     }
 
     fn witness(&self) -> Self::State {
-        ()
     }
 
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();
         if current < self.threshold {
-            return Condition::stable().with_context("current", current);
+            Condition::stable().with_context("current", current)
         } else {
-            return Condition::firing("value exceeds threshold")
+            Condition::firing("value exceeds threshold")
                 .with_context("current", current)
-                .with_context("threshold", self.threshold);
+                .with_context("threshold", self.threshold)
         }
     }
 }
@@ -485,17 +490,16 @@ impl Monitor for AboveThreshold {
     }
 
     fn witness(&self) -> Self::State {
-        ()
     }
 
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();
         if current > self.threshold {
-            return Condition::stable().with_context("current", current);
+            Condition::stable().with_context("current", current)
         } else {
-            return Condition::firing("value below threshold")
+            Condition::firing("value below threshold")
                 .with_context("current", current)
-                .with_context("threshold", self.threshold);
+                .with_context("threshold", self.threshold)
         }
     }
 }
