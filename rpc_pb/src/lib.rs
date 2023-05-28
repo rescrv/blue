@@ -134,6 +134,13 @@ pub enum Error {
         #[prototk(2, string)]
         what: String,
     },
+    #[prototk(278537, message)]
+    LogicError {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
 }
 
 impl Error {
@@ -148,6 +155,7 @@ impl Error {
             Error::EncryptionMisconfiguration { core, .. } => { core } ,
             Error::UlimitParseError { core, .. } => { core } ,
             Error::OsError { core, .. } => { core } ,
+            Error::LogicError { core, .. } => { core } ,
         }
     }
 
@@ -162,6 +170,7 @@ impl Error {
             Error::EncryptionMisconfiguration { core, .. } => { core } ,
             Error::UlimitParseError { core, .. } => { core } ,
             Error::OsError { core, .. } => { core } ,
+            Error::LogicError { core, .. } => { core } ,
         }
     }
 }
@@ -203,6 +212,9 @@ impl Display for Error {
             }
             Error::OsError { core: _, what } => {
                 write!(f, "os error: {}", what)
+            }
+            Error::LogicError { core: _, what } => {
+                write!(f, "logic error: {}", what)
             }
         }
     }
