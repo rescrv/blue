@@ -4,8 +4,6 @@ use std::sync::{Arc, Mutex};
 
 use boring::ssl::{ErrorCode, SslConnector, SslMethod, SslStream};
 
-use crc32c;
-
 use biometrics::{Collector, Counter, Moments};
 
 use buffertk::{stack_pack, Buffer, Packable, Unpackable};
