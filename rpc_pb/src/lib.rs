@@ -284,6 +284,10 @@ impl Z for Error {
     }
 }
 
+////////////////////////////////////////////// Status //////////////////////////////////////////////
+
+pub type Status = Result<Result<Buffer, Buffer>, Error>;
+
 ////////////////////////////////////////////// Service /////////////////////////////////////////////
 
 pub trait Service {
@@ -292,13 +296,13 @@ pub trait Service {
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
 pub trait Server {
-    fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Result<Buffer, Error>;
+    fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Status;
 }
 
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
 pub trait Client {
-    fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Result<Buffer, Error>;
+    fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Status;
 }
 
 /////////////////////////////////////////////// Frame //////////////////////////////////////////////
@@ -335,10 +339,14 @@ pub struct Request<'a> {
 pub struct Response<'a> {
     #[prototk(3, uint64)]
     pub seq_no: u64,
-    #[prototk(4, bytes)]
-    pub body: &'a [u8],
     #[prototk(6, message)]
     pub trace: Option<TraceID>,
+    #[prototk(7, bytes)]
+    pub body: Option<&'a [u8]>,
+    #[prototk(8, bytes)]
+    pub service_error: Option<&'a [u8]>,
+    #[prototk(9, bytes)]
+    pub rpc_error: Option<&'a [u8]>,
 }
 
 ///////////////////////////////////////////// The Macro ////////////////////////////////////////////
@@ -382,16 +390,22 @@ macro_rules! service {
 
 #[macro_export]
 macro_rules! client_method {
-    ($service:ident, $method:ident, $req:ident, $resp:ident, $error:ty) => {
+    ($service:ident, $method:ident, $req:ident, $resp:ty, $error:ty) => {
         fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             let req = stack_pack(req).to_vec();
-            let buf = self.client.call(ctx, stringify!($service), stringify!($method), &req)?;
-            let (resp, buf): (Result<$resp, $error>, &[u8]) = <Result<$resp, $error> as Unpackable>::unpack(buf.as_bytes())?;
-            if !buf.is_empty() {
-                rpc_pb::UNUSED_BUFFER.click();
+            let status = self.client.call(ctx, stringify!($service), stringify!($method), &req);
+            match status {
+                Ok(Ok(msg)) => {
+                    Ok(<$resp as Unpackable>::unpack(msg.as_bytes())?.0)
+                },
+                Ok(Err(msg)) => {
+                    Err(<$error as Unpackable>::unpack(msg.as_bytes())?.0)
+                },
+                Err(err) => {
+                    Err(err.into())
+                },
             }
-            resp
         }
     };
 }
@@ -399,22 +413,28 @@ macro_rules! client_method {
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $error:ty, $($method:ident, $req:ident, $resp:ident),+) => {
-        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> Result<buffertk::Buffer, rpc_pb::Error> {
+        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> rpc_pb::Status {
             use buffertk::{stack_pack, Packable, Unpackable};
             match method {
                 $(
                 stringify!($method) => {
                     let req = <$req as buffertk::Unpackable>::unpack(req)?.0;
-                    let resp: Result<$resp, $error> = self.server.$method(ctx, req);
-                    Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
+                    let ans: Result<$resp, $error> = self.server.$method(ctx, req);
+                    match ans {
+                        Ok(resp) => {
+                            Ok(Ok(stack_pack(resp).to_buffer()))
+                        }
+                        Err(err) => {
+                            Ok(Err(stack_pack(err).to_buffer()))
+                        }
+                    }
                 }
                 ),*
                 _ => {
-                    let resp: Result<(), $error> = Err(<$error>::from(rpc_pb::Error::UnknownMethodName {
+                    Err(rpc_pb::Error::UnknownMethodName {
                         core: zerror_core::ErrorCore::default(),
                         name: method.to_string(),
-                    }));
-                    Ok::<buffertk::Buffer, rpc_pb::Error>(buffertk::stack_pack(resp).to_buffer())
+                    }.into())
                 },
             }
         }
