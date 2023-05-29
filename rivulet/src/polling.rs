@@ -16,7 +16,7 @@ pub const POLLOUT: u32 = 0x0004;
 pub const POLLERR: u32 = 0x0008;
 pub const POLLHUP: u32 = 0x0010;
 
-pub fn poll_constants(x: u32) -> i16 {
+pub fn to_poll_constants(x: u32) -> i16 {
     let mut fx: i16 = 0;
     if x & POLLIN != 0 {
         fx |= libc::POLLIN;
@@ -33,21 +33,21 @@ pub fn poll_constants(x: u32) -> i16 {
     fx
 }
 
-pub fn epoll_constants(x: u32) -> i32 {
-    let mut fx: i32 = 0;
-    if x & POLLIN != 0 {
-        fx |= libc::EPOLLIN;
+pub fn from_epoll_constants(x: i32) -> u32 {
+    let mut events: u32 = 0;
+    if x & libc::EPOLLIN != 0 {
+        events |= POLLIN;
     }
-    if x & POLLOUT != 0 {
-        fx |= libc::EPOLLOUT;
+    if x & libc::EPOLLOUT != 0 {
+        events |= POLLOUT;
     }
-    if x & POLLERR != 0 {
-        fx |= libc::EPOLLERR;
+    if x & libc::EPOLLERR != 0 {
+        events |= POLLERR;
     }
-    if x & POLLHUP != 0 {
-        fx |= libc::EPOLLHUP;
+    if x & libc::EPOLLHUP != 0 {
+        events |= POLLHUP;
     }
-    fx
+    events
 }
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -135,7 +135,7 @@ impl OsPoll for Epoll {
 
     fn insert(&self, fd: RawFd) -> Result<(), Error> {
         let mut ev = libc::epoll_event {
-            events: (libc::EPOLLIN | libc::EPOLLOUT) as u32,
+            events: (libc::EPOLLET | libc::EPOLLIN | libc::EPOLLOUT) as u32,
             u64: fd as u64,
         };
         let ret = unsafe { libc::epoll_ctl(self.epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
@@ -158,7 +158,7 @@ impl OsPoll for Epoll {
         } else {
             assert_eq!(1, ret);
             let fd = ev.u64 as RawFd;
-            Ok(Some((fd, ev.events)))
+            Ok(Some((fd, from_epoll_constants(ev.events as i32))))
         }
     }
 }

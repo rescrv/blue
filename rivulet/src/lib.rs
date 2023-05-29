@@ -313,7 +313,7 @@ impl SendChannel {
             }
             let mut pfd = libc::pollfd {
                 fd: self.state.lock().unwrap().as_raw_fd(),
-                events: poll_constants(events),
+                events: to_poll_constants(events),
                 revents: 0,
             };
             let sw = Stopwatch::default();
