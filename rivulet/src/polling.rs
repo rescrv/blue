@@ -62,6 +62,10 @@ static CONSERVE_POLLOUT: Counter = Counter::new("rivulet.conserve_pollout");
 static RETURN_CONSERVED_POLLIN: Counter = Counter::new("rivulet.return_pollin");
 static RETURN_CONSERVED_POLLOUT: Counter = Counter::new("rivulet.return_pollout");
 
+static POLL_ERROR: Counter = Counter::new("rivulet.poll.error");
+static POLL_TIMEOUT: Counter = Counter::new("rivulet.poll.timeout");
+static POLL_RETURN: Counter = Counter::new("rivulet.poll.return");
+
 pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&FD_TRUNCATED);
     collector.register_counter(&NEW_THREAD);
@@ -149,13 +153,16 @@ impl OsPoll for Epoll {
         let mut ev = libc::epoll_event { events: 0, u64: 0 };
         let ret = unsafe { libc::epoll_wait(self.epfd, &mut ev, 1, timeout_ms) };
         if ret < 0 {
+            POLL_ERROR.click();
             Err(std::io::Error::last_os_error().into())
         } else if ret == 0 {
+            POLL_TIMEOUT.click();
             Ok(None)
         } else if ev.u64 > i32::max_value() as u64 {
             FD_TRUNCATED.click();
             Ok(None)
         } else {
+            POLL_RETURN.click();
             assert_eq!(1, ret);
             let fd = ev.u64 as RawFd;
             Ok(Some((fd, from_epoll_constants(ev.events as i32))))
