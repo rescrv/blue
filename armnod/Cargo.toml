@@ -7,7 +7,9 @@ description = "Armnod provides a random string generator."
 license = "Apache-2.0"
 
 [dependencies]
-clap = "2.33"
+getopts = "0.2"
 rand = "0.7"
 
+arrrg = { path = "../arrrg", version = "0.1.0" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.1.0" }
 guacamole = { path = "../guacamole", version = "0.1.0" }

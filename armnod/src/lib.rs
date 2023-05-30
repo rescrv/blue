@@ -1,6 +1,6 @@
 //! Armnod is an anagram for "random"; Armnod is a library for working with random strings.
 //!
-//! Each [ARMNOD] consists of a [SeedChooser], [LengthChooser], and [CharacterChooser] which
+//! Each [Armnod] consists of a [SeedChooser], [LengthChooser], and [CharacterChooser] which
 //! compose a set of random strings.  The SeedChooser picks the element of the set.  It may say to
 //! stop iterating (enough items have been chosen), it may say to seek to a particular offset in
 //! another guacamole generator (there's a finite number of seeds), or it may say to not seek at
@@ -17,6 +17,8 @@ use rand::RngCore;
 
 use guacamole::Guacamole;
 use guacamole::Zipf;
+
+use arrrg_derive::CommandLine;
 
 //////////////////////////////////////////// SeedChoice ////////////////////////////////////////////
 
@@ -233,11 +235,11 @@ impl CharSetChooser {
         assert!(s.len() < 96);
         let mut table: [char; 256] = ['A'; 256];
 
-        for i in 0..256 {
+        for (i, x) in table.iter_mut().enumerate() {
             let d: f64 = (i as f64) / 256.0 * s.len() as f64;
             let d: usize = d as usize;
             assert!(d < s.len());
-            table[i] = s[d];
+            *x = s[d];
         }
 
         Self { chars: table }
@@ -260,23 +262,23 @@ impl CharacterChooser for CharSetChooser {
     }
 }
 
-////////////////////////////////////////////// ARMNOD //////////////////////////////////////////////
+////////////////////////////////////////////// Armnod //////////////////////////////////////////////
 
-/// ARMNOD is an anagram of RANDOM
-pub struct ARMNOD {
+/// Armnod is an anagram of Random
+pub struct Armnod {
     pub string: Box<dyn SeedChooser>,
     pub length: Box<dyn LengthChooser>,
     pub characters: Box<dyn CharacterChooser>,
     pub buffer: Vec<u8>,
 }
 
-impl ARMNOD {
-    /// Create a new [ARMNOD] for strings of `length` with the default character set.
-    pub fn random(length: u32) -> ARMNOD {
+impl Armnod {
+    /// Create a new [Armnod] for strings of `length` with the default character set.
+    pub fn random(length: u32) -> Self {
         let string = Box::<RandomStringChooser>::default();
         let length = Box::new(ConstantLengthChooser::new(length));
         let characters = Box::new(CharSetChooser::new(CHAR_SET_DEFAULT));
-        ARMNOD {
+        Self {
             string,
             length,
             characters,
@@ -299,5 +301,52 @@ impl ARMNOD {
         guac.fill_bytes(&mut self.buffer);
         let string = self.characters.whole_string(&mut self.buffer);
         Some(string)
+    }
+}
+
+/////////////////////////////////////////// Command Line ///////////////////////////////////////////
+
+#[derive(CommandLine)]
+pub struct ArmnodCommandLine {
+    #[arrrg(required, "Number of strings to generate.", "N")]
+    pub number: u64,
+    #[arrrg(required, "Method of choosing strings.", "METHOD")]
+    pub chooser_mode: String,
+    #[arrrg(optional, "Cardinality for set-based modes.", "N")]
+    pub cardinality: Option<u64>,
+    #[arrrg(optional, "First set element to load in set-once mode.", "ELEM")]
+    pub set_once_begin: Option<u64>,
+    #[arrrg(optional, "Last set element to load in set-once mode.", "ELEM")]
+    pub set_once_end: Option<u64>,
+    // TODO(rescrv):  Embed something from guacamole::zipf.
+    #[arrrg(optional, "Theta value for the zipf distribution.", "THETA")]
+    pub zipf_theta: Option<f64>,
+    #[arrrg(optional, "Method of choosing length.", "LENGTH")]
+    pub length_mode: Option<String>,
+    #[arrrg(optional, "Generate strings of this constant length.", "LENGTH")]
+    pub string_length: Option<u32>,
+    #[arrrg(optional, "Generate strings at least this length for varied length modes.", "MIN")]
+    pub string_min_length: Option<u32>,
+    #[arrrg(optional, "Generate strings at most this length for varied length modes.", "MAX")]
+    pub string_max_length: Option<u32>,
+    #[arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET")]
+    pub charset: Option<String>,
+}
+
+impl Default for ArmnodCommandLine {
+    fn default() -> Self {
+        Self {
+            number: 1_000,
+            chooser_mode: "random".to_string(),
+            cardinality: None,
+            set_once_begin: None,
+            set_once_end: None,
+            zipf_theta: None,
+            length_mode: None,
+            string_length: None,
+            string_min_length: None,
+            string_max_length: None,
+            charset: None,
+        }
     }
 }
