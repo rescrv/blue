@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "armnod",
+    "arrrg",
+    "arrrg_derive",
     "biometrics",
     "biometrics_pb",
     "bloom",
