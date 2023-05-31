@@ -29,7 +29,10 @@ impl Default for ZipfCommandLine {
 
 /// Choose numbers [0, n) from a zipf distribution.
 fn main() {
-    let cmdline = ZipfCommandLine::from_command_line();
+    let (cmdline, free) = ZipfCommandLine::from_command_line();
+    if !free.is_empty() {
+        panic!("free arguments are not accepted");
+    }
     if cmdline.alpha.is_none() && cmdline.theta.is_none() {
         panic!("provide at least one of --alpha or --theta");
     }

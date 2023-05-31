@@ -1,42 +1,40 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use clap::{App, Arg};
-
 use util::time::now;
+
+use arrrg::CommandLine;
+use arrrg_derive::CommandLine;
 
 use sst::{Builder, SSTBuilder, SSTBuilderOptions};
 
+#[derive(CommandLine, Debug)]
+struct SstFromPlaintextCommandLine {
+    #[arrrg(required, "Input file in plaintext \"<KEY> <VALUE>\\n\" formatting.")]
+    plaintext: String,
+    #[arrrg(required, "Output file in SST format.")]
+    sst: String,
+}
+
+impl Default for SstFromPlaintextCommandLine {
+    fn default() -> Self {
+        Self {
+            plaintext: "/dev/stdin".to_string(),
+            sst: "plaintext.sst".to_string(),
+        }
+    }
+}
+
 fn main() {
-    let app = App::new("zataods-lp-sst-from-plaintext")
-        .version("0.1.0")
-        .about("Convert a plaintext \"table\" to an SST.");
-    let app = app.arg(
-        Arg::with_name("input")
-            .long("input")
-            .takes_value(true)
-            .help("Number of strings to generate."),
-    );
-    let app = app.arg(
-        Arg::with_name("output")
-            .long("output")
-            .takes_value(true)
-            .help("Name of the SST to create."),
-    );
-
-    // parse
-    let args = app.get_matches();
-    let input = args.value_of("input").unwrap_or("/dev/stdin");
-    let output = args.value_of("output").unwrap_or("plaintext.sst");
-
+    let (cmdline, _) = SstFromPlaintextCommandLine::from_command_line();
     // setup fin
-    let fin = File::open(input).expect("could not open input");
-    let fin = BufReader::new(fin);
+    let plaintext = File::open(cmdline.plaintext).expect("could not open plaintext");
+    let plaintext = BufReader::new(plaintext);
     // setup sst out
     let opts = SSTBuilderOptions::default();
-    let mut sst = SSTBuilder::new(output, opts).expect("could not open sst");
+    let mut sst = SSTBuilder::new(cmdline.sst, opts).expect("could not open sst");
 
-    for line in fin.lines() {
+    for line in plaintext.lines() {
         let line = &line.expect("could not parse line");
         let split: Vec<&str> = line.split_whitespace().collect();
         if split.len() != 2 {

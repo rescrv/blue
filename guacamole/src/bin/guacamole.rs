@@ -15,7 +15,10 @@ struct GuacamoleCommandLine {
 
 /// Generate pseudo-random, predictable bytes.
 fn main() {
-    let cmdline = GuacamoleCommandLine::from_command_line();
+    let (cmdline, free) = GuacamoleCommandLine::from_command_line();
+    if !free.is_empty() {
+        panic!("free arguments are not accepted");
+    }
     let mut guac = Guacamole::new(cmdline.seed.unwrap_or(0));
     let mut remain = cmdline.bytes.unwrap_or(u64::max_value()) as usize;
     let mut buf = [0u8; 1 << 20];

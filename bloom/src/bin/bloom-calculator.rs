@@ -18,7 +18,10 @@ struct Parameters {
 }
 
 fn main() {
-    let params = Parameters::from_command_line_relaxed();
+    let (params, free) = Parameters::from_command_line_relaxed();
+    if !free.is_empty() {
+        panic!("free arguments are not accepted");
+    }
 
     let n = params.card.map(N::new);
     let p = params.prob.map(P::new);

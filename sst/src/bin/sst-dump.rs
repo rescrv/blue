@@ -1,21 +1,15 @@
-use clap::{App, Arg};
+use arrrg::CommandLine;
+use arrrg_derive::CommandLine;
 
 use sst::{Cursor, SST};
 
-fn main() {
-    let app = App::new("zataods-lp-sst-dump")
-        .version("0.1.0")
-        .about("Dump an SST to stdout using escaped strings.");
-    let app = app.arg(
-        Arg::with_name("sst")
-            .index(1)
-            .multiple(true)
-            .help("List of ssts to dump."));
+#[derive(CommandLine, Debug, Default)]
+struct SstDumpCommandLine {}
 
+fn main() {
+    let (_, args) = SstDumpCommandLine::from_command_line();
     // parse
-    let args = app.get_matches();
-    let ssts: Vec<_> = args.values_of("sst").unwrap().collect();
-    for sst in ssts {
+    for sst in args {
         let sst = SST::new(sst).expect("could not open sst");
         let mut cursor = sst.cursor();
         cursor.seek_to_first().expect("could not seek to first");

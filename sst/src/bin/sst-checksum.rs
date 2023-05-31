@@ -1,6 +1,6 @@
-use clap::{App, Arg};
+use arrrg::CommandLine;
+use arrrg_derive::CommandLine;
 
-use sst::cli::{parse_sst_args, sst_args};
 use sst::setsum::Setsum;
 use sst::{Cursor, SST};
 
@@ -28,24 +28,16 @@ fn slow_setsum(sst: &str) -> String {
     setsum.hexdigest()
 }
 
+#[derive(CommandLine, Debug, Default)]
+struct SstChecksumCommandLine {
+    #[arrrg(flag, "Report checksum from file footer rather than by computation.")]
+    fast: bool,
+}
+
 fn main() {
-    let app = App::new("zataods-lp-sst-checksum")
-        .version("0.1.0")
-        .about("Checksum the provided SST files.");
-    let app = sst_args(app, 1);
-    let app = app.arg(
-        Arg::with_name("fast")
-            .long("fast")
-            .takes_value(false)
-            .help("Use the embedded setsum instead of computing one."));
-
-    // parse
-    let args = app.get_matches();
-    let ssts = parse_sst_args(&args);
-    let fast = args.is_present("fast");
-
-    for sst in ssts.into_iter() {
-        if fast {
+    let (cmdline, args) = SstChecksumCommandLine::from_command_line();
+    for sst in args {
+        if cmdline.fast {
             println!("{} {}", fast_setsum(&sst), sst);
         } else {
             println!("{} {}", slow_setsum(&sst), sst);

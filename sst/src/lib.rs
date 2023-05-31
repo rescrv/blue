@@ -18,7 +18,6 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 pub mod block;
-pub mod cli;
 pub mod file_manager;
 pub mod merging_cursor;
 pub mod pruning_cursor;
