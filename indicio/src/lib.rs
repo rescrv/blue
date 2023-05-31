@@ -6,7 +6,7 @@ use biometrics::Counter;
 
 use buffertk::stack_pack;
 
-use id::generate_id;
+use one_two_eight::generate_id;
 
 use util::stopwatch::Stopwatch;
 

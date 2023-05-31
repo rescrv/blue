@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use biometrics::{Counter, Gauge, Sensor};
 
-use id::generate_id;
+use one_two_eight::generate_id;
 
 ///////////////////////////////////////////// FiringID /////////////////////////////////////////////
 

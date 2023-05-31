@@ -7,6 +7,8 @@ use buffertk::Buffer;
 
 use biometrics::Counter;
 
+use one_two_eight::{generate_id, generate_id_prototk};
+
 use zerror:: Z;
 
 use zerror_core::ErrorCore;
@@ -22,11 +24,11 @@ pub static UNUSED_BUFFER: Counter = Counter::new("rpc_pb.unused_buffer");
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
-id::generate_id! {TraceID, "trace:"}
-id::generate_id_prototk! {TraceID}
+generate_id! {TraceID, "trace:"}
+generate_id_prototk! {TraceID}
 
-id::generate_id! {ClientID, "client:"}
-id::generate_id_prototk! {ClientID}
+generate_id! {ClientID, "client:"}
+generate_id_prototk! {ClientID}
 
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 

@@ -8,6 +8,6 @@ edition = "2021"
 rand = "0.7"
 
 biometrics = { path = "../biometrics", version = "0.1.0" }
-id = { path = "../id" }
+one_two_eight = { path = "../one_two_eight" }
 indicio = { path = "../indicio" }
 prototk = { path = "../prototk", version = "0.1.0" }
