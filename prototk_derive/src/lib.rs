@@ -440,7 +440,7 @@ fn visit_attribute<V: ProtoTKVisitor>(
     let (field_number, field_type) = match parse_attribute(attr) {
         Some(x) => x,
         None => {
-            panic!("{}", USAGE);
+            return None;
         }
     };
     let field_type = &field_type_tokens(field, &field_type);
