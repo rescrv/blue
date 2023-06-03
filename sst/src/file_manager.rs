@@ -18,8 +18,8 @@ use super::{LOGIC_ERROR, Error, FromIO};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static TOO_MANY_OPEN_FILES: Counter = Counter::new("lp.file_manager.too_many_open_files");
-static TOO_MANY_OPEN_FILES_MONITOR: Stationary = Stationary::new("lp.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
+static TOO_MANY_OPEN_FILES: Counter = Counter::new("sst.file_manager.too_many_open_files");
+static TOO_MANY_OPEN_FILES_MONITOR: Stationary = Stationary::new("sst.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&TOO_MANY_OPEN_FILES_MONITOR);
@@ -104,7 +104,7 @@ impl State {
                 panic!("path missing from names map");
             }
         };
-        // TODO(rescrv) click!("lp.file_manager.close");
+        // TODO(rescrv) click!("sst.file_manager.close");
     }
 }
 
@@ -229,7 +229,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
 
 fn open(path: PathBuf) -> Result<File, Error> {
     // Open the file
-    // TODO(rescrv) click!("lp.file_manager.open");
+    // TODO(rescrv) click!("sst.file_manager.open");
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {

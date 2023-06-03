@@ -31,20 +31,20 @@ use crate::setsum::Setsum;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static LOGIC_ERROR: Counter = Counter::new("lp.logic_error");
-static LOGIC_ERROR_MONITOR: Stationary = Stationary::new("lp.logic_error", &LOGIC_ERROR);
+static LOGIC_ERROR: Counter = Counter::new("sst.logic_error");
+static LOGIC_ERROR_MONITOR: Stationary = Stationary::new("sst.logic_error", &LOGIC_ERROR);
 
-static CORRUPTION: Counter = Counter::new("lp.corruption");
-static CORRUPTION_MONITOR: Stationary = Stationary::new("lp.corruption", &CORRUPTION);
+static CORRUPTION: Counter = Counter::new("sst.corruption");
+static CORRUPTION_MONITOR: Stationary = Stationary::new("sst.corruption", &CORRUPTION);
 
-static KEY_TOO_LARGE: Counter = Counter::new("lp.error.key_too_large");
-static KEY_TOO_LARGE_MONITOR: Stationary = Stationary::new("lp.error.key_too_large", &KEY_TOO_LARGE);
+static KEY_TOO_LARGE: Counter = Counter::new("sst.error.key_too_large");
+static KEY_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.key_too_large", &KEY_TOO_LARGE);
 
-static VALUE_TOO_LARGE: Counter = Counter::new("lp.error.value_too_large");
-static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("lp.error.value_too_large", &VALUE_TOO_LARGE);
+static VALUE_TOO_LARGE: Counter = Counter::new("sst.error.value_too_large");
+static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.value_too_large", &VALUE_TOO_LARGE);
 
-static TABLE_FULL: Counter = Counter::new("lp.error.table_full");
-static TABLE_FULL_MONITOR: Stationary = Stationary::new("lp.error.table_full", &TABLE_FULL);
+static TABLE_FULL: Counter = Counter::new("sst.error.table_full");
+static TABLE_FULL_MONITOR: Stationary = Stationary::new("sst.error.table_full", &TABLE_FULL);
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOGIC_ERROR_MONITOR);
