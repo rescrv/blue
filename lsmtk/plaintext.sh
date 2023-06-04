@@ -19,6 +19,6 @@ for table in table*.txt
 do
     LC_ALL=C sort -S 256M -o $table $table
     rm -f ${table:r}.sst
-    $BINDIR/lp-sst-from-plaintext --input ${table} --output ${table:r}.sst
+    $BINDIR/sst-from-plaintext --plaintext ${table} --sst ${table:r}.sst
     rm $table
 done
