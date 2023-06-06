@@ -1,4 +1,4 @@
-MAX_SIZE = (1 << 30) - (1 << 24)
+MAX_SIZE = (1 << 24)
 TEMPLATE = '''            #[test]
             fn num_keys_{num_keys}_key_bytes_{key_bytes}_value_bytes_{value_bytes}_num_seeks_{num_seeks}_seek_distance_{seek_distance}_prev_probability_{prev_probability_str}() {{
                 let name = stringify!($name).to_string() + "::" + "num_keys_{num_keys}_key_bytes_{key_bytes}_value_bytes_{value_bytes}_num_seeks_{num_seeks}_seek_distance_{seek_distance}_prev_probability_{prev_probability_str}";
