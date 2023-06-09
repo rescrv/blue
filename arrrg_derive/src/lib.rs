@@ -45,6 +45,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
             }
 
             fn canonical_command_line(&self, prefix: Option<&str>) -> Vec<String> {
+                let dflt = Self::default();
                 let mut result = Vec::new();
                 #canonical_command_line
                 result
@@ -55,6 +56,15 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
 }
 
 //////////////////////////////////////// CommandLineVisitor ////////////////////////////////////////
+
+fn type_is_option(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(ty) = ty {
+        if ty.into_token_stream().to_string().starts_with("Option <") {
+            return true;
+        }
+    }
+    false
+}
 
 struct CommandLineVisitor {
 }
@@ -129,15 +139,27 @@ impl StructVisitor for CommandLineVisitor {
                         };
                     },
                     FieldType::Optional => {
-                        matches = quote! {
-                            #matches
-                            match matches.opt_str(&arg_str) {
-                                Some(s) => {
-                                    self.#field_ident = Some(arrrg::parse_field(&arg_str, &s));
-                                },
-                                None => {},
+                        if type_is_option(&field.ty) {
+                            matches = quote! {
+                                #matches
+                                match matches.opt_str(&arg_str) {
+                                    Some(s) => {
+                                        self.#field_ident = Some(arrrg::parse_field(&arg_str, &s));
+                                    },
+                                    None => {},
+                                };
                             };
-                        };
+                        } else {
+                            matches = quote! {
+                                #matches
+                                match matches.opt_str(&arg_str) {
+                                    Some(s) => {
+                                        self.#field_ident = arrrg::parse_field(&arg_str, &s);
+                                    },
+                                    None => {},
+                                };
+                            };
+                        }
                     },
                     FieldType::Required => {
                         matches = quote! {
@@ -176,13 +198,23 @@ impl StructVisitor for CommandLineVisitor {
                         };
                     },
                     FieldType::Optional => {
-                        canonical_command_line = quote! {
-                            #canonical_command_line
-                            if let Some(ref ident) = self.#field_ident {
-                                result.push(flag_str);
-                                result.push(ident.to_string());
+                        if type_is_option(&field.ty) {
+                            canonical_command_line = quote! {
+                                #canonical_command_line
+                                if let Some(ref ident) = self.#field_ident {
+                                    result.push(flag_str);
+                                    result.push(ident.to_string());
+                                }
+                            };
+                        } else {
+                            canonical_command_line = quote! {
+                                #canonical_command_line
+                                if self.#field_ident != dflt.#field_ident {
+                                    result.push(flag_str);
+                                    result.push(self.#field_ident.to_string());
+                                }
                             }
-                        };
+                        }
                     },
                     FieldType::Required => {
                         canonical_command_line = quote! {

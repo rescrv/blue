@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 //////////////////////////////////////////// CommandLine ///////////////////////////////////////////
 
-pub trait CommandLine: Sized + Default {
+pub trait CommandLine: Sized + Default + Eq + PartialEq {
     fn add_opts(&self, prefix: Option<&str>, opts: &mut getopts::Options);
     fn matches(&mut self, prefix: Option<&str>, matches: &getopts::Matches);
     fn canonical_command_line(&self, prefix: Option<&str>) -> Vec<String>;
