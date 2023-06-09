@@ -154,7 +154,7 @@ impl Setsum {
         let mut setsum = String::with_capacity(68);
         let digest = self.digest();
         for item in &digest {
-            write!(&mut setsum, "{:02x}", item).expect("unable to write to string");
+            write!(&mut setsum, "{:02x}", *item).expect("unable to write to string");
         }
         setsum
     }
