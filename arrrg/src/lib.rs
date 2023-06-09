@@ -21,7 +21,9 @@ pub trait CommandLine: Sized + Default + Eq + PartialEq {
 
     fn from_arguments(args: &[&str]) -> (Self, Vec<String>) {
         let (command_line, free) = Self::from_arguments_relaxed(args);
-        let reconstructed_args = command_line.canonical_command_line(None);
+        let mut reconstructed_args = command_line.canonical_command_line(None);
+        let mut free_p = free.clone();
+        reconstructed_args.append(&mut free_p);
         if args != reconstructed_args {
             panic!("non-canonical commandline specified:
 provided: {:?}
