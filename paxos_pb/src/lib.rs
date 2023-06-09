@@ -6,6 +6,12 @@ use rpc_pb::service;
 
 use zerror_core::ErrorCore;
 
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
+
+pub const DEFAULT_ALPHA: u64 = 256;
+pub const MIN_ALPHA: u64 = 1;
+pub const MAX_ALPHA: u64 = 1 << 20;
+
 //////////////////////////////////////////////// IDs ///////////////////////////////////////////////
 
 generate_id!(PaxosID, "paxos:");
@@ -111,6 +117,8 @@ pub struct Configuration {
     #[prototk(3, uint64)]
     pub first_slot: u64,
     /// Alpha may be any positive value.  Defaults to 1.
+    /// Alpha must be a positive value.  Defaults to DEFAULT_ALPHA.  MAX_ALPHA is maximum value.
+    /// MIN_ALPHA is minimum value.
     #[prototk(4, uint64)]
     pub alpha: u64,
     /// Replicas involved in this ensemble.  These will be used for acceptors, learners, and
