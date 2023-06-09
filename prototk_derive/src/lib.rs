@@ -768,6 +768,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         quote_spanned! { variant.span() =>
             (#field_number, ::prototk::field_types::#field_type::WIRE_TYPE) => {
                 let tmp: ::prototk::field_types::#field_type = up.unpack()?;
+                #[allow(clippy::useless_conversion)]
                 Ok((#ctor(tmp.into_native().into()), up.remain()))
             },
         }
