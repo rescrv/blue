@@ -97,7 +97,7 @@ impl Default for Ballot {
 /////////////////////////////////////////// Configuration //////////////////////////////////////////
 
 /// A configuration of the Paxos ensemble.
-#[derive(Clone, Debug, Default, Eq, Message, PartialEq)]
+#[derive(Clone, Default, Eq, Message, PartialEq)]
 pub struct Configuration {
     /// The Paxos ensemble this configuration represents.
     #[prototk(1, message)]
@@ -109,7 +109,7 @@ pub struct Configuration {
     /// The smallest slot this configuration is allowed to address.  The first configuration is, by
     /// convention, anchored at slot 1.  Slot 0 is treated as a non-slot so it can be default.
     #[prototk(3, uint64)]
-    pub slot: u64,
+    pub first_slot: u64,
     /// Alpha may be any positive value.  Defaults to 1.
     #[prototk(4, uint64)]
     pub alpha: u64,
@@ -118,6 +118,19 @@ pub struct Configuration {
     /// to at least a quorum of replicas before it is considered committed.
     #[prototk(5, message)]
     pub replicas: Vec<ReplicaID>,
+}
+
+impl std::fmt::Debug for Configuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        let replicas: Vec<String> = self.replicas.iter().map(|x| x.human_readable()).collect();
+        f.debug_struct("Configuration")
+            .field("group", &self.group.human_readable())
+            .field("epoch", &self.epoch)
+            .field("first_slot", &self.first_slot)
+            .field("alpha", &self.alpha)
+            .field("replicas", &replicas)
+            .finish()
+    }
 }
 
 ////////////////////////////////////////////// Command /////////////////////////////////////////////
