@@ -1,0 +1,34 @@
+Welcome to the texttale library.
+
+help: ....... Print this help menu.
+character: .. Configure your character for this texttale.
+begin: ...... Start off on your journey with the given character.
+
+> character
+Craft your character.
+
+help: .... Print this help menu.
+name: .... Set your character's name.
+age: ..... Set your character's age.
+gender: .. Set your character's gender.
+race: .... Set your character's race.
+print: ... Print your character.
+save: .... Commit changes to the configuration and return to previous menu.
+
+> name Robert
+> age 35
+> race Human
+> print
+Player {
+    name: "Robert",
+    age: 35,
+    gender: "unspecified",
+    race: "Human",
+}
+> save
+Welcome to the texttale library.
+
+help: ....... Print this help menu.
+character: .. Configure your character for this texttale.
+begin: ...... Start off on your journey with the given character.
+>  

@@ -23,6 +23,7 @@ members = [
     "setsum",
     "sst",
     "sync42",
+    "texttale",
     "tiny_lfu",
     "tuple_key",
     "tuple_key_derive",
