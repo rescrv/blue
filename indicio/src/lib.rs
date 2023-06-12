@@ -1,17 +1,17 @@
 use std::backtrace::Backtrace;
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 
 use biometrics::Counter;
 
 use buffertk::stack_pack;
 
-use one_two_eight::generate_id;
-
 use util::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldPackHelper, FieldType};
+
+use rpc_pb::TraceID;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -31,10 +31,6 @@ static TRACE_FLUSH: Counter = Counter::new("indicio.trace.flush");
 static TRACE_WITH_VALUE: Counter = Counter::new("indicio.trace.with_value");
 static TRACE_WITH_BACKTRACE: Counter = Counter::new("indicio.trace.with_backtrace");
 static TRACE_WITH_STOPWATCH: Counter = Counter::new("indicio.trace.with_stopwatch");
-
-////////////////////////////////////////////// TraceID /////////////////////////////////////////////
-
-generate_id! {TraceID, "trace:"}
 
 /////////////////////////////////////////////// Trace //////////////////////////////////////////////
 
