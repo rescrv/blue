@@ -6,20 +6,20 @@ use rustyline::error::ReadlineError;
 use rustyline::history::MemHistory;
 use rustyline::Editor;
 
-////////////////////////////////////////////// Harness /////////////////////////////////////////////
+///////////////////////////////////////////// TextTale /////////////////////////////////////////////
 
-pub trait Harness: Write {
+pub trait TextTale: Write {
     fn next_command(&mut self) -> Option<String>;
 }
 
-/////////////////////////////////////////// ShellHarness ///////////////////////////////////////////
+/////////////////////////////////////////// ShellTextTale //////////////////////////////////////////
 
-pub struct ShellHarness {
+pub struct ShellTextTale {
     rl: Editor<(), MemHistory>,
     prompt: &'static str,
 }
 
-impl ShellHarness {
+impl ShellTextTale {
     pub fn new(rl: Editor<(), MemHistory>, prompt: &'static str) -> Self {
         Self {
             rl,
@@ -28,7 +28,7 @@ impl ShellHarness {
     }
 }
 
-impl Write for ShellHarness {
+impl Write for ShellTextTale {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         std::io::stdout().write(buf)
     }
@@ -38,7 +38,7 @@ impl Write for ShellHarness {
     }
 }
 
-impl Harness for ShellHarness {
+impl TextTale for ShellTextTale {
     fn next_command(&mut self) -> Option<String> {
         let line = self.rl.readline(self.prompt);
         match line {
@@ -58,15 +58,15 @@ impl Harness for ShellHarness {
     }
 }
 
-/////////////////////////////////////////// ExpectHarness //////////////////////////////////////////
+////////////////////////////////////////// ExpectTextTale //////////////////////////////////////////
 
 #[derive(Default)]
-pub struct ExpectHarness {
+pub struct ExpectTextTale {
     input_lines: Vec<String>,
     output_buffer: Vec<u8>,
 }
 
-impl ExpectHarness {
+impl ExpectTextTale {
     pub fn new<P: AsRef<Path>>(script: P) -> Result<Self, std::io::Error> {
         let script = read_to_string(script)?;
         let input_lines = script.lines().map(|s| s.to_owned()).collect();
@@ -77,7 +77,7 @@ impl ExpectHarness {
     }
 }
 
-impl Write for ExpectHarness {
+impl Write for ExpectTextTale {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         self.output_buffer.write(buf)
     }
@@ -87,7 +87,7 @@ impl Write for ExpectHarness {
     }
 }
 
-impl Harness for ExpectHarness {
+impl TextTale for ExpectTextTale {
     fn next_command(&mut self) -> Option<String> {
         let mut expected_output = String::new();
         loop {
