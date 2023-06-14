@@ -9,7 +9,7 @@ pub struct u63 {
 }
 
 impl u63 {
-    fn must(x: u64) -> Self {
+    const fn must(x: u64) -> Self {
         match Self::new(x) {
             Some(x) => x,
             None => {
@@ -18,7 +18,7 @@ impl u63 {
         }
     }
 
-    fn new(x: u64) -> Option<Self> {
+    const fn new(x: u64) -> Option<Self> {
         if x & (1u64 << 63) != 0 {
             return None
         }
