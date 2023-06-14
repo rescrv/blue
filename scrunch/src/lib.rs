@@ -1,5 +1,7 @@
 use std::hash::Hash;
 
+use zerror_core::ErrorCore;
+
 pub mod bit_array;
 pub mod bit_vector;
 pub mod dictionary;
@@ -13,6 +15,16 @@ pub mod wavelet_tree;
 
 #[derive(Debug)]
 pub enum Error {
+    UnpackError {
+        core: ErrorCore,
+        error: prototk::Error,
+        context: String,
+    },
+    MissingField {
+        core: ErrorCore,
+        structure: String,
+        field: String,
+    },
 }
 
 /////////////////////////////////////////////// Index //////////////////////////////////////////////
