@@ -67,6 +67,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn usize_is_u64() {
+        assert_eq!(usize::BITS, 64);
+    }
+
+    #[test]
     fn sixty_three_new_works() {
         let x = u63::new((1u64 << 63) - 1);
         assert!(x.is_some());
