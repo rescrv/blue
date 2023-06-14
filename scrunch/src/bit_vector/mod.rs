@@ -1,6 +1,5 @@
-use buffertk::{Buffer, Unpackable};
+use buffertk::Unpackable;
 
-use super::bit_array::BitArray;
 use super::Error;
 
 pub mod rrr;
