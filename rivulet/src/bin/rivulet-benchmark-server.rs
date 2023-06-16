@@ -1,10 +1,10 @@
 use std::fs::File;
-use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
 
-use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
+use arrrg::CommandLine;
 
 use biometrics::{Collector, PlainTextEmitter};
+
+use rivulet::{RivuletCommandLine, RecvChannel, SendChannel};
 
 fn main() {
     std::thread::spawn(|| {
@@ -19,33 +19,25 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    // Setup our SSL preferences.
-    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-    acceptor.set_ca_file("ca.pem").unwrap();
-    acceptor.set_private_key_file("home.key", SslFiletype::PEM).unwrap();
-    acceptor.set_certificate_file("home.crt", SslFiletype::PEM).unwrap();
-    acceptor.check_private_key().expect("invalid private key");
-    // TODO(rescrv):  Production blocker.
-    acceptor.set_verify(boring::ssl::SslVerifyMode::NONE);
-    let acceptor = Arc::new(acceptor.build());
-    // Establish a listener.
-    let listener = TcpListener::bind("127.0.0.1:1982").unwrap();
-    // Act as server from this thread.
-    let handle_client = |stream: SslStream<TcpStream>| {
-        let (mut recv_chan, mut send_chan) = rivulet::from_stream(stream).expect("channel from stream");
+
+    let (options, free) = RivuletCommandLine::from_command_line_relaxed();
+    if !free.is_empty() {
+        eprintln!("command ignores positional arguments");
+    }
+    let listener = options.bind_to().expect("bind-to");
+
+    let handle_client = |mut recv_chan: RecvChannel, mut send_chan: SendChannel| {
         loop {
             let buf = recv_chan.recv().expect("recv");
             send_chan.send(buf.as_bytes()).expect("send");
         }
     };
     let mut threads = Vec::new();
-    for stream in listener.incoming() {
+    for stream in listener {
         match stream {
-            Ok(stream) => {
-                let acceptor = acceptor.clone();
+            Ok((recv_chan, send_chan)) => {
                 threads.push(std::thread::spawn(move || {
-                    let stream = acceptor.accept(stream).unwrap();
-                    handle_client(stream);
+                    handle_client(recv_chan, send_chan);
                 }));
             }
             Err(e) => { eprintln!("failure: {}", e); }

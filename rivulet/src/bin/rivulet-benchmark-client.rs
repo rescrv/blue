@@ -1,6 +1,10 @@
 use std::fs::File;
 
+use arrrg::CommandLine;
+
 use biometrics::{Collector, PlainTextEmitter};
+
+use rivulet::RivuletCommandLine;
 
 fn main() {
     std::thread::spawn(|| {
@@ -15,7 +19,11 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let (mut recv_chan, mut send_chan) = match rivulet::connect("127.0.0.1", 1982) {
+    let (options, free) = RivuletCommandLine::from_command_line_relaxed();
+    if !free.is_empty() {
+        eprintln!("command ignores positional arguments");
+    }
+    let (mut recv_chan, mut send_chan) = match options.connect() {
         Ok((recv_chan, send_chan)) => (recv_chan, send_chan),
         Err(e) => {
             panic!("err: {}", e);

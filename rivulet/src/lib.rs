@@ -1,8 +1,10 @@
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex};
 
-use boring::ssl::{ErrorCode, SslConnector, SslMethod, SslStream};
+use boring::ssl::{ErrorCode, SslAcceptor, SslConnector, SslFiletype, SslMethod, SslStream};
+
+use arrrg_derive::CommandLine;
 
 use biometrics::{Collector, Counter, Moments};
 
@@ -345,34 +347,123 @@ impl ProcessEvents for SendChannel {
     }
 }
 
-////////////////////////////////////////////// connect /////////////////////////////////////////////
+///////////////////////////////////////////// Listener /////////////////////////////////////////////
 
-pub fn connect(hostname: &str, port: u16) -> Result<(RecvChannel, SendChannel), Error> {
-    CONNECT.click();
-    let mut builder =
-        SslConnector::builder(SslMethod::tls()).map_err(|err| Error::TransportFailure {
-            core: ErrorCore::default(),
-            what: format!("could not build connector builder: {}", err),
-        })?;
-    // TODO(rescrv): Production blocker.  Need to sort out certs, etc.
-    builder.set_verify(boring::ssl::SslVerifyMode::NONE);
-    let connector = builder.build();
-    let stream = TcpStream::connect(format!("{hostname}:{port}"))?;
-    let stream =
-        connector
-            .connect(hostname, stream)
-            .map_err(|err| Error::TransportFailure {
+pub struct Listener {
+    acceptor: Arc<SslAcceptor>,
+    listener: TcpListener,
+}
+
+impl Iterator for Listener {
+    type Item = Result<(RecvChannel, SendChannel), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (stream, addr) = match self.listener.accept() {
+            Ok((stream, addr)) => (stream, addr),
+            Err(err) => {
+                return Some(Err(err.into()));
+            },
+        };
+        // TODO(rescrv): Log to indicio with the accepted addr.
+        _ = addr;
+        let stream = match self.acceptor.accept(stream) {
+            Ok(stream) => stream,
+            Err(err) => {
+                return Some(Err(Error::TransportFailure {
+                    core: ErrorCore::default(),
+                    what: err.to_string(),
+                }));
+            },
+        };
+        let (recv_chan, send_chan) = from_stream(stream).expect("channel from stream");
+        Some(Ok((recv_chan, send_chan)))
+    }
+}
+
+//////////////////////////////////////// RivuletCommandLine ////////////////////////////////////////
+
+#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
+pub struct RivuletCommandLine {
+    #[arrrg(required, "Hostname to use.", "HOST")]
+    host: String,
+    #[arrrg(required, "Port to use.", "PORT")]
+    port: u16,
+    #[arrrg(optional, "Set CA file.", "PEM")]
+    ca_file: Option<String>,
+    #[arrrg(optional, "Set private-key file.", "PEM")]
+    private_key_file: Option<String>,
+    #[arrrg(optional, "Set certificate file.", "PEM")]
+    certificate_file: Option<String>,
+    #[arrrg(flag, "Set SSL verify mode to None.  Useful when certificates don't match.")]
+    verify_none: bool,
+}
+
+impl RivuletCommandLine {
+    pub fn connect(&self) -> Result<(RecvChannel, SendChannel), Error> {
+        CONNECT.click();
+        let mut builder =
+            SslConnector::builder(SslMethod::tls()).map_err(|err| Error::TransportFailure {
                 core: ErrorCore::default(),
-                what: format!("{}", err),
+                what: format!("could not build connector builder: {}", err),
             })?;
-    from_stream(stream)
+        if let Some(ca_file) = &self.ca_file {
+            builder.set_ca_file(ca_file).expect("set_ca_file");
+        }
+        if let Some(private_key_file) = &self.private_key_file {
+            builder.set_private_key_file(private_key_file, SslFiletype::PEM).expect("private_key_file");
+        }
+        if let Some(certificate_file) = &self.certificate_file {
+            builder.set_certificate_file(certificate_file, SslFiletype::PEM).expect("private_key_file");
+        }
+        if self.private_key_file.is_some() && self.certificate_file.is_some() {
+            builder.check_private_key().expect("invalid private key");
+        }
+        if self.verify_none {
+            builder.set_verify(boring::ssl::SslVerifyMode::NONE);
+        }
+        let connector = builder.build();
+        let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
+        let stream =
+            connector
+                .connect(&self.host, stream)
+                .map_err(|err| Error::TransportFailure {
+                    core: ErrorCore::default(),
+                    what: format!("{}", err),
+                })?;
+        from_stream(stream)
+    }
+
+    pub fn bind_to(&self) -> Result<Listener, Error> {
+        // Create the SSL acceptor state.
+        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        if let Some(ca_file) = &self.ca_file {
+            acceptor.set_ca_file(ca_file).expect("set_ca_file");
+        }
+        if let Some(private_key_file) = &self.private_key_file {
+            acceptor.set_private_key_file(private_key_file, SslFiletype::PEM).expect("private_key_file");
+        }
+        if let Some(certificate_file) = &self.certificate_file {
+            acceptor.set_certificate_file(certificate_file, SslFiletype::PEM).expect("private_key_file");
+        }
+        if self.private_key_file.is_some() && self.certificate_file.is_some() {
+            acceptor.check_private_key().expect("invalid private key");
+        }
+        if self.verify_none {
+            acceptor.set_verify(boring::ssl::SslVerifyMode::NONE);
+        }
+        let acceptor = Arc::new(acceptor.build());
+        // Establish a listener.
+        let listener = TcpListener::bind(format!("{}:{}", self.host, self.port))?;
+        Ok(Listener {
+            acceptor,
+            listener,
+        })
+    }
 }
 
 //////////////////////////////////////////// from_stream ///////////////////////////////////////////
 
-pub fn from_stream(
-    stream: SslStream<TcpStream>,
-) -> Result<(RecvChannel, SendChannel), Error> {
+pub fn from_stream(stream: SslStream<TcpStream>) -> Result<(RecvChannel, SendChannel), Error> {
     FROM_STREAM.click();
     stream.get_ref().set_nonblocking(true)?;
     stream.get_ref().set_nodelay(true)?;
@@ -383,7 +474,7 @@ pub fn from_stream(
         recv_idx: 0,
     };
     let send = SendChannel {
-        state: Arc::clone(&state),
+        state,
         send_buf: Vec::new(),
         send_idx: 0,
     };
