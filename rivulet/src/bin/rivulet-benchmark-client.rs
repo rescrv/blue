@@ -19,7 +19,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let (options, free) = RivuletCommandLine::from_command_line_relaxed();
+    let (options, free) = RivuletCommandLine::from_command_line_relaxed("Usage: rivulet-benchmark-client [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }

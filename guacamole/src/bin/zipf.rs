@@ -4,7 +4,7 @@ use arrrg_derive::CommandLine;
 use guacamole::zipf::Zipf;
 use guacamole::Guacamole;
 
-#[derive(CommandLine)]
+#[derive(CommandLine, PartialEq)]
 struct ZipfCommandLine {
     #[arrrg(required, "Approximate cardinality of the set.", "N")]
     card: u64,
@@ -27,9 +27,11 @@ impl Default for ZipfCommandLine {
     }
 }
 
+impl Eq for ZipfCommandLine {}
+
 /// Choose numbers [0, n) from a zipf distribution.
 fn main() {
-    let (cmdline, free) = ZipfCommandLine::from_command_line();
+    let (cmdline, free) = ZipfCommandLine::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

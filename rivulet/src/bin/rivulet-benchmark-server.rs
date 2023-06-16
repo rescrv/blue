@@ -20,7 +20,7 @@ fn main() {
         }
     });
 
-    let (options, free) = RivuletCommandLine::from_command_line_relaxed();
+    let (options, free) = RivuletCommandLine::from_command_line_relaxed("Usage: rivulet-benchmark-server [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }

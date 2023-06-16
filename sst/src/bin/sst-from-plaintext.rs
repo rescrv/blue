@@ -8,7 +8,7 @@ use arrrg_derive::CommandLine;
 
 use sst::{Builder, SSTBuilder, SSTBuilderOptions};
 
-#[derive(CommandLine, Debug)]
+#[derive(CommandLine, Debug, Eq, PartialEq)]
 struct SstFromPlaintextCommandLine {
     #[arrrg(required, "Input file in plaintext \"<KEY> <VALUE>\\n\" formatting.")]
     plaintext: String,
@@ -26,7 +26,7 @@ impl Default for SstFromPlaintextCommandLine {
 }
 
 fn main() {
-    let (cmdline, _) = SstFromPlaintextCommandLine::from_command_line();
+    let (cmdline, _) = SstFromPlaintextCommandLine::from_command_line("Usage: sst-from-plaintext --plaintext <FILE> --sst <FILE>");
     // setup fin
     let plaintext = File::open(cmdline.plaintext).expect("could not open plaintext");
     let plaintext = BufReader::new(plaintext);

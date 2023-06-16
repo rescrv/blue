@@ -5,7 +5,7 @@ use bloom::{
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-#[derive(CommandLine, Debug, Default)]
+#[derive(CommandLine, Debug, Default, PartialEq)]
 struct Parameters {
     #[arrrg(optional, "Expected number of elements to insert into the bloom filter.", "N")]
     card: Option<f64>,
@@ -17,8 +17,10 @@ struct Parameters {
     keys: Option<f64>,
 }
 
+impl Eq for Parameters {}
+
 fn main() {
-    let (params, free) = Parameters::from_command_line_relaxed();
+    let (params, free) = Parameters::from_command_line_relaxed("Usage: bloom-calculator [--n N] [--p P] [--m M] [--k K]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

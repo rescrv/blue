@@ -3,11 +3,11 @@ use arrrg_derive::CommandLine;
 
 use sst::{Cursor, SST};
 
-#[derive(CommandLine, Debug, Default)]
+#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct SstDumpCommandLine {}
 
 fn main() {
-    let (_, args) = SstDumpCommandLine::from_command_line();
+    let (_, args) = SstDumpCommandLine::from_command_line("Usage: sst-dump [OPTIONS] [SSTs]");
     // parse
     for sst in args {
         let sst = SST::new(sst).expect("could not open sst");
