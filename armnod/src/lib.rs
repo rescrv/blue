@@ -306,7 +306,7 @@ impl Armnod {
 
 /////////////////////////////////////////// Command Line ///////////////////////////////////////////
 
-#[derive(CommandLine)]
+#[derive(CommandLine, Debug, PartialEq)]
 pub struct ArmnodCommandLine {
     #[arrrg(required, "Number of strings to generate.", "N")]
     pub number: u64,
@@ -350,3 +350,5 @@ impl Default for ArmnodCommandLine {
         }
     }
 }
+
+impl Eq for ArmnodCommandLine {}

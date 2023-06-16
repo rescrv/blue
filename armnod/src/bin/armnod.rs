@@ -31,7 +31,7 @@ fn uniform_length_chooser(min_length: u32, max_length: u32) -> Box<dyn LengthCho
 }
 
 fn main() {
-    let (mut cmdline, free) = ArmnodCommandLine::from_command_line();
+    let (mut cmdline, free) = ArmnodCommandLine::from_command_line("Usage: armnod [--options]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }
