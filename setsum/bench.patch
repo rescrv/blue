@@ -1,0 +1,40 @@
+diff --git a/setsum/Cargo.toml b/setsum/Cargo.toml
+index 12e224d..70e9e65 100644
+--- a/setsum/Cargo.toml
++++ b/setsum/Cargo.toml
+@@ -6,7 +6,15 @@ edition = "2021"
+ description = "Setsum provides an order-agnostic checksum."
+ license = "Apache-2.0"
+ 
+-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
++[dev-dependencies]
++criterion = "0.5"
++rand = "0.7"
++
++guacamole = { path = "../guacamole", version = "0.1.0" }
++
++[[bench]]
++name = "benchmark"
++harness = false
+ 
+ [dependencies]
+ sha2 = "0.9"
+diff --git a/setsum/src/lib.rs b/setsum/src/lib.rs
+index 79fbe60..e41e18e 100644
+--- a/setsum/src/lib.rs
++++ b/setsum/src/lib.rs
+@@ -23,11 +23,11 @@ pub const SETSUM_BYTES: usize = 32;
+ /// The number of bytes per column.  This should evenly divide the number of bytes.  This number is
+ /// implicitly wound through the code in its use of u32 to store columns as it's the number of bytes
+ /// used to store a u32.
+-const SETSUM_BYTES_PER_COLUMN: usize = 4;
++pub const SETSUM_BYTES_PER_COLUMN: usize = 4;
+ /// The number of columns in the logical/internal representation of the setsum.
+-const SETSUM_COLUMNS: usize = SETSUM_BYTES / SETSUM_BYTES_PER_COLUMN;
++pub const SETSUM_COLUMNS: usize = SETSUM_BYTES / SETSUM_BYTES_PER_COLUMN;
+ /// Each column uses a different prime to construct a field of different size and transformations.
+-const SETSUM_PRIMES: [u32; SETSUM_COLUMNS] = [
++pub const SETSUM_PRIMES: [u32; SETSUM_COLUMNS] = [
+     4294967291, 4294967279, 4294967231, 4294967197, 4294967189, 4294967161, 4294967143, 4294967111,
+ ];
+ 
