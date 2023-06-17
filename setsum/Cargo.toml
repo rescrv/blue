@@ -1,7 +1,7 @@
 [package]
 name = "setsum"
 version = "0.1.0"
-authors = ["Robert Escriva <rescriva@dropbox.com>"]
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Setsum provides an order-agnostic checksum."
 license = "Apache-2.0"
