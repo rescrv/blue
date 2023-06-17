@@ -33,13 +33,16 @@ const SETSUM_PRIMES: [u32; SETSUM_COLUMNS] = [
 
 /// Adds together two internal representations and constructs their output.  The algorithm for
 /// column i is (A[i] + B[i]) % P[i], where P[i] is the primes array.
-fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
+pub fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
     let mut ret = <[u32; SETSUM_COLUMNS]>::default();
     for i in 0..SETSUM_COLUMNS {
         let lc = lhs[i] as u64;
         let rc = rhs[i] as u64;
-        let sum = (lc + rc) % SETSUM_PRIMES[i] as u64;
-        assert!(sum <= u32::MAX as u64);
+        let mut sum = lc + rc;
+        let p = SETSUM_PRIMES[i] as u64;
+        if sum >= p {
+            sum -= p;
+        }
         ret[i] = sum as u32;
     }
     ret
@@ -47,7 +50,7 @@ fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SE
 
 /// Converts each column in the provided state to be the inverse of the input.  This means that the
 /// two columns added together via add_state will come out zero.
-fn invert_state(state: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
+pub fn invert_state(state: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
     let mut state = state;
     for i in 0..SETSUM_COLUMNS {
         state[i] = SETSUM_PRIMES[i] - state[i]
@@ -123,9 +126,7 @@ impl Setsum {
         for col in 0..SETSUM_COLUMNS {
             let idx = col * SETSUM_BYTES_PER_COLUMN;
             let buf = self.state[col].to_le_bytes();
-            for i in 0..4 {
-                item_hash[idx + i] = buf[i];
-            }
+            item_hash[idx..(4 + idx)].copy_from_slice(&buf[..4]);
         }
         item_hash
     }
@@ -133,13 +134,11 @@ impl Setsum {
     /// Creates a setsum from an array of SETSUM_BYTES.
     pub fn from_digest(digest: [u8; SETSUM_BYTES]) -> Setsum {
         let mut state: [u32; SETSUM_COLUMNS] = [0u32; SETSUM_COLUMNS];
-        for col in 0..SETSUM_COLUMNS {
+        for (col, item) in state.iter_mut().enumerate().take(SETSUM_COLUMNS) {
             let idx = col * SETSUM_BYTES_PER_COLUMN;
             let mut buf = [0u8; 4];
-            for i in 0..4 {
-                buf[i] = digest[idx + i];
-            }
-            state[col] = u32::from_le_bytes(buf);
+            buf.clone_from_slice(&digest[idx..idx + 4]);
+            *item = u32::from_le_bytes(buf);
         }
         Self { state }
     }
@@ -148,8 +147,8 @@ impl Setsum {
     pub fn hexdigest(&self) -> String {
         let mut setsum = String::with_capacity(68);
         let digest = self.digest();
-        for i in 0..digest.len() {
-            write!(&mut setsum, "{:02x}", digest[i]).expect("unable to write to string");
+        for item in &digest {
+            write!(&mut setsum, "{:02x}", item).expect("unable to write to string");
         }
         setsum
     }
