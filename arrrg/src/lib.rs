@@ -47,7 +47,7 @@ check argument order amongst other differences",
         let matches = match opts.parse(args) {
             Ok(matches) => { matches },
             Err(Fail::OptionMissing(which)) => {
-                eprintln!("missing argument: {}", which);
+                eprintln!("missing argument: --{}", which);
                 command_line.usage(opts, usage);
             },
             Err(err) => {
