@@ -382,7 +382,7 @@ impl Iterator for Listener {
 
 //////////////////////////////////////// RivuletCommandLine ////////////////////////////////////////
 
-#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
 pub struct RivuletCommandLine {
     #[arrrg(required, "Hostname to use.", "HOST")]
     host: String,
