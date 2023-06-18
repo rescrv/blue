@@ -33,6 +33,7 @@ const SETSUM_PRIMES: [u32; SETSUM_COLUMNS] = [
 
 /// Adds together two internal representations and constructs their output.  The algorithm for
 /// column i is (A[i] + B[i]) % P[i], where P[i] is the primes array.
+#[inline(always)]
 pub fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
     let mut ret = <[u32; SETSUM_COLUMNS]>::default();
     for i in 0..SETSUM_COLUMNS {
@@ -50,6 +51,7 @@ pub fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32
 
 /// Converts each column in the provided state to be the inverse of the input.  This means that the
 /// two columns added together via add_state will come out zero.
+#[inline(always)]
 pub fn invert_state(state: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
     let mut state = state;
     for i in 0..SETSUM_COLUMNS {
