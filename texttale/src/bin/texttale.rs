@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Formatter};
+
 use rustyline::history::MemHistory;
 use rustyline::{Config, Editor, Result};
 
@@ -5,22 +7,34 @@ use texttale::{ExpectTextTale, TextTale, ShellTextTale};
 
 ////////////////////////////////////////////// Player //////////////////////////////////////////////
 
-#[derive(Debug)]
-struct Player {
+struct Player<T: TextTale> {
     name: String,
     age: u8,
     gender: String,
     race: String,
+    tale: T,
 }
 
-impl Default for Player {
-    fn default() -> Self {
+impl<T: TextTale> Player<T> {
+    fn new(tale: T) -> Self {
         Self {
             name: "Link".to_owned(),
             gender: "unspecified".to_owned(),
             age: 18,
             race: "Hylian".to_owned(),
+            tale,
         }
+    }
+}
+
+impl<T: TextTale> Debug for Player<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Player")
+            .field("name", &self.name)
+            .field("age", &self.age)
+            .field("gender", &self.gender)
+            .field("race", &self.race)
+            .finish()
     }
 }
 
@@ -33,36 +47,37 @@ character: .. Configure your character for this texttale.
 begin: ...... Start off on your journey with the given character.
 ";
 
-fn bootstrap<T: TextTale>(tale: &mut T) -> Result<()> {
-    let mut print_help = true;
-    let mut player = Player::default();
-    'bootstrapping:
-    loop {
-        if print_help {
-            writeln!(tale, "{}", BOOTSTRAP_HELP)?;
-            print_help = false;
-        }
-        if let Some(ref line) = tale.next_command() {
-            match line.as_str() {
-                "help" => {
-                    print_help = true;
-                },
-                "character" => {
-                    character(tale, &mut player)?;
-                    print_help = true;
-                }
-                "begin" => {
-                    return steady_state(tale, player);
-                }
-                _ => {
-                    writeln!(tale, "unknown command: {}", line.as_str())?;
-                },
+impl<T: TextTale> Player<T> {
+    fn bootstrap(&mut self) -> Result<()> {
+        let mut print_help = true;
+        'bootstrapping:
+        loop {
+            if print_help {
+                writeln!(self.tale, "{}", BOOTSTRAP_HELP)?;
+                print_help = false;
             }
-        } else {
-            break 'bootstrapping;
+            if let Some(ref line) = self.tale.next_command() {
+                match line.as_str() {
+                    "help" => {
+                        print_help = true;
+                    },
+                    "character" => {
+                        self.character()?;
+                        print_help = true;
+                    }
+                    "begin" => {
+                        return self.steady_state();
+                    }
+                    _ => {
+                        writeln!(self.tale, "unknown command: {}", line.as_str())?;
+                    },
+                }
+            } else {
+                break 'bootstrapping;
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 ///////////////////////////////////////////// character ////////////////////////////////////////////
@@ -78,60 +93,63 @@ print: ... Print your character.
 save: .... Commit changes to the configuration and return to previous menu.
 ";
 
-fn character<T: TextTale>(tale: &mut T, mut player: &mut Player) -> Result<()> {
-    let mut print_help = true;
-    'configuring:
-    loop {
-        if print_help {
-            writeln!(tale, "{}", CHARACTER_HELP)?;
-            print_help = false;
-        }
-        if let Some(ref line) = tale.next_command() {
-            let cmd: Vec<&str> = line.split_whitespace().collect();
-            if cmd.is_empty() {
-                continue 'configuring;
+impl<T: TextTale> Player<T> {
+    fn character(&mut self) -> Result<()> {
+        let mut print_help = true;
+        'configuring:
+        loop {
+            if print_help {
+                writeln!(self.tale, "{}", CHARACTER_HELP)?;
+                print_help = false;
             }
-            match cmd[0] {
-                "help" => {
-                    print_help = true;
-                },
-                "name" => {
-                    player.name = cmd[1..].to_vec().join(" ")
-                },
-                "gender" => {
-                    player.gender = cmd[1..].to_vec().join(" ")
-                },
-                "race" => {
-                    player.race = cmd[1..].to_vec().join(" ")
-                },
-                "age" => {
-                    if cmd.len() != 2 {
-                        writeln!(tale, "USAGE: age [age]")?;
-                    } else {
-                        player.age = match cmd[1].parse::<u8>() {
-                            Ok(age) => age,
-                            Err(err) => {
-                                writeln!(tale, "invalid age: {}", err)?;
-                                continue 'configuring;
-                            },
-                        };
-                    }
-                },
-                "print" => {
-                    writeln!(tale, "{:#?}", player)?;
-                },
-                "save" => {
-                    break 'configuring;
-                },
-                _ => {
-                    writeln!(tale, "unknown command: {}", line.as_str())?;
-                },
+            if let Some(ref line) = self.tale.next_command() {
+                let cmd: Vec<&str> = line.split_whitespace().collect();
+                if cmd.is_empty() {
+                    continue 'configuring;
+                }
+                match cmd[0] {
+                    "help" => {
+                        print_help = true;
+                    },
+                    "name" => {
+                        self.name = cmd[1..].to_vec().join(" ")
+                    },
+                    "gender" => {
+                        self.gender = cmd[1..].to_vec().join(" ")
+                    },
+                    "race" => {
+                        self.race = cmd[1..].to_vec().join(" ")
+                    },
+                    "age" => {
+                        if cmd.len() != 2 {
+                            writeln!(self.tale, "USAGE: age [age]")?;
+                        } else {
+                            self.age = match cmd[1].parse::<u8>() {
+                                Ok(age) => age,
+                                Err(err) => {
+                                    writeln!(self.tale, "invalid age: {}", err)?;
+                                    continue 'configuring;
+                                },
+                            };
+                        }
+                    },
+                    "print" => {
+                        let debug = format!("{:#?}", self);
+                        writeln!(self.tale, "{}", debug)?;
+                    },
+                    "save" => {
+                        break 'configuring;
+                    },
+                    _ => {
+                        writeln!(self.tale, "unknown command: {}", line.as_str())?;
+                    },
+                }
+            } else {
+                break 'configuring;
             }
-        } else {
-            break 'configuring;
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /////////////////////////////////////////// steady_state ///////////////////////////////////////////
@@ -145,39 +163,41 @@ character: .. Configure your character for this texttale.
 end: ........ Unceremoniously end this adventure.
 ";
 
-fn steady_state<T: TextTale>(tale: &mut T, mut player: Player) -> Result<()> {
-    let mut print_help = true;
-    'adventuring:
-    loop {
-        if print_help {
-            writeln!(tale, "{}", STEADY_STATE_HELP)?;
-            print_help = false;
-        }
-        if let Some(ref line) = tale.next_command() {
-            let cmd: Vec<&str> = line.split_whitespace().collect();
-            if cmd.is_empty() {
-                continue 'adventuring;
+impl<T: TextTale> Player<T> {
+    fn steady_state(&mut self) -> Result<()> {
+        let mut print_help = true;
+        'adventuring:
+        loop {
+            if print_help {
+                writeln!(self.tale, "{}", STEADY_STATE_HELP)?;
+                print_help = false;
             }
-            match cmd[0] {
-                "help" => {
-                    print_help = true;
-                },
-                "character" => {
-                    character(tale, &mut player)?;
-                    print_help = true;
+            if let Some(ref line) = self.tale.next_command() {
+                let cmd: Vec<&str> = line.split_whitespace().collect();
+                if cmd.is_empty() {
+                    continue 'adventuring;
                 }
-                "end" => {
-                    break 'adventuring;
+                match cmd[0] {
+                    "help" => {
+                        print_help = true;
+                    },
+                    "character" => {
+                        self.character()?;
+                        print_help = true;
+                    }
+                    "end" => {
+                        break 'adventuring;
+                    }
+                    _ => {
+                        writeln!(self.tale, "unknown command: {}", line.as_str())?;
+                    },
                 }
-                _ => {
-                    writeln!(tale, "unknown command: {}", line.as_str())?;
-                },
+            } else {
+                break 'adventuring;
             }
-        } else {
-            break 'adventuring;
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /////////////////////////////////////////////// main ///////////////////////////////////////////////
@@ -196,12 +216,14 @@ fn main() -> Result<()> {
     let mut args: Vec<String> = std::env::args().collect();
     args.remove(0);
     if args.is_empty() {
-        let mut tale = ShellTextTale::new(rl, "> ");
-        bootstrap(&mut tale)
+        let tale = ShellTextTale::new(rl, "> ");
+        let mut player = Player::new(tale);
+        player.bootstrap()
     } else {
         for arg in args {
-            let mut tale = ExpectTextTale::new(arg)?;
-            bootstrap(&mut tale)?;
+            let tale = ExpectTextTale::new(arg)?;
+            let mut player = Player::new(tale);
+            player.bootstrap()?;
         }
         Ok(())
     }

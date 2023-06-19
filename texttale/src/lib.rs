@@ -114,3 +114,45 @@ impl TextTale for ExpectTextTale {
         }
     }
 }
+
+/////////////////////////////////////////// StoryElement ///////////////////////////////////////////
+
+pub enum StoryElement {
+    Continue,
+    Return,
+    PrintHelp,
+}
+
+//////////////////////////////////////////// story macro ///////////////////////////////////////////
+
+#[macro_export]
+macro_rules! story {
+    ($story_title:ident @ $story_teller:path; $help:literal; $($command:literal => $code:block)*) => {
+        impl $story_teller {
+            fn $story_title(&mut self) {
+                let mut print_help = true;
+                'adventuring:
+                loop {
+                    if print_help {
+                        writeln!(self.tale, "{}", $help)?;
+                        print_help = false;
+                    }
+                    if let Some(ref line) = self.tale.next_command() {
+                        let cmd: Vec<&str> = line.split_whitespace().collect();
+                        if cmd.is_empty() {
+                            continue 'adventuring;
+                        }
+                        match cmd[0] {
+                            $($command => { $code }),*
+                            _ => {
+                                writeln!(self.tale, "unknown command: {}", line.as_str())?;
+                            },
+                        }
+                    } else {
+                        break 'adventuring;
+                    }
+                }
+            }
+        }
+    };
+}
