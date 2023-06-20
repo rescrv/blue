@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+set -e
 for script in scripts/*
 do
     ../target/debug/gremlins \
