@@ -127,26 +127,39 @@ pub enum StoryElement {
 
 #[macro_export]
 macro_rules! story {
-    ($story_title:ident @ $story_teller:path; $help:literal; $($command:literal => $code:block)*) => {
-        impl $story_teller {
-            fn $story_title(&mut self) {
+    ($sel:ident $cmd:ident, $story_title:ident by $story_teller:ty; $help:literal; $($command:literal => $code:tt)*) => {
+        impl<T: TextTale> $story_teller {
+            fn $story_title(&mut $sel) {
                 let mut print_help = true;
                 'adventuring:
                 loop {
                     if print_help {
-                        writeln!(self.tale, "{}", $help)?;
+                        writeln!($sel.tale, "{}", $help).expect("print help");
                         print_help = false;
                     }
-                    if let Some(ref line) = self.tale.next_command() {
-                        let cmd: Vec<&str> = line.split_whitespace().collect();
-                        if cmd.is_empty() {
+                    if let Some(ref line) = $sel.tale.next_command() {
+                        let $cmd: Vec<&str> = line.split_whitespace().collect();
+                        if $cmd.is_empty() {
                             continue 'adventuring;
                         }
-                        match cmd[0] {
-                            $($command => { $code }),*
+                        let element: $crate::StoryElement = match $cmd[0] {
+                            $($command => $code),*
                             _ => {
-                                writeln!(self.tale, "unknown command: {}", line.as_str())?;
+                                writeln!($sel.tale, "unknown command: {}", line.as_str()).expect("unknown command");
+                                continue 'adventuring;
                             },
+                        };
+                        match element {
+                            StoryElement::Continue => {
+                                continue 'adventuring;
+                            },
+                            StoryElement::Return => {
+                                break 'adventuring;
+                            }
+                            StoryElement::PrintHelp => {
+                                print_help = true;
+                                continue 'adventuring;
+                            }
                         }
                     } else {
                         break 'adventuring;
