@@ -129,7 +129,7 @@ pub enum StoryElement {
 macro_rules! story {
     ($sel:ident $cmd:ident, $story_title:ident by $story_teller:ty; $help:literal; $($command:literal => $code:tt)*) => {
         impl<T: TextTale> $story_teller {
-            fn $story_title(&mut $sel) {
+            pub fn $story_title(&mut $sel) {
                 let mut print_help = true;
                 'adventuring:
                 loop {
