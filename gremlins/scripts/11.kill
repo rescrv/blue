@@ -1,0 +1,32 @@
+Welcome to the gremlins control center.
+
+This is a tool for running distributed systems simulations that feel like text-mode adventures.
+
+Choose from the following options:
+
+help: ....... Print this help menu.
+spawn: ...... Spawn a new process.
+processes: .. List the open processes under this control center.
+kill: ....... Kill a specified process.
+
+> spawn
+Spawn a gremlin.
+
+This will create a new process in which services register.
+
+Choose from the following options:
+
+pid: ... Set the ProcessID for the process.
+proc: .. Set the command for the process.
+args: .. Add additional args to the process.
+         This will augment existing args.
+go: .... Spawn the process.
+
+> pid pid:0ced594f-b619-4be6-1c8d-8ff1d5963525
+> proc ../target/debug/gremlin-example-harness
+> args --harness-control-host localhost --harness-control-port 1982
+> args --harness-control-ca-file ca.pem --harness-control-private-key-file home.key --harness-control-certificate-file home.crt
+> go
+> kill pid:0ced594f-b619-4be6-1c8d-8ff1d5963525
+> processes
+> 

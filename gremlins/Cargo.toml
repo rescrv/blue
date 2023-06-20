@@ -1,0 +1,27 @@
+[package]
+name = "gremlins"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "Gremlins provides a tool for instrumenting rpc_pb services."
+license = "Apache-2.0"
+
+[dependencies]
+getopts = "0.2"
+rand = "0.7"
+rustyline = "11.0"
+
+arrrg = { path = "../arrrg", version = "0.1.0" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.1.0" }
+biometrics = { path = "../biometrics", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.1.0" }
+busybee = { path = "../busybee", version = "0.1.0" }
+guacamole = { path = "../guacamole", version = "0.1.0" }
+indicio = { path = "../indicio", version = "0.1.0" }
+one_two_eight = { path = "../one_two_eight", version = "0.1.0" }
+prototk = { path = "../prototk", version = "0.1.0" }
+prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
+rivulet = { path = "../rivulet", version = "0.1.0" }
+rpc_pb = { path = "../rpc_pb", version = "0.1.0" }
+texttale = { path = "../texttale", version = "0.1.0" }
+zerror_core = { path = "../zerror_core", version = "0.1.0" }

@@ -12,6 +12,7 @@ members = [
     "ci",
     "databuf",
     "derive_util",
+    "gremlins",
     "guacamole",
     "hey_listen",
     "indicio",
