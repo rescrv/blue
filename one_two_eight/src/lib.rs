@@ -128,6 +128,17 @@ macro_rules! generate_id {
                 write!(f, "{}{}", $prefix, $crate::encode(&self.id))
             }
         }
+
+        impl std::str::FromStr for $what {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match $what::from_human_readable(s) {
+                    Some(x) => Ok(x),
+                    None => Err("invalid human-readable identifier"),
+                }
+            }
+        }
     };
 }
 
