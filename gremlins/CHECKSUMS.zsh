@@ -8,6 +8,7 @@ do
         --control-center-listener-ca-file ca.pem \
         --control-center-listener-private-key-file home.key \
         --control-center-listener-certificate-file home.crt \
+        --control-center-listener-verify-none \
         $script \
         | sha256sum \
         | sed -e "s, -\$,$script,"

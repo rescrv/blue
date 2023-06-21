@@ -8,5 +8,6 @@ help: ....... Print this help menu.
 spawn: ...... Spawn a new process.
 processes: .. List the open processes under this control center.
 kill: ....... Kill a specified process.
+tick: ....... Deliver a tick to the process.
 
 > 

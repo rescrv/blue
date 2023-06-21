@@ -1,9 +1,16 @@
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use arrrg_derive::CommandLine;
+
+use biometrics::{Counter, Collector};
+
+use buffertk::{stack_pack, Unpacker};
+
+use prototk_derive::Message;
 
 use guacamole::Guacamole;
 
@@ -12,6 +19,14 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use rivulet::{Listener, RecvChannel, RivuletCommandLine, SendChannel};
 
 use texttale::{story, StoryElement, TextTale};
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static TICK: Counter = Counter::new("gremlins.tick");
+
+pub fn register_biometrics(collector: &mut Collector) {
+    collector.register_counter(&TICK);
+}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -37,6 +52,20 @@ impl From<std::io::Error> for Error {
 
 generate_id!{ProcessID, "pid:"}
 generate_id_prototk!{ProcessID}
+
+/////////////////////////////////////////////// Event //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+enum Event {
+    #[prototk(1, message)]
+    #[default]
+    Nop,
+    #[prototk(2, message)]
+    Tick {
+        #[prototk(1, message)]
+        pid: ProcessID,
+    },
+}
 
 /////////////////////////////////////// ControlCenterOptions ///////////////////////////////////////
 
@@ -64,9 +93,25 @@ struct Process {
 //////////////////////////////////////// ControlCenterState ////////////////////////////////////////
 
 struct ControlCenterState {
-    listener: Listener,
+    closed: bool,
     guac: Guacamole,
     processes: Vec<Process>,
+    recv_channels: Vec<RecvChannel>,
+    send_channels: Vec<SendChannel>,
+}
+
+impl ControlCenterState {
+    fn listen(ptr: Arc<Mutex<ControlCenterState>>, listener: Listener) {
+        for stream in listener {
+            let (recv_chan, send_chan) = stream.unwrap();
+            let mut state = ptr.lock().unwrap();
+            if state.closed {
+                return;
+            }
+            state.recv_channels.push(recv_chan);
+            state.send_channels.push(send_chan);
+        }
+    }
 }
 
 /////////////////////////////////////////// ControlCenter //////////////////////////////////////////
@@ -75,39 +120,66 @@ pub struct ControlCenter<T: TextTale> {
     options: ControlCenterOptions,
     state: Arc<Mutex<ControlCenterState>>,
     tale: T,
+    listener: JoinHandle<()>,
 }
 
 impl<T: TextTale> ControlCenter<T> {
     pub fn new(options: ControlCenterOptions, tale: T) -> Self {
         let listener = options.listener.bind_to().expect("bind-to");
         let state = Arc::new(Mutex::new(ControlCenterState { 
-            listener,
+            closed: false,
             guac: Guacamole::new(0),
             processes: Vec::new(),
+            recv_channels: Vec::new(),
+            send_channels: Vec::new(),
         }));
+        let statep = Arc::clone(&state);
+        let listener = std::thread::spawn(move || {
+            ControlCenterState::listen(statep, listener);
+        });
         Self {
             options,
             state, 
             tale,
+            listener,
         }
     }
 
-    pub fn cleanup(&mut self) {
+    pub fn cleanup(self) {
         let mut processes = Vec::new();
         std::mem::swap(&mut processes, &mut self.state.lock().unwrap().processes);
         for mut proc in processes.into_iter() {
             proc.child.kill().unwrap_or(());
             proc.child.wait().unwrap();
         }
+        self.state.lock().unwrap().closed = true;
+        _ = self.options.listener.connect();
+        self.listener.join().unwrap();
     }
 
-    fn interpret_pid(guac: &mut Guacamole, pid: &str) -> Option<ProcessID> {
+    fn interpret_pid_random(guac: &mut Guacamole, pid: &str) -> Option<ProcessID> {
         if pid == "auto" {
             let mut bytes: [u8; one_two_eight::BYTES] = [0u8; one_two_eight::BYTES];
             guac.fill(&mut bytes);
             Some(ProcessID {
                 id: bytes,
             })
+        } else if let Some(pid) = ProcessID::from_human_readable(pid) {
+            Some(pid)
+        } else {
+            None
+        }
+    }
+
+    fn interpret_pid_select(&self, pid: &str) -> Option<ProcessID> {
+        if pid == "auto" {
+            let mut state = self.state.lock().unwrap();
+            if !state.processes.is_empty() {
+                let idx = state.guac.next_u64() as usize % state.processes.len();
+                Some(state.processes[idx].pid)
+            } else {
+                None
+            }
         } else if let Some(pid) = ProcessID::from_human_readable(pid) {
             Some(pid)
         } else {
@@ -133,6 +205,16 @@ impl<T: TextTale> ControlCenter<T> {
             writeln!(self.tale, "no such pid").unwrap();
         }
     }
+
+    pub fn tick(&mut self, pid: ProcessID) {
+        let mut state = self.state.lock().unwrap();
+        for send_channel in state.send_channels.iter_mut() {
+            let buf = stack_pack(Event::Tick {
+                pid: pid,
+            }).to_buffer();
+            send_channel.send(buf.as_bytes()).expect("could not send");
+        }
+    }
 }
 
 story! {
@@ -148,6 +230,7 @@ help: ....... Print this help menu.
 spawn: ...... Spawn a new process.
 processes: .. List the open processes under this control center.
 kill: ....... Kill a specified process.
+tick: ....... Deliver a tick to the process.
 ";
     "help" => {
         StoryElement::PrintHelp
@@ -171,14 +254,28 @@ kill: ....... Kill a specified process.
     }
     "kill" => {
         if cmd.len() == 2 {
-            let pid = Self::interpret_pid(&mut self.state.lock().unwrap().guac, &cmd[1]);
+            let pid = self.interpret_pid_select(&cmd[1]);
             if let Some(pid) = pid {
                 self.kill(pid);
             } else {
                 writeln!(self.tale, "pid must be a valid ProcessID or \"auto\".").unwrap();
             };
         } else {
-            writeln!(self.tale, "kill takes exactly one argument, the pid to kill.").unwrap();
+            writeln!(self.tale, "kill takes exactly one argument, the pid to kill: {:?}", cmd).unwrap();
+        }
+        StoryElement::Continue
+    }
+    "tick" => {
+        if cmd.len() == 2 {
+            let pid = self.interpret_pid_select(&cmd[1]);
+            if let Some(pid) = pid {
+                self.tick(pid);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            } else {
+                writeln!(self.tale, "pid must be a valid ProcessID or \"auto\".").unwrap();
+            };
+        } else {
+            writeln!(self.tale, "fire takes one argument, the pid.").unwrap();
         }
         StoryElement::Continue
     }
@@ -214,13 +311,13 @@ go: .... Spawn the process.
     }
     "pid" => {
         if cmd.len() == 2 {
-            if let Some(pid) = ControlCenter::<T>::interpret_pid(&mut self.state.lock().unwrap().guac, &cmd[1]) {
+            if let Some(pid) = ControlCenter::<T>::interpret_pid_random(&mut self.state.lock().unwrap().guac, &cmd[1]) {
                 self.pid = pid;
             } else {
                 writeln!(self.tale, "pid must be a valid ProcessID or \"auto\".").unwrap();
             };
         } else {
-            writeln!(self.tale, "kill takes exactly one argument, the pid to kill.").unwrap();
+            writeln!(self.tale, "pid takes exactly one argument, the pid.").unwrap();
         }
         StoryElement::Continue
     }
@@ -239,13 +336,16 @@ go: .... Spawn the process.
         StoryElement::Continue
     }
     "go" => {
-        match Command::new(self.proc.clone()).args(self.args.clone()).spawn() {
+        let mut args = vec!["--harness-process-id".to_owned(), self.pid.human_readable()];
+        args.append(&mut self.args.clone());
+        match Command::new(self.proc.clone()).args(args).spawn() {
             Ok(child) => {
                 let process = Process {
                     pid: self.pid,
                     child,
                 };
                 self.state.lock().unwrap().processes.push(process);
+                std::thread::sleep(std::time::Duration::from_millis(100));
                 StoryElement::Return
             }
             Err(err) => {
@@ -260,6 +360,8 @@ go: .... Spawn the process.
 
 #[derive(CommandLine, Eq, PartialEq)]
 pub struct HarnessOptions {
+    #[arrrg(required, "ProcessID of the process in human-readable pid:0ced594f-b619-4be6-1c8d-8ff1d5963525 form", "PID")]
+    process_id: ProcessID,
     #[arrrg(nested)]
     control: RivuletCommandLine,
 }
@@ -267,6 +369,7 @@ pub struct HarnessOptions {
 impl Default for HarnessOptions {
     fn default() -> Self {
         Self {
+            process_id: ProcessID::BOTTOM,
             control: RivuletCommandLine::default(),
         }
     }
@@ -296,8 +399,17 @@ impl Harness {
         // Only one server at a time.  We'll hold the mutex on the recv channel to enforce that.
         let mut control_recv = self.control_recv.lock().unwrap();
         loop {
-            let msg_buf = control_recv.recv();
-            println!("{:?}", msg_buf);
+            let msg_buf = control_recv.recv().unwrap();
+            let mut up = Unpacker::new(msg_buf.as_bytes());
+            let event: Event = up.unpack().unwrap();
+            match event {
+                Event::Nop => {},
+                Event::Tick { pid } => {
+                    if pid == self.options.process_id {
+                        TICK.click();
+                    }
+                },
+            }
         }
     }
 }
