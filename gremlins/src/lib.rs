@@ -506,6 +506,9 @@ impl Harness {
         let (control_recv, control_send) = options.control.connect()?;
         let mut biometrics = Collector::new();
         register_biometrics(&mut biometrics);
+        indicio::register_biometrics(&mut biometrics);
+        busybee::register_biometrics(&mut biometrics);
+        rivulet::register_biometrics(&mut biometrics);
         let control_recv = Mutex::new(control_recv);
         let control_send = Mutex::new(control_send);
         Ok(Arc::new(Self {
