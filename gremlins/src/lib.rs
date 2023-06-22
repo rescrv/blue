@@ -106,18 +106,10 @@ impl DisplayAnswer {
 
 /////////////////////////////////////// ControlCenterOptions ///////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
 pub struct ControlCenterOptions {
     #[arrrg(nested)]
     listener: RivuletCommandLine,
-}
-
-impl Default for ControlCenterOptions {
-    fn default() -> Self {
-        Self {
-            listener: RivuletCommandLine::default(),
-        }
-    }
 }
 
 ////////////////////////////////////////////// Process /////////////////////////////////////////////
@@ -201,10 +193,8 @@ impl<T: TextTale> ControlCenter<T> {
             Some(ProcessID {
                 id: bytes,
             })
-        } else if let Some(pid) = ProcessID::from_human_readable(pid) {
-            Some(pid)
         } else {
-            None
+            ProcessID::from_human_readable(pid)
         }
     }
 
@@ -217,10 +207,8 @@ impl<T: TextTale> ControlCenter<T> {
             } else {
                 None
             }
-        } else if let Some(pid) = ProcessID::from_human_readable(pid) {
-            Some(pid)
         } else {
-            None
+            ProcessID::from_human_readable(pid)
         }
     }
 
@@ -247,7 +235,7 @@ impl<T: TextTale> ControlCenter<T> {
         let mut state = self.state.lock().unwrap();
         for send_channel in state.send_channels.iter_mut() {
             let buf = stack_pack(Event::Tick {
-                pid: pid,
+                pid,
             }).to_buffer();
             send_channel.send(buf.as_bytes()).expect("could not send");
         }
@@ -319,7 +307,7 @@ tick: ........ Deliver a tick to the process.
     }
     "kill" => {
         if cmd.len() == 2 {
-            let pid = self.interpret_pid_select(&cmd[1]);
+            let pid = self.interpret_pid_select(cmd[1]);
             if let Some(pid) = pid {
                 self.kill(pid);
             } else {
@@ -332,7 +320,7 @@ tick: ........ Deliver a tick to the process.
     }
     "tick" => {
         if cmd.len() == 2 {
-            let pid = self.interpret_pid_select(&cmd[1]);
+            let pid = self.interpret_pid_select(cmd[1]);
             if let Some(pid) = pid {
                 self.tick(pid);
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -376,7 +364,7 @@ go: .... Spawn the process.
     }
     "pid" => {
         if cmd.len() == 2 {
-            if let Some(pid) = ControlCenter::<T>::interpret_pid_random(&mut self.state.lock().unwrap().guac, &cmd[1]) {
+            if let Some(pid) = ControlCenter::<T>::interpret_pid_random(&mut self.state.lock().unwrap().guac, cmd[1]) {
                 self.pid = pid;
             } else {
                 writeln!(self.tale, "pid must be a valid ProcessID or \"auto\".").unwrap();
