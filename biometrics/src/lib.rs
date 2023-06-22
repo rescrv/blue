@@ -63,7 +63,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
 
     /// Emit readings all sensors through `emitter`+`emit`, recording each sensor reading as close
     /// to `now` as possible.
-    pub fn emit<EM: Emitter<Error = ERR>, ERR>(
+    fn emit<EM: Emitter<Error = ERR>, ERR>(
         &self,
         emitter: &mut EM,
         emit: &dyn Fn(&mut EM, &'static S, f64) -> Result<(), ERR>,
@@ -178,13 +178,13 @@ impl Collector {
     /// Output the sensors registered to this emitter.
     pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(&self, emitter: &mut EM) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &Self::now));
-        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now));
-        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now));
-        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &Self::now))
+        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &Self::now_ms));
+        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now_ms));
+        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms));
+        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &Self::now_ms))
     }
 
-    fn now() -> f64 {
+    fn now_ms() -> f64 {
         // TODO(rescrv):  Make this monotonic with std::time::Instant.
         match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(now) => now.as_millis() as f64,
@@ -253,16 +253,15 @@ impl Emitter for PlainTextEmitter {
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
-        // TODO(rescrv):  Output the algebraic value, not the computed values.
         self.output.write_fmt(format_args!(
             "{} {} {} {} {} {} {}\n",
             label,
             now,
-            moments.n(),
-            moments.mean(),
-            moments.variance(),
-            moments.skewness(),
-            moments.kurtosis()
+            moments.n,
+            moments.m1,
+            moments.m2,
+            moments.m3,
+            moments.m4,
         ))
     }
 

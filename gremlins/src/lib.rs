@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -6,7 +7,7 @@ use rand::{Rng, RngCore};
 
 use arrrg_derive::CommandLine;
 
-use biometrics::{Counter, Collector};
+use biometrics::{Collector, Counter, Gauge, Moments, Sensor, TDigest};
 
 use buffertk::{stack_pack, Unpacker};
 
@@ -19,6 +20,8 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use rivulet::{Listener, RecvChannel, RivuletCommandLine, SendChannel};
 
 use texttale::{story, StoryElement, TextTale};
+
+use util::fnmatch::Pattern;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -65,6 +68,40 @@ enum Event {
         #[prototk(1, message)]
         pid: ProcessID,
     },
+    #[prototk(3, message)]
+    Biometrics {
+        #[prototk(1, string)]
+        glob: String,
+    },
+}
+
+/////////////////////////////////////////// DisplayAnswer //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+enum DisplayAnswer {
+    #[prototk(1, message)]
+    #[default]
+    Nop,
+    #[prototk(2, message)]
+    SingleString {
+        #[prototk(1, message)]
+        pid: ProcessID,
+        #[prototk(2, string)]
+        display: String,
+    },
+}
+
+impl DisplayAnswer {
+    fn pid(&self) -> ProcessID {
+        match self {
+            DisplayAnswer::Nop => {
+                ProcessID::BOTTOM
+            },
+            DisplayAnswer::SingleString { pid, display: _ } => {
+                *pid
+            },
+        }
+    }
 }
 
 /////////////////////////////////////// ControlCenterOptions ///////////////////////////////////////
@@ -126,7 +163,7 @@ pub struct ControlCenter<T: TextTale> {
 impl<T: TextTale> ControlCenter<T> {
     pub fn new(options: ControlCenterOptions, tale: T) -> Self {
         let listener = options.listener.bind_to().expect("bind-to");
-        let state = Arc::new(Mutex::new(ControlCenterState { 
+        let state = Arc::new(Mutex::new(ControlCenterState {
             closed: false,
             guac: Guacamole::new(0),
             processes: Vec::new(),
@@ -139,7 +176,7 @@ impl<T: TextTale> ControlCenter<T> {
         });
         Self {
             options,
-            state, 
+            state,
             tale,
             listener,
         }
@@ -226,11 +263,12 @@ This is a tool for running distributed systems simulations that feel like text-m
 
 Choose from the following options:
 
-help: ....... Print this help menu.
-spawn: ...... Spawn a new process.
-processes: .. List the open processes under this control center.
-kill: ....... Kill a specified process.
-tick: ....... Deliver a tick to the process.
+help: ........ Print this help menu.
+spawn: ....... Spawn a new process.
+processes: ... List the open processes under this control center.
+biometrics: .. Inspect the biometrics of a process.
+kill: ........ Kill a specified process.
+tick: ........ Deliver a tick to the process.
 ";
     "help" => {
         StoryElement::PrintHelp
@@ -249,6 +287,33 @@ tick: ....... Deliver a tick to the process.
     "processes" => {
         for proc in self.state.lock().unwrap().processes.iter() {
             writeln!(self.tale, "{}", proc.pid.human_readable()).expect("print pid");
+        }
+        StoryElement::Continue
+    }
+    "biometrics" => {
+        if cmd.len() == 2 {
+            let mut state = self.state.lock().unwrap();
+            for send_channel in state.send_channels.iter_mut() {
+                let buf = stack_pack(Event::Biometrics {
+                    glob: cmd[1].to_owned(),
+                }).to_buffer();
+                send_channel.send(buf.as_bytes()).expect("could not send");
+            }
+            let mut answers = Vec::new();
+            for recv_channel in state.recv_channels.iter_mut() {
+                let buf = recv_channel.recv().expect("could not recv");
+                let mut up = Unpacker::new(buf.as_bytes());
+                let ans: DisplayAnswer = up.unpack().unwrap();
+                answers.push(ans);
+            }
+            answers.sort_by_key(|x| x.pid());
+            for answer in answers {
+                if let DisplayAnswer::SingleString { pid, display } = &answer {
+                    writeln!(self.tale, "{}\n{}\n", pid, display).unwrap();
+                }
+            }
+        } else {
+            writeln!(self.tale, "kill takes exactly one argument, the pid to kill: {:?}", cmd).unwrap();
         }
         StoryElement::Continue
     }
@@ -375,10 +440,75 @@ impl Default for HarnessOptions {
     }
 }
 
+/////////////////////////////////////////// MemoryEmitter //////////////////////////////////////////
+
+#[derive(Default)]
+struct LastValueEmitter {
+    counters: HashMap<String, <Counter as Sensor>::Reading>,
+    gauges: HashMap<String, <Gauge as Sensor>::Reading>,
+    moments: HashMap<String, <Moments as Sensor>::Reading>,
+    t_digests: HashMap<String, <TDigest as Sensor>::Reading>,
+}
+
+impl LastValueEmitter {
+    fn fnmatch(&self, fnmatch: Pattern) -> Vec<String> {
+        let mut strings = Vec::new();
+        for (label, reading) in self.counters.iter() {
+            if fnmatch.fnmatch(label) {
+                strings.push(format!("{} = {}", label, reading));
+            }
+        }
+        for (label, reading) in self.gauges.iter() {
+            if fnmatch.fnmatch(label) {
+                strings.push(format!("{} = {}", label, reading));
+            }
+        }
+        for (label, reading) in self.moments.iter() {
+            if fnmatch.fnmatch(label) {
+                strings.push(format!("{} = {{ n: {}, mean: {}, variance: {}, skewness: {}, kurtosis: {} }}",
+                                     label, reading.n(), reading.mean(), reading.variance(),
+                                     reading.skewness(), reading.kurtosis()));
+            }
+        }
+        for (label, _) in self.t_digests.iter() {
+            if fnmatch.fnmatch(label) {
+                strings.push(format!("{} = <t-digest is unsupported>", label));
+            }
+        }
+        strings.sort();
+        strings
+    }
+}
+
+impl biometrics::Emitter for LastValueEmitter {
+    type Error = ();
+
+    fn emit_counter(&mut self, counter: &'static Counter, _: f64) -> Result<(), ()> {
+        self.counters.insert(counter.label().to_owned(), counter.read());
+        Ok(())
+    }
+
+    fn emit_gauge(&mut self, gauge: &'static Gauge, _: f64) -> Result<(), ()> {
+        self.gauges.insert(gauge.label().to_owned(), gauge.read());
+        Ok(())
+    }
+
+    fn emit_moments(&mut self, moments: &'static Moments, _: f64) -> Result<(), ()> {
+        self.moments.insert(moments.label().to_owned(), moments.read());
+        Ok(())
+    }
+
+    fn emit_t_digest(&mut self, t_digest: &'static TDigest, _: f64) -> Result<(), ()> {
+        self.t_digests.insert(t_digest.label().to_owned(), t_digest.read());
+        Ok(())
+    }
+}
+
 ////////////////////////////////////////////// Harness /////////////////////////////////////////////
 
 pub struct Harness {
     options: HarnessOptions,
+    biometrics: Collector,
     control_recv: Mutex<RecvChannel>,
     control_send: Mutex<SendChannel>,
 }
@@ -386,10 +516,13 @@ pub struct Harness {
 impl Harness {
     pub fn new(options: HarnessOptions) -> Result<Arc<Self>, rpc_pb::Error> {
         let (control_recv, control_send) = options.control.connect()?;
+        let mut biometrics = Collector::new();
+        register_biometrics(&mut biometrics);
         let control_recv = Mutex::new(control_recv);
         let control_send = Mutex::new(control_send);
         Ok(Arc::new(Self {
             options,
+            biometrics,
             control_recv,
             control_send,
         }))
@@ -408,6 +541,18 @@ impl Harness {
                     if pid == self.options.process_id {
                         TICK.click();
                     }
+                },
+                Event::Biometrics { glob } => {
+                    let pattern = Pattern::must(glob);
+                    let mut emitter = LastValueEmitter::default();
+                    self.biometrics.emit(&mut emitter).unwrap();
+                    let sensors = emitter.fnmatch(pattern);
+                    let display = sensors.join("\n");
+                    let buf = stack_pack(DisplayAnswer::SingleString {
+                        pid: self.options.process_id,
+                        display,
+                    }).to_buffer();
+                    self.control_send.lock().unwrap().send(buf.as_bytes()).unwrap();
                 },
             }
         }
