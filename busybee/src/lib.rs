@@ -17,6 +17,9 @@ pub use server::{Server, ServerOptions};
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 pub fn register_biometrics(collector: &mut Collector) {
+    if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
+        return;
+    }
     client::register_biometrics(collector);
     server::register_biometrics(collector);
 }

@@ -33,6 +33,9 @@ static TRACE_WITH_BACKTRACE: Counter = Counter::new("indicio.trace.with_backtrac
 static TRACE_WITH_STOPWATCH: Counter = Counter::new("indicio.trace.with_stopwatch");
 
 pub fn register_biometrics(collector: &mut Collector) {
+    if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
+        return;
+    }
     collector.register_counter(&TRACE_INSTANTIATIONS);
     collector.register_counter(&TRACE_ID_GENERATE_FAILED);
     collector.register_counter(&TRACE_NOT_SAMPLED);
