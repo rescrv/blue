@@ -2,7 +2,7 @@ use std::backtrace::Backtrace;
 use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 
-use biometrics::Counter;
+use biometrics::{Collector, Counter};
 
 use buffertk::stack_pack;
 
@@ -31,6 +31,18 @@ static TRACE_FLUSH: Counter = Counter::new("indicio.trace.flush");
 static TRACE_WITH_VALUE: Counter = Counter::new("indicio.trace.with_value");
 static TRACE_WITH_BACKTRACE: Counter = Counter::new("indicio.trace.with_backtrace");
 static TRACE_WITH_STOPWATCH: Counter = Counter::new("indicio.trace.with_stopwatch");
+
+pub fn register_biometrics(collector: &mut Collector) {
+    collector.register_counter(&TRACE_INSTANTIATIONS);
+    collector.register_counter(&TRACE_ID_GENERATE_FAILED);
+    collector.register_counter(&TRACE_NOT_SAMPLED);
+    collector.register_counter(&TRACE_DROPPED);
+    collector.register_counter(&TRACE_EMIT);
+    collector.register_counter(&TRACE_FLUSH);
+    collector.register_counter(&TRACE_WITH_VALUE);
+    collector.register_counter(&TRACE_WITH_BACKTRACE);
+    collector.register_counter(&TRACE_WITH_STOPWATCH);
+}
 
 /////////////////////////////////////////////// Trace //////////////////////////////////////////////
 
