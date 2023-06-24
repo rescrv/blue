@@ -250,16 +250,13 @@ story! {
     main_menu by ControlCenter<'_, T>;
     "Welcome to the gremlins control center.
 
-This is a tool for running distributed systems simulations that feel like text-mode adventures.
-
-Choose from the following options:
-
 help: ........ Print this help menu.
 spawn: ....... Spawn a new process.
 processes: ... List the open processes under this control center.
 biometrics: .. Inspect the biometrics of a process.
 kill: ........ Kill a specified process.
 tick: ........ Deliver a tick to the process.
+return: ...... Return to previous menu.
 ";
     "help" => {
         StoryElement::PrintHelp
@@ -334,6 +331,9 @@ tick: ........ Deliver a tick to the process.
             writeln!(self.tale, "fire takes one argument, the pid.").unwrap();
         }
         StoryElement::Continue
+    }
+    "return" => {
+        StoryElement::Return
     }
 }
 
