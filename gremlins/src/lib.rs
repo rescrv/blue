@@ -148,15 +148,15 @@ impl ControlCenterState {
 
 /////////////////////////////////////////// ControlCenter //////////////////////////////////////////
 
-pub struct ControlCenter<T: TextTale> {
+pub struct ControlCenter<'a, T: TextTale> {
     options: ControlCenterOptions,
     state: Arc<Mutex<ControlCenterState>>,
-    tale: T,
+    tale: &'a mut T,
     listener: JoinHandle<()>,
 }
 
-impl<T: TextTale> ControlCenter<T> {
-    pub fn new(options: ControlCenterOptions, tale: T) -> Self {
+impl<'a, T: TextTale> ControlCenter<'a, T> {
+    pub fn new(options: ControlCenterOptions, tale: &'a mut T) -> Self {
         let listener = options.listener.bind_to().expect("bind-to");
         let state = Arc::new(Mutex::new(ControlCenterState {
             closed: false,
@@ -247,7 +247,7 @@ impl<T: TextTale> ControlCenter<T> {
 
 story! {
     self cmd,
-    main_menu by ControlCenter<T>;
+    main_menu by ControlCenter<'_, T>;
     "Welcome to the gremlins control center.
 
 This is a tool for running distributed systems simulations that feel like text-mode adventures.
@@ -267,7 +267,7 @@ tick: ........ Deliver a tick to the process.
     "spawn" => {
         let mut spawner = Spawner {
             state: Arc::clone(&self.state),
-            tale: &mut self.tale,
+            tale: self.tale,
             pid: Default::default(),
             args: Default::default(),
             proc: Default::default(),
