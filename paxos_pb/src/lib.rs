@@ -1,3 +1,5 @@
+use buffertk::Buffer;
+
 use prototk_derive::Message;
 
 use one_two_eight::{generate_id, generate_id_prototk};
@@ -40,6 +42,22 @@ pub enum Error {
         core: ErrorCore,
         #[prototk(2, message)]
         what: rpc_pb::Error,
+    },
+    #[prototk(4, message)]
+    IoError {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
+}
+
+impl From<std::io::Error> for Error {
+    fn from(what: std::io::Error) -> Self {
+        Self::IoError {
+            core: ErrorCore::default(),
+            what: what.to_string(),
+        }
     }
 }
 
@@ -112,20 +130,23 @@ pub struct Configuration {
     /// first valid configuration is epoch=1, allowing a default configuration to take epoch=0.
     #[prototk(2, uint64)]
     pub epoch: u64,
-    /// The smallest slot this configuration is allowed to address.  The first configuration is, by
-    /// convention, anchored at slot 1.  Slot 0 is treated as a non-slot so it can be default.
-    #[prototk(3, uint64)]
-    pub first_slot: u64,
     /// Alpha may be any positive value.  Defaults to 1.
     /// Alpha must be a positive value.  Defaults to DEFAULT_ALPHA.  MAX_ALPHA is maximum value.
     /// MIN_ALPHA is minimum value.
-    #[prototk(4, uint64)]
+    #[prototk(3, uint64)]
     pub alpha: u64,
     /// Replicas involved in this ensemble.  These will be used for acceptors, learners, and
     /// proposers, and to provide the durability guarantees for the cluster.  All data gets written
     /// to at least a quorum of replicas before it is considered committed.
-    #[prototk(5, message)]
+    #[prototk(4, message)]
     pub replicas: Vec<ReplicaID>,
+}
+
+impl Configuration {
+    /// Is the provided replica a member of this Paxos ensemble.
+    pub fn is_replica(&self, replica: ReplicaID) -> bool {
+        self.replicas.iter().any(|r| r == &replica)
+    }
 }
 
 impl std::fmt::Debug for Configuration {
@@ -134,7 +155,6 @@ impl std::fmt::Debug for Configuration {
         f.debug_struct("Configuration")
             .field("group", &self.group.human_readable())
             .field("epoch", &self.epoch)
-            .field("first_slot", &self.first_slot)
             .field("alpha", &self.alpha)
             .field("replicas", &replicas)
             .finish()
@@ -147,11 +167,27 @@ impl std::fmt::Debug for Configuration {
 enum Command {
     #[prototk(1, message)]
     #[default]
-    Ping,
+    Nop,
     #[prototk(2, message)]
-    Reconfigure {
+    Call {
+        #[prototk(1, string)]
+        object: String,
+        #[prototk(2, string)]
+        method: String,
+        #[prototk(3, bytes)]
+        req: Buffer,
+    },
+    #[prototk(3, message)]
+    Poke {
+        #[prototk(1, string)]
+        message: String,
+    },
+    #[prototk(4, message)]
+    Tick {
         #[prototk(1, message)]
-        config: Configuration,
+        replica: ReplicaID,
+        #[prototk(2, uint64)]
+        clock_ms: u64,
     },
 }
 
@@ -238,7 +274,7 @@ service! {
     rpc phase2(Phase2A) -> Phase2B;
 }
 
-///////////////////////////////////////////// Proposer /////////////////////////////////////////////
+///////////////////////////////////////// GenNoncesRequest /////////////////////////////////////////
 
 /// [GenNonceRequest] messages embed the number of nonces to fetch.
 #[derive(Clone, Debug, Default, Message)]
@@ -247,12 +283,16 @@ struct GenNoncesRequest {
     count: u64,
 }
 
+///////////////////////////////////////// GenNoncesResponse ////////////////////////////////////////
+
 /// [GenNonceResponse] messages embed the first nonce in a sequence of `count` nonces.
 #[derive(Clone, Debug, Default, Message)]
 struct GenNoncesResponse {
     #[prototk(1, uint64)]
     nonce: u64,
 }
+
+//////////////////////////////////////// IssueCommandRequest ///////////////////////////////////////
 
 /// [IssueCommandRequest] issues a command under the given nonce.  It is permissible to make this
 /// call indefinitely until it either completes successfully or returns a terminal error.
@@ -261,15 +301,21 @@ struct GenNoncesResponse {
 struct IssueCommandRequest {
     #[prototk(1, uint64)]
     nonce: u64,
-    //#[prototk(2, message)]
-    //command: Command,
+    #[prototk(2, message)]
+    command: Command,
 }
+
+/////////////////////////////////////// IssueCommandResponse ///////////////////////////////////////
 
 /// [IssueCommandResponse] is the result of a command issued under a given nonce.  For the memory
 /// of the proposer this will result in the same answer if retried.
 #[derive(Clone, Debug, Default, Message)]
 struct IssueCommandResponse {
+    #[prototk(1, uint64)]
+    nonce: u64,
 }
+
+///////////////////////////////////////////// Proposer /////////////////////////////////////////////
 
 // [ProposerService] is responseible for generating nonces and then issuing requests using those
 // nonces.  The nonce is guaranteed to serve as a clock timestamp among all other generated nonces.
