@@ -3,8 +3,6 @@ use std::hash::Hasher;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use cache::AdmissionPolicy;
-
 mod vector;
 
 pub const MIN_PROBABILITY: f64 = 0.000000001;
@@ -44,6 +42,17 @@ const KEYS: [u64; MAX_KEYS] = [
     9062261515874811040,
     6396837448873813959,
 ];
+
+////////////////////////////////////////// AdmissionPolicy /////////////////////////////////////////
+
+/// An [AdmissionPolicy] is a gatekeeping force at the entry to the cache.  A good admission policy
+/// will only replace objects in the cache when the caching outcome is favorable.
+pub trait AdmissionPolicy {
+    /// `t` gets admitted to the cache.  Update accordingly.
+    fn admit<T: std::hash::Hash>(&self, t: &T);
+    /// Return true if the `candidate` should replace the `victim`.
+    fn should_replace<T: std::hash::Hash>(&self, victim: &T, candidate: &T) -> bool;
+}
 
 ////////////////////////////////////////// TinyLFUOptions //////////////////////////////////////////
 

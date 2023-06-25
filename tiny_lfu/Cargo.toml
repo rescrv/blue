@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.1.1" }
 bloomcalc = { path = "../bloomcalc", version = "0.1.0" }
-cache = { path = "../cache" }

@@ -8,7 +8,6 @@ members = [
     "bloomcalc",
     "buffertk",
     "busybee",
-    "cache",
     "databuf",
     "derive_util",
     "gremlins",

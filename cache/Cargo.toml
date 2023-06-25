@@ -1,7 +1,0 @@
-[package]
-name = "cache"
-version = "0.1.0"
-authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
-
-[dependencies]
