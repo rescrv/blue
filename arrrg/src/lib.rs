@@ -3,20 +3,22 @@
 //! For example, let's consider the parser specified here using the derive syntax:
 //!
 //! ```
-//! #[derive(CommandLine)]
+//! use arrrg_derive::CommandLine;
+//!
+//! #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 //! struct Options {
 //!     #[arrrg(optional, "this is the help text", "PLACEHOLDER")]
 //!     some_string: String,
 //!     #[arrrg(nested)]
-//!     some_prefix: SomeOptions
+//!     some_prefix: SomeOptions,
 //! }
 //!
-//! #[derive(CommandLine)]
+//! #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 //! struct SomeOptions {
 //!     #[arrrg(required, "this is the help text", "PLACEHOLDER")]
-//!     a: String
+//!     a: String,
 //!     #[arrrg(optional, "this is the help text", "PLACEHOLDER")]
-//!     b: String
+//!     b: String,
 //! }
 //! ```
 //!
