@@ -15,5 +15,5 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 buffertk = { path = "../buffertk", version = "0.2" }
-derive_util = { path = "../derive_util" }
+derive_util = { path = "../derive_util", version = "0.1" }
 prototk = { path = "../prototk", version = "0.2" }
