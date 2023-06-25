@@ -2,6 +2,8 @@
 name = "tiny_lfu"
 version = "0.1.0"
 edition = "2021"
+description = "tiny_lfu provides a cache admission control policy."
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
