@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 rand = "0.7"
 
-biometrics = { path = "../biometrics", version = "0.1.0" }
+biometrics = { path = "../biometrics", version = "0.1.1" }
 one_two_eight = { path = "../one_two_eight" }
 indicio = { path = "../indicio" }
 prototk = { path = "../prototk", version = "0.1.0" }

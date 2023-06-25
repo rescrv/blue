@@ -9,7 +9,7 @@ license = "Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.1.0" }
+biometrics = { path = "../biometrics", version = "0.1.1" }
 buffertk = { path = "../buffertk", version = "0.1.0" }
 prototk = { path = "../prototk", version = "0.1.0" }
 prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
