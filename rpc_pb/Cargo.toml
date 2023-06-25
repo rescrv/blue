@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 biometrics = { path = "../biometrics" }
 buffertk = { path = "../buffertk" }
-guacamole = { path = "../guacamole" }
+guacamole = { path = "../guacamole", version = "0.2.0" }
 one_two_eight = { path = "../one_two_eight" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }

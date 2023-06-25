@@ -14,7 +14,7 @@ rand = "0.7"
 armnod = { path = "../armnod", version = "0.1.0" }
 biometrics = { path = "../biometrics", version = "0.1.0" }
 buffertk = { path = "../buffertk", version = "0.1.0" }
-guacamole = { path = "../guacamole", version = "0.1.0" }
+guacamole = { path = "../guacamole", version = "0.2.0" }
 hey_listen = { path = "../hey_listen" }
 indicio = { path = "../indicio" }
 prototk = { path = "../prototk", version = "0.1.0" }
