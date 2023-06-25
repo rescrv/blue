@@ -15,7 +15,7 @@ crc32c = "0.6"
 arrrg = { path = "../arrrg", version = "0.1.0" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.1.0" }
 biometrics = { path = "../biometrics", version = "0.1.1" }
-buffertk = { path = "../buffertk", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.2.0" }
 hey_listen = { path = "../hey_listen" }
 prototk = { path = "../prototk", version = "0.1.0" }
 prototk_derive = { path = "../prototk_derive", version = "0.1.0" }

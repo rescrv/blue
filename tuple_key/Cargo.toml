@@ -7,6 +7,6 @@ description = "A serialization format for lexicographically sorted tuples."
 license = "Apache-2.0"
 
 [dependencies]
-buffertk = { path = "../buffertk", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.2.0" }
 prototk = { path = "../prototk", version = "0.1.0" }
 tuple_key_derive = { path = "../tuple_key_derive" }

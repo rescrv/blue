@@ -14,6 +14,6 @@ syn = "1.0"
 quote = "1.0"
 proc-macro2 = "1.0"
 
-buffertk = { path = "../buffertk", version = "0.1.0" }
+buffertk = { path = "../buffertk", version = "0.2.0" }
 derive_util = { path = "../derive_util" }
 prototk = { path = "../prototk", version = "0.1.0" }
