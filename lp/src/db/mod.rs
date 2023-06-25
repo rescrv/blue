@@ -4,8 +4,8 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use util::lockfile::Lockfile;
-use util::time::now;
+use utilz::lockfile::Lockfile;
+use utilz::time::now;
 
 use buffertk::{stack_pack, Buffer, Unpacker};
 

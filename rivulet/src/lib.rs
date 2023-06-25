@@ -10,7 +10,7 @@ use biometrics::{Collector, Counter, Moments};
 
 use buffertk::{stack_pack, Buffer, Packable, Unpackable};
 
-use util::stopwatch::Stopwatch;
+use utilz::stopwatch::Stopwatch;
 
 use zerror_core::ErrorCore;
 

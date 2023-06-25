@@ -6,7 +6,7 @@ use biometrics::{Collector, Counter};
 
 use buffertk::stack_pack;
 
-use util::stopwatch::Stopwatch;
+use utilz::stopwatch::Stopwatch;
 
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldPackHelper, FieldType};

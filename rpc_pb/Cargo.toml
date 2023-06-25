@@ -11,6 +11,6 @@ guacamole = { path = "../guacamole", version = "0.2.0" }
 one_two_eight = { path = "../one_two_eight" }
 prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
-util = { path = "../util" }
+utilz = { path = "../utilz", version = "0.1" }
 zerror = { path = "../zerror" }
 zerror_core = { path = "../zerror_core" }

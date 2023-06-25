@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use util::time::now;
+use utilz::time::now;
 
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;

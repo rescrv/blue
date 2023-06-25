@@ -21,7 +21,7 @@ use rivulet::{Listener, RecvChannel, RivuletCommandLine, SendChannel};
 
 use texttale::{story, StoryElement, TextTale};
 
-use util::fnmatch::Pattern;
+use utilz::fnmatch::Pattern;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 

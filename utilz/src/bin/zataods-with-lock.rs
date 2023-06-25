@@ -1,7 +1,7 @@
 use std::env::args;
 use std::process::Command;
 
-use util::lockfile::Lockfile;
+use utilz::lockfile::Lockfile;
 
 fn main() {
     let args: Vec<String> = args().collect();

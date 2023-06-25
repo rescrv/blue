@@ -28,7 +28,7 @@ members = [
     "tiny_lfu",
     "tuple_key",
     "tuple_key_derive",
-    "util",
+    "utilz",
     "zerror",
     "zerror_core",
 ]

@@ -3,6 +3,8 @@ name = "utilz"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "utilz provides miscellaneous utilities too small for their own crates."
+license = "Apache-2.0"
 
 [dependencies]
 libc = "0.2"
