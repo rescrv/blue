@@ -31,7 +31,8 @@ impl Eq for ZipfCommandLine {}
 
 /// Choose numbers [0, n) from a zipf distribution.
 fn main() {
-    let (cmdline, free) = ZipfCommandLine::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
+    let (cmdline, free) =
+        ZipfCommandLine::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }
