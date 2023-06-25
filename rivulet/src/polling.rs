@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use biometrics::{Collector, Counter};
 
-use hey_listen::{HeyListen, Stationary};
+use tatl::{HeyListen, Stationary};
 
 use rpc_pb::Error;
 

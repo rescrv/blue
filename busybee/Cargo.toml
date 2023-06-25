@@ -13,7 +13,6 @@ clap = "2.33"
 biometrics = { path = "../biometrics", version = "0.1.1" }
 buffertk = { path = "../buffertk", version = "0.2.0" }
 guacamole = { path = "../guacamole", version = "0.2.0" }
-hey_listen = { path = "../hey_listen" }
 indicio = { path = "../indicio" }
 one_two_eight = { path = "../one_two_eight" }
 prototk = { path = "../prototk", version = "0.1.0" }
@@ -21,6 +20,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
 rivulet = { path = "../rivulet" }
 rpc_pb = { path = "../rpc_pb" }
 sync42 = { path = "../sync42" }
+tatl = { path = "../tatl" }
 util = { path = "../util" }
 zerror = { path = "../zerror", version = "0.1.0" }
 zerror_core = { path = "../zerror_core", version = "0.1.0" }
