@@ -278,7 +278,7 @@ impl Element for u64 {
         key.buf.push(((self >> 21) | 1) as u8);
         key.buf.push(((self >> 14) | 1) as u8);
         key.buf.push(((self >> 7) | 1) as u8);
-        key.buf.push(((self >> 0) | 1) as u8);
+        key.buf.push((self | 1) as u8);
         key.buf.push(((self & 0x1) << 7) as u8);
     }
 
@@ -295,7 +295,7 @@ impl Element for u64 {
         key |= ((buf[5] & 0xfe) as u64) << 21;
         key |= ((buf[6] & 0xfe) as u64) << 14;
         key |= ((buf[7] & 0xfe) as u64) << 7;
-        key |= ((buf[8] & 0xfe) as u64) << 0;
+        key |= (buf[8] & 0xfe) as u64;
         key |= ((buf[9] & 0x80) as u64) >> 7;
         Ok(key)
     }
@@ -348,7 +348,7 @@ impl Element for i64 {
         key.buf.push(((num >> 21) | 1) as u8);
         key.buf.push(((num >> 14) | 1) as u8);
         key.buf.push(((num >> 7) | 1) as u8);
-        key.buf.push(((num >> 0) | 1) as u8);
+        key.buf.push((num | 1) as u8);
         key.buf.push(((num & 0x1) << 7) as u8);
     }
 
@@ -365,7 +365,7 @@ impl Element for i64 {
         key |= ((buf[5] & 0xfe) as u64) << 21;
         key |= ((buf[6] & 0xfe) as u64) << 14;
         key |= ((buf[7] & 0xfe) as u64) << 7;
-        key |= ((buf[8] & 0xfe) as u64) << 0;
+        key |= (buf[8] & 0xfe) as u64;
         key |= ((buf[9] & 0x80) as u64) >> 7;
         Ok(ordered::decode_i64(key))
     }
