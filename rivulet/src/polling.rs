@@ -5,8 +5,6 @@ use std::sync::Mutex;
 
 use biometrics::{Collector, Counter};
 
-use tatl::{HeyListen, Stationary};
-
 use rpc_pb::Error;
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
@@ -53,7 +51,7 @@ pub fn from_epoll_constants(x: i32) -> u32 {
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static FD_TRUNCATED: Counter = Counter::new("rivulet.fd_truncated");
-static FD_TRUNCATED_MONITOR: Stationary = Stationary::new("rivulet.fd_truncated", &FD_TRUNCATED);
+// TODO(rescrv): static FD_TRUNCATED_MONITOR: Stationary = Stationary::new("rivulet.fd_truncated", &FD_TRUNCATED);
 
 static NEW_THREAD: Counter = Counter::new("rivulet.new_thread");
 
@@ -73,10 +71,6 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&CONSERVE_POLLOUT);
     collector.register_counter(&RETURN_CONSERVED_POLLIN);
     collector.register_counter(&RETURN_CONSERVED_POLLOUT);
-}
-
-pub fn register_monitors(hey_listen: &mut HeyListen) {
-    hey_listen.register_stationary(&FD_TRUNCATED_MONITOR);
 }
 
 //////////////////////////////////////////// ThreadState ///////////////////////////////////////////
