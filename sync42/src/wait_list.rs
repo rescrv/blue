@@ -1,5 +1,11 @@
-//! [WaitList] provides a collection for synchronizing threads.  See examples/clicker.rs for
-//! details.
+//! [WaitList] provides a collection for synchronizing threads.  Internally, the collection owns
+//! MAX_CONCURRENCY positions of rendezvous called Waiter (private).  You can call [WaitList::link]
+//! to allocate a waiter and return a [WaitGuard].  Holding a wait guard allows one to construct an
+//! iterator or random-accessor over all subsequent threads in the data structure.  In this way,
+//! the head of the list can iterate the list, batching operations together, and then iterate the
+//! list again to distribute the batched work.
+//!
+//! See examples/clicker.rs for a concrete, complete example of exactly that.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -247,7 +253,8 @@ impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
 
     /// Use the [WaitGuard] provided by `self` to get a wait guard to a later position in the list.
     /// It is not possible to get a wait guard to an index less than our own position.  This
-    /// limitation enables us to enforce lifetimes with the borrow checker.
+    /// limitation enables us to enforce lifetimes with the borrow checker.  Returns None if the
+    /// owner called unlink on the index.
     pub fn get_waiter<'c, 'b: 'c>(&'b mut self, index: u64) -> Option<WaitGuard<'c, T>> {
         let state = self.list.state.lock().unwrap();
         if index < self.index || index >= state.tail || !self.list.index_waitlist(index).linked.load(Ordering::Relaxed) {
