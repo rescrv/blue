@@ -18,7 +18,7 @@ guacamole = { path = "../guacamole", version = "0.2.0" }
 indicio = { path = "../indicio" }
 prototk = { path = "../prototk", version = "0.1.0" }
 prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
-setsum = { path = "../setsum", version = "0.1.0" }
+setsum = { path = "../setsum", version = "0.2.0" }
 sst = { path = "../sst" }
 tatl = { path = "../tatl" }
 util = { path = "../util" }
