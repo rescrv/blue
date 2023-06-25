@@ -34,5 +34,10 @@ members = [
     "zerror_core",
 ]
 
+# Scrunch is under progress on a separate branch.  As-is it's unusable.
+exclude = [
+    "scrunch",
+]
+
 [profile.release]
 debug = true
