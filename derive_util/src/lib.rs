@@ -6,9 +6,15 @@ extern crate syn;
 
 /////////////////////////////////////////// StructVisitor //////////////////////////////////////////
 
+/// [StructVisitor] provides default implementations for panicking when visiting a struct.
+/// Override [StructVisitor::visit_struct_named_fields],
+/// [StructVisitor::visit_struct_unnamed_fields], and [StructVisitor::visit_struct_unit] to support
+/// the three different struct types.
 pub trait StructVisitor: Sized {
     type Output;
 
+    /// Visit the struct and switch over the struct type.  This will call one of the other visit
+    /// methods.
     fn visit_struct(&mut self, ty_name: &syn::Ident, ds: &syn::DataStruct) -> Self::Output {
         match ds.fields {
             syn::Fields::Named(ref fields) => self.visit_struct_named_fields(ty_name, ds, fields),
@@ -19,6 +25,7 @@ pub trait StructVisitor: Sized {
         }
     }
 
+    /// Visit a struct with named fields.
     fn visit_struct_named_fields(
         &mut self,
         _ty_name: &syn::Ident,
@@ -28,6 +35,7 @@ pub trait StructVisitor: Sized {
         panic!("{}", "structs with named fields are not supported");
     }
 
+    /// Visit a struct with unnamed fields.
     fn visit_struct_unnamed_fields(
         &mut self,
         _ty_name: &syn::Ident,
@@ -37,6 +45,7 @@ pub trait StructVisitor: Sized {
         panic!("{}", "structs with unnamed fields are not supported");
     }
 
+    /// Visit a unit struct.
     fn visit_struct_unit(&mut self, _ty_name: &syn::Ident, _ds: &syn::DataStruct) -> Self::Output {
         panic!("{}", "unit structs are not supported");
     }
@@ -44,10 +53,15 @@ pub trait StructVisitor: Sized {
 
 //////////////////////////////////////////// EnumVisitor ///////////////////////////////////////////
 
+/// [EnumVisitor] provides default implementations for panicking when visiting an enum.  Provide
+/// implementations of [EnumVisitor::combine_variants], and at least one of
+/// [EnumVisitor::visit_enum_variant_named_field], [EnumVisitor::visit_enum_variant_unnamed_field],
+/// and [EnumVisitor::visit_enum_variant_unit].
 trait EnumVisitor: Sized {
     type Output;
     type VariantOutput;
 
+    /// Visit all variants and combine them into one output.
     fn visit_enum(&mut self, ty_name: &syn::Ident, de: &syn::DataEnum) -> Self::Output {
         let mut variants = Vec::new();
         for v in de.variants.iter() {
@@ -56,6 +70,7 @@ trait EnumVisitor: Sized {
         self.combine_variants(ty_name, de, &variants)
     }
 
+    /// Combine the provided variants into one output.
     fn combine_variants(
         &mut self,
         ty_name: &syn::Ident,
@@ -63,6 +78,7 @@ trait EnumVisitor: Sized {
         variants: &[Self::VariantOutput],
     ) -> Self::Output;
 
+    /// Visit an enum, switching over its variant type.
     fn visit_enum_variant(
         &mut self,
         ty_name: &syn::Ident,
@@ -80,6 +96,7 @@ trait EnumVisitor: Sized {
         }
     }
 
+    /// Visit an enum with [syn::FieldsNamed].
     fn visit_enum_variant_named_field(
         &mut self,
         _ty_name: &syn::Ident,
@@ -90,6 +107,7 @@ trait EnumVisitor: Sized {
         panic!("{}", "enum variants with named fields are not supported");
     }
 
+    /// Visit an enum with [syn::FieldsUnnamed].
     fn visit_enum_variant_unnamed_field(
         &mut self,
         _ty_name: &syn::Ident,
@@ -100,6 +118,7 @@ trait EnumVisitor: Sized {
         panic!("{}", "enum variants with unnamed fields are not supported");
     }
 
+    /// Visit a unit enum.
     fn visit_enum_variant_unit(
         &mut self,
         _ty_name: &syn::Ident,

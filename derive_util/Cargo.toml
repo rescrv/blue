@@ -3,6 +3,8 @@ name = "derive_util"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "derive_util provides tools for derive macros"
+license = "Apache-2.0"
 
 [dependencies]
 syn = "1.0"
