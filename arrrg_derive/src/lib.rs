@@ -1,3 +1,5 @@
+//! See arrrg for a description of this crate.
+
 #![recursion_limit = "128"]
 
 extern crate proc_macro;
