@@ -104,13 +104,13 @@ impl TinyLFU {
         };
         let counter_bits = (opts.window_size as f64).log2().ceil() as usize;
         let num_counters = (opts.target_memory_usage * 8 + counter_bits - 1) / counter_bits;
-        let n = bloom::N(opts.window_size as f64);
-        let m = bloom::M(num_counters as f64);
-        let p = bloom::calc_p_given_n_m(n, m);
+        let n = bloomcalc::N(opts.window_size as f64);
+        let m = bloomcalc::M(num_counters as f64);
+        let p = bloomcalc::calc_p_given_n_m(n, m);
         if p.0 < MIN_PROBABILITY {
             return Err("invalid parameters: false positive rate too small");
         }
-        let k = bloom::calc_keys_given_probability(p);
+        let k = bloomcalc::calc_keys_given_probability(p);
         let num_keys = k.0.ceil() as usize;
         if num_keys > MAX_KEYS {
             return Err("invalid parameters: too many hashing keys");
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn constants() {
-        use bloom::{calc_keys_given_probability, P};
+        use bloomcalc::{calc_keys_given_probability, P};
         // The minimum probability must not yield more than MAX_KEYS hashes.
         assert!(MAX_KEYS >= calc_keys_given_probability(P(MIN_PROBABILITY)).0 as usize);
     }

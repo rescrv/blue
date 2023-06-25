@@ -1,4 +1,4 @@
-use bloom::{
+use bloomcalc::{
     calc_keys_given_probability, calc_m_given_p_n, calc_p_given_n_m, Parameter, K, M, N, P,
 };
 
