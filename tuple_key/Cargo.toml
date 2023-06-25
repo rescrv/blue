@@ -8,5 +8,5 @@ license = "Apache-2.0"
 
 [dependencies]
 buffertk = { path = "../buffertk", version = "0.2" }
-prototk = { path = "../prototk", version = "0.1.0" }
+prototk = { path = "../prototk", version = "0.2" }
 tuple_key_derive = { path = "../tuple_key_derive" }
