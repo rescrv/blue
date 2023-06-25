@@ -1,9 +1,10 @@
 [package]
 name = "texttale"
 version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "TextTale provides tools for writing text-mode adventures."
+license = "Apache-2.0"
 
 [dependencies]
 rustyline = "11.0"
