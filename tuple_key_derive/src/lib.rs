@@ -81,14 +81,14 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
     let mut into_tuple_key = TupleKeyStructVisitor {
         f: extract_into,
     };
-    let into_tuple_key = into_tuple_key.visit_struct(&ty_name, &data);
+    let into_tuple_key = into_tuple_key.visit_struct(&ty_name, data);
 
     // Create from_tuple_key
     fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, unnamed: &syn::FieldsUnnamed) -> TokenStream {
         let mut sum: TokenStream = quote! {};
         let mut fields: TokenStream = quote! {};
         for (idx, field) in unnamed.unnamed.iter().enumerate() {
-            let (ty_str, ty_tok) = extract_type(&field);
+            let (ty_str, ty_tok) = extract_type(field);
             let num = parse_attributes(&field.attrs);
             let field_num = syn::Ident::new(&format!("field_{}", idx), num.span());
             if ty_str == "()" {
@@ -134,7 +134,7 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
     let mut from_tuple_key = TupleKeyStructVisitor {
         f: extract_from,
     };
-    let from_tuple_key = from_tuple_key.visit_struct(&ty_name, &data);
+    let from_tuple_key = from_tuple_key.visit_struct(&ty_name, data);
 
     // Generate the whole implementation.
     let gen = quote! {
