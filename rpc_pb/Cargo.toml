@@ -13,4 +13,4 @@ prototk = { path = "../prototk" }
 prototk_derive = { path = "../prototk_derive" }
 utilz = { path = "../utilz", version = "0.1" }
 zerror = { path = "../zerror" }
-zerror_core = { path = "../zerror_core" }
+zerror_core = { path = "../zerror_core", version = "0.2" }

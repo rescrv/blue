@@ -25,4 +25,4 @@ rivulet = { path = "../rivulet", version = "0.1.0" }
 rpc_pb = { path = "../rpc_pb", version = "0.1.0" }
 texttale = { path = "../texttale", version = "0.1.0" }
 utilz = { path = "../utilz", version = "0.1" }
-zerror_core = { path = "../zerror_core", version = "0.1.0" }
+zerror_core = { path = "../zerror_core", version = "0.2" }

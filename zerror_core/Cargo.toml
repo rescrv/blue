@@ -1,14 +1,14 @@
 [package]
 name = "zerror_core"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "A complete implementation of the zerror:Z trait."
 license = "Apache-2.0"
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.1.1" }
-buffertk = { path = "../buffertk", version = "0.2.0" }
-prototk = { path = "../prototk", version = "0.1.0" }
-prototk_derive = { path = "../prototk_derive", version = "0.1.0" }
-zerror = { path = "../zerror", version = "0.1.0" }
+biometrics = { path = "../biometrics", version = "0.1" }
+buffertk = { path = "../buffertk", version = "0.2" }
+prototk = { path = "../prototk", version = "0.1" }
+prototk_derive = { path = "../prototk_derive", version = "0.1" }
+zerror = { path = "../zerror", version = "0.1" }

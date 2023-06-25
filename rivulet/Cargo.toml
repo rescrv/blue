@@ -22,4 +22,4 @@ rpc_pb = { path = "../rpc_pb" }
 tatl = { path = "../tatl" }
 utilz = { path = "../utilz", version = "0.1" }
 zerror = { path = "../zerror", version = "0.1.0" }
-zerror_core = { path = "../zerror_core", version = "0.1.0" }
+zerror_core = { path = "../zerror_core", version = "0.2" }
