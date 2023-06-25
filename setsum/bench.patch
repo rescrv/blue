@@ -11,7 +11,7 @@ index 12e224d..70e9e65 100644
 +criterion = "0.5"
 +rand = "0.7"
 +
-+guacamole = { path = "../guacamole", version = "0.1.0" }
++guacamole = { path = "../guacamole", version = "0.2.0" }
 +
 +[[bench]]
 +name = "benchmark"
@@ -38,3 +38,101 @@ index 79fbe60..e41e18e 100644
      4294967291, 4294967279, 4294967231, 4294967197, 4294967189, 4294967161, 4294967143, 4294967111,
  ];
  
+diff --git b/setsum/benches/benchmark.rs a/setsum/benches/benchmark.rs
+new file mode 100644
+index 0000000..322fd2a
+--- /dev/null
++++ a/setsum/benches/benchmark.rs
+@@ -0,0 +1,92 @@
++use std::hint::black_box;
++
++use rand::Rng;
++
++use criterion::{criterion_group, criterion_main, Criterion};
++
++use guacamole::Guacamole;
++
++use setsum::{add_state, SETSUM_COLUMNS, SETSUM_PRIMES};
++
++pub fn add_state_div(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
++    let mut ret = <[u32; SETSUM_COLUMNS]>::default();
++    for i in 0..SETSUM_COLUMNS {
++        let lc = lhs[i] as u64;
++        let rc = rhs[i] as u64;
++        let sum = (lc + rc) % SETSUM_PRIMES[i] as u64;
++        ret[i] = sum as u32;
++    }
++    ret
++}
++
++pub fn add_state_sub(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
++    let mut ret = <[u32; SETSUM_COLUMNS]>::default();
++    for i in 0..SETSUM_COLUMNS {
++        let lc = lhs[i] as u64;
++        let rc = rhs[i] as u64;
++        let mut sum = lc + rc;
++        let p = SETSUM_PRIMES[i] as u64;
++        if sum >= p {
++            sum -= p;
++        }
++        ret[i] = sum as u32;
++    }
++    ret
++}
++
++fn fold_state_div(items: &[[u32; SETSUM_COLUMNS]]) {
++    let mut acc = [0u32; SETSUM_COLUMNS];
++    for item in items {
++        acc = add_state_div(acc, *item);
++    }
++    black_box(acc);
++}
++
++fn fold_state_sub(items: &[[u32; SETSUM_COLUMNS]]) {
++    let mut acc = [0u32; SETSUM_COLUMNS];
++    for item in items {
++        acc = add_state_sub(acc, *item);
++    }
++    black_box(acc);
++}
++
++fn fold_state_lib(items: &[[u32; SETSUM_COLUMNS]]) {
++    let mut acc = [0u32; SETSUM_COLUMNS];
++    for item in items {
++        acc = add_state(acc, *item);
++    }
++    black_box(acc);
++}
++
++pub fn criterion_benchmark(c: &mut Criterion) {
++    let mut guac = Guacamole::new(0);
++    let mut samples = Vec::new();
++    for _ in 0..100_000 {
++        let mut sample: [u32; SETSUM_COLUMNS] = [0u32; SETSUM_COLUMNS];
++        for s in sample.iter_mut() {
++            *s = guac.gen();
++        }
++        samples.push(sample);
++    }
++    c.bench_function("fold_state_div 1", |b| b.iter(|| fold_state_div(black_box(&samples[..1]))));
++    c.bench_function("fold_state_div 10", |b| b.iter(|| fold_state_div(black_box(&samples[..10]))));
++    c.bench_function("fold_state_div 100", |b| b.iter(|| fold_state_div(black_box(&samples[..100]))));
++    c.bench_function("fold_state_div 1_000", |b| b.iter(|| fold_state_div(black_box(&samples[..1_000]))));
++    c.bench_function("fold_state_div 10_000", |b| b.iter(|| fold_state_div(black_box(&samples[..10_000]))));
++    c.bench_function("fold_state_div 100_000", |b| b.iter(|| fold_state_div(black_box(&samples[..100_000]))));
++    c.bench_function("fold_state_sub 1", |b| b.iter(|| fold_state_sub(black_box(&samples[..1]))));
++    c.bench_function("fold_state_sub 10", |b| b.iter(|| fold_state_sub(black_box(&samples[..10]))));
++    c.bench_function("fold_state_sub 100", |b| b.iter(|| fold_state_sub(black_box(&samples[..100]))));
++    c.bench_function("fold_state_sub 1_000", |b| b.iter(|| fold_state_sub(black_box(&samples[..1_000]))));
++    c.bench_function("fold_state_sub 10_000", |b| b.iter(|| fold_state_sub(black_box(&samples[..10_000]))));
++    c.bench_function("fold_state_sub 100_000", |b| b.iter(|| fold_state_sub(black_box(&samples[..100_000]))));
++    c.bench_function("fold_state_lib 1", |b| b.iter(|| fold_state_lib(black_box(&samples[..1]))));
++    c.bench_function("fold_state_lib 10", |b| b.iter(|| fold_state_lib(black_box(&samples[..10]))));
++    c.bench_function("fold_state_lib 100", |b| b.iter(|| fold_state_lib(black_box(&samples[..100]))));
++    c.bench_function("fold_state_lib 1_000", |b| b.iter(|| fold_state_lib(black_box(&samples[..1_000]))));
++    c.bench_function("fold_state_lib 10_000", |b| b.iter(|| fold_state_lib(black_box(&samples[..10_000]))));
++    c.bench_function("fold_state_lib 100_000", |b| b.iter(|| fold_state_lib(black_box(&samples[..100_000]))));
++}
++
++criterion_group!(benches, criterion_benchmark);
++criterion_main!(benches);
