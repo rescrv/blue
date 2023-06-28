@@ -1,4 +1,5 @@
 #![recursion_limit = "128"]
+//! derive_util is a library for writing [StructVisitor] and [EnumVisitor] types.
 
 extern crate proc_macro;
 extern crate quote;
@@ -28,25 +29,33 @@ pub trait StructVisitor: Sized {
     /// Visit a struct with named fields.
     fn visit_struct_named_fields(
         &mut self,
-        _ty_name: &syn::Ident,
-        _ds: &syn::DataStruct,
-        _fields: &syn::FieldsNamed,
+        ty_name: &syn::Ident,
+        ds: &syn::DataStruct,
+        fields: &syn::FieldsNamed,
     ) -> Self::Output {
+        _ = ty_name;
+        _ = ds;
+        _ = fields;
         panic!("{}", "structs with named fields are not supported");
     }
 
     /// Visit a struct with unnamed fields.
     fn visit_struct_unnamed_fields(
         &mut self,
-        _ty_name: &syn::Ident,
-        _ds: &syn::DataStruct,
-        _fields: &syn::FieldsUnnamed,
+        ty_name: &syn::Ident,
+        ds: &syn::DataStruct,
+        fields: &syn::FieldsUnnamed,
     ) -> Self::Output {
+        _ = ty_name;
+        _ = ds;
+        _ = fields;
         panic!("{}", "structs with unnamed fields are not supported");
     }
 
     /// Visit a unit struct.
-    fn visit_struct_unit(&mut self, _ty_name: &syn::Ident, _ds: &syn::DataStruct) -> Self::Output {
+    fn visit_struct_unit(&mut self, ty_name: &syn::Ident, ds: &syn::DataStruct) -> Self::Output {
+        _ = ty_name;
+        _ = ds;
         panic!("{}", "unit structs are not supported");
     }
 }
@@ -57,7 +66,7 @@ pub trait StructVisitor: Sized {
 /// implementations of [EnumVisitor::combine_variants], and at least one of
 /// [EnumVisitor::visit_enum_variant_named_field], [EnumVisitor::visit_enum_variant_unnamed_field],
 /// and [EnumVisitor::visit_enum_variant_unit].
-trait EnumVisitor: Sized {
+pub trait EnumVisitor: Sized {
     type Output;
     type VariantOutput;
 
