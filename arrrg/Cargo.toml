@@ -1,6 +1,6 @@
 [package]
 name = "arrrg"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "arrrg provides a wrapper around the getops library for stable commandline parsing."
@@ -9,4 +9,4 @@ license = "Apache-2.0"
 [dependencies]
 getopts = "0.2"
 
-arrrg_derive = { path = "../arrrg_derive", version = "0.1.0" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
