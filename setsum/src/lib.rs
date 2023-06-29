@@ -68,7 +68,11 @@ fn hash_to_state(hash: &[u8; SETSUM_BYTES]) -> [u32; SETSUM_COLUMNS] {
         let end = idx + SETSUM_BYTES_PER_COLUMN;
         let buf: [u8; 4] = hash[idx..end].try_into().unwrap();
         let num = u32::from_le_bytes(buf);
-        item_state[i] = num % SETSUM_PRIMES[i];
+        item_state[i] = if num >= SETSUM_PRIMES[i] {
+            num - SETSUM_PRIMES[i]
+        } else {
+            num
+        };
     }
     item_state
 }
