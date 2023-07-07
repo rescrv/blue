@@ -1,4 +1,4 @@
-//! See arrrg for a description of this crate.
+//!  Derive macro for arrrg::CommandLine.
 
 #![recursion_limit = "128"]
 
