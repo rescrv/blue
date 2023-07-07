@@ -1,7 +1,7 @@
 derive_util
 ===========
 
-derive_util is a library for writing struct and enum visitors.
+derive_util provides tools for derive macros.
 
 struct visitor
 --------------
@@ -85,3 +85,24 @@ fn combine_variants(
     variants: &[Self::VariantOutput],
 ) -> Self::Output;
 ```
+
+Status
+------
+
+Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
+
+Scope
+-----
+
+This library will provide visitors for the core rust data types for use in derive macros.
+
+Warts
+-----
+
+- The library is not complete enough to be used in [prototk](https://crates.io/crates/prototk) from which it was
+  derived.
+
+Documentation
+-------------
+
+The latest documentation is always available at [docs.rs](https://docs.rs/prototk/latest/prototk/).
