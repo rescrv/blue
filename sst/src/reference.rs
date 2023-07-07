@@ -132,11 +132,7 @@ impl Cursor for ReferenceCursor {
     }
 
     fn prev(&mut self) -> Result<(), Error> {
-        self.index = if self.returned {
-            self.index - 1
-        } else {
-            self.index - 1
-        };
+        self.index -= 1;
         if self.index < 0 {
             self.seek_to_first()
         } else {

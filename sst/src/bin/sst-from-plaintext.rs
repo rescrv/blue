@@ -6,7 +6,7 @@ use utilz::time::now;
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use sst::{Builder, SSTBuilder, SSTBuilderOptions};
+use sst::{Builder, SstBuilder, SstOptions};
 
 #[derive(CommandLine, Debug, Eq, PartialEq)]
 struct SstFromPlaintextCommandLine {
@@ -31,8 +31,8 @@ fn main() {
     let plaintext = File::open(cmdline.plaintext).expect("could not open plaintext");
     let plaintext = BufReader::new(plaintext);
     // setup sst out
-    let opts = SSTBuilderOptions::default();
-    let mut sst = SSTBuilder::new(cmdline.sst, opts).expect("could not open sst");
+    let opts = SstOptions::default();
+    let mut sst = SstBuilder::new(cmdline.sst, opts).expect("could not open sst");
 
     for line in plaintext.lines() {
         let line = &line.expect("could not parse line");

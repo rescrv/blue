@@ -15,7 +15,7 @@ members = [
     "indicio",
     "meta",
     "one_two_eight",
-    "lsmtk",
+    "lsmgraph",
     "prototk",
     "prototk_derive",
     "rivulet",

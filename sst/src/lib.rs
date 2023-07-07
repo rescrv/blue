@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate arrrg_derive;
+
 extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
@@ -145,19 +148,11 @@ pub enum Error {
         error: prototk::Error,
         context: String,
     },
-    CRC32CFailure {
+    Crc32cFailure {
         core: ErrorCore,
         start: u64,
         limit: u64,
         crc32c: u32,
-    },
-    LockNotObtained {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    DuplicateSST {
-        core: ErrorCore,
-        what: String,
     },
     Corruption {
         core: ErrorCore,
@@ -169,63 +164,11 @@ pub enum Error {
     },
     SystemError {
         core: ErrorCore,
-        context: String,
-    },
-    IOError {
-        core: ErrorCore,
-        what: std::io::Error,
+        what: String,
     },
     TooManyOpenFiles {
         core: ErrorCore,
         limit: usize,
-    },
-    SSTNotFound {
-        core: ErrorCore,
-        setsum: String,
-    },
-    DBExists {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    DBNotExist {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    PathError {
-        core: ErrorCore,
-        path: PathBuf,
-        what: String,
-    },
-    MissingManifest {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    MissingSST {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    ExtraFile {
-        core: ErrorCore,
-        path: PathBuf,
-    },
-    InvalidManifestLine {
-        core: ErrorCore,
-        line: String,
-    },
-    InvalidManifestCommand {
-        core: ErrorCore,
-        cmd: String,
-        arg: String,
-    },
-    InvalidManifestSetsum {
-        core: ErrorCore,
-        manifest: String,
-        computed: String,
-    },
-    InvalidSSTSetsum {
-        core: ErrorCore,
-        expected: String,
-        computed: String,
     },
 }
 
@@ -238,25 +181,11 @@ impl Error {
             Error::TableFull { core, .. } => { core } ,
             Error::BlockTooSmall { core, .. } => { core } ,
             Error::UnpackError { core, .. } => { core } ,
-            Error::CRC32CFailure { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-            Error::DuplicateSST { core, .. } => { core } ,
+            Error::Crc32cFailure { core, .. } => { core } ,
             Error::Corruption { core, .. } => { core } ,
             Error::LogicError { core, .. } => { core } ,
             Error::SystemError { core, .. } => { core } ,
-            Error::IOError { core, .. } => { core } ,
             Error::TooManyOpenFiles { core, .. } => { core } ,
-            Error::SSTNotFound { core, .. } => { core } ,
-            Error::DBExists { core, .. } => { core } ,
-            Error::DBNotExist { core, .. } => { core } ,
-            Error::PathError { core, .. } => { core } ,
-            Error::MissingManifest { core, .. } => { core } ,
-            Error::MissingSST { core, .. } => { core } ,
-            Error::ExtraFile { core, .. } => { core } ,
-            Error::InvalidManifestLine { core, .. } => { core } ,
-            Error::InvalidManifestCommand { core, .. } => { core } ,
-            Error::InvalidManifestSetsum { core, .. } => { core } ,
-            Error::InvalidSSTSetsum { core, .. } => { core } ,
         }
     }
 
@@ -268,25 +197,11 @@ impl Error {
             Error::TableFull { core, .. } => { core } ,
             Error::BlockTooSmall { core, .. } => { core } ,
             Error::UnpackError { core, .. } => { core } ,
-            Error::CRC32CFailure { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-            Error::DuplicateSST { core, .. } => { core } ,
+            Error::Crc32cFailure { core, .. } => { core } ,
             Error::Corruption { core, .. } => { core } ,
             Error::LogicError { core, .. } => { core } ,
             Error::SystemError { core, .. } => { core } ,
-            Error::IOError { core, .. } => { core } ,
             Error::TooManyOpenFiles { core, .. } => { core } ,
-            Error::SSTNotFound { core, .. } => { core } ,
-            Error::DBExists { core, .. } => { core } ,
-            Error::DBNotExist { core, .. } => { core } ,
-            Error::PathError { core, .. } => { core } ,
-            Error::MissingManifest { core, .. } => { core } ,
-            Error::MissingSST { core, .. } => { core } ,
-            Error::ExtraFile { core, .. } => { core } ,
-            Error::InvalidManifestLine { core, .. } => { core } ,
-            Error::InvalidManifestCommand { core, .. } => { core } ,
-            Error::InvalidManifestSetsum { core, .. } => { core } ,
-            Error::InvalidSSTSetsum { core, .. } => { core } ,
         }
     }
 }
@@ -335,7 +250,10 @@ impl Display for Error {
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
-        Error::IOError { core: ErrorCore::default(), what }
+        Error::SystemError {
+            core: ErrorCore::default(),
+            what: format!("{:?}", what),
+        }
     }
 }
 
@@ -344,6 +262,7 @@ impl From<std::io::Error> for Error {
 pub trait FromIO {
     type Result;
 
+    #[allow(clippy::wrong_self_convention)]
     fn from_io(self) -> Self::Result;
 }
 
@@ -460,14 +379,11 @@ pub struct KeyValuePair {
 }
 
 impl KeyValuePair {
-    pub fn from_key_value_ref<'a>(kvr: &KeyValueRef<'a>) -> Self {
+    pub fn from_key_value_ref(kvr: &KeyValueRef<'_>) -> Self {
         Self {
             key: kvr.key.into(),
             timestamp: kvr.timestamp,
-            value: match kvr.value {
-                Some(x) => Some(x.into()),
-                None => None,
-            },
+            value: kvr.value.map(|v| v.into()),
         }
     }
 }
@@ -501,10 +417,7 @@ impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
         Self {
             key: kvr.key.into(),
             timestamp: kvr.timestamp,
-            value: match kvr.value {
-                Some(v) => Some(v.into()),
-                None => None,
-            },
+            value: kvr.value.map(|v| v.into()),
         }
     }
 }
@@ -522,10 +435,10 @@ pub trait Builder {
     fn seal(self) -> Result<Self::Sealed, Error>;
 }
 
-///////////////////////////////////////////// SSTEntry /////////////////////////////////////////////
+///////////////////////////////////////////// SstEntry /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Message)]
-enum SSTEntry<'a> {
+enum SstEntry<'a> {
     #[prototk(10, bytes)]
     PlainBlock(&'a [u8]),
     // #[prototk(11, bytes)]
@@ -534,11 +447,11 @@ enum SSTEntry<'a> {
     FinalBlock(&'a [u8]),
 }
 
-impl<'a> SSTEntry<'a> {
+impl<'a> SstEntry<'a> {
     fn bytes(&self) -> &[u8] {
         match self {
-            SSTEntry::PlainBlock(x) => x,
-            SSTEntry::FinalBlock(x) => x,
+            SstEntry::PlainBlock(x) => x,
+            SstEntry::FinalBlock(x) => x,
         }
     }
 
@@ -547,7 +460,7 @@ impl<'a> SSTEntry<'a> {
     }
 }
 
-impl<'a> Default for SSTEntry<'a> {
+impl<'a> Default for SstEntry<'a> {
     fn default() -> Self {
         Self::PlainBlock(&[])
     }
@@ -617,10 +530,10 @@ pub trait TableMetadata {
     fn last_key(&self) -> KeyRef;
 }
 
-//////////////////////////////////////////// SSTMetadata ///////////////////////////////////////////
+//////////////////////////////////////////// SstMetadata ///////////////////////////////////////////
 
 #[derive(Clone, Eq, Message, Ord, PartialEq, PartialOrd)]
-pub struct SSTMetadata {
+pub struct SstMetadata {
     #[prototk(1, bytes32)]
     pub setsum: [u8; 32],
     #[prototk(2, bytes)]
@@ -635,7 +548,7 @@ pub struct SSTMetadata {
     pub file_size: u64,
 }
 
-impl SSTMetadata {
+impl SstMetadata {
     // TODO(rescrv): dedupe with the other implementations.
     pub fn setsum(&self) -> String {
         let mut setsum = String::with_capacity(68);
@@ -668,7 +581,7 @@ impl SSTMetadata {
     }
 }
 
-impl Default for SSTMetadata {
+impl Default for SstMetadata {
     fn default() -> Self {
         let mut last_key = Buffer::new(MAX_KEY_LEN);
         for i in 0..MAX_KEY_LEN {
@@ -685,31 +598,31 @@ impl Default for SSTMetadata {
     }
 }
 
-impl Debug for SSTMetadata {
+impl Debug for SstMetadata {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "SSTMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
+        write!(fmt, "SstMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
             self.setsum(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
     }
 }
 
-//////////////////////////////////////////////// SST ///////////////////////////////////////////////
+//////////////////////////////////////////////// Sst ///////////////////////////////////////////////
 
 #[derive(Clone)]
-pub struct SST {
+pub struct Sst {
     // The file backing the table.
     handle: FileHandle,
     // The final block of the table.
     final_block: FinalBlock,
-    // SST metadata.
+    // Sst metadata.
     index_block: Block,
     // Cache for metadata call.
     file_size: u64,
 }
 
-impl SST {
+impl Sst {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let handle = open_without_manager(path.as_ref().to_path_buf())?;
-        SST::from_file_handle(handle)
+        Sst::from_file_handle(handle)
     }
 
     pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
@@ -770,7 +683,7 @@ impl SST {
             .with_variable("index_block_limit", final_block.index_block.limit);
             return Err(err);
         }
-        let index_block = SST::load_block(&handle, &final_block.index_block)?;
+        let index_block = Sst::load_block(&handle, &final_block.index_block)?;
         Ok(Self {
             handle,
             final_block,
@@ -779,20 +692,15 @@ impl SST {
         })
     }
 
-    pub fn cursor(&self) -> SSTCursor {
-        SSTCursor::new(self.clone())
+    pub fn cursor(&self) -> SstCursor {
+        SstCursor::new(self.clone())
     }
 
-    pub fn setsum(&self) -> String {
-        let mut setsum = String::with_capacity(68);
-        for i in 0..self.final_block.setsum.len() {
-            write!(&mut setsum, "{:02x}", self.final_block.setsum[i])
-                .expect("unable to write to string");
-        }
-        setsum
+    pub fn setsum(&self) -> Setsum {
+        Setsum::from_digest(self.final_block.setsum)
     }
 
-    pub fn metadata(&self) -> Result<SSTMetadata, Error> {
+    pub fn metadata(&self) -> Result<SstMetadata, Error> {
         let mut cursor = self.cursor();
         // First key.
         cursor.seek_to_first()?;
@@ -817,7 +725,7 @@ impl SST {
             }
         };
         // Metadata
-        Ok(SSTMetadata {
+        Ok(SstMetadata {
             setsum: self.final_block.setsum,
             first_key,
             last_key,
@@ -833,11 +741,10 @@ impl SST {
     ) -> Result<Block, Error> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(amt);
-        buf.resize(amt, 0);
+        let mut buf: Vec<u8> = vec![0u8; amt];
         file.read_exact_at(&mut buf, block_metadata.start)?;
         let mut up = Unpacker::new(&buf);
-        let table_entry: SSTEntry = up.unpack().map_err(|e| {
+        let table_entry: SstEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
             Error::UnpackError {
                 core: ErrorCore::default(),
@@ -847,7 +754,7 @@ impl SST {
         })?;
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
-            let err = Error::CRC32CFailure {
+            let err = Error::Crc32cFailure {
                 core: ErrorCore::default(),
                 start: block_metadata.start,
                 limit: block_metadata.limit,
@@ -856,8 +763,8 @@ impl SST {
             return Err(err);
         }
         match table_entry {
-            SSTEntry::PlainBlock(bytes) => Ok(Block::new(bytes.into())?),
-            SSTEntry::FinalBlock(_) => {
+            SstEntry::PlainBlock(bytes) => Ok(Block::new(bytes.into())?),
+            SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
                 Err(Error::Corruption {
                     core: ErrorCore::default(),
@@ -870,20 +777,23 @@ impl SST {
 
 ///////////////////////////////////////// BlockCompression /////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BlockCompression {
     NoCompression,
 }
 
 impl BlockCompression {
-    fn compress<'a>(&self, bytes: &'a [u8], _scratch: &'a mut Vec<u8>) -> SSTEntry<'a> {
+    fn compress<'a>(&self, bytes: &'a [u8], scratch: &'a mut Vec<u8>) -> SstEntry<'a> {
         match self {
-            BlockCompression::NoCompression => SSTEntry::PlainBlock(bytes),
+            BlockCompression::NoCompression => {
+                scratch.clear();
+                SstEntry::PlainBlock(bytes)
+            },
         }
     }
 }
 
-///////////////////////////////////////// SSTBuilderOptions ////////////////////////////////////////
+//////////////////////////////////////////// SstOptions ////////////////////////////////////////////
 
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
@@ -891,17 +801,21 @@ pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 pub const CLAMP_MIN_TARGET_FILE_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
 
-#[derive(Clone, Debug, Message)]
-pub struct SSTBuilderOptions {
-    block_options: BlockBuilderOptions,
+#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+pub struct SstOptions {
+    #[arrrg(nested)]
+    block: BlockBuilderOptions,
+    // TODO(rescrv): arrrg needs an enum helper.
     block_compression: BlockCompression,
+    #[arrrg(optional, "Target block size.", "BYTES")]
     target_block_size: usize,
+    #[arrrg(optional, "Target file size.", "BYTES")]
     target_file_size: usize,
 }
 
-impl SSTBuilderOptions {
-    pub fn block_options(mut self, block_options: BlockBuilderOptions) -> Self {
-        self.block_options = block_options;
+impl SstOptions {
+    pub fn block(mut self, block: BlockBuilderOptions) -> Self {
+        self.block = block;
         self
     }
 
@@ -933,10 +847,10 @@ impl SSTBuilderOptions {
     }
 }
 
-impl Default for SSTBuilderOptions {
-    fn default() -> SSTBuilderOptions {
-        SSTBuilderOptions {
-            block_options: BlockBuilderOptions::default(),
+impl Default for SstOptions {
+    fn default() -> SstOptions {
+        SstOptions {
+            block: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
             target_file_size: 1<<22,
@@ -944,11 +858,11 @@ impl Default for SSTBuilderOptions {
     }
 }
 
-//////////////////////////////////////////// SSTBuilder ////////////////////////////////////////////
+//////////////////////////////////////////// SstBuilder ////////////////////////////////////////////
 
-pub struct SSTBuilder {
+pub struct SstBuilder {
     // Options for every "normal" table entry.
-    options: SSTBuilderOptions,
+    options: SstOptions,
     // The most recent that was successfully written.  Update only after writing to the block to
     // which a key is written.
     last_key: Vec<u8>,
@@ -969,15 +883,15 @@ pub struct SSTBuilder {
     path: PathBuf,
 }
 
-impl SSTBuilder {
-    pub fn new<P: AsRef<Path>>(path: P, options: SSTBuilderOptions) -> Result<Self, Error> {
+impl SstBuilder {
+    pub fn new<P: AsRef<Path>>(path: P, options: SstOptions) -> Result<Self, Error> {
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(path.as_ref().to_path_buf())
+            .open(path.as_ref())
             .from_io()
             .with_variable("open", path.as_ref().to_string_lossy())?;
-        Ok(SSTBuilder {
+        Ok(SstBuilder {
             options,
             last_key: Vec::new(),
             last_timestamp: u64::max_value(),
@@ -1020,20 +934,20 @@ impl SSTBuilder {
     }
 
     fn start_new_block(&mut self) -> Result<(), Error> {
-        if !self.block_builder.is_none() {
+        if self.block_builder.is_some() {
             LOGIC_ERROR.click();
             return Err(Error::LogicError {
                 core: ErrorCore::default(),
                 context: "called start_new_block() when block_builder is not None".to_string(),
             });
         }
-        self.block_builder = Some(BlockBuilder::new(self.options.block_options.clone()));
+        self.block_builder = Some(BlockBuilder::new(self.options.block.clone()));
         self.block_start_offset = self.bytes_written;
         Ok(())
     }
 
     fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        if !self.block_builder.is_some() {
+        if self.block_builder.is_none() {
             LOGIC_ERROR.click();
             return Err(Error::LogicError {
                 core: ErrorCore::default(),
@@ -1041,18 +955,22 @@ impl SSTBuilder {
             });
         }
         // Metadata for the block.
-        let mut block_metadata = BlockMetadata::default();
-        block_metadata.start = self.bytes_written as u64;
+        let start = self.bytes_written as u64;
         // Write out the block.
         let block = self.block_builder.take().unwrap().seal()?;
         let bytes = block.as_bytes();
         let mut scratch = Vec::new();
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
-        block_metadata.crc32c = entry.crc32c();
+        let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
         self.bytes_written += pa.stream(&mut self.output).from_io()?;
         // Prepare the block metadata.
-        block_metadata.limit = self.bytes_written as u64;
+        let limit = self.bytes_written as u64;
+        let block_metadata = BlockMetadata {
+            start,
+            limit,
+            crc32c,
+        };
         block_metadata.sanity_check()?;
         let value = stack_pack(block_metadata).to_vec();
         // Find a dividing key that falls between last_{key,timestamp} and {key,timestamp}.  In
@@ -1083,8 +1001,8 @@ impl SSTBuilder {
     }
 }
 
-impl Builder for SSTBuilder {
-    type Sealed = SST;
+impl Builder for SstBuilder {
+    type Sealed = Sst;
 
     fn approximate_size(&self) -> usize {
         let mut sum = self.bytes_written;
@@ -1120,7 +1038,7 @@ impl Builder for SSTBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<SST, Error> {
+    fn seal(self) -> Result<Sst, Error> {
         let mut builder = self;
         // Flush the block we have.
         if builder.block_builder.is_some() {
@@ -1131,7 +1049,7 @@ impl Builder for SSTBuilder {
         let index_block = builder.index_block.seal()?;
         let index_block_start = builder.bytes_written;
         let bytes = index_block.as_bytes();
-        let entry = SSTEntry::PlainBlock(bytes);
+        let entry = SstEntry::PlainBlock(bytes);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
         builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
@@ -1157,32 +1075,34 @@ impl Builder for SSTBuilder {
         builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
         // fsync
         builder.output.sync_all().from_io()?;
-        SST::new(builder.path)
+        Sst::new(builder.path)
     }
 }
 
-////////////////////////////////////////// SSTMultiBuilder /////////////////////////////////////////
+////////////////////////////////////////// SstMultiBuilder /////////////////////////////////////////
 
-pub struct SSTMultiBuilder {
-    prefix: String,
+pub struct SstMultiBuilder {
+    prefix: PathBuf,
     suffix: String,
     counter: u64,
-    options: SSTBuilderOptions,
-    builder: Option<SSTBuilder>,
+    options: SstOptions,
+    builder: Option<SstBuilder>,
+    paths: Vec<PathBuf>,
 }
 
-impl SSTMultiBuilder {
-    pub fn new(prefix: String, suffix: String, options: SSTBuilderOptions) -> Self {
+impl SstMultiBuilder {
+    pub fn new(prefix: PathBuf, suffix: String, options: SstOptions) -> Self {
         Self {
             prefix,
             suffix,
             counter: 0,
             options,
             builder: None,
+            paths: Vec::new(),
         }
     }
 
-    fn get_builder(&mut self) -> Result<&mut SSTBuilder, Error> {
+    fn get_builder(&mut self) -> Result<&mut SstBuilder, Error> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.target_file_size {
@@ -1192,15 +1112,16 @@ impl SSTMultiBuilder {
             }
             return Ok(self.builder.as_mut().unwrap());
         }
-        let path = PathBuf::from(format!("{}{}{}", self.prefix, self.counter, self.suffix));
+        let path = self.prefix.join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
+        self.paths.push(path.clone());
         self.counter += 1;
-        self.builder = Some(SSTBuilder::new(path, self.options.clone())?);
+        self.builder = Some(SstBuilder::new(path, self.options.clone())?);
         Ok(self.builder.as_mut().unwrap())
     }
 }
 
-impl Builder for SSTMultiBuilder {
-    type Sealed = ();
+impl Builder for SstMultiBuilder {
+    type Sealed = Vec<PathBuf>;
 
     fn approximate_size(&self) -> usize {
         match &self.builder {
@@ -1217,15 +1138,15 @@ impl Builder for SSTMultiBuilder {
         self.get_builder()?.del(key, timestamp)
     }
 
-    fn seal(mut self) -> Result<(), Error> {
+    fn seal(mut self) -> Result<Vec<PathBuf>, Error> {
         let builder = match self.builder.take() {
             Some(b) => b,
             None => {
-                return Ok(());
+                return Ok(self.paths);
             }
         };
         builder.seal()?;
-        Ok(())
+        Ok(self.paths)
     }
 }
 
@@ -1243,10 +1164,10 @@ pub trait Cursor {
     fn value(&self) -> Option<KeyValueRef>;
 }
 
-///////////////////////////////////////////// SSTCursor ////////////////////////////////////////////
+///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
-pub struct SSTCursor {
-    table: SST,
+pub struct SstCursor {
+    table: Sst,
     // The position in the table.  When meta_cursor is at its extremes, block_cursor is None.
     // Otherwise, block_cursor is positioned at the block referred to by the most recent
     // KVP-returning call to meta_cursor.
@@ -1254,8 +1175,8 @@ pub struct SSTCursor {
     block_cursor: Option<BlockCursor>,
 }
 
-impl SSTCursor {
-    fn new(table: SST) -> Self {
+impl SstCursor {
+    fn new(table: Sst) -> Self {
         let meta_cursor = table.index_block.cursor();
         Self {
             table,
@@ -1273,7 +1194,7 @@ impl SSTCursor {
                 return Ok(None);
             }
         };
-        SSTCursor::metadata_from_kvp(kvp)
+        SstCursor::metadata_from_kvp(kvp)
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
@@ -1285,7 +1206,7 @@ impl SSTCursor {
                 return Ok(None);
             }
         };
-        SSTCursor::metadata_from_kvp(kvp)
+        SstCursor::metadata_from_kvp(kvp)
     }
 
     fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
@@ -1312,7 +1233,7 @@ impl SSTCursor {
     }
 }
 
-impl Cursor for SSTCursor {
+impl Cursor for SstCursor {
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.meta_cursor.seek_to_first()?;
         self.block_cursor = None;
@@ -1333,7 +1254,7 @@ impl Cursor for SSTCursor {
                 return self.seek_to_last();
             }
         };
-        let block = SST::load_block(&self.table.handle, &metadata)?;
+        let block = Sst::load_block(&self.table.handle, &metadata)?;
         let mut block_cursor = block.cursor();
         block_cursor.seek(key)?;
         self.block_cursor = Some(block_cursor);
@@ -1348,7 +1269,7 @@ impl Cursor for SSTCursor {
                     return self.seek_to_first();
                 }
             };
-            let block = SST::load_block(&self.table.handle, &metadata)?;
+            let block = Sst::load_block(&self.table.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek_to_last()?;
             self.block_cursor = Some(block_cursor);
@@ -1373,7 +1294,7 @@ impl Cursor for SSTCursor {
                     return self.seek_to_last();
                 }
             };
-            let block = SST::load_block(&self.table.handle, &metadata)?;
+            let block = Sst::load_block(&self.table.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek_to_first()?;
             self.block_cursor = Some(block_cursor);
@@ -1405,8 +1326,8 @@ impl Cursor for SSTCursor {
     }
 }
 
-impl From<SST> for SSTCursor {
-    fn from(table: SST) -> Self {
+impl From<Sst> for SstCursor {
+    fn from(table: Sst) -> Self {
         Self::new(table)
     }
 }
@@ -1417,7 +1338,7 @@ impl From<SST> for SSTCursor {
 // https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
 pub fn compare_bytes(a: &[u8], b: &[u8]) -> cmp::Ordering {
     for (ai, bi) in a.iter().zip(b.iter()) {
-        match ai.cmp(&bi) {
+        match ai.cmp(bi) {
             Ordering::Equal => continue,
             ord => return ord,
         }
@@ -1465,7 +1386,7 @@ fn divide_keys(
         d_key[shared] = key_lhs[shared] + 1;
         d_timestamp = 0;
     } else {
-        d_key.extend_from_slice(&key_lhs);
+        d_key.extend_from_slice(key_lhs);
         d_timestamp = timestamp_lhs;
     }
     let cmp_lhs = compare_key(key_lhs, timestamp_lhs, &d_key, d_timestamp);

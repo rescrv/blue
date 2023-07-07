@@ -9,6 +9,7 @@ enum Comparator {
 }
 
 impl Comparator {
+    #[allow(clippy::borrowed_box)]
     fn is_less(&self, lhs: &Box<dyn Cursor>, rhs: &Box<dyn Cursor>) -> bool {
         let lhs_key = lhs.key();
         let rhs_key = rhs.key();
@@ -79,11 +80,10 @@ impl MergingCursor {
             //      that a value lesser than it will also be lesser than its descendants.
             let child = if child_lhs >= self.cursors.len() {
                 break;
-            } else if child_rhs >= self.cursors.len() {
-                child_lhs
-            } else if self
-                .comparator
-                .is_less(&self.cursors[child_lhs], &self.cursors[child_rhs])
+            } else if child_rhs >= self.cursors.len()
+                || self
+                    .comparator
+                    .is_less(&self.cursors[child_lhs], &self.cursors[child_rhs])
             {
                 child_lhs
             } else {

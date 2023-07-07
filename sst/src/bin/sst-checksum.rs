@@ -2,17 +2,17 @@ use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
 use sst::setsum::Setsum;
-use sst::{Cursor, SST};
+use sst::{Cursor, Sst};
 
 fn fast_setsum(sst: &str) -> String {
-    let sst = SST::new(sst).expect("open SST");
-    sst.setsum()
+    let sst = Sst::new(sst).expect("open Sst");
+    sst.setsum().hexdigest()
 }
 
 fn slow_setsum(sst: &str) -> String {
-    let sst = SST::new(sst).expect("open SST");
+    let sst = Sst::new(sst).expect("open Sst");
     let mut cursor = sst.cursor();
-    cursor.seek_to_first().expect("seek SST");
+    cursor.seek_to_first().expect("seek Sst");
     let mut setsum = Setsum::default();
     loop {
         cursor.next().expect("next");

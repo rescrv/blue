@@ -42,6 +42,8 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
             "&[u8]" => { quote! { ::tuple_key::DataType::Bytes }},
             "[u8; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
             "[u8; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
+            "[u8 ; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
+            "[u8 ; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
             "String" => { quote! { ::tuple_key::DataType::String }},
             "()" => { quote! { ::tuple_key::DataType::Message }},
             _ => {

@@ -8,7 +8,7 @@ use buffertk::Buffer;
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Cursor, SSTBuilder, SSTCursor, SST};
+use sst::{Builder, Cursor, SstBuilder, SstCursor, Sst};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 
@@ -151,19 +151,19 @@ impl<'a> TableBuilderTrait<'a> for BlockBuilder {
     type Table = Block;
 }
 
-///////////////////////////////////////////// SST impls ////////////////////////////////////////////
+///////////////////////////////////////////// Sst impls ////////////////////////////////////////////
 
-impl<'a> TableTrait<'a> for SST {
-    type Builder = SSTBuilder;
-    type Cursor = SSTCursor;
+impl<'a> TableTrait<'a> for Sst {
+    type Builder = SstBuilder;
+    type Cursor = SstCursor;
 
     fn cursor(&self) -> Self::Cursor {
-        SST::cursor(self)
+        Sst::cursor(self)
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for SSTBuilder {
-    type Table = SST;
+impl<'a> TableBuilderTrait<'a> for SstBuilder {
+    type Table = Sst;
 }
 
 /////////////////////////////////////////// FuzzerConfig ///////////////////////////////////////////

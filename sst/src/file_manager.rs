@@ -38,7 +38,7 @@ impl FileHandle {
         let fd = check_fd(self.file.as_raw_fd())?;
         let state = self.state.lock().unwrap();
         if let Some((path, _)) = &state.files[fd] {
-            return Ok(path.clone());
+            Ok(path.clone())
         } else {
             LOGIC_ERROR.click();
             let err = Error::LogicError {
@@ -46,7 +46,7 @@ impl FileHandle {
                 context: "FileManager has broken names->files pointer".to_string(),
             }
             .with_variable("fd", self.file.as_raw_fd());
-            return Err(err);
+            Err(err)
         }
     }
 
@@ -233,9 +233,9 @@ fn open(path: PathBuf) -> Result<File, Error> {
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
-            let err = Error::IOError {
+            let err = Error::SystemError {
                 core: ErrorCore::default(),
-                what: e
+                what: format!("{:?}", e),
             }
             .with_variable("path", path.to_string_lossy());
             return Err(err);

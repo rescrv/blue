@@ -1,0 +1,26 @@
+[package]
+name = "lsmgraph"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "lsmgraph provides a log-structured-merge-graph"
+license = "Apache-2.0"
+
+[dependencies]
+getopts = "0.2"
+
+arrrg = { path = "../arrrg", version = "0.1" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
+biometrics = { path = "../biometrics", version = "0.1" }
+buffertk = { path = "../buffertk", version = "0.2" }
+one_two_eight = { path = "../one_two_eight", version = "0.1" }
+prototk = { path = "../prototk", version = "0.2" }
+prototk_derive = { path = "../prototk_derive", version = "0.2" }
+setsum = { path = "../setsum", version = "0.2" }
+sst = { path = "../sst", version = "0.1" }
+tatl = { path = "../tatl", version = "0.1" }
+tuple_key = { path = "../tuple_key", version = "0.1" }
+tuple_key_derive = { path = "../tuple_key_derive", version = "0.1" }
+utilz = { path = "../utilz", version = "0.1" }
+zerror = { path = "../zerror", version = "0.1" }
+zerror_core = { path = "../zerror_core", version = "0.2" }

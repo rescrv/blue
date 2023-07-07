@@ -1,7 +1,7 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use sst::{Cursor, SST};
+use sst::{Cursor, Sst};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct SstDumpCommandLine {}
@@ -10,7 +10,7 @@ fn main() {
     let (_, args) = SstDumpCommandLine::from_command_line("Usage: sst-dump [OPTIONS] [SSTs]");
     // parse
     for sst in args {
-        let sst = SST::new(sst).expect("could not open sst");
+        let sst = Sst::new(sst).expect("could not open sst");
         let mut cursor = sst.cursor();
         cursor.seek_to_first().expect("could not seek to first");
         cursor.next().expect("cursor::next");

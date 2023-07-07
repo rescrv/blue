@@ -16,9 +16,11 @@ use super::{
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
 pub struct BlockBuilderOptions {
+    #[arrrg(optional, "Store a complete key every this many bytes.", "BYTES")]
     bytes_restart_interval: u64,
+    #[arrrg(optional, "Store a complete key every this many keys.", "KEYS")]
     key_value_pairs_restart_interval: u64,
 }
 
@@ -157,7 +159,7 @@ impl Block {
         // Footer size.
         // |tag 10|v64 of num bytes|packed num_restarts u32s|tag 11|fixed32 capstone|
         let capstone: usize = 1/*tag 11*/ + 4/*fixed32 capstone*/;
-        let footer_body: usize = num_restarts as usize * 4;
+        let footer_body: usize = num_restarts * 4;
         let footer_head: usize = 1/*tag 10*/ + v64::from(footer_body).pack_sz();
         let restarts_idx = bytes.len() - capstone - footer_body;
         let restarts_boundary = restarts_idx - footer_head;
@@ -180,7 +182,7 @@ impl Block {
     }
 
     fn restart_point(&self, restart_idx: usize) -> usize {
-        assert!(restart_idx < self.num_restarts as usize);
+        assert!(restart_idx < self.num_restarts);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
         let bytes = self.bytes.as_bytes();
         for i in 0..4 {
@@ -276,7 +278,7 @@ impl BlockBuilder {
     }
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
-    fn append<'a>(&mut self, be: BlockEntry<'a>) -> Result<(), Error> {
+    fn append(&mut self, be: BlockEntry<'_>) -> Result<(), Error> {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
@@ -518,7 +520,7 @@ impl BlockCursor {
                 key,
                 timestamp,
             } => Ok(Some(KeyRef {
-                key: key,
+                key,
                 timestamp: *timestamp,
             })),
         }
@@ -705,7 +707,7 @@ impl Cursor for BlockCursor {
         };
 
         // Boundary condition
-        if target_next_offset <= 0 {
+        if target_next_offset == 0 {
             self.position = CursorPosition::First;
             return Ok(());
         }
@@ -810,7 +812,7 @@ impl Cursor for BlockCursor {
                 key,
                 timestamp,
             } => Some(KeyRef {
-                key: &key,
+                key,
                 timestamp: *timestamp,
             }),
         }
@@ -834,7 +836,7 @@ impl Cursor for BlockCursor {
                     .unpack()
                     .expect("already parsed this block with extract_key; corruption");
                 Some(KeyValueRef {
-                    key: &key,
+                    key,
                     timestamp: *timestamp,
                     value: be.value(),
                 })
