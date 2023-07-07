@@ -1,0 +1,2 @@
+- Note that the gremlins are resistant to stdout/stderr messages when used
+  with CHECKSUMS.zsh

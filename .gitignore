@@ -4,3 +4,6 @@
 # specific files
 /Cargo.lock
 /target/
+ca.pem
+home.key
+home.crt
