@@ -89,12 +89,12 @@ struct CompilerMessage {
 
 fn handle_output(output: Output) {
     let line = std::str::from_utf8(&output.stdout).expect("could not parse output of \"cargo check\"");
-    for line in line.split_terminator("\n") {
+    for line in line.split_terminator('\n') {
         if line.starts_with("test") {
             println!("{}", line);
             continue;
         }
-        if line.is_empty() || !line.starts_with("{") { 
+        if line.is_empty() || !line.starts_with('{') {
             continue;
         }
         let reason = reason(line);

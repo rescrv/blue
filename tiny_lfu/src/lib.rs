@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
+use std::iter::zip;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -137,11 +138,11 @@ impl TinyLFU {
     }
 
     fn hash<'a, T: std::hash::Hash>(&self, t: &T, hashes: &'a mut [u64; MAX_KEYS]) -> &'a [u64] {
-        for i in 0..self.keys.len() {
+        for (k, h) in zip(self.keys.iter(), hashes.iter_mut()) {
             let mut hasher = DefaultHasher::new();
-            hasher.write_u64(self.keys[i]);
+            hasher.write_u64(*k);
             t.hash(&mut hasher);
-            hashes[i] = hasher.finish();
+            *h = hasher.finish();
         }
         &hashes[0..self.keys.len()]
     }
