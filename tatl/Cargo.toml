@@ -9,6 +9,6 @@ license = "Apache-2.0"
 [dependencies]
 rand = "0.7"
 
-biometrics = { path = "../biometrics", version = "0.1" }
+biometrics = { path = "../biometrics", version = "0.2" }
 one_two_eight = { path = "../one_two_eight", version = "0.1" }
 prototk = { path = "../prototk", version = "0.2" }

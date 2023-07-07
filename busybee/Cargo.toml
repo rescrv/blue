@@ -10,9 +10,9 @@ license = "Apache-2.0"
 boring = "2.1.0"
 clap = "2.33"
 
-biometrics = { path = "../biometrics", version = "0.1.1" }
+biometrics = { path = "../biometrics", version = "0.2" }
 buffertk = { path = "../buffertk", version = "0.2" }
-guacamole = { path = "../guacamole", version = "0.2.0" }
+guacamole = { path = "../guacamole", version = "0.2" }
 indicio = { path = "../indicio" }
 one_two_eight = { path = "../one_two_eight" }
 prototk = { path = "../prototk", version = "0.2" }
@@ -22,5 +22,5 @@ rpc_pb = { path = "../rpc_pb" }
 sync42 = { path = "../sync42" }
 tatl = { path = "../tatl" }
 utilz = { path = "../utilz", version = "0.1" }
-zerror = { path = "../zerror", version = "0.1.0" }
+zerror = { path = "../zerror", version = "0.1" }
 zerror_core = { path = "../zerror_core", version = "0.2" }

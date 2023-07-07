@@ -84,10 +84,6 @@ where
         });
         // cleanup and make the pieces we care about immutable
         let table = table;
-        drop(ctx);
-        drop(ipsi);
-        drop(wt);
-        drop(start);
         // now form the rest of what we need to be able to lookup in the wt
         // starting with a bit vector tracking non-empty cells
         let mut cells: Vec<(usize, (usize, usize))> = Vec::new();
