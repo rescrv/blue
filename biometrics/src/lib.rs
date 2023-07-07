@@ -1,6 +1,6 @@
-//! biometrics is a library for measuring the vitals of processes using intrusive sensors.
-//! A sensor is an object that maintains a view of the system.  Threads active in the system
-//! cooperate to update the view, and background threads output the view to elsewhere for analysis.
+//! Biometrics provide the vitals of a process in the form of counters, gauges, moments, and
+//! T-digests.  Collectively, these sensors paint a picture of what's happening within a process in
+//! timeseries form.
 
 use std::collections::HashSet;
 use std::fs::File;

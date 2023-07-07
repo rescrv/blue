@@ -3,7 +3,7 @@ name = "biometrics"
 version = "0.2.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-description = "Biometrics provide the vitals of a process in the form of counters, gauges, and T-Digests."
+description = "Biometrics provide the vitals of a process in the form of counters, gauges, moments, and T-digests."
 license = "Apache-2.0"
 
 [dependencies]
