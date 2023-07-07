@@ -11,7 +11,7 @@ boring = "2.1.0"
 clap = "2.33"
 
 biometrics = { path = "../biometrics", version = "0.2" }
-buffertk = { path = "../buffertk", version = "0.2" }
+buffertk = { path = "../buffertk", version = "0.3" }
 guacamole = { path = "../guacamole", version = "0.2" }
 indicio = { path = "../indicio" }
 one_two_eight = { path = "../one_two_eight" }

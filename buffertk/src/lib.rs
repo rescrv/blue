@@ -1,6 +1,7 @@
+//! Buffertk provides tooling for serializing and deserializing data.
+
 pub mod buffer;
 pub mod varint;
-pub mod zero_copy;
 
 pub use buffer::Buffer;
 pub use varint::v64;
