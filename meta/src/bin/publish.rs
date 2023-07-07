@@ -1,7 +1,18 @@
-use std::fs::read_to_string;
+use std::fs::{read_dir, read_to_string};
 use std::path::PathBuf;
 
 use toml::Table;
+
+const EXCLUDE_MEMBERS: &[&str] = &[
+    "meta",
+];
+
+const EXCLUDE_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    // TODO(rescrv): Stuff to integrate eventually.
+    "statslicer",
+];
 
 fn workspace_members() -> Vec<String> {
     let workspace_text = read_to_string("../Cargo.toml").expect("reading workspace toml");
@@ -12,7 +23,20 @@ fn workspace_members() -> Vec<String> {
     let mut members = Vec::new();
     for member in workspace_table["members"].as_array().expect("parsing members array") {
         let member = member.as_str().expect("parsing member");
-        members.push(member.to_string());
+        if !EXCLUDE_MEMBERS.iter().any(|x| x == &member) {
+            members.push(member.to_string());
+        }
+    }
+    for path in read_dir("..").unwrap() {
+        let path = path.unwrap();
+        let name = path.file_name();
+        if !members.iter().any(|x| x == &name.to_string_lossy())
+        && path.path().is_dir()
+        && !EXCLUDE_MEMBERS.iter().any(|x| x == &name.to_string_lossy())
+        && !EXCLUDE_DIRS.iter().any(|x| x == &name.to_string_lossy())
+        {
+            panic!("\"{}\" not in manifest and not excluded", path.file_name().to_string_lossy());
+        }
     }
     members
 }
@@ -42,7 +66,8 @@ fn graph() -> (Vec<String>, Vec<(String, String)>) {
     (vertices, edges)
 }
 
-fn main() {
+fn candidate_order() -> Vec<String> {
+    let mut in_sequence = Vec::new();
     let (mut vertices, mut edges) = graph();
     while !vertices.is_empty() {
         let mut candidates = Vec::new();
@@ -51,13 +76,20 @@ fn main() {
             if num_inbound_edges == 0 {
                 candidates.push(vertex);
             }
-            println!("FINDME {}:{} {} => {:?}", file!(), line!(), vertex, num_inbound_edges);
         }
         candidates.sort();
-        assert!(!candidates.is_empty());
         let candidate = candidates[0].to_owned();
-        println!("{}", candidate);
         vertices.retain(|v| v != &candidate);
-        edges.retain(|(src, dst)| src != &candidate);
+        edges.retain(|(src, _)| src != &candidate);
+        in_sequence.push(candidate);
+    }
+    in_sequence
+}
+
+fn main() {
+    let candidates = candidate_order();
+    println!("publication order:");
+    for candidate in candidates.iter() {
+        println!("{}", candidate);
     }
 }
