@@ -1,4 +1,4 @@
-//! Randomness tooling.  [Guacamole] provides a linear-seekable pseudo-random number generator.
+//! [Guacamole] provides a linearly-seekable random number generator.
 //! [Zipf] provides a zipf-distribution sampler.
 
 extern crate rand;
@@ -154,10 +154,11 @@ impl MashOutput {
     }
 }
 
-/// Guacamole is a stream of random bytes.  It's linearly-seekable, which is a new way of saying
-/// that that seed(i) and seed(i+1) are adjacent in the input and output.  This allows workloads
-/// that are partitionable or discrete with many members to predictably manipulate the output by
-/// the input.
+/// Guacamole is a linearly-seekable random number generator.  The linearly-seekable property comes
+/// from the fact that the seed for the random number generator preserves spacing in the input.
+/// Each one unit increase in the seed corresponds to a 64B movement in the output.  This allows
+/// workloads that are partitionable or discrete with many members to predictably manipulate the
+/// output by the input.
 #[derive(Clone)]
 pub struct Guacamole {
     // we treat this like the nonce in the stream cipher
