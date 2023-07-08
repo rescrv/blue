@@ -32,7 +32,7 @@ const SETSUM_PRIMES: [u32; SETSUM_COLUMNS] = [
 ];
 
 /// Adds together two internal representations and constructs their output.  The algorithm for
-/// column i is (A[i] + B[i]) % P[i], where P[i] is the primes array.
+/// column i is `(A[i] + B[i]) % P[i]`, where `P` is the primes array.
 #[inline(always)]
 pub fn add_state(lhs: [u32; SETSUM_COLUMNS], rhs: [u32; SETSUM_COLUMNS]) -> [u32; SETSUM_COLUMNS] {
     let mut ret = <[u32; SETSUM_COLUMNS]>::default();

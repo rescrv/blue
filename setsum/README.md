@@ -81,3 +81,21 @@ There's a trade-off here as well:  An LSM tree protected by setsums is not able
 to do more complicated compaction logic that merges values together.  While it
 could track that the files match their checksums, the compaction would be unable
 to balance the input and output checksums.
+
+Status
+======
+
+Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
+
+Scope
+=====
+
+This library provides the Abelian group and inverse operators and a sugar over SHA256.
+
+Warts
+=====
+
+Documentation
+=============
+
+The latest documentation is always available at [docs.rs](https://docs.rs/setsum/latest/setsum/).
