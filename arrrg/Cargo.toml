@@ -1,6 +1,6 @@
 [package]
 name = "arrrg"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "arrrg provides a wrapper around the getops library for stable commandline parsing."
