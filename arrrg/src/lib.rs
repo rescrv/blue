@@ -26,6 +26,10 @@
 //! `--some-prefix-b`.  In general the rule is to derive the flag names from the identifiers of
 //! struct members.  When nesting the name will be the concatenation of the prefix from the parent
 //! struct and the member identifier from the child struct.  Unlimited nesting is possible.
+//!
+//! This library takes an opinionated stance on the command line.  There should be exactly one
+//! canonical argument order on the command-line and all applications must be built with this in
+//! mind.  Users of the library can call [from_command_line_relaxed] to disable this checking.
 
 use std::str::FromStr;
 
