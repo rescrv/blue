@@ -1,9 +1,9 @@
 [package]
 name = "one_two_eight"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-description = "one_two_eight provides 128-bit identifiers."
+description = "one_two_eight provides typed 128-bit identifiers."
 license = "Apache-2.0"
 
 [dependencies]

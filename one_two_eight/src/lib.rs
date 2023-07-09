@@ -1,3 +1,6 @@
+//! one_two_eight provides typed 128-bit identifiers.  Use [generate_id] to create a type, and
+//! possibly [generate_id_protok] to implement [prototk::Message].
+
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Read;
