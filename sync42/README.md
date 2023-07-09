@@ -19,6 +19,7 @@ Warts
 -----
 
 - The library is currently missing some critical data structures.
+- The documentation needs work.
 
 Documentation
 -------------
