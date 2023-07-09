@@ -17,7 +17,7 @@ one_two_eight = { path = "../one_two_eight", version = "0.1" }
 prototk = { path = "../prototk", version = "0.2" }
 prototk_derive = { path = "../prototk_derive", version = "0.2" }
 setsum = { path = "../setsum", version = "0.3" }
-sst = { path = "../sst", version = "0.1" }
+sst = { path = "../sst", version = "0.2" }
 tatl = { path = "../tatl", version = "0.2" }
 tuple_key = { path = "../tuple_key", version = "0.1" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.1" }
