@@ -1,3 +1,5 @@
+//! biometrics_pb provides protocol buffers corresponding to biometric readings.
+
 use prototk_derive::Message;
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////

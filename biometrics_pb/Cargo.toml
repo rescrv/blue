@@ -1,9 +1,9 @@
 [package]
 name = "biometrics_pb"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-description = "biometrics_pb provides protobuf definitions for biometrics sensors"
+description = "biometrics_pb provides protocol buffers corresponding to biometric readings."
 license = "Apache-2.0"
 
 [dependencies]
