@@ -1,3 +1,11 @@
+//! split_channel provides a stream-of-messages abstraction with split send/recv channels.
+//! Most calls that establish a channel return a tuple of ([RecvChannel], [SendChannel]).
+//!
+//! The key idea here is that an `&mut RecvChannel` and `&mut SendChannel` exist for the same
+//! `SslStream<TcpStream>`, allowing parallel sending and processing of messages.  The general
+//! pattern is to lock the send channel, send data, and then use [sync42::wait_list::WaitList] to
+//! synchronize receivers.
+
 use std::net::{TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex};
