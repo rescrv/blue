@@ -1,9 +1,9 @@
 [package]
-name = "rivulet"
+name = "split_channel"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-description = "Rivulet provides a stream-of-messages abstraction."
+description = "split_channel provides a stream-of-messages abstraction with split send/recv channels."
 license = "Apache-2.0"
 
 [dependencies]

@@ -22,29 +22,29 @@ pub use polling::*;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static CONNECT: Counter = Counter::new("rivulet.connect");
-static FROM_STREAM: Counter = Counter::new("rivulet.from_stream");
+static CONNECT: Counter = Counter::new("split_channel.connect");
+static FROM_STREAM: Counter = Counter::new("split_channel.from_stream");
 
-static MESSAGES_SENT: Counter = Counter::new("rivulet.messages_sent");
-static MESSAGES_RECV: Counter = Counter::new("rivulet.messages_recv");
+static MESSAGES_SENT: Counter = Counter::new("split_channel.messages_sent");
+static MESSAGES_RECV: Counter = Counter::new("split_channel.messages_recv");
 
-static POLL_ERRORS: Counter = Counter::new("rivulet.poll.errors");
-static RECV_ERRORS: Counter = Counter::new("rivulet.recv.errors");
-static SEND_ERRORS: Counter = Counter::new("rivulet.send.errors");
+static POLL_ERRORS: Counter = Counter::new("split_channel.poll.errors");
+static RECV_ERRORS: Counter = Counter::new("split_channel.recv.errors");
+static SEND_ERRORS: Counter = Counter::new("split_channel.send.errors");
 
-static SEND_POLL_LATENCY: Moments = Moments::new("rivulet.send.poll_latency");
-static SEND_CALL_LATENCY: Moments = Moments::new("rivulet.send.call_latency");
-static SEND_ERROR_LATENCY: Moments = Moments::new("rivulet.send.error_latency");
-static RECV_POLL_LATENCY: Moments = Moments::new("rivulet.recv.poll_latency");
-static RECV_CALL_LATENCY: Moments = Moments::new("rivulet.recv.call_latency");
-static RECV_ERROR_LATENCY: Moments = Moments::new("rivulet.recv.error_latency");
+static SEND_POLL_LATENCY: Moments = Moments::new("split_channel.send.poll_latency");
+static SEND_CALL_LATENCY: Moments = Moments::new("split_channel.send.call_latency");
+static SEND_ERROR_LATENCY: Moments = Moments::new("split_channel.send.error_latency");
+static RECV_POLL_LATENCY: Moments = Moments::new("split_channel.recv.poll_latency");
+static RECV_CALL_LATENCY: Moments = Moments::new("split_channel.recv.call_latency");
+static RECV_ERROR_LATENCY: Moments = Moments::new("split_channel.recv.error_latency");
 
-static SEND_WANT_READ: Counter = Counter::new("rivulet.send.want_read");
-static SEND_WANT_WRITE: Counter = Counter::new("rivulet.send.want_write");
-static RECV_WANT_READ: Counter = Counter::new("rivulet.recv.want_read");
-static RECV_WANT_WRITE: Counter = Counter::new("rivulet.recv.want_write");
+static SEND_WANT_READ: Counter = Counter::new("split_channel.send.want_read");
+static SEND_WANT_WRITE: Counter = Counter::new("split_channel.send.want_write");
+static RECV_WANT_READ: Counter = Counter::new("split_channel.recv.want_read");
+static RECV_WANT_WRITE: Counter = Counter::new("split_channel.recv.want_write");
 
-static SEND_SHRINK_BUF: Counter = Counter::new("rivulet.send.shrink_buf");
+static SEND_SHRINK_BUF: Counter = Counter::new("split_channel.send.shrink_buf");
 
 pub fn register_biometrics(collector: &mut Collector) {
     if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
@@ -383,10 +383,10 @@ impl Iterator for Listener {
     }
 }
 
-//////////////////////////////////////// RivuletCommandLine ////////////////////////////////////////
+////////////////////////////////////// SplitChannelCommandLine /////////////////////////////////////
 
 #[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
-pub struct RivuletCommandLine {
+pub struct SplitChannelCommandLine {
     #[arrrg(required, "Hostname to use.", "HOST")]
     host: String,
     #[arrrg(required, "Port to use.", "PORT")]
@@ -401,7 +401,7 @@ pub struct RivuletCommandLine {
     verify_none: bool,
 }
 
-impl RivuletCommandLine {
+impl SplitChannelCommandLine {
     pub fn connect(&self) -> Result<(RecvChannel, SendChannel), Error> {
         CONNECT.click();
         let mut builder =

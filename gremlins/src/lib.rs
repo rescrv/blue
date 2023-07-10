@@ -17,7 +17,7 @@ use guacamole::Guacamole;
 
 use one_two_eight::{generate_id, generate_id_prototk};
 
-use rivulet::{Listener, RecvChannel, RivuletCommandLine, SendChannel};
+use split_channel::{Listener, RecvChannel, SplitChannelCommandLine, SendChannel};
 
 use texttale::{story, StoryElement, TextTale};
 
@@ -112,7 +112,7 @@ impl DisplayAnswer {
 #[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
 pub struct ControlCenterOptions {
     #[arrrg(nested)]
-    listener: RivuletCommandLine,
+    listener: SplitChannelCommandLine,
 }
 
 ////////////////////////////////////////////// Process /////////////////////////////////////////////
@@ -419,14 +419,14 @@ pub struct HarnessOptions {
     #[arrrg(required, "ProcessID of the process in human-readable pid:0ced594f-b619-4be6-1c8d-8ff1d5963525 form", "PID")]
     process_id: ProcessID,
     #[arrrg(nested)]
-    control: RivuletCommandLine,
+    control: SplitChannelCommandLine,
 }
 
 impl Default for HarnessOptions {
     fn default() -> Self {
         Self {
             process_id: ProcessID::BOTTOM,
-            control: RivuletCommandLine::default(),
+            control: SplitChannelCommandLine::default(),
         }
     }
 }
@@ -511,7 +511,7 @@ impl Harness {
         register_biometrics(&mut biometrics);
         indicio::register_biometrics(&mut biometrics);
         busybee::register_biometrics(&mut biometrics);
-        rivulet::register_biometrics(&mut biometrics);
+        split_channel::register_biometrics(&mut biometrics);
         let control_recv = Mutex::new(control_recv);
         let control_send = Mutex::new(control_send);
         Ok(Arc::new(Self {

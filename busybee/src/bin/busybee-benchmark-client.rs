@@ -11,7 +11,7 @@ fn main() {
     std::thread::spawn(|| {
         let mut collector = Collector::new();
         busybee::register_biometrics(&mut collector);
-        rivulet::register_biometrics(&mut collector);
+        split_channel::register_biometrics(&mut collector);
         let fout = File::create("/dev/stdout").unwrap();
         let mut emit = PlainTextEmitter::new(fout);
         loop {

@@ -50,19 +50,19 @@ pub fn from_epoll_constants(x: i32) -> u32 {
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static FD_TRUNCATED: Counter = Counter::new("rivulet.fd_truncated");
-// TODO(rescrv): static FD_TRUNCATED_MONITOR: Stationary = Stationary::new("rivulet.fd_truncated", &FD_TRUNCATED);
+static FD_TRUNCATED: Counter = Counter::new("split_channel.fd_truncated");
+// TODO(rescrv): static FD_TRUNCATED_MONITOR: Stationary = Stationary::new("split_channel.fd_truncated", &FD_TRUNCATED);
 
-static NEW_THREAD: Counter = Counter::new("rivulet.new_thread");
+static NEW_THREAD: Counter = Counter::new("split_channel.new_thread");
 
-static CONSERVE_POLLIN: Counter = Counter::new("rivulet.conserve_pollin");
-static CONSERVE_POLLOUT: Counter = Counter::new("rivulet.conserve_pollout");
-static RETURN_CONSERVED_POLLIN: Counter = Counter::new("rivulet.return_pollin");
-static RETURN_CONSERVED_POLLOUT: Counter = Counter::new("rivulet.return_pollout");
+static CONSERVE_POLLIN: Counter = Counter::new("split_channel.conserve_pollin");
+static CONSERVE_POLLOUT: Counter = Counter::new("split_channel.conserve_pollout");
+static RETURN_CONSERVED_POLLIN: Counter = Counter::new("split_channel.return_pollin");
+static RETURN_CONSERVED_POLLOUT: Counter = Counter::new("split_channel.return_pollout");
 
-static POLL_ERROR: Counter = Counter::new("rivulet.poll.error");
-static POLL_TIMEOUT: Counter = Counter::new("rivulet.poll.timeout");
-static POLL_RETURN: Counter = Counter::new("rivulet.poll.return");
+static POLL_ERROR: Counter = Counter::new("split_channel.poll.error");
+static POLL_TIMEOUT: Counter = Counter::new("split_channel.poll.timeout");
+static POLL_RETURN: Counter = Counter::new("split_channel.poll.return");
 
 pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&FD_TRUNCATED);

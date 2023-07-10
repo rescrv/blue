@@ -4,12 +4,12 @@ use arrrg::CommandLine;
 
 use biometrics::{Collector, PlainTextEmitter};
 
-use rivulet::{RivuletCommandLine, RecvChannel, SendChannel};
+use split_channel::{SplitChannelCommandLine, RecvChannel, SendChannel};
 
 fn main() {
     std::thread::spawn(|| {
         let mut collector = Collector::new();
-        rivulet::register_biometrics(&mut collector);
+        split_channel::register_biometrics(&mut collector);
         let fout = File::create("/dev/stdout").unwrap();
         let mut emit = PlainTextEmitter::new(fout);
         loop {
@@ -20,7 +20,7 @@ fn main() {
         }
     });
 
-    let (options, free) = RivuletCommandLine::from_command_line_relaxed("Usage: rivulet-benchmark-server [OPTIONS]");
+    let (options, free) = SplitChannelCommandLine::from_command_line_relaxed("Usage: split_channel-benchmark-server [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }

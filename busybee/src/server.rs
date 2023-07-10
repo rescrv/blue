@@ -16,7 +16,7 @@ use zerror_core::ErrorCore;
 
 use rpc_pb::{Context, Error, Request, Response, Status};
 
-use rivulet::{RecvChannel, SendChannel, ThreadState, Poll, ProcessEvents, POLLIN, POLLOUT, POLLERR, POLLHUP};
+use split_channel::{RecvChannel, SendChannel, ThreadState, Poll, ProcessEvents, POLLIN, POLLOUT, POLLERR, POLLHUP};
 
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
@@ -75,7 +75,7 @@ struct Channel {
 impl Channel {
     fn new(stream: SslStream<TcpStream>) -> Result<Channel, Error> {
         CHANNEL_NEW.click();
-        let (r, s) = rivulet::from_stream(stream)?;
+        let (r, s) = split_channel::from_stream(stream)?;
         Ok(Channel::from_parts(r, s))
     }
 

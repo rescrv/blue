@@ -13,7 +13,7 @@ use sync42::wait_list::WaitList;
 
 use boring::ssl::SslStream;
 
-use rivulet::{RecvChannel, SendChannel};
+use split_channel::{RecvChannel, SendChannel};
 
 use super::Resolver;
 
@@ -43,7 +43,7 @@ struct Channel {
 
 impl Channel {
     fn new(stream: SslStream<TcpStream>) -> Result<Channel, Error> {
-        let (r, s) = rivulet::from_stream(stream)?;
+        let (r, s) = split_channel::from_stream(stream)?;
         Ok(Channel::from_parts(r, s))
     }
 

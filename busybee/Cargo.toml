@@ -17,8 +17,8 @@ indicio = { path = "../indicio" }
 one_two_eight = { path = "../one_two_eight" }
 prototk = { path = "../prototk", version = "0.2" }
 prototk_derive = { path = "../prototk_derive", version = "0.2" }
-rivulet = { path = "../rivulet" }
 rpc_pb = { path = "../rpc_pb" }
+split_channel = { path = "../split_channel", version = "0.1" }
 sync42 = { path = "../sync42" }
 tatl = { path = "../tatl", version = "0.2" }
 utilz = { path = "../utilz", version = "0.1" }
