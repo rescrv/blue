@@ -481,10 +481,10 @@ struct Vertex {
     bytes_within_color: u64,
 }
 
-//////////////////////////////////////////// Graph::new ////////////////////////////////////////////
+///////////////////////////////////// GraphRepresentation::new /////////////////////////////////////
 
 #[derive(Debug)]
-pub struct Graph<'a> {
+pub struct GraphRepresentation<'a> {
     options: LsmOptions,
     metadata: &'a Vec<SstMetadata>,
     vertices: Vec<Vertex>,
@@ -492,7 +492,7 @@ pub struct Graph<'a> {
     color_adj_list: BTreeSet<(usize, usize)>,
 }
 
-impl<'a> Graph<'a> {
+impl<'a> GraphRepresentation<'a> {
     pub fn new(
         options: LsmOptions,
         metadata: &'a Vec<SstMetadata>,
@@ -694,9 +694,9 @@ fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
     }
 }
 
-//////////////////////////////////////// Graph::compactions ////////////////////////////////////////
+///////////////////////////////// GraphRepresentation::compactions /////////////////////////////////
 
-impl<'a> Graph<'a> {
+impl<'a> GraphRepresentation<'a> {
     pub fn compactions(&self) -> Vec<Compaction> {
         let mut max_level = 0;
         for idx in 0..self.vertices.len() {
@@ -797,7 +797,7 @@ pub struct Compaction {
 
 impl Compaction {
     pub fn stats(&self) -> CompactionStats {
-        let graph = Graph::new(self.options.clone(), &self.inputs).unwrap();
+        let graph = GraphRepresentation::new(self.options.clone(), &self.inputs).unwrap();
         let mut stats = CompactionStats::default();
         stats.num_inputs += self.inputs.len();
         if stats.num_inputs > 0 {
@@ -958,7 +958,7 @@ impl DB {
 
     pub fn compactions(&self) -> Result<Vec<Compaction>, Error> {
         let state = self.get_state();
-        let graph = Graph::new(self.options.clone(), &state.data)?;
+        let graph = GraphRepresentation::new(self.options.clone(), &state.data)?;
         let mut compactions = graph.compactions();
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
