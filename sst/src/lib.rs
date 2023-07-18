@@ -257,19 +257,18 @@ impl From<std::io::Error> for Error {
     }
 }
 
-////////////////////////////////////////////// FromIO //////////////////////////////////////////////
+//////////////////////////////////////////// MapIoError ////////////////////////////////////////////
 
-pub trait FromIO {
+pub trait MapIoError {
     type Result;
 
-    #[allow(clippy::wrong_self_convention)]
-    fn from_io(self) -> Self::Result;
+    fn map_io_err(self) -> Self::Result;
 }
 
-impl<T> FromIO for Result<T, std::io::Error> {
+impl<T> MapIoError for Result<T, std::io::Error> {
     type Result = Result<T, Error>;
 
-    fn from_io(self) -> Self::Result {
+    fn map_io_err(self) -> Self::Result {
         match self {
             Ok(x) => Ok(x),
             Err(e) => Err(Error::from(e)),
@@ -889,7 +888,7 @@ impl SstBuilder {
             .create_new(true)
             .write(true)
             .open(path.as_ref())
-            .from_io()
+            .map_io_err()
             .with_variable("open", path.as_ref().to_string_lossy())?;
         Ok(SstBuilder {
             options,
@@ -963,7 +962,7 @@ impl SstBuilder {
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        self.bytes_written += pa.stream(&mut self.output).from_io()?;
+        self.bytes_written += pa.stream(&mut self.output).map_io_err()?;
         // Prepare the block metadata.
         let limit = self.bytes_written as u64;
         let block_metadata = BlockMetadata {
@@ -1052,7 +1051,7 @@ impl Builder for SstBuilder {
         let entry = SstEntry::PlainBlock(bytes);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
+        builder.bytes_written += pa.stream(&mut builder.output).map_io_err()?;
         let index_block_limit = builder.bytes_written;
         // Update timestamps if nothing written
         if builder.smallest_timestamp > builder.biggest_timestamp {
@@ -1072,9 +1071,9 @@ impl Builder for SstBuilder {
             biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output).from_io()?;
+        builder.bytes_written += pa.stream(&mut builder.output).map_io_err()?;
         // fsync
-        builder.output.sync_all().from_io()?;
+        builder.output.sync_all().map_io_err()?;
         Sst::new(builder.path)
     }
 }
