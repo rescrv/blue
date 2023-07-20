@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
 use buffertk::Buffer;
@@ -440,4 +441,21 @@ macro_rules! server_methods {
             }
         }
     };
+}
+
+////////////////////////////////////////// ServerRegistry //////////////////////////////////////////
+
+pub struct ServerRegistry {
+    registry: HashMap<&'static str, Box<dyn Server>>,
+}
+
+impl ServerRegistry {
+    pub fn register(&mut self, name: &'static str, server: Box<dyn Server>) {
+        assert!(!self.registry.contains_key(name));
+        self.registry.insert(name, server);
+    }
+
+    pub fn get_server(&self, name: &str) -> Option<&dyn Server> {
+        self.registry.get(name).map(|x| x.as_ref())
+    }
 }
