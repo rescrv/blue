@@ -14,7 +14,7 @@ use common::Error;
 //////////////////////////////////////////// The Service ///////////////////////////////////////////
 
 #[derive(Debug, Message)]
-struct CacheLoad<'a> {
+pub struct CacheLoad<'a> {
     #[prototk(1, bytes)]
     key: &'a [u8],
 }
@@ -28,13 +28,13 @@ impl<'a> Default for CacheLoad<'a> {
 }
 
 #[derive(Debug, Default, Message)]
-struct CacheResponse {
+pub struct CacheResponse {
     #[prototk(2, bytes)]
     val: Option<Buffer>,
 }
 
 #[derive(Debug, Message)]
-struct CacheStore<'a> {
+pub struct CacheStore<'a> {
     #[prototk(1, bytes)]
     key: &'a [u8],
     #[prototk(2, bytes)]
@@ -51,7 +51,7 @@ impl<'a> Default for CacheStore<'a> {
 }
 
 #[derive(Debug, Default, Message)]
-struct CacheEmpty {
+pub struct CacheEmpty {
 }
 
 service! {

@@ -221,7 +221,7 @@ impl Default for PValue {
 
 /// Phase1A messages rally support for a new ballot.  They are answered with Phase1B messages.
 #[derive(Clone, Debug, Default, Message)]
-struct Phase1A {
+pub struct Phase1A {
     #[prototk(1, message)]
     ballot: Ballot,
     #[prototk(2, uint64)]
@@ -234,7 +234,7 @@ struct Phase1A {
 
 /// Phase1B messages retrun whether an acceptor supports a ballot.
 #[derive(Clone, Debug, Default, Message)]
-struct Phase1B {
+pub struct Phase1B {
     #[prototk(1, message)]
     ballot: Ballot,
     #[prototk(2, message)]
@@ -246,7 +246,7 @@ struct Phase1B {
 /// Phase2A messages use a previously rallied ballot to assign a [PValue].  The PValue provides the
 /// slot and ballot corresponding to a Phase1A message.
 #[derive(Clone, Debug, Default, Message)]
-struct Phase2A {
+pub struct Phase2A {
     #[prototk(1, message)]
     pvalue: PValue,
 }
@@ -255,7 +255,7 @@ struct Phase2A {
 
 /// [Phase2B] messages return whether a [Phase2A] message was accepted.
 #[derive(Clone, Debug, Default, Message)]
-struct Phase2B {
+pub struct Phase2B {
     #[prototk(1, Bool)]
     accepted: bool,
 }
@@ -278,7 +278,7 @@ service! {
 
 /// [GenNonceRequest] messages embed the number of nonces to fetch.
 #[derive(Clone, Debug, Default, Message)]
-struct GenNoncesRequest {
+pub struct GenNoncesRequest {
     #[prototk(1, uint64)]
     count: u64,
 }
@@ -287,7 +287,7 @@ struct GenNoncesRequest {
 
 /// [GenNonceResponse] messages embed the first nonce in a sequence of `count` nonces.
 #[derive(Clone, Debug, Default, Message)]
-struct GenNoncesResponse {
+pub struct GenNoncesResponse {
     #[prototk(1, uint64)]
     nonce: u64,
 }
@@ -298,7 +298,7 @@ struct GenNoncesResponse {
 /// call indefinitely until it either completes successfully or returns a terminal error.
 /// Transient errors can be overcome as the nonce will be checked.
 #[derive(Clone, Debug, Default, Message)]
-struct IssueCommandRequest {
+pub struct IssueCommandRequest {
     #[prototk(1, uint64)]
     nonce: u64,
     #[prototk(2, message)]
@@ -310,7 +310,7 @@ struct IssueCommandRequest {
 /// [IssueCommandResponse] is the result of a command issued under a given nonce.  For the memory
 /// of the proposer this will result in the same answer if retried.
 #[derive(Clone, Debug, Default, Message)]
-struct IssueCommandResponse {
+pub struct IssueCommandResponse {
     #[prototk(1, uint64)]
     nonce: u64,
 }

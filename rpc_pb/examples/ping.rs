@@ -9,10 +9,10 @@ use common::Error;
 //////////////////////////////////////////// The Service ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
-struct PingRequest {}
+pub struct PingRequest {}
 
 #[derive(Clone, Debug, Default, Message)]
-struct PingResponse {}
+pub struct PingResponse {}
 
 service! {
     name = Ping; // No magic.  The name of the trait for this service.
