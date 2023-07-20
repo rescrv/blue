@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate prototk_derive;
-
 use std::fmt::{Debug, Display, Formatter};
 
 use buffertk::Buffer;
@@ -8,6 +5,8 @@ use buffertk::Buffer;
 use biometrics::Counter;
 
 use one_two_eight::{generate_id, generate_id_prototk};
+
+use prototk_derive::Message;
 
 use zerror:: Z;
 
