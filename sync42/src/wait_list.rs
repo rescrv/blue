@@ -24,9 +24,6 @@ static LINK: Counter = Counter::new("sync42.wait_list.link");
 static UNLINK: Counter = Counter::new("sync42.wait_list.unlink");
 
 pub fn register_biometrics(collector: &mut biometrics::Collector) {
-    if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
-        return;
-    }
     collector.register_counter(&NOTIFY_HEAD);
     collector.register_counter(&NOTIFY_HEAD_DROPPED);
     collector.register_counter(&WAITING_FOR_WAITERS);

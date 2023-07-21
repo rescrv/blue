@@ -98,7 +98,6 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
 
 /// Collect and register sensors of all types.  One registry per sensor type.
 pub struct Collector {
-    modules: HashSet<String>,
     counters: SensorRegistry<Counter>,
     gauges: SensorRegistry<Gauge>,
     moments: SensorRegistry<Moments>,
@@ -121,7 +120,6 @@ impl Collector {
     /// COLLECTOR_* counters for easy monitoring.
     pub fn new() -> Self {
         let collector = Self {
-            modules: HashSet::new(),
             counters: SensorRegistry::new(
                 &COLLECTOR_REGISTER_COUNTER,
                 &COLLECTOR_EMIT_COUNTER,
@@ -185,14 +183,6 @@ impl Collector {
         let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now_ms));
         let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms));
         result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &Self::now_ms))
-    }
-
-    /// Returns true on the first call and false on all subsequent calls with the same arguments.
-    pub fn ingest_swizzle(&mut self, module: &str, file: &str, line: u32) -> bool {
-        let uniq = format!("{}:{}:{}", module.to_owned(), file, line);
-        let first = !self.modules.contains(&uniq);
-        self.modules.insert(uniq);
-        first
     }
 
     fn now_ms() -> f64 {

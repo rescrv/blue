@@ -55,9 +55,6 @@ static RECV_WANT_WRITE: Counter = Counter::new("split_channel.recv.want_write");
 static SEND_SHRINK_BUF: Counter = Counter::new("split_channel.send.shrink_buf");
 
 pub fn register_biometrics(collector: &mut Collector) {
-    if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
-        return;
-    }
     collector.register_counter(&CONNECT);
     collector.register_counter(&FROM_STREAM);
     collector.register_counter(&MESSAGES_SENT);

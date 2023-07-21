@@ -19,9 +19,8 @@ buffer definitions for sensor readings can be found in the [biometrics_pb](https
 Warts
 -----
 
-- Currently there's no consensus about whether a crate's dependencies should be loaded to a `Collector`.  The
-  `ingest_swizzle` function can be used to get singleton-like behavior without singleton collectors.  This part is under
-  active development.  It is intended to be a feature hidden away in program initialization.
+- The blue repo currently is not uniform in its register_biometrics functions.  The convention is that a public method
+  should not call other public methods.
 
 Documentation
 -------------

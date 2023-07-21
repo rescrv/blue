@@ -27,10 +27,7 @@ use utilz::fnmatch::Pattern;
 
 static TICK: Counter = Counter::new("gremlins.tick");
 
-pub fn register_biometrics(collector: &mut Collector) {
-    if !collector.ingest_swizzle(module_path!(), file!(), line!()) {
-        return;
-    }
+pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&TICK);
 }
 
