@@ -23,7 +23,8 @@ static WAITING_FOR_WAITERS: Counter = Counter::new("sync42.wait_list.waiting_for
 static LINK: Counter = Counter::new("sync42.wait_list.link");
 static UNLINK: Counter = Counter::new("sync42.wait_list.unlink");
 
-pub fn register_biometrics(collector: &mut biometrics::Collector) {
+/// Register biometrics for the wait_list.
+pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&NOTIFY_HEAD);
     collector.register_counter(&NOTIFY_HEAD_DROPPED);
     collector.register_counter(&WAITING_FOR_WAITERS);
