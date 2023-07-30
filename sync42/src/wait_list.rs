@@ -16,6 +16,8 @@ use super::MAX_CONCURRENCY;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
+static NEW_WAIT_LIST: Counter = Counter::new("sync42.wait_list.new");
+
 static NOTIFY_HEAD: Counter = Counter::new("sync42.wait_list.notify_head");
 static NOTIFY_HEAD_DROPPED: Counter = Counter::new("sync42.wait_list.notify_head_dropped");
 static WAITING_FOR_WAITERS: Counter = Counter::new("sync42.wait_list.waiting_for_waiters");
@@ -25,6 +27,7 @@ static UNLINK: Counter = Counter::new("sync42.wait_list.unlink");
 
 /// Register biometrics for the wait_list.
 pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&NEW_WAIT_LIST);
     collector.register_counter(&NOTIFY_HEAD);
     collector.register_counter(&NOTIFY_HEAD_DROPPED);
     collector.register_counter(&WAITING_FOR_WAITERS);
@@ -108,6 +111,7 @@ pub struct WaitList<T: Clone + 'static> {
 
 impl<T: Clone + 'static> WaitList<T> {
     pub fn new() -> Self {
+        NEW_WAIT_LIST.click();
         let mut waiters: Vec<Waiter<T>> = Vec::new();
         for _ in 0..MAX_CONCURRENCY {
             waiters.push(Waiter::new());
