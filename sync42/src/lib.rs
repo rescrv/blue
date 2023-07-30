@@ -9,5 +9,6 @@ pub const MAX_CONCURRENCY: usize = 1 << 22;
 
 /// Register all biometrics for the crate.
 pub fn register_biometrics(collector: &biometrics::Collector) {
+    state_hash_table::register_biometrics(collector);
     wait_list::register_biometrics(collector);
 }

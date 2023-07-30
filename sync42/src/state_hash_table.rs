@@ -97,8 +97,12 @@ use biometrics::{Collector, Counter};
 
 static NEW_STATE_HASH_TABLE: Counter = Counter::new("sync42.state_hash_table.new");
 
+static ENTRY_INSERTED: Counter = Counter::new("sync42.state_hash_table.inserted");
+static ENTRY_REMOVED: Counter = Counter::new("sync42.state_hash_table.removed");
+
 pub fn register_biometrics(collector: &Collector) {
-    collector.register_counter(&NEW_STATE_HASH_TABLE);
+    collector.register_counter(&ENTRY_INSERTED);
+    collector.register_counter(&ENTRY_REMOVED);
 }
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
@@ -162,6 +166,7 @@ impl<'a, K: Key, V: Value> Drop for Handle<'a, K, V> {
         // that point we've already made the decision to remove from the map, so the new thread
         // will follow the rules to create a value.
         if Arc::strong_count(&self.value) == 2 && (*self.value).finished() {
+            ENTRY_REMOVED.click();
             entries.remove(self.key);
         }
         // NOTE(rescrv):  Here we're safe to drop the handle.  If the count is less than two we've
@@ -192,6 +197,7 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         let valuep = Arc::clone(&value);
         let mut entries = self.entries.lock().unwrap();
         if !entries.contains_key(key) {
+            ENTRY_INSERTED.click();
             entries.insert(key.clone(), value);
             Some(Handle::new(self, key, valuep))
         } else {
@@ -229,6 +235,7 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
                 (None, Some(value)) => {
                     let value1 = Arc::clone(value);
                     let value2 = Arc::clone(value);
+                    ENTRY_INSERTED.click();
                     entries.insert(key.clone(), value1);
                     return Handle::new(self, key, value2);
                 },
