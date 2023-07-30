@@ -17,7 +17,7 @@ use guacamole::Guacamole;
 
 use one_two_eight::{generate_id, generate_id_prototk};
 
-use split_channel::{Listener, RecvChannel, SplitChannelCommandLine, SendChannel};
+use split_channel::{Listener, RecvChannel, SplitChannelOptions, SendChannel};
 
 use texttale::{story, StoryElement, TextTale};
 
@@ -109,7 +109,7 @@ impl DisplayAnswer {
 #[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
 pub struct ControlCenterOptions {
     #[arrrg(nested)]
-    listener: SplitChannelCommandLine,
+    listener: SplitChannelOptions,
 }
 
 ////////////////////////////////////////////// Process /////////////////////////////////////////////
@@ -416,14 +416,14 @@ pub struct HarnessOptions {
     #[arrrg(required, "ProcessID of the process in human-readable pid:0ced594f-b619-4be6-1c8d-8ff1d5963525 form", "PID")]
     process_id: ProcessID,
     #[arrrg(nested)]
-    control: SplitChannelCommandLine,
+    control: SplitChannelOptions,
 }
 
 impl Default for HarnessOptions {
     fn default() -> Self {
         Self {
             process_id: ProcessID::BOTTOM,
-            control: SplitChannelCommandLine::default(),
+            control: SplitChannelOptions::default(),
         }
     }
 }

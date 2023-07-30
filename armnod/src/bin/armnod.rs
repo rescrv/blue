@@ -4,7 +4,7 @@ use arrrg::CommandLine;
 
 use guacamole::Guacamole;
 
-use armnod::{LengthChooser, SeedChooser, Armnod, ArmnodCommandLine};
+use armnod::{LengthChooser, SeedChooser, Armnod, ArmnodOptions};
 
 fn random_chooser() -> Box<dyn SeedChooser> {
     Box::<armnod::RandomStringChooser>::default()
@@ -31,7 +31,7 @@ fn uniform_length_chooser(min_length: u32, max_length: u32) -> Box<dyn LengthCho
 }
 
 fn main() {
-    let (mut cmdline, free) = ArmnodCommandLine::from_command_line("Usage: armnod [--options]");
+    let (mut cmdline, free) = ArmnodOptions::from_command_line("Usage: armnod [--options]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

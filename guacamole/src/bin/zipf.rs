@@ -5,7 +5,7 @@ use guacamole::zipf::Zipf;
 use guacamole::Guacamole;
 
 #[derive(CommandLine, PartialEq)]
-struct ZipfCommandLine {
+struct ZipfOptions {
     #[arrrg(required, "Approximate cardinality of the set.", "N")]
     card: u64,
     #[arrrg(optional, "Alpha value for the zipf distribution.")]
@@ -16,7 +16,7 @@ struct ZipfCommandLine {
     seed: Option<u64>,
 }
 
-impl Default for ZipfCommandLine {
+impl Default for ZipfOptions {
     fn default() -> Self {
         Self {
             card: 1000,
@@ -27,12 +27,12 @@ impl Default for ZipfCommandLine {
     }
 }
 
-impl Eq for ZipfCommandLine {}
+impl Eq for ZipfOptions {}
 
 /// Choose numbers [0, n) from a zipf distribution.
 fn main() {
     let (cmdline, free) =
-        ZipfCommandLine::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
+        ZipfOptions::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

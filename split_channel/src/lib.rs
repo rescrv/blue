@@ -388,10 +388,10 @@ impl Iterator for Listener {
     }
 }
 
-////////////////////////////////////// SplitChannelCommandLine /////////////////////////////////////
+//////////////////////////////////////// SplitChannelOptions ///////////////////////////////////////
 
 #[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
-pub struct SplitChannelCommandLine {
+pub struct SplitChannelOptions {
     #[arrrg(required, "Hostname to use.", "HOST")]
     host: String,
     #[arrrg(required, "Port to use.", "PORT")]
@@ -406,7 +406,7 @@ pub struct SplitChannelCommandLine {
     verify_none: bool,
 }
 
-impl SplitChannelCommandLine {
+impl SplitChannelOptions {
     pub fn connect(&self) -> Result<(RecvChannel, SendChannel), Error> {
         CONNECT.click();
         let mut builder =

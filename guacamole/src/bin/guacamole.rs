@@ -6,7 +6,7 @@ use arrrg_derive::CommandLine;
 use guacamole::Guacamole;
 
 #[derive(CommandLine, Default, Eq, PartialEq)]
-struct GuacamoleCommandLine {
+struct GuacamoleOptions {
     #[arrrg(
         optional,
         "Number of bytes to generate before exiting.  By default, 1<<64.",
@@ -19,7 +19,7 @@ struct GuacamoleCommandLine {
 
 /// Generate pseudo-random, predictable bytes.
 fn main() {
-    let (cmdline, free) = GuacamoleCommandLine::from_command_line("Usage: guacamole [OPTIONS]");
+    let (cmdline, free) = GuacamoleOptions::from_command_line("Usage: guacamole [OPTIONS]");
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

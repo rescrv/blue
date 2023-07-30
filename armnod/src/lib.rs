@@ -307,7 +307,7 @@ impl Armnod {
 /////////////////////////////////////////// Command Line ///////////////////////////////////////////
 
 #[derive(CommandLine, Debug, PartialEq)]
-pub struct ArmnodCommandLine {
+pub struct ArmnodOptions {
     #[arrrg(required, "Number of strings to generate.", "N")]
     pub number: u64,
     #[arrrg(required, "Method of choosing strings.", "METHOD")]
@@ -333,7 +333,7 @@ pub struct ArmnodCommandLine {
     pub charset: Option<String>,
 }
 
-impl Default for ArmnodCommandLine {
+impl Default for ArmnodOptions {
     fn default() -> Self {
         Self {
             number: 1_000,
@@ -351,4 +351,4 @@ impl Default for ArmnodCommandLine {
     }
 }
 
-impl Eq for ArmnodCommandLine {}
+impl Eq for ArmnodOptions {}

@@ -4,7 +4,7 @@ use arrrg::CommandLine;
 
 use biometrics::{Collector, PlainTextEmitter};
 
-use split_channel::{SplitChannelCommandLine, RecvChannel, SendChannel};
+use split_channel::{SplitChannelOptions, RecvChannel, SendChannel};
 
 fn main() {
     std::thread::spawn(|| {
@@ -20,7 +20,7 @@ fn main() {
         }
     });
 
-    let (options, free) = SplitChannelCommandLine::from_command_line_relaxed("Usage: split_channel-benchmark-server [OPTIONS]");
+    let (options, free) = SplitChannelOptions::from_command_line_relaxed("Usage: split_channel-benchmark-server [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }

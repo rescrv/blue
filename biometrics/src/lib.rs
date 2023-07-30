@@ -2,7 +2,6 @@
 //! T-digests.  Collectively, these sensors paint a picture of what's happening within a process in
 //! timeseries form.
 
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;

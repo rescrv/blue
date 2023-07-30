@@ -29,13 +29,13 @@ fn slow_setsum(sst: &str) -> String {
 }
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
-struct SstChecksumCommandLine {
+struct SstChecksumOptions {
     #[arrrg(flag, "Report checksum from file footer rather than by computation.")]
     fast: bool,
 }
 
 fn main() {
-    let (cmdline, args) = SstChecksumCommandLine::from_command_line("Usage: sst-checksum [OPTIONS] [SSTs]");
+    let (cmdline, args) = SstChecksumOptions::from_command_line("Usage: sst-checksum [OPTIONS] [SSTs]");
     for sst in args {
         if cmdline.fast {
             println!("{} {}", fast_setsum(&sst), sst);
