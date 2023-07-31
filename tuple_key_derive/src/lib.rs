@@ -21,7 +21,7 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
     // Break out for templating purposes.
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let data = match input.data {
+    let ds = match input.data {
         syn::Data::Struct(ref ds) => ds,
         syn::Data::Enum(_) => {
             panic!("enums are not supported");
@@ -31,33 +31,128 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
         }
     };
 
-    fn extract_type(field: &syn::Field) -> (String, TokenStream) {
-        let ty = (&field.ty).into_token_stream();
-        let ty_str = format!("{}", ty.into_token_stream());
-        let ty_tok = match ty_str.as_str() {
-            "u32" => { quote! { ::tuple_key::DataType::Fixed32 }},
-            "u64" => { quote! { ::tuple_key::DataType::Fixed64 }},
-            "i32" => { quote! { ::tuple_key::DataType::SFixed32 }},
-            "i64" => { quote! { ::tuple_key::DataType::SFixed64 }},
-            "&[u8]" => { quote! { ::tuple_key::DataType::Bytes }},
-            "[u8; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
-            "[u8; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
-            "[u8 ; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
-            "[u8 ; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
-            "String" => { quote! { ::tuple_key::DataType::String }},
-            "()" => { quote! { ::tuple_key::DataType::Message }},
-            _ => {
-                panic!("Don't know how to decode {}", ty_str);
-            }
-        };
-        (ty_str, ty_tok)
-    }
+    let (into_tuple_key, from_tuple_key) = match ds.fields {
+        syn::Fields::Named(_) => {
+            gen_named(&ty_name, &ds)
+        },
+        syn::Fields::Unnamed(_) => {
+            gen_unnamed(&ty_name, &ds)
+        },
+        syn::Fields::Unit => {
+            gen_unnamed(&ty_name, &ds)
+        },
+    };
 
+    // Generate the whole implementation.
+    let gen = quote! {
+        impl #impl_generics ::tuple_key::FromIntoTupleKey for #ty_name #ty_generics #where_clause {
+            fn from_tuple_key(tk: &TupleKey) -> Result<Self, ::tuple_key::Error> {
+                #from_tuple_key
+            }
+
+            fn into_tuple_key(self) -> TupleKey {
+                #into_tuple_key
+            }
+        }
+    };
+    gen.into()
+}
+
+fn extract_type(field: &syn::Field) -> (String, TokenStream) {
+    let ty = (&field.ty).into_token_stream();
+    let ty_str = format!("{}", ty.into_token_stream());
+    let ty_tok = match ty_str.as_str() {
+        "u32" => { quote! { ::tuple_key::DataType::Fixed32 }},
+        "u64" => { quote! { ::tuple_key::DataType::Fixed64 }},
+        "i32" => { quote! { ::tuple_key::DataType::SFixed32 }},
+        "i64" => { quote! { ::tuple_key::DataType::SFixed64 }},
+        "&[u8]" => { quote! { ::tuple_key::DataType::Bytes }},
+        "[u8; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
+        "[u8; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
+        "[u8 ; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
+        "[u8 ; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
+        "String" => { quote! { ::tuple_key::DataType::String }},
+        "()" => { quote! { ::tuple_key::DataType::Message }},
+        _ => {
+            panic!("Don't know how to decode {}", ty_str);
+        }
+    };
+    (ty_str, ty_tok)
+}
+
+fn gen_named<'a>(ty_name: &syn::Ident, ds: &syn::DataStruct) -> (TokenStream, TokenStream) {
     // Create into_tuple_key
-    fn extract_into(_ty_name: &syn::Ident, _ds: &syn::DataStruct, unnamed: &syn::FieldsUnnamed) -> TokenStream {
+    fn extract_into(_ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
         let mut sum: TokenStream = quote! {};
-        for (idx, field) in unnamed.unnamed.iter().enumerate() {
-            let (ty_str, ty_tok) = extract_type(field);
+        for field in fields_iter {
+            let (_, ty_tok) = extract_type(&field);
+            let num = parse_attributes(&field.attrs);
+            let field_name = &field.ident.unwrap();
+            let line = quote! {
+                #sum
+                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name, #ty_tok);
+            };
+            sum = line;
+        }
+        quote! {
+            let mut tk: TupleKey = TupleKey::default();
+            #sum
+            tk
+        }
+    }
+    let mut into_tuple_key = TupleKeyStructVisitor {
+        f: extract_into,
+    };
+    let into_tuple_key = into_tuple_key.visit_struct(&ty_name, ds);
+
+    // Create from_tuple_key
+    fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
+        let mut sum: TokenStream = quote! {};
+        let mut fields: TokenStream = quote! {};
+        for (idx, field) in fields_iter.enumerate() {
+            let (_, ty_tok) = extract_type(&field);
+            let num = parse_attributes(&field.attrs);
+            let field_name = &field.ident.unwrap();
+            let line = quote! {
+                #sum
+                let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty_tok) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        return Err(::tuple_key::Error::CouldNotExtend { field_number: #num });
+                    }
+                };
+            };
+            sum = line;
+            if idx == 0 {
+                fields = quote! {
+                    #field_name
+                }
+            } else {
+                fields = quote! {
+                    #fields, #field_name
+                }
+            }
+        }
+        quote! {
+            let mut tkp: ::tuple_key::TupleKeyParser = ::tuple_key::TupleKeyParser::new(&tk);
+            #sum
+            Ok(#ty_name { #fields })
+        }
+    }
+    let mut from_tuple_key = TupleKeyStructVisitor {
+        f: extract_from,
+    };
+    let from_tuple_key = from_tuple_key.visit_struct(&ty_name, ds);
+
+    (into_tuple_key, from_tuple_key)
+}
+
+fn gen_unnamed<'a>(ty_name: &syn::Ident, ds: &syn::DataStruct) -> (TokenStream, TokenStream) {
+    // Create into_tuple_key
+    fn extract_into(_ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
+        let mut sum: TokenStream = quote! {};
+        for (idx, field) in fields_iter.enumerate() {
+            let (ty_str, ty_tok) = extract_type(&field);
             let num = parse_attributes(&field.attrs);
             if ty_str == "()" {
                 let line = quote! {
@@ -83,14 +178,14 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
     let mut into_tuple_key = TupleKeyStructVisitor {
         f: extract_into,
     };
-    let into_tuple_key = into_tuple_key.visit_struct(&ty_name, data);
+    let into_tuple_key = into_tuple_key.visit_struct(&ty_name, ds);
 
     // Create from_tuple_key
-    fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, unnamed: &syn::FieldsUnnamed) -> TokenStream {
+    fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
         let mut sum: TokenStream = quote! {};
         let mut fields: TokenStream = quote! {};
-        for (idx, field) in unnamed.unnamed.iter().enumerate() {
-            let (ty_str, ty_tok) = extract_type(field);
+        for (idx, field) in fields_iter.enumerate() {
+            let (ty_str, ty_tok) = extract_type(&field);
             let num = parse_attributes(&field.attrs);
             let field_num = syn::Ident::new(&format!("field_{}", idx), num.span());
             if ty_str == "()" {
@@ -136,34 +231,31 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
     let mut from_tuple_key = TupleKeyStructVisitor {
         f: extract_from,
     };
-    let from_tuple_key = from_tuple_key.visit_struct(&ty_name, data);
+    let from_tuple_key = from_tuple_key.visit_struct(&ty_name, ds);
 
-    // Generate the whole implementation.
-    let gen = quote! {
-        impl #impl_generics ::tuple_key::FromIntoTupleKey for #ty_name #ty_generics #where_clause {
-            fn from_tuple_key(tk: &TupleKey) -> Result<Self, ::tuple_key::Error> {
-                #from_tuple_key
-            }
-
-            fn into_tuple_key(self) -> TupleKey {
-                #into_tuple_key
-            }
-        }
-    };
-    gen.into()
+    (into_tuple_key, from_tuple_key)
 }
 
 /////////////////////////////////////// TupleKeyStructVisitor //////////////////////////////////////
 
-struct TupleKeyStructVisitor<O, F: Fn(&syn::Ident, &syn::DataStruct, &syn::FieldsUnnamed) -> O> {
+struct TupleKeyStructVisitor<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> {
     f: F,
 }
 
-impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &syn::FieldsUnnamed) -> O> TupleKeyStructVisitor<O, F> {
+impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> TupleKeyStructVisitor<O, F> {
 }
 
-impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &syn::FieldsUnnamed) -> O> StructVisitor for TupleKeyStructVisitor<O, F> {
+impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> StructVisitor for TupleKeyStructVisitor<O, F> {
     type Output = O;
+
+    fn visit_struct_named_fields(
+        &mut self,
+        ty_name: &syn::Ident,
+        ds: &syn::DataStruct,
+        fields: &syn::FieldsNamed,
+    ) -> Self::Output {
+        (self.f)(ty_name, ds, &mut fields.named.iter().cloned())
+    }
 
     fn visit_struct_unnamed_fields(
         &mut self,
@@ -171,7 +263,7 @@ impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &syn::FieldsUnnamed) -> O> StructVi
         ds: &syn::DataStruct,
         fields: &syn::FieldsUnnamed,
     ) -> Self::Output {
-        (self.f)(ty_name, ds, fields)
+        (self.f)(ty_name, ds, &mut fields.unnamed.iter().cloned())
     }
 
     fn visit_struct_unit(&mut self, ty_name: &syn::Ident, ds: &syn::DataStruct) -> Self::Output {
@@ -179,7 +271,7 @@ impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &syn::FieldsUnnamed) -> O> StructVi
             paren_token: syn::token::Paren(ty_name.span()),
             unnamed: syn::punctuated::Punctuated::new(),
         };
-        (self.f)(ty_name, ds, &fields)
+        (self.f)(ty_name, ds, &mut fields.unnamed.iter().cloned())
     }
 }
 

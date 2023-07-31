@@ -65,3 +65,20 @@ struct EmptyTriplet (
 fn empty_triplet() {
     test_from_into_tuple_key::<EmptyTriplet>(EmptyTriplet((), (), ()), &[((7 << 4) | 15) << 1, ((6 << 4) | 15) << 1, ((5 << 4) | 15) << 1]); 
 }
+
+//////////////////////////////////////////// NamedFields ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
+struct StringDoublet {
+    #[tuple_key(8)]
+    first: String,
+    #[tuple_key(9)]
+    second: String,
+}
+
+#[test]
+fn string_doublet() {
+    let doublet = StringDoublet { first: "first".to_owned(), second: "second".to_owned() };
+    let expected = &[17, 2, 16, 103, 53, 93, 79, 55, 160, 49, 2, 16, 115, 179, 89, 109, 247, 115, 144];
+    test_from_into_tuple_key::<StringDoublet>(doublet, expected);
+}
