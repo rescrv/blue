@@ -2,6 +2,8 @@ extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
+use prototk::field_types::*;
+
 ////////////////////////////////////// Stuff we want to write //////////////////////////////////////
 
 /// Details of an X,Y point that might be relevant for an error.
@@ -63,6 +65,69 @@ fn three_kinds_of_enum() {
     let mut up = buffertk::Unpacker::new(&[26, 4, 8, 42, 16, 99]);
     let got3 = up.unpack().unwrap();
     assert_eq!(exp3, got3, "unpacker failed");
+
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
+////////////////////////////////////////// EnumWithOption //////////////////////////////////////////
+
+#[derive(Debug, Default, Eq, Message, PartialEq)]
+enum EnumWithOptionAndVectorMessages {
+    #[prototk(1, message)]
+    #[default]
+    Nop,
+    #[prototk(2, message)]
+    VariantWithOption {
+        #[prototk(1, message)]
+        value: Option<Details>,
+    },
+    #[prototk(3, message)]
+    VariantWithVector {
+        #[prototk(1, message)]
+        value: Vec<Details>,
+    },
+}
+
+#[test]
+fn enum_embed_option() {
+    let value = EnumWithOptionAndVectorMessages::VariantWithOption {
+        value: Some(Details { x: 42, y: 99}),
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&value).to_vec();
+    let exp: &[u8] = &[18, 6, 10, 4, 8, 42, 16, 99];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(&exp);
+    let got: EnumWithOptionAndVectorMessages = up.unpack().unwrap();
+    assert_eq!(value, got, "unpacker failed");
+
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
+#[test]
+fn enum_embed_vector() {
+    let value = EnumWithOptionAndVectorMessages::VariantWithVector {
+        value: vec![Details { x: 42, y: 99}, Details { x: 1, y: 1 }],
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&value).to_vec();
+    let exp: &[u8] = &[26, 12, 10, 4, 8, 42, 16, 99, 10, 4, 8, 1, 16, 1];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(&exp);
+    let got: EnumWithOptionAndVectorMessages = up.unpack().unwrap();
+    assert_eq!(value, got, "unpacker failed");
 
     // test remainder
     let exp: &[u8] = &[];

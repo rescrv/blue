@@ -718,18 +718,20 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             );
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
+            let default_type = &field.ty;
             let decl = quote! {
-                let mut #field_name: ::prototk::field_types::#enum_type = ::prototk::field_types::#enum_type::default();
+                let mut #field_name = <#default_type as Default>::default();
             };
             field_decls.push(decl);
             let block = quote! {
                 (#enum_number, ::prototk::field_types::#enum_type::WIRE_TYPE) => {
-                    (#field_name, _) = Unpackable::unpack(buf)?;
+                    let enum_value: ::prototk::field_types::#enum_type = Unpackable::unpack(buf)?.0;
+                    #field_name.merge_field(enum_value);
                 },
             };
             field_blocks.push(block);
             let hydrate = quote! {
-                #enum_name: #field_name.into(),
+                #enum_name: #field_name,
             };
             hydration.push(hydrate);
         }

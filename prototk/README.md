@@ -7,6 +7,7 @@ Status
 ------
 
 Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
+The clock was last reset 2023-07-31.
 
 Scope
 -----
