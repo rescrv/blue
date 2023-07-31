@@ -109,6 +109,9 @@ pub fn register_biometrics(collector: &Collector) {
 
 pub trait Key: Clone + Debug + Hash + Eq + PartialEq + 'static {}
 
+impl Key for u64 {}
+impl Key for String {}
+
 /////////////////////////////////////////////// Value //////////////////////////////////////////////
 
 pub trait Value: Debug + Default + 'static {
