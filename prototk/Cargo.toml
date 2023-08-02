@@ -1,6 +1,6 @@
 [package]
 name = "prototk"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "prototk provides a toolkit for prototcol buffers."
@@ -8,5 +8,5 @@ license = "Apache-2.0"
 
 [dependencies]
 buffertk = { path = "../buffertk", version = "0.3" }
-prototk_derive = { path = "../prototk_derive", version = "0.2" }
+prototk_derive = { path = "../prototk_derive", version = "0.3" }
 zerror = { path = "../zerror", version = "0.1" }

@@ -22,3 +22,8 @@ Documentation
 -------------
 
 The latest documentation is always available at [docs.rs](https://docs.rs/prototk_derive/latest/prototk_derive/).
+
+Updating
+--------
+
+- 0.2.1 -> 0.3.0:  User facing changes only enable behavior.  No action necessary.
