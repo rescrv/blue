@@ -26,3 +26,9 @@ Documentation
 -------------
 
 The latest documentation is always available at [docs.rs](https://docs.rs/biometrics/latest/biometrics/).
+
+Updating
+--------
+
+- 0.2.0 -> 0.3.0:  API changes to remove `ingest_swizzle`.  It's recommended to have a crate transitively register its
+  own modules and then have the main function register each crate's root registration function.

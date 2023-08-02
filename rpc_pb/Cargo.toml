@@ -7,7 +7,7 @@ description = "rpc_pb provides prototk definitions for an RPC layer."
 license = "Apache-2.0"
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.2" }
+biometrics = { path = "../biometrics", version = "0.3" }
 buffertk = { path = "../buffertk", version = "0.3" }
 guacamole = { path = "../guacamole", version = "0.2" }
 one_two_eight = { path = "../one_two_eight", version = "0.1" }
