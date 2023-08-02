@@ -11,7 +11,7 @@ getopts = "0.2"
 crc32c = "0.6"
 rand = "0.7"
 
-armnod = { path = "../armnod", version = "0.2" }
+armnod = { path = "../armnod", version = "0.3" }
 arrrg = { path = "../arrrg", version = "0.1" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
 biometrics = { path = "../biometrics", version = "0.3" }
