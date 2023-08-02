@@ -20,3 +20,8 @@ Documentation
 -------------
 
 The latest documentation is always available at [docs.rs](https://docs.rs/tiny_lfu/latest/tiny_lfu/).
+
+Updating
+--------
+
+- 0.1.1 -> 0.1.2:  Update to biometrics 0.3.
