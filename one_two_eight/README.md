@@ -7,6 +7,7 @@ Status
 ------
 
 Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
+The clock was last reset 2023-08-02.
 
 Scope
 -----
@@ -21,3 +22,8 @@ Documentation
 -------------
 
 The latest documentation is always available at [docs.rs](https://docs.rs/one_two_eight/latest/one_two_eight/).
+
+Updating
+--------
+
+- 0.1.1 -> 0.2.0:  API expansion; otherwise backwards compatible.
