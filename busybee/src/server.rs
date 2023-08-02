@@ -194,7 +194,7 @@ impl Default for ServerOptions {
 ///////////////////////////////////////////// BuiltIns /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
-struct Empty {}
+pub struct Empty {}
 
 rpc_pb::service! {
     name = Builtin;
