@@ -82,3 +82,20 @@ fn string_doublet() {
     let expected = &[17, 2, 16, 103, 53, 93, 79, 55, 160, 49, 2, 16, 115, 179, 89, 109, 247, 115, 144];
     test_from_into_tuple_key::<StringDoublet>(doublet, expected);
 }
+
+//////////////////////////////////////// EmptyInNamedFields ////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
+struct EmptyInNamedFields {
+    #[tuple_key(8)]
+    first: String,
+    #[tuple_key(9)]
+    empty: (),
+}
+
+#[test]
+fn empty_in_named_fields() {
+    let empty = EmptyInNamedFields { first: "first".to_owned(), empty: () };
+    let expected = &[17, 2, 16, 103, 53, 93, 79, 55, 160, 63, 2];
+    test_from_into_tuple_key::<EmptyInNamedFields>(empty, expected);
+}
