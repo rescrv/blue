@@ -38,14 +38,14 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
 ////////////////////////////////////////////// Waiter //////////////////////////////////////////////
 
 #[derive(Debug)]
-struct Waiter<T: Clone + 'static> {
+struct Waiter<T: Clone> {
     cond: Condvar,
     value: Mutex<Option<T>>,
     seq_no: AtomicU64,
     linked: AtomicBool,
 }
 
-impl<T: Clone + 'static> Waiter<T> {
+impl<T: Clone> Waiter<T> {
     fn new() -> Self {
         Self {
             cond: Condvar::new(),
@@ -103,13 +103,13 @@ struct WaitListState {
 
 /// [WaitList] provides the main collection.
 #[derive(Debug)]
-pub struct WaitList<T: Clone + 'static> {
+pub struct WaitList<T: Clone> {
     state: Mutex<WaitListState>,
     waiters: Vec<Waiter<T>>,
     wait_waiter_available: Condvar,
 }
 
-impl<T: Clone + 'static> WaitList<T> {
+impl<T: Clone> WaitList<T> {
     pub fn new() -> Self {
         NEW_WAIT_LIST.click();
         let mut waiters: Vec<Waiter<T>> = Vec::new();
@@ -128,7 +128,7 @@ impl<T: Clone + 'static> WaitList<T> {
         }
     }
 
-    pub fn link<'a, 'b: 'a>(&'b self, t: T) -> WaitGuard<'a, T> {
+    pub fn link<>(&self, t: T) -> WaitGuard<T> {
         let mut state = self.state.lock().unwrap();
         while state.head + (self.waiters.len() as u64) <= state.tail {
             state = self.assert_invariants(state);
@@ -196,7 +196,7 @@ impl<T: Clone + 'static> WaitList<T> {
     }
 }
 
-impl<T: Clone + 'static> Default for WaitList<T> {
+impl<T: Clone> Default for WaitList<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -207,13 +207,13 @@ impl<T: Clone + 'static> Default for WaitList<T> {
 /// Callers link a Waiter into the list and protect it with a WaitGuard.  The WaitGuard will panic
 /// if the caller fails to unlink.
 #[derive(Debug)]
-pub struct WaitGuard<'a, T: Clone + 'static> {
+pub struct WaitGuard<'a, T: Clone + 'a> {
     list: &'a WaitList<T>,
     index: u64,
     owned: bool,
 }
 
-impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
+impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
     /// Iterate the list from our position forward.
     pub fn iter<'b: 'a>(&'b self) -> WaitIterator<'b, T> {
         let index = self.index;
@@ -281,7 +281,7 @@ impl<'a, T: Clone + 'static> WaitGuard<'a, T> {
     }
 }
 
-impl<'a, T: Clone + 'static> Drop for WaitGuard<'a, T> {
+impl<'a, T: Clone + 'a> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
         assert!(!self.owned || u64::max_value() == self.index, "unlink not called on dropped guard");
     }
@@ -292,16 +292,16 @@ impl<'a, T: Clone + 'static> Drop for WaitGuard<'a, T> {
 /// [WaitIterator] iteratres from the position of the provided guard forward.  At each step the
 /// iterator will give a guard that lives at least as long as the [WaitIterator]'s lifetime.
 #[derive(Debug)]
-pub struct WaitIterator<'a, T: Clone + 'static>
+pub struct WaitIterator<'a, T: Clone + 'a>
 {
     guard: &'a WaitGuard<'a, T>,
     index: u64,
 }
 
-impl<'a, T: Clone + 'static> WaitIterator<'a, T> {
+impl<'a, T: Clone + 'a> WaitIterator<'a, T> {
 }
 
-impl<'a, T: Clone + 'static> Iterator for WaitIterator<'a, T> {
+impl<'a, T: Clone + 'a> Iterator for WaitIterator<'a, T> {
     type Item = WaitGuard<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
