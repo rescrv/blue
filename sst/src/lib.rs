@@ -114,7 +114,7 @@ fn check_table_size(size: usize) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     KeyTooLarge {
         core: ErrorCore,
@@ -257,6 +257,23 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<buffertk::Error> for Error {
+    fn from(error: buffertk::Error) -> Error {
+        let err: prototk::Error = error.into();
+        Error::from(err)
+    }
+}
+
+impl From<prototk::Error> for Error {
+    fn from(error: prototk::Error) -> Error {
+        Error::UnpackError {
+            core: ErrorCore::default(),
+            error,
+            context: "From<prototk::Error>".to_owned(),
+        }
+    }
+}
+
 //////////////////////////////////////////// MapIoError ////////////////////////////////////////////
 
 pub trait MapIoError {
@@ -266,6 +283,28 @@ pub trait MapIoError {
 }
 
 impl<T> MapIoError for Result<T, std::io::Error> {
+    type Result = Result<T, Error>;
+
+    fn map_io_err(self) -> Self::Result {
+        match self {
+            Ok(x) => Ok(x),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+}
+
+impl<T> MapIoError for Result<T, buffertk::Error> {
+    type Result = Result<T, Error>;
+
+    fn map_io_err(self) -> Self::Result {
+        match self {
+            Ok(x) => Ok(x),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+}
+
+impl<T> MapIoError for Result<T, prototk::Error> {
     type Result = Result<T, Error>;
 
     fn map_io_err(self) -> Self::Result {
