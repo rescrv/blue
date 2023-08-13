@@ -1415,6 +1415,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn u64_is_usize() {
+        assert_eq!(u64::BITS, usize::BITS);
+    }
+
+    #[test]
     fn key_ref_ordering() {
         let kvp1 = KeyRef {
             key: "key1".as_bytes(),
