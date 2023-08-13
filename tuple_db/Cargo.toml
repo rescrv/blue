@@ -1,0 +1,9 @@
+[package]
+name = "tuple_db"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "tuple_db builds an ORM on top of a key-value store ."
+license = "Apache-2.0"
+
+[dependencies]
