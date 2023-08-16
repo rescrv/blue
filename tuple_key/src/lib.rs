@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use buffertk::{v64, Packable};
+use buffertk::{v64, Packable, Unpackable};
 
 use prototk::FieldNumber;
 
@@ -18,7 +18,19 @@ pub enum Error {
     CouldNotExtend {
         field_number: u32,
     },
+    UnpackError {
+        err: prototk::Error,
+    },
     NotValidUtf8,
+    InvalidTag,
+}
+
+impl From<prototk::Error> for Error {
+    fn from(err: prototk::Error) -> Self {
+        Self::UnpackError {
+            err,
+        }
+    }
 }
 
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
@@ -123,6 +135,7 @@ impl TupleKey {
 
 ///////////////////////////////////////// TupleKeyIterator /////////////////////////////////////////
 
+#[derive(Clone, Debug)]
 pub struct TupleKeyIterator<'a> {
     tk: &'a TupleKey,
     offset: usize,
@@ -133,6 +146,45 @@ impl<'a> TupleKeyIterator<'a> {
         Self {
             tk,
             offset: 0,
+        }
+    }
+}
+
+impl<'a> TupleKeyIterator<'a> {
+    pub fn peek(&self) -> Result<Option<(FieldNumber, DataType)>, Error> {
+        let mut copy = Self {
+            tk: self.tk,
+            offset: self.offset,
+        };
+        if let Some(imm_buf) = copy.next() {
+            let mut buf = [0u8; 10];
+            println!("FINDME {} {} {:?}", file!(), line!(), buf);
+            let sz = std::cmp::min(buf.len(), imm_buf.len());
+            buf[0..sz].copy_from_slice(imm_buf);
+            println!("FINDME {} {} {:?}", file!(), line!(), buf);
+            buf[0..sz].iter_mut().for_each(|c| *c = c.rotate_right(1));
+            println!("FINDME {} {} {:?}", file!(), line!(), buf);
+            let tag: v64 = <v64 as Unpackable>::unpack(&buf[0..sz]).map_err(|_| Error::InvalidTag)?.0;
+            println!("FINDME {} {} {:?}", file!(), line!(), tag);
+            let tag: u64 = tag.into();
+            let tag: u32 = tag.try_into().map_err(|_| Error::InvalidTag)?;
+            println!("FINDME {} {} tag={}", file!(), line!(), tag);
+            let discriminant = (tag & 15) as u64;
+            let field_number = tag >> 4;
+            let field_number = FieldNumber::new(field_number)?;
+            println!("FINDME {} {}", file!(), line!());
+            match DataType::from_discriminant(discriminant) {
+                Some(data_type) => {
+            println!("FINDME {} {}", file!(), line!());
+                    Ok(Some((field_number, data_type)))
+                },
+                None => {
+            println!("FINDME {} {}", file!(), line!());
+                    Err(Error::InvalidTag)
+                },
+            }
+        } else {
+            Ok(None)
         }
     }
 }
@@ -687,24 +739,32 @@ mod tuple_key {
             tk1.extend_with_key(FieldNumber::must(2), "B".to_string(), DataType::Message);
             tk1.extend_with_key(FieldNumber::must(3), "C".to_string(), DataType::Message);
             let mut iter = TupleKeyIterator::new(&tk1);
+
+            assert_eq!((FieldNumber::must(1), DataType::Message), iter.peek().unwrap().unwrap());
             let buf: &[u8] = &[62];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[16];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[65, 128];
             assert_eq!(Some(buf), iter.next());
+
+            assert_eq!((FieldNumber::must(2), DataType::Message), iter.peek().unwrap().unwrap());
             let buf: &[u8] = &[94];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[16];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[67, 0];
             assert_eq!(Some(buf), iter.next());
+
+            assert_eq!((FieldNumber::must(3), DataType::Message), iter.peek().unwrap().unwrap());
             let buf: &[u8] = &[126];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[16];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[67, 128];
             assert_eq!(Some(buf), iter.next());
+
+            assert_eq!(None, iter.peek().unwrap());
             assert_eq!(None, iter.next());
         }
     }
