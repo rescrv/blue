@@ -1,0 +1,18 @@
+########################################### Partitioning ###########################################
+
+# Recall that we've created a number of partitions to manage.  
+PARTITION_SIZE = PARTITION_SIZE # bytes
+PARTITIONS_PER_CLUSTER = PARTITIONS_PER_CLUSTER
+PARTITIONS_PER_MACHINE = PARTITIONS_PER_MACHINE
+# and that we have an assumed limit on the number of bytes per second ingested into the cluster
+ASSUMPTION1_INGEST_24H_BYTES = ASSUMPTION1_INGEST_24H_BYTES # bytes
+
+# How many files do we need per partition?
+PARTITION_FILES = ceil(PARTITION_SIZE / TARGET_FILE_SIZE) # raw
+
+# How much throughput do we need to sustain in order to hit assumption 1 levels of throughput?
+INGEST_PER_PARTITION_THROUGHPUT = floor(ASSUMPTION1_INGEST_24H_BYTES / 86400 / PARTITIONS_PER_CLUSTER) # bytes/sec
+INGEST_PER_MACHINE_THROUGHPUT = INGEST_PER_PARTITION_THROUGHPUT * PARTITIONS_PER_MACHINE # bytes/sec
+
+INGEST_PER_PARTITION_FILES_DAILY = ceil(INGEST_PER_PARTITION_THROUGHPUT * 86400 / TARGET_FILE_SIZE) # raw
+INGEST_PER_MACHINE_FILES_DAILY = ceil(INGEST_PER_PARTITION_FILES_DAILY * PARTITIONS_PER_MACHINE)  # raw

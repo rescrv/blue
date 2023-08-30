@@ -1,0 +1,14 @@
+############################################# Machines #############################################
+
+# Now let's talk about the machines we could use.  I picked the i3.metal machine as inspiration.
+MACHINE_CPUS = 72
+MACHINE_MEMORY = 512 * Gi # bytes
+MACHINE_NUM_DISKS = 8
+MACHINE_STORAGE = MACHINE_NUM_DISKS * 1900 * Gi # bytes
+MACHINE_NET_RATE = 10 * 1024**3 / 8 # bytes/s
+MACHINE_IOP_SIZE = 4096 # bytes
+MACHINE_IOPS_RAND_READ = MACHINE_NUM_DISKS * 3.3 * M
+MACHINE_IOPS_SEQ_WRITE = MACHINE_NUM_DISKS * 1.4 * M
+
+# And how many of them we need without considering replication if we fill to 85%.
+MIN_MACHINES = ceil(CAPACITY / (MACHINE_STORAGE * 0.85)) # raw

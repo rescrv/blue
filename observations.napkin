@@ -1,0 +1,7 @@
+########################################### Observations ###########################################
+
+# Let's first explore how partitioning, files, and machine counts interrelate.
+PARTITIONS_PER_CLUSTER = CAPACITY / PARTITION_SIZE 
+PARTITIONS_PER_MACHINE = PARTITIONS_PER_CLUSTER / MIN_MACHINES
+FILES_PER_PARTITION = PARTITION_SIZE / TARGET_FILE_SIZE
+FILES_PER_MACHINE = FILES_PER_PARTITION * PARTITIONS_PER_MACHINE

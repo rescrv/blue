@@ -1,0 +1,22 @@
+########################################### Assumption 1 ###########################################
+
+# Convert assumption 1 from a ratio of cluster size to a value of bytes per 24 hours.
+ASSUMPTION1_INGEST_24H_BYTES = CAPACITY * ASSUMPTION1_INGEST_24H_RATIO # bytes
+
+# Sanity check that assumption 1 is viable.  This is how much data we must ingest per second to keep up.
+ASSUMPTION1_INGEST_RATE_BYTES_S = ASSUMPTION1_INGEST_24H_BYTES / 86400 # bytes/sec
+ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE = ASSUMPTION1_INGEST_RATE_BYTES_S / MIN_MACHINES # bytes/sec
+assert ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE < ASSUMPTION1_INGEST_PERCENT * MACHINE_IOPS_SEQ_WRITE * MACHINE_IOP_SIZE
+
+# This is how many raw IOPS we need to perform to keep up with the ingest rate.
+ASSUMPTION1_INGEST_RATE_IOPS_S = ceil(ASSUMPTION1_INGEST_RATE_BYTES_S / 4096)
+ASSUMPTION1_INGEST_RATE_IOPS_S_PER_MACHINE = ASSUMPTION1_INGEST_RATE_IOPS_S / MIN_MACHINES
+assert ASSUMPTION1_INGEST_RATE_IOPS_S_PER_MACHINE < ASSUMPTION1_INGEST_PERCENT * MACHINE_IOPS_SEQ_WRITE
+
+# Check that assumption 1 is compatible with the network.
+NETWORK_RESOURCES_AVAILABLE = ASSUMPTION1_INGEST_PERCENT * MACHINE_NET_RATE # bytes/sec
+assert NETWORK_RESOURCES_AVAILABLE > ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE
+
+# Property:  If no assertion fails, the configured ratio is at most ASSUMPTION1_INGEST_PERCENT of
+# our ssd write rate and network card rate, leaving the rest of the machine's write rate for
+# compaction and logging.
