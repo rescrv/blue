@@ -718,10 +718,21 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             );
             let (enum_number, enum_type) = parse_attributes(&field.attrs);
             let enum_type = &field_type_tokens(field, &enum_type);
+            let mut decl = quote! {};
             let default_type = &field.ty;
-            let decl = quote! {
-                let mut #field_name = <#default_type as Default>::default();
-            };
+            let mut default_type_string = format!("{}", default_type.to_token_stream());
+            default_type_string.retain(|c| !c.is_whitespace());
+            if default_type_string == "[u8;64]" {
+                decl = quote! {
+                    #decl
+                    let mut #field_name = [0u8; 64];
+                }
+            } else {
+                decl = quote! {
+                    #decl
+                    let mut #field_name = <#default_type as Default>::default();
+                };
+            }
             field_decls.push(decl);
             let block = quote! {
                 (#enum_number, ::prototk::field_types::#enum_type::WIRE_TYPE) => {

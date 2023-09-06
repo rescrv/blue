@@ -949,6 +949,88 @@ impl<'a> Unpackable<'a> for bytes32 {
     }
 }
 
+////////////////////////////////////////////// bytes64 /////////////////////////////////////////////
+
+/// [bytes] represents 64 bytes.
+#[derive(Clone, Debug)]
+pub struct bytes64([u8; 64]);
+
+impl<'a> FieldType<'a> for bytes64 {
+    const WIRE_TYPE: WireType = WireType::LengthDelimited;
+
+    type Native = [u8; 64];
+
+    fn from_native(x: Self::Native) -> Self {
+        Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
+    }
+}
+
+impl Default for bytes64 {
+    fn default() -> Self {
+        Self([0u8; 64])
+    }
+}
+
+impl<'a> FieldPackHelper<'a, bytes64> for [u8; 64] {
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        let b: &[u8] = self;
+        stack_pack(tag).pack(b).pack_sz()
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        let b: &[u8] = self;
+        stack_pack(tag).pack(b).into_slice(out);
+    }
+}
+
+impl<'a> FieldUnpackHelper<'a, bytes64> for [u8; 64] {
+    fn merge_field(&mut self, proto: bytes64) {
+        *self = proto.into();
+    }
+}
+
+impl From<bytes64> for [u8; 64] {
+    fn from(f: bytes64) -> [u8; 64] {
+        f.0
+    }
+}
+
+impl<'a> Unpackable<'a> for bytes64 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let mut up = Unpacker::new(buf);
+        let v: v64 = up.unpack()?;
+        let v: usize = v.into();
+        let rem = up.remain();
+        if rem.len() < v {
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
+        }
+        if v < 64 {
+            return Err(Error::BufferTooShort {
+                required: 64,
+                had: v,
+            });
+        }
+        if v != 64 {
+            return Err(Error::WrongLength {
+                required: 64,
+                had: v,
+            });
+        }
+        let mut ret = [0u8; 64];
+        ret[..64].copy_from_slice(&rem[..64]);
+        Ok((Self(ret), &rem[v..]))
+    }
+}
+
 ///////////////////////////////////////////// string ////////////////////////////////////////////
 
 /// [string] represents a UTF-8 string of variable length.

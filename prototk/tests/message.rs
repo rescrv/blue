@@ -425,6 +425,48 @@ fn bytes32() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
+///////////////////////////////////////////// 64 bytes /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Message, PartialEq)]
+struct Bytes64 {
+    #[prototk(11, bytes64)]
+    buffer: [u8; 64],
+}
+
+impl Default for Bytes64 {
+    fn default() -> Self {
+        Self {
+            buffer: [0u8; 64],
+        }
+    }
+}
+
+#[test]
+fn bytes64() {
+    let b64 = Bytes64 {
+        buffer: [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,
+        ],
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&b64).to_vec();
+    let exp: &[u8] = &[
+        90, 64, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+        23, 24, 25, 26, 27, 28, 29, 30, 31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,
+    ];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(b64, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
 ////////////////////////////////////////////// Buffer //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Message, PartialEq)]
