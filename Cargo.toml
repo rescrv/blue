@@ -17,6 +17,7 @@ members = [
     "meta",
     "one_two_eight",
     "lsmgraph",
+    "macarunes",
     "paxos_pb",
     "prototk",
     "prototk_derive",
