@@ -82,15 +82,16 @@ impl Trace {
         F: FieldType<'a> + 'a,
         F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
     {
-        if self.id.is_some() {
-            TRACE_WITH_VALUE.click();
-            stack_pack(F::field_packer(FieldNumber::must(N), &field_value)).append_to_vec(&mut self.value);
+        if self.id.is_none() {
+            return self;
         }
+        TRACE_WITH_VALUE.click();
+        stack_pack(F::field_packer(FieldNumber::must(N), &field_value)).append_to_vec(&mut self.value);
         self
     }
 
     pub fn with_backtrace(self) -> Self {
-        if self.id.is_some() {
+        if self.id.is_none() {
             return self;
         }
         TRACE_WITH_BACKTRACE.click();
