@@ -873,6 +873,81 @@ impl<'a> Unpackable<'a> for bytes<'a> {
     }
 }
 
+////////////////////////////////////////////// bytes16 /////////////////////////////////////////////
+
+/// [bytes] represents 16 bytes.
+#[derive(Clone, Debug, Default)]
+pub struct bytes16([u8; 16]);
+
+impl<'a> FieldType<'a> for bytes16 {
+    const WIRE_TYPE: WireType = WireType::LengthDelimited;
+
+    type Native = [u8; 16];
+
+    fn from_native(x: Self::Native) -> Self {
+        Self(x)
+    }
+
+    fn into_native(self) -> Self::Native {
+        self.0
+    }
+}
+
+impl<'a> FieldPackHelper<'a, bytes16> for [u8; 16] {
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        let b: &[u8] = self;
+        stack_pack(tag).pack(b).pack_sz()
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        let b: &[u8] = self;
+        stack_pack(tag).pack(b).into_slice(out);
+    }
+}
+
+impl<'a> FieldUnpackHelper<'a, bytes16> for [u8; 16] {
+    fn merge_field(&mut self, proto: bytes16) {
+        *self = proto.into();
+    }
+}
+
+impl From<bytes16> for [u8; 16] {
+    fn from(f: bytes16) -> [u8; 16] {
+        f.0
+    }
+}
+
+impl<'a> Unpackable<'a> for bytes16 {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+        let mut up = Unpacker::new(buf);
+        let v: v64 = up.unpack()?;
+        let v: usize = v.into();
+        let rem = up.remain();
+        if rem.len() < v {
+            return Err(Error::BufferTooShort {
+                required: v,
+                had: rem.len(),
+            });
+        }
+        if v < 16 {
+            return Err(Error::BufferTooShort {
+                required: 16,
+                had: v,
+            });
+        }
+        if v != 16 {
+            return Err(Error::WrongLength {
+                required: 16,
+                had: v,
+            });
+        }
+        let mut ret = [0u8; 16];
+        ret[..16].copy_from_slice(&rem[..16]);
+        Ok((Self(ret), &rem[v..]))
+    }
+}
 ////////////////////////////////////////////// bytes32 /////////////////////////////////////////////
 
 /// [bytes] represents 32 bytes.

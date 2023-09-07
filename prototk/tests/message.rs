@@ -544,3 +544,39 @@ fn option_struct() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
+
+///////////////////////////////////////////// 16 bytes /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Message, PartialEq)]
+struct Bytes16 {
+    #[prototk(11, bytes16)]
+    buffer: [u8; 16],
+}
+
+impl Default for Bytes16 {
+    fn default() -> Self {
+        Self {
+            buffer: [0u8; 16],
+        }
+    }
+}
+
+#[test]
+fn bytes16() {
+    let b16 = Bytes16 {
+        buffer: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&b16).to_vec();
+    let exp: &[u8] = &[90, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(b16, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
