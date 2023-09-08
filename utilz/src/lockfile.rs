@@ -49,25 +49,34 @@ impl Lockfile {
                 return Ok(None);
             }
         }
-        // Use flock/fcntl to grab the lock via the OS.
+        // NOTE(rescrv): l_type,l_whence is 16 bits on some platforms and 32 bits on others.
+        // The annotations here are for cross-platform compatibility.
+        #[allow(clippy::useless_conversion)]
+        #[allow(clippy::unnecessary_cast)]
         let flock = libc::flock {
             l_type: libc::F_WRLCK as i16,
             l_whence: libc::SEEK_SET as i16,
             l_start: 0,
             l_len: 0,
             l_pid: 0,
+            #[cfg(target_os = "freebsd")]
+            l_sysid: 0,
         };
         loop {
-            if unsafe { libc::fcntl(file.as_raw_fd(), what, &flock) } < 0 {
-                if unsafe { *libc::__errno_location() == libc::EAGAIN } {
-                    return Ok(None);
-                } else if unsafe { *libc::__errno_location() == libc::EINTR } {
-                    continue;
-                } else {
-                    return Err(Error::from_raw_os_error(unsafe {
-                        *libc::__errno_location()
-                    }));
+            if unsafe { libc::fcntl(file.as_raw_fd(), what, &flock) < 0 } {
+                let err = std::io::Error::last_os_error();
+                if let Some(raw) = err.raw_os_error() {
+                    match raw {
+                        libc::EAGAIN => {
+                            return Ok(None);
+                        },
+                        libc::EINTR => {
+                            continue;
+                        },
+                        _ => {}
+                    }
                 }
+                return Err(err);
             } else {
                 break;
             }
