@@ -614,6 +614,7 @@ fn one_generic() {
     let rem: &[u8] = up.remain();
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
+
 //////////////////////////////////////////// TwoGeneric ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]

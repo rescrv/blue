@@ -127,8 +127,8 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
 
-        impl #impl_generics From<::prototk::field_types::message<#ty_name #ty_generics>> for #ty_name #ty_generics #where_clause {
-            fn from(proto: ::prototk::field_types::message<#ty_name #ty_generics>) -> Self {
+        impl #impl_generics From<::prototk::field_types::message<Self>> for #ty_name #ty_generics #where_clause {
+            fn from(proto: ::prototk::field_types::message<Self>) -> Self {
                 proto.unwrap_message()
             }
         }
@@ -416,6 +416,8 @@ fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream 
             {
                 let tokens = ToTokens::into_token_stream(ty);
                 let tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
+                // NOTE(rescrv):  This code could be made more robust in the presence of generics,
+                // but I don't know how to do it right now.
                 let tokens = &tokens[2];
                 return quote! {
                     #ret::<#tokens>
@@ -509,20 +511,20 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
 
     fn visit_enum_variant_named_fields(
         &mut self,
-        ty_name: &syn::Ident,
+        _ty_name: &syn::Ident,
         _de: &syn::DataEnum,
         variant: &syn::Variant,
         fields: &syn::FieldsNamed,
     ) -> Self::VariantOutput {
         let (field_number, field_type) = parse_attributes(&variant.attrs);
         let variant_ident = &variant.ident;
-        let ctor = quote! { #ty_name :: #variant_ident };
+        let ctor = quote! { Self :: #variant_ident };
         self.named_variant_snippet(&ctor, variant, &field_number, &field_type, fields)
     }
 
     fn visit_enum_variant_unnamed_fields(
         &mut self,
-        ty_name: &syn::Ident,
+        _ty_name: &syn::Ident,
         _de: &syn::DataEnum,
         variant: &syn::Variant,
         fields: &syn::FieldsUnnamed,
@@ -534,19 +536,19 @@ impl<V: ProtoTKVisitor> EnumVisitor for V {
         let (field_number, field_type) = parse_attributes(&variant.attrs);
         let field_type = &field_type_tokens(field, &field_type);
         let variant_ident = &variant.ident;
-        let ctor = quote! { #ty_name :: #variant_ident };
+        let ctor = quote! { Self :: #variant_ident };
         self.unnamed_variant_snippet(&ctor, variant, &field_number, field_type)
     }
 
     fn visit_enum_variant_unit(
         &mut self,
-        ty_name: &syn::Ident,
+        _ty_name: &syn::Ident,
         _de: &syn::DataEnum,
         variant: &syn::Variant,
     ) -> Self::VariantOutput {
         let (field_number, _) = parse_attributes(&variant.attrs);
         let variant_ident = &variant.ident;
-        let ctor = quote! { #ty_name :: #variant_ident };
+        let ctor = quote! { Self :: #variant_ident };
         self.unit_variant_snippet(&ctor, variant, &field_number)
     }
 }
