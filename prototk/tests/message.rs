@@ -1,8 +1,7 @@
-extern crate prototk;
-#[macro_use]
-extern crate prototk_derive;
-
 use buffertk::Buffer;
+
+use prototk::Message;
+use prototk_derive::Message;
 
 //////////////////////////////////////////// EmptyStruct ///////////////////////////////////////////
 
@@ -575,6 +574,79 @@ fn bytes16() {
     let mut up = buffertk::Unpacker::new(exp);
     let got = up.unpack().unwrap();
     assert_eq!(b16, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+
+//////////////////////////////////////////// TwoGeneric ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+struct OneGeneric<'a, K: Message<'a>> {
+    #[prototk(1, message)]
+    key: K,
+    _phantom_a: std::marker::PhantomData<&'a ()>,
+}
+
+#[test]
+fn one_generic() {
+    let key = NamedStruct {
+        x: 42,
+        y: 3.14159,
+        z: -1,
+    };
+    let two = OneGeneric::<NamedStruct> {
+        key,
+        _phantom_a: std::marker::PhantomData,
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&two).to_vec();
+    let exp: &[u8] = &[10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(two, got, "unpacker failed");
+    // test remainder
+    let exp: &[u8] = &[];
+    let rem: &[u8] = up.remain();
+    assert_eq!(exp, rem, "unpack should not have remaining buffer");
+}
+//////////////////////////////////////////// TwoGeneric ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+struct TwoGeneric<'a, K: Message<'a>, V: Message<'a>> {
+    #[prototk(1, message)]
+    key: K,
+    #[prototk(2, message)]
+    value: V,
+    _phantom_a: std::marker::PhantomData<&'a ()>,
+}
+
+#[test]
+fn two_generic() {
+    let key = NamedStruct {
+        x: 42,
+        y: 3.14159,
+        z: -1,
+    };
+    let value = UnnamedStruct(42, 3.14159, -1);
+    let two = TwoGeneric::<NamedStruct, UnnamedStruct> {
+        key,
+        value,
+        _phantom_a: std::marker::PhantomData,
+    };
+    // test packing
+    let buf: Vec<u8> = buffertk::stack_pack(&two).to_vec();
+    let exp: &[u8] = &[10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1, 18, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let got: &[u8] = &buf;
+    assert_eq!(exp, got, "buffer did not match expectations");
+    // test unpacking
+    let mut up = buffertk::Unpacker::new(exp);
+    let got = up.unpack().unwrap();
+    assert_eq!(two, got, "unpacker failed");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();

@@ -2,8 +2,6 @@ extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
-use prototk::field_types::*;
-
 ////////////////////////////////////// Stuff we want to write //////////////////////////////////////
 
 /// Details of an X,Y point that might be relevant for an error.

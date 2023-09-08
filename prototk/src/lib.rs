@@ -1152,4 +1152,15 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
 
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
-pub trait Message<'a>: Default + buffertk::Packable + buffertk::Unpackable<'a> {}
+pub trait Message<'a>:
+    Default
+    + buffertk::Packable
+    + buffertk::Unpackable<'a, Error=Error>
+    + FieldPackHelper<'a, field_types::message<Self>>
+    + FieldUnpackHelper<'a, field_types::message<Self>>
+    + 'a
+where
+    <Self as Unpackable<'a>>::Error: Into<Error>,
+    Error: From<Self::Error>,
+{
+}

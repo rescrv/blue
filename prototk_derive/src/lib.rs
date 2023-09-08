@@ -681,9 +681,9 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         }
     }
 
-    fn struct_snippet(&mut self, ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
+    fn struct_snippet(&mut self, _ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         quote! {
-            let mut ret: #ty_name = #ty_name::default();
+            let mut ret = Self::default();
             let mut error: Option<::prototk::Error> = None;
             let fields = ::prototk::FieldIterator::new(buf, &mut error);
             for (tag, field_value) in fields {
