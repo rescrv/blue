@@ -1,0 +1,4 @@
+for cluster in 1PiB 16PiB 128PiB 1EiB 32EiB
+do
+    napkin $cluster.napkin machine.napkin observations.napkin assumption1.napkin lexico.napkin lsm.napkin > $cluster.txt
+done

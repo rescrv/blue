@@ -1,0 +1,159 @@
+#!/usr/bin/env napkin
+
+############################################ Parameters ############################################
+
+# These parameters represent the assumptions and observations that will confine our work.  We'll use
+# these numbers throughout as we refine the design.  These are not specific to this work, and
+# capture constants that make sense as a starting point for any system.
+
+# Unreplicated size of the cluster.
+CAPACITY = 128PiB
+
+# Size of each partition.  We pick a small partition size so that they can be easily re-replicated
+# on failure.  This value is good for RocksDB or sst.
+PARTITION_SIZE = 64GiB
+
+# Size of each file.  The target file size should be something efficient and large enough to hold
+# many key-value pairs.
+TARGET_FILE_SIZE = 4MiB
+
+# Assumption 1:  The amount of data held by the store greatly exceeds the amount of data ingested in
+# any 24h period.  We'll assume approximately 1% growth per day.  This could be more or less.
+#
+# Start with a ratio of data ingested to data in the KVS.  This will determine the number of bytes
+# ingested in any non-anomalous 24-hour period relative to cluster size.
+ASSUMPTION1_INGEST_24H_RATIO = 0.1
+# Now configure how much of the machine is in use on the ingest path.
+#
+# Note we're making a strong choice here to limit how much of the machine is available to write.
+# Lower numbers indicate more headroom in the design.  Like, 50x.
+ASSUMPTION1_INGEST_PERCENT = 0.02
+
+# Assumption 2: How many files in Level 0 of the LSM tree and how many levels in the tree.
+LSM_LEVEL_0_NUM_FILES = 8
+LSM_NUM_LEVELS = 11
+
+############################################# Machines #############################################
+
+# Now let's talk about the machines we could use.  I picked the i3.metal machine as inspiration.
+MACHINE_CPUS = 72
+MACHINE_MEMORY = 512GiB
+MACHINE_NUM_DISKS = 8
+MACHINE_STORAGE = 14.8TiB
+MACHINE_NET_RATE = 1.2GiB/s
+MACHINE_IOP_SIZE = 4kiB
+MACHINE_IOPS_RAND_READ = 26.4M
+MACHINE_IOPS_SEQ_WRITE = 11.2M
+
+# And how many of them we need without considering replication if we fill to 85%.
+MIN_MACHINES = 10389
+
+########################################### Observations ###########################################
+
+# Let's first explore how partitioning, files, and machine counts interrelate.
+PARTITIONS_PER_CLUSTER = 2.1M
+PARTITIONS_PER_MACHINE = 201
+FILES_PER_PARTITION = 16.4k
+FILES_PER_CLUSTER = 34.4G
+FILES_PER_MACHINE = 3.3M
+
+########################################### Assumption 1 ###########################################
+
+# Convert assumption 1 from a ratio of cluster size to a value of bytes per 24 hours.
+ASSUMPTION1_INGEST_24H_BYTES = 12.8PiB
+
+# Sanity check that assumption 1 is viable.  This is how much data we must ingest per second to keep up.
+ASSUMPTION1_INGEST_RATE_BYTES_S = 155GiB/s
+ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE = 15.3MiB/s
+assert ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE < ASSUMPTION1_INGEST_PERCENT * MACHINE_IOPS_SEQ_WRITE * MACHINE_IOP_SIZE
+
+# This is how many raw IOPS we need to perform to keep up with the ingest rate.
+ASSUMPTION1_INGEST_RATE_IOPS_S = 40.7M
+ASSUMPTION1_INGEST_RATE_IOPS_S_PER_MACHINE = 3.9k
+assert ASSUMPTION1_INGEST_RATE_IOPS_S_PER_MACHINE < ASSUMPTION1_INGEST_PERCENT * MACHINE_IOPS_SEQ_WRITE
+
+# Check that assumption 1 is compatible with the network.
+NETWORK_RESOURCES_AVAILABLE = 25.6MiB/s
+assert NETWORK_RESOURCES_AVAILABLE > ASSUMPTION1_INGEST_RATE_BYTES_S_PER_MACHINE
+
+# Property:  If no assertion fails, the configured ratio is at most ASSUMPTION1_INGEST_PERCENT of
+# our ssd write rate and network card rate, leaving the rest of the machine's write rate for
+# compaction and logging.
+
+########################################### Partitioning ###########################################
+
+# Recall that we've created a number of partitions to manage.  
+PARTITION_SIZE = 64GiB
+PARTITIONS_PER_CLUSTER = 2.1M
+PARTITIONS_PER_MACHINE = 201
+# and that we have an assumed limit on the number of bytes per second ingested into the cluster
+ASSUMPTION1_INGEST_24H_BYTES = 12.8PiB
+
+# How many files do we need per partition?
+PARTITION_FILES = 16384
+
+# How much throughput do we need to sustain in order to hit assumption 1 levels of throughput?
+INGEST_PER_PARTITION_THROUGHPUT = 77.7kiB/s
+INGEST_PER_MACHINE_THROUGHPUT = 15.3MiB/s
+
+INGEST_PER_PARTITION_FILES_DAILY = 1639
+INGEST_PER_MACHINE_FILES_DAILY = 330854
+
+####################################### LSM number of levels #######################################
+
+# We're going to do something a little simple here.  We're going to make a tree with a branching
+# factor of two.  This means we'll have COLD_LEVEL_0_NUM_FILES distinct powers-of-two triangles.
+LSM_LOWER_LEVEL_NUM_FILES = 8
+LSM_UPPER_LEVEL_NUM_FILES = 16384
+
+# Cross-check:  The partition size should fit within the levels we need
+assert PARTITION_SIZE <= 2**LSM_NUM_LEVELS * TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
+# Cross-check:  But wouldn't fit in a fewer number of partitions
+assert PARTITION_SIZE >= 2**(LSM_NUM_LEVELS-1) * TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
+
+############################################ Compaction ############################################
+
+# We ended up with some number of levels.  Now here's the key:  We'll make each level twice the
+# previous level in size, and compact the lowest-n levels, where all n levels are full.  It is,
+# metaphorically, the number of low order bits set.  E.g. 0b10111 would be 3 because the lowest 3
+# bits are set, so it would compact to 0b11000.  Let's just do the math to figure out what this
+# looks like in terms of compaction size.  The work of a compaction is O(log n) if I'm not crazy.
+sums = 0
+count = 0
+ingest = 0
+for i in range(2**ceil(LSM_NUM_LEVELS)):
+    bits = 0
+    while i and (1 << bits) & i:
+        bits += 1
+    sums += (1 << bits) * TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
+    ingest += TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
+    count += 1
+# What falls out is the average compaction size.
+COMPACTION_AVERAGE_SIZE = 240MiB
+WRITE_AMPLIFICATION = 6.5
+
+# How many times we'll evaluate compaction daily.
+COMPACTIONS_PER_DAY = 429M
+COMPACTIONS_PER_DAY_PER_MACHINE = 41.3k
+
+# Now let's make sure that the available bandwidth for compaction exceeds the demand.
+# These values are per-machine.
+COMPACTION_BANDWIDTH_AVAILABLE_DAILY = 3.5PiB
+COMPACTION_BANDWIDTH_DEMAND_DAILY = 9.5TiB
+
+# We check that our demand is not within a factor of two of the limit.
+assert COMPACTION_BANDWIDTH_DEMAND_DAILY < 0.5 * COMPACTION_BANDWIDTH_AVAILABLE_DAILY 
+
+# It's important to witness what we've done here.  We can guarantee space amplification is less than
+# a factor of two (the first n-1 levels are approximately the size of the nth level).  We can
+# guarantee write amplification is approximately O(log n).  What are we losing?  Read amplfication.
+# There are more levels, although half of them will be empty.  Because half the data resides in
+# these levels, half the reads will likely come from those levels.  Bloom filters (as in LevelDB or
+# RocksDB) can help.
+#
+# Note that scaling the cluster does not affect the compaction, as compaction is purely local.
+
+# The structure we have also permits us to guarantee the ability to make compaction progress, if
+# only locally.  Like a hot knife through layers of ice cream cake, we can carve one set of
+# overlapping SSTs into two disjoint sets separated by a single key.
+HOT_KNIFE_MAX_IO = 92.3M

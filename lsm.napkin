@@ -19,14 +19,17 @@ assert PARTITION_SIZE >= 2**(LSM_NUM_LEVELS-1) * TARGET_FILE_SIZE * LSM_LEVEL_0_
 # looks like in terms of compaction size.  The work of a compaction is O(log n) if I'm not crazy.
 sums = 0
 count = 0
+ingest = 0
 for i in range(2**ceil(LSM_NUM_LEVELS)):
     bits = 0
     while i and (1 << bits) & i:
         bits += 1
-    sums += (1 << bits) * TARGET_FILE_SIZE
+    sums += (1 << bits) * TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
+    ingest += TARGET_FILE_SIZE * LSM_LEVEL_0_NUM_FILES
     count += 1
 # What falls out is the average compaction size.
 COMPACTION_AVERAGE_SIZE = sums / count + LSM_LEVEL_0_NUM_FILES * TARGET_FILE_SIZE # bytes
+WRITE_AMPLIFICATION = sums / ingest
 
 # How many times we'll evaluate compaction daily.
 COMPACTIONS_PER_DAY = ASSUMPTION1_INGEST_24H_BYTES / (LSM_LEVEL_0_NUM_FILES * TARGET_FILE_SIZE)
