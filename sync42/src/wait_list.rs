@@ -77,6 +77,12 @@ impl<T: Clone> Waiter<T> {
         (guard, self.value.lock().unwrap().clone())
     }
 
+    fn swap<'a, M>(&self, guard: MutexGuard<'a, M>, t: &mut Option<T>) -> MutexGuard<'a, M> {
+        let x: &mut Option<T> = &mut self.value.lock().unwrap();
+        std::mem::swap(x, t);
+        guard
+    }
+
     fn naked_wait<'a, M>(&self, guard: MutexGuard<'a, M>) -> MutexGuard<'a, M> {
         self.cond.wait(guard).unwrap()
     }
@@ -239,6 +245,12 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
         let state = self.list.state.lock().unwrap();
         let (_state, t) = self.list.index_waitlist(self.index).load(state);
         t
+    }
+
+    /// Swap with the current value.
+    pub fn swap(&mut self, t: &mut Option<T>) {
+        let state = self.list.state.lock().unwrap();
+        let _state = self.list.index_waitlist(self.index).swap(state, t);
     }
 
     /// True iff the thread is the lowest-index thread in the system.
