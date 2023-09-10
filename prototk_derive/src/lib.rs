@@ -415,12 +415,19 @@ fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream 
                     || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span()))
             {
                 let tokens = ToTokens::into_token_stream(ty);
-                let tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
-                // NOTE(rescrv):  This code could be made more robust in the presence of generics,
-                // but I don't know how to do it right now.
-                let tokens = &tokens[2];
+                let mut tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
+                if tokens.len() < 3 {
+                    panic!("unhandled case in prototk_derive: please file a bug report");
+                }
+                tokens.remove(0);
+                tokens.remove(0);
+                tokens.remove(tokens.len() - 1);
+                let mut inner_type = quote! {};
+                for token in tokens.into_iter() {
+                    inner_type = quote! { #inner_type #token };
+                }
                 return quote! {
-                    #ret::<#tokens>
+                    #ret::<#inner_type>
                 };
             }
         }
