@@ -84,6 +84,10 @@ impl<T: Clone> Waiter<T> {
         guard
     }
 
+    fn notify(&self) {
+        self.cond.notify_one()
+    }
+
     fn naked_wait<'a, M>(&self, guard: MutexGuard<'a, M>) -> MutexGuard<'a, M> {
         self.cond.wait(guard).unwrap()
     }
@@ -291,6 +295,11 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
     /// some other thread will call store on this wait guard's index.
     pub fn wait_for_store<'b, M>(&self, guard: MutexGuard<'b, M>) -> (MutexGuard<'b, M>, T) {
         self.list.index_waitlist(self.index).wait_for_store(guard)
+    }
+
+    /// Notify the waiter that it's time to wake up.
+    pub fn notify(&self) {
+        self.list.index_waitlist(self.index).notify()
     }
 }
 
