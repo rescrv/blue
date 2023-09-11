@@ -98,18 +98,15 @@ impl<'a> Clicker<'a> {
                 && !(waiter.is_head() && state.head_passback)
             {
                 match waiter.load() {
-                    Some(WaitState::Present) => {
+                    WaitState::Present => {
                         BLOCKING_ON_TICKET_ACQUISITION.click();
                         state = waiter.naked_wait(state);
                     }
-                    Some(WaitState::CallingCount) => {
+                    WaitState::CallingCount => {
                         panic!("CallingCount state achieved before allowed to call count");
                     }
-                    Some(WaitState::Counted(_)) => {
+                    WaitState::Counted(_) => {
                         break 'conditions;
-                    }
-                    None => {
-                        panic!("Our waiter was initialized to WaitState::Present, but the value got lost");
                     }
                 }
                 if state.outstanding_calls < self.concurrent_count_calls && !state.head_passback{
@@ -120,7 +117,7 @@ impl<'a> Clicker<'a> {
                     self.wait_list.notify_head();
                 }
             }
-            if let Some(WaitState::Counted(x)) = waiter.load() {
+            if let WaitState::Counted(x) = waiter.load() {
                 self.wait_list.unlink(waiter);
                 self.wait_list.notify_head();
                 return x;
@@ -129,14 +126,11 @@ impl<'a> Clicker<'a> {
             let mut count = 0;
             for mut w in waiter.iter() {
                 match w.load() {
-                    Some(WaitState::Present) => {
+                    WaitState::Present => {
                         count += 1;
                     }
-                    Some(WaitState::CallingCount) | Some(WaitState::Counted(_)) => {
+                    WaitState::CallingCount | WaitState::Counted(_) => {
                         break;
-                    }
-                    None => {
-                        panic!("Our waiter was initialized to WaitState::Present, but the value got lost");
                     }
                 };
             }
@@ -156,7 +150,7 @@ impl<'a> Clicker<'a> {
         {
             w.store(WaitState::Counted(ticket))
         }
-        if let Some(WaitState::Counted(x)) = waiter.load() {
+        if let WaitState::Counted(x) = waiter.load() {
             self.wait_list.unlink(waiter);
             {
                 let mut state = self.state.lock().unwrap();

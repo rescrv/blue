@@ -90,7 +90,7 @@ impl Channel {
         REQUEST_AT_HEAD.click();
         'receiving:
         loop {
-            if let Some(Some(resp)) = waiter.load() {
+            if let Some(resp) = waiter.load() {
                 wait_list.unlink(waiter);
                 // TODO(rescrv): Conditional notify head.
                 wait_list.notify_head();

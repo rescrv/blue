@@ -73,12 +73,13 @@ impl<T: Clone> Waiter<T> {
         guard
     }
 
-    fn load<'a, M>(&self, guard: MutexGuard<'a, M>) -> (MutexGuard<'a, M>, Option<T>) {
-        (guard, self.value.lock().unwrap().clone())
+    fn load<'a, M>(&self, guard: MutexGuard<'a, M>) -> (MutexGuard<'a, M>, T) {
+        (guard, self.value.lock().unwrap().as_ref().unwrap().clone())
     }
 
-    fn swap<'a, M>(&self, guard: MutexGuard<'a, M>, t: &mut Option<T>) -> MutexGuard<'a, M> {
-        let x: &mut Option<T> = &mut self.value.lock().unwrap();
+    fn swap<'a, M>(&self, guard: MutexGuard<'a, M>, t: &mut T) -> MutexGuard<'a, M> {
+        let mut value = self.value.lock().unwrap();
+        let x: &mut T = value.as_mut().expect("should always be some when initialized");
         std::mem::swap(x, t);
         guard
     }
@@ -87,7 +88,7 @@ impl<T: Clone> Waiter<T> {
         self.cond.wait(guard).unwrap()
     }
 
-    fn wait_for_store<'a, M>(&self, mut guard: MutexGuard<'a, M>) -> (MutexGuard<'a, M>, Option<T>) {
+    fn wait_for_store<'a, M>(&self, mut guard: MutexGuard<'a, M>) -> (MutexGuard<'a, M>, T) {
         let seq_no = self.seq_no.load(Ordering::Relaxed);
         while seq_no == self.seq_no.load(Ordering::Relaxed) {
             guard = self.cond.wait(guard).unwrap();
@@ -241,14 +242,14 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
     }
 
     /// Load the value for the WaitGuard.
-    pub fn load(&mut self) -> Option<T> {
+    pub fn load(&mut self) -> T {
         let state = self.list.state.lock().unwrap();
         let (_state, t) = self.list.index_waitlist(self.index).load(state);
         t
     }
 
     /// Swap with the current value.
-    pub fn swap(&mut self, t: &mut Option<T>) {
+    pub fn swap(&mut self, t: &mut T) {
         let state = self.list.state.lock().unwrap();
         let _state = self.list.index_waitlist(self.index).swap(state, t);
     }
@@ -288,7 +289,7 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
 
     /// Wait until someone stores a value in the guard.  Note that you must always make sure that
     /// some other thread will call store on this wait guard's index.
-    pub fn wait_for_store<'b, M>(&self, guard: MutexGuard<'b, M>) -> (MutexGuard<'b, M>, Option<T>) {
+    pub fn wait_for_store<'b, M>(&self, guard: MutexGuard<'b, M>) -> (MutexGuard<'b, M>, T) {
         self.list.index_waitlist(self.index).wait_for_store(guard)
     }
 }
@@ -460,8 +461,8 @@ mod tests {
         assert!(iter.next().is_none());
 
         let mut iter = waiter0.iter();
-        assert_eq!(Some(Some(42)), iter.next().unwrap().load());
-        assert_eq!(Some(Some(99)), iter.next().unwrap().load());
+        assert_eq!(Some(42), iter.next().unwrap().load());
+        assert_eq!(Some(99), iter.next().unwrap().load());
         assert!(iter.next().is_none());
 
         wait_list.unlink(waiter0);
@@ -481,7 +482,7 @@ mod tests {
             let mut waiter1 = wait_list1.link(None);
             barrier1.wait();
             barrier1.wait();
-            assert_eq!(Some(Some(1)), waiter1.load());
+            assert_eq!(Some(1), waiter1.load());
             let guard = mtx.lock().unwrap();
             let _guard = waiter1.wait_for_store(guard).0;
             barrier1.wait();
@@ -493,7 +494,7 @@ mod tests {
             guard.store(Some(idx as u64))
         }
         barrier0.wait();
-        assert_eq!(Some(Some(0)), waiter0.load());
+        assert_eq!(Some(0), waiter0.load());
         std::thread::sleep(std::time::Duration::from_millis(100));
         for mut guard in waiter0.iter() {
             guard.store(Some(42));
