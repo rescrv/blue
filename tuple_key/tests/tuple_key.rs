@@ -1,101 +1,80 @@
 use std::fmt::Debug;
 
-use tuple_key::TupleKey;
-use tuple_key::FromIntoTupleKey;
-use tuple_key_derive::FromIntoTupleKey;
+use tuple_key::{TupleKey, TypedTupleKey};
+use tuple_key_derive::TypedTupleKey;
 
-///////////////////////////////////// test_from_into_tuple_key /////////////////////////////////////
+//////////////////////////////////////////// test helper ///////////////////////////////////////////
 
-fn test_from_into_tuple_key<TK: FromIntoTupleKey + Clone + Debug + Eq>(ttk: TK, bytes: &[u8]) {
-    let tk = ttk.clone().into_tuple_key();
+fn test_helper<T: TypedTupleKey + Clone + Debug + Eq>(typed: T, bytes: &[u8])
+where
+    <T as TryFrom<TupleKey>>::Error: Debug,
+{
+    let tk = <T as Into<TupleKey>>::into(typed.clone());
     assert_eq!(bytes, tk.as_bytes());
-    let got = TK::from_tuple_key(&tk).unwrap();
-    assert_eq!(ttk, got);
+    let got = <T as TryFrom<TupleKey>>::try_from(tk).unwrap();
+    assert_eq!(typed, got);
 }
 
 /////////////////////////////////////////// EmptyTupleKey //////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct EmptyTupleKey();
+#[derive(Clone, Debug, Default, Eq, PartialEq, TypedTupleKey)]
+struct EmptyTupleKey {}
 
 #[test]
 fn empty_tuple_key() {
-    test_from_into_tuple_key::<EmptyTupleKey>(EmptyTupleKey::default(), &[]);
+    test_helper(EmptyTupleKey{}, &[])
 }
 
-/////////////////////////////////////////// OneElementKey //////////////////////////////////////////
+///////////////////////////////////////// AllTypesTupleKey /////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct OneElementKey (
-    #[tuple_key(1)]
-    u64,
-);
-
-#[test]
-fn one_element_key() {
-    test_from_into_tuple_key::<OneElementKey>(OneElementKey(42u64), &[((1 << 4) | 2) << 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 43, 0]);
-}
-
-///////////////////////////////////////////// StringKey ////////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct StringKey (
-    #[tuple_key(7)]
-    String,
-);
-
-#[test]
-fn string_key() {
-    test_from_into_tuple_key::<StringKey>(StringKey("Hello World".to_owned()), &[((7 << 4) | 8) << 1, 16, 0x49, 0x33, 0x5b, 0x8d, 0xc7, 0x79, 0x81, 0xaf, 0x6f, 0xb9, 0x9b, 0x8d, 0x40]);
-}
-
-/////////////////////////////////////////// EmptyTriplet ///////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct EmptyTriplet (
-    #[tuple_key(7)]
-    (),
-    #[tuple_key(6)]
-    (),
-    #[tuple_key(5)]
-    (),
-);
-
-#[test]
-fn empty_triplet() {
-    test_from_into_tuple_key::<EmptyTriplet>(EmptyTriplet((), (), ()), &[((7 << 4) | 15) << 1, ((6 << 4) | 15) << 1, ((5 << 4) | 15) << 1]); 
-}
-
-//////////////////////////////////////////// NamedFields ///////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct StringDoublet {
-    #[tuple_key(8)]
-    first: String,
-    #[tuple_key(9)]
-    second: String,
+#[derive(Clone, Debug, Eq, PartialEq, TypedTupleKey)]
+struct AllTypesTupleKey {
+    #[tuple_key(1, message)]
+    fixed_32: u32,
+    #[tuple_key(1, message)]
+    fixed_64: u64,
+    #[tuple_key(1, message)]
+    sfixed_32: i32,
+    #[tuple_key(1, message)]
+    sfixed_64: i64,
+    #[tuple_key(1, message)]
+    bytes: Vec<u8>,
+    #[tuple_key(1, message)]
+    bytes_16: [u8; 16],
+    #[tuple_key(1, message)]
+    bytes_32: [u8; 32],
+    #[tuple_key(1, message)]
+    string: String,
 }
 
 #[test]
-fn string_doublet() {
-    let doublet = StringDoublet { first: "first".to_owned(), second: "second".to_owned() };
-    let expected = &[17, 2, 16, 103, 53, 93, 79, 55, 160, 49, 2, 16, 115, 179, 89, 109, 247, 115, 144];
-    test_from_into_tuple_key::<StringDoublet>(doublet, expected);
+fn all_types_tuple_key() {
+    test_helper(AllTypesTupleKey {
+        fixed_32: 0x1eaff00du32,
+        fixed_64: 0xc0ffee00c0ffee00u64,
+        sfixed_32: 0x1eaff00di32,
+        sfixed_64: 0xc0ffee00c0ffee00u64 as i64,
+        bytes: vec![0, 1, 2, 3],
+        bytes_16: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        bytes_32: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        string: "hello world".to_owned(),
+	}, &[62, 2, 31, 87, 253, 1, 208, 62, 4, 193, 127, 251, 193, 13, 7, 255, 221, 1, 0, 62, 6, 159, 87, 253, 1, 208, 62, 8, 65, 127, 251, 193, 13, 7, 255, 221, 1, 0, 62, 10, 1, 1, 65, 65, 48, 62, 12, 1, 1, 65, 65, 49, 33, 21, 13, 7, 133, 3, 33, 161, 89, 49, 27, 15, 7, 192, 62, 14, 1, 1, 65, 65, 49, 33, 21, 13, 7, 133, 3, 33, 161, 89, 49, 27, 15, 7, 197, 3, 17, 145, 77, 41, 21, 139, 133, 227, 129, 201, 105, 55, 29, 15, 71, 195, 240, 62, 16, 105, 51, 91, 141, 199, 121, 129, 239, 111, 185, 155, 141, 64]);
 }
 
-//////////////////////////////////////// EmptyInNamedFields ////////////////////////////////////////
+/////////////////////////////////////////// WithUnitTypes //////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
-struct EmptyInNamedFields {
-    #[tuple_key(8)]
-    first: String,
-    #[tuple_key(9)]
-    empty: (),
+#[derive(Clone, Debug, Eq, PartialEq, TypedTupleKey)]
+struct WithUnitTypes {
+    #[tuple_key(1, message)]
+    unit1: (),
+    #[tuple_key(2, message)]
+    unit2: (),
 }
 
 #[test]
-fn empty_in_named_fields() {
-    let empty = EmptyInNamedFields { first: "first".to_owned(), empty: () };
-    let expected = &[17, 2, 16, 103, 53, 93, 79, 55, 160, 63, 2];
-    test_from_into_tuple_key::<EmptyInNamedFields>(empty, expected);
+fn with_unit_types() {
+    test_helper(WithUnitTypes {
+        unit1: (),
+        unit2: (),
+    }, &[62, 94]);
 }

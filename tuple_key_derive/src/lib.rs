@@ -9,12 +9,10 @@ use proc_macro2::TokenStream;
 use quote::ToTokens;
 use syn::{parse_macro_input, DeriveInput};
 
-use derive_util::StructVisitor;
+///////////////////////////////////// #[derive(TypedTupleKey)] /////////////////////////////////////
 
-//////////////////////////////////// #[derive(FromIntoTupleKey)] ////////////////////////////////
-
-#[proc_macro_derive(FromIntoTupleKey, attributes(tuple_key))]
-pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+#[proc_macro_derive(TypedTupleKey, attributes(tuple_key))]
+pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     // `ty_name` holds the type's identifier.
     let ty_name = input.ident;
@@ -31,268 +29,162 @@ pub fn derive_from_into_tuple_key(input: proc_macro::TokenStream) -> proc_macro:
         }
     };
 
-    let (into_tuple_key, from_tuple_key) = match ds.fields {
-        syn::Fields::Named(_) => {
-            gen_named(&ty_name, ds)
+    let fields: Vec<syn::Field> = match &ds.fields {
+        syn::Fields::Named(fields) => {
+            fields.named.iter().cloned().collect()
         },
         syn::Fields::Unnamed(_) => {
-            gen_unnamed(&ty_name, ds)
+            panic!("unnamed structs are not supported");
         },
         syn::Fields::Unit => {
-            gen_unnamed(&ty_name, ds)
+            panic!("unit structs are not supported");
         },
     };
 
+    let try_from_snippet = generate_try_from(&ty_name, &fields);
+    let into_snippet = generate_into(&fields);
+
     // Generate the whole implementation.
     let gen = quote! {
-        impl #impl_generics ::tuple_key::FromIntoTupleKey for #ty_name #ty_generics #where_clause {
-            fn from_tuple_key(tk: &TupleKey) -> Result<Self, ::tuple_key::Error> {
-                #from_tuple_key
-            }
+        impl #impl_generics TryFrom<::tuple_key::TupleKey> for #ty_name #ty_generics #where_clause {
+            type Error = ::tuple_key::Error;
 
-            fn into_tuple_key(self) -> TupleKey {
-                #into_tuple_key
+            fn try_from(tk: ::tuple_key::TupleKey) -> Result<Self, Self::Error> {
+                #try_from_snippet
             }
+        }
+
+        impl #impl_generics Into<::tuple_key::TupleKey> for #ty_name #ty_generics #where_clause {
+            fn into(self) -> ::tuple_key::TupleKey {
+                #into_snippet
+            }
+        }
+
+        impl #impl_generics ::tuple_key::TypedTupleKey for #ty_name #ty_generics #where_clause {
         }
     };
     gen.into()
 }
 
-fn extract_type(field: &syn::Field) -> (String, TokenStream) {
-    let ty = (&field.ty).into_token_stream();
-    let ty_str = format!("{}", ty.into_token_stream());
-    let ty_tok = match ty_str.as_str() {
-        "u32" => { quote! { ::tuple_key::DataType::Fixed32 }},
-        "u64" => { quote! { ::tuple_key::DataType::Fixed64 }},
-        "i32" => { quote! { ::tuple_key::DataType::SFixed32 }},
-        "i64" => { quote! { ::tuple_key::DataType::SFixed64 }},
-        "&[u8]" => { quote! { ::tuple_key::DataType::Bytes }},
-        "[u8; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
-        "[u8; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
-        "[u8 ; 16]" => { quote! { ::tuple_key::DataType::Bytes16 }},
-        "[u8 ; 32]" => { quote! { ::tuple_key::DataType::Bytes32 }},
-        "String" => { quote! { ::tuple_key::DataType::String }},
-        "()" => { quote! { ::tuple_key::DataType::Message }},
+fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream {
+    let mut sum: TokenStream = quote! {};
+    let mut field_names: TokenStream = quote! {};
+    // The prefix of the key must be of type message.
+    let mut witnessed_non_message = false;
+    for (idx, field) in fields.iter().enumerate() {
+        if witnessed_non_message {
+            panic!("invalid tuple-key: all but the last extension of the key must be type message");
+        }
+        let (num, ty) = parse_attributes(&field.attrs);
+        let num = match num {
+            Some(num) => num,
+            None => {
+                continue;
+            },
+        };
+        if format!("{}", ty) != "message" {
+            witnessed_non_message = true;
+        }
+        let ty = extract_type(ty);
+        let field_name = &field.ident.as_ref().unwrap();
+        let field_type = &field.ty;
+        let line = if field_type.to_token_stream().to_string() == "()" {
+            quote! {
+                #sum
+                match tkp.extend(::prototk::FieldNumber::must(#num), #ty) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        return Err(::tuple_key::Error::CouldNotExtend { field_number: #num, ty: #ty });
+                    }
+                }
+                let #field_name = ();
+            }
+        } else {
+            quote! {
+                #sum
+                let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        return Err(::tuple_key::Error::CouldNotExtend { field_number: #num, ty: #ty });
+                    }
+                };
+            }
+        };
+        sum = line;
+        if idx == 0 {
+            field_names = quote! {
+                #field_name
+            };
+        } else {
+            field_names = quote! {
+                #field_names, #field_name
+            }
+        }
+    }
+    quote! {
+        let mut tkp: ::tuple_key::TupleKeyParser = ::tuple_key::TupleKeyParser::new(&tk);
+        #sum
+        Ok(#ty_name { #field_names })
+    }
+}
+
+fn generate_into(fields: &[syn::Field]) -> TokenStream {
+    let mut sum: TokenStream = quote! {};
+    // The prefix of the key must be of type message.
+    let mut witnessed_non_message = false;
+    for field in fields.iter() {
+        if witnessed_non_message {
+            panic!("invalid tuple-key: all but the last extension of the key must be type message");
+        }
+        let (num, ty) = parse_attributes(&field.attrs);
+        let num = match num {
+            Some(num) => num,
+            None => {
+                continue;
+            },
+        };
+        if format!("{}", ty) != "message" {
+            witnessed_non_message = true;
+        }
+        let ty = extract_type(ty);
+        let field_name = &field.ident.as_ref().unwrap();
+        let field_type = &field.ty;
+        let line = if field_type.to_token_stream().to_string() == "()" {
+            quote! {
+                #sum
+                tk.extend(::prototk::FieldNumber::must(#num), #ty);
+            }
+        } else {
+            quote! {
+                #sum
+                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name, #ty);
+            }
+        };
+        sum = line;
+    }
+    quote! {
+        let mut tk: ::tuple_key::TupleKey = ::tuple_key::TupleKey::default();
+        #sum
+        tk
+    }
+}
+
+fn extract_type(ty: TokenStream) -> TokenStream {
+    let ty_str = format!("{}", ty);
+    match ty_str.as_str() {
+        "unit" => quote!{ ::tuple_key::DataType::Unit },
+        "fixed32" => quote!{ ::tuple_key::DataType::Fixed32 },
+        "fixed64" => quote!{ ::tuple_key::DataType::Fixed64 },
+        "sfixed32" => quote!{ ::tuple_key::DataType::SFixed32 },
+        "sfixed64" => quote!{ ::tuple_key::DataType::SFixed64 },
+        "bytes" => quote!{ ::tuple_key::DataType::Bytes },
+        "bytes16" => quote!{ ::tuple_key::DataType::Bytes16 },
+        "bytes32" => quote!{ ::tuple_key::DataType::Bytes32 },
+        "string" => quote!{ ::tuple_key::DataType::String },
+        "message" => quote!{ ::tuple_key::DataType::Message },
         _ => {
             panic!("Don't know how to decode {}", ty_str);
         }
-    };
-    (ty_str, ty_tok)
-}
-
-fn gen_named(ty_name: &syn::Ident, ds: &syn::DataStruct) -> (TokenStream, TokenStream) {
-    // Create into_tuple_key
-    fn extract_into(_ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
-        let mut sum: TokenStream = quote! {};
-        for field in fields_iter {
-            let (ty_str, ty_tok) = extract_type(&field);
-            let num = parse_attributes(&field.attrs);
-            let field_name = &field.ident.unwrap();
-            if ty_str == "()" {
-                let line = quote! {
-                    #sum
-                    tk.extend(::prototk::FieldNumber::must(#num), #ty_tok);
-                };
-                sum = line;
-            } else {
-                let line = quote! {
-                    #sum
-                    tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name, #ty_tok);
-                };
-                sum = line;
-            }
-        }
-        quote! {
-            let mut tk: TupleKey = TupleKey::default();
-            #sum
-            tk
-        }
-    }
-    let mut into_tuple_key = TupleKeyStructVisitor {
-        f: extract_into,
-    };
-    let into_tuple_key = into_tuple_key.visit_struct(ty_name, ds);
-
-    // Create from_tuple_key
-    fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
-        let mut sum: TokenStream = quote! {};
-        let mut fields: TokenStream = quote! {};
-        for (idx, field) in fields_iter.enumerate() {
-            let (ty_str, ty_tok) = extract_type(&field);
-            let num = parse_attributes(&field.attrs);
-            let field_name = &field.ident.unwrap();
-            if ty_str == "()" {
-                let line = quote! {
-                    #sum
-                    let #field_name: () = match tkp.extend(::prototk::FieldNumber::must(#num), #ty_tok) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            return Err(::tuple_key::Error::CouldNotExtend { field_number: #idx as u32 });
-                        }
-                    };
-                };
-                sum = line;
-            } else {
-                let line = quote! {
-                    #sum
-                    let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty_tok) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            return Err(::tuple_key::Error::CouldNotExtend { field_number: #num });
-                        }
-                    };
-                };
-                sum = line;
-            }
-            if idx == 0 {
-                fields = quote! {
-                    #field_name
-                }
-            } else {
-                fields = quote! {
-                    #fields, #field_name
-                }
-            }
-        }
-        quote! {
-            let mut tkp: ::tuple_key::TupleKeyParser = ::tuple_key::TupleKeyParser::new(&tk);
-            #sum
-            Ok(#ty_name { #fields })
-        }
-    }
-    let mut from_tuple_key = TupleKeyStructVisitor {
-        f: extract_from,
-    };
-    let from_tuple_key = from_tuple_key.visit_struct(ty_name, ds);
-
-    (into_tuple_key, from_tuple_key)
-}
-
-fn gen_unnamed(ty_name: &syn::Ident, ds: &syn::DataStruct) -> (TokenStream, TokenStream) {
-    // Create into_tuple_key
-    fn extract_into(_ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
-        let mut sum: TokenStream = quote! {};
-        for (idx, field) in fields_iter.enumerate() {
-            let (ty_str, ty_tok) = extract_type(&field);
-            let num = parse_attributes(&field.attrs);
-            if ty_str == "()" {
-                let line = quote! {
-                    #sum
-                    tk.extend(::prototk::FieldNumber::must(#num), #ty_tok);
-                };
-                sum = line;
-            } else {
-                let idx: syn::Index = idx.into();
-                let line = quote! {
-                    #sum
-                    tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#idx, #ty_tok);
-                };
-                sum = line;
-            }
-        }
-        quote! {
-            let mut tk: TupleKey = TupleKey::default();
-            #sum
-            tk
-        }
-    }
-    let mut into_tuple_key = TupleKeyStructVisitor {
-        f: extract_into,
-    };
-    let into_tuple_key = into_tuple_key.visit_struct(ty_name, ds);
-
-    // Create from_tuple_key
-    fn extract_from(ty_name: &syn::Ident, _ds: &syn::DataStruct, fields_iter: &mut dyn Iterator<Item=syn::Field>) -> TokenStream {
-        let mut sum: TokenStream = quote! {};
-        let mut fields: TokenStream = quote! {};
-        for (idx, field) in fields_iter.enumerate() {
-            let (ty_str, ty_tok) = extract_type(&field);
-            let num = parse_attributes(&field.attrs);
-            let field_num = syn::Ident::new(&format!("field_{}", idx), num.span());
-            if ty_str == "()" {
-                let line = quote! {
-                    #sum
-                    let #field_num: () = ();
-                    match tkp.extend(::prototk::FieldNumber::must(#num), #ty_tok) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            return Err(::tuple_key::Error::CouldNotExtend { field_number: #idx as u32 });
-                        }
-                    };
-                };
-                sum = line;
-            } else {
-                let line = quote! {
-                    #sum
-                    let mut #field_num = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty_tok) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            return Err(::tuple_key::Error::CouldNotExtend { field_number: #num });
-                        }
-                    };
-                };
-                sum = line;
-            }
-            if idx == 0 {
-                fields = quote! {
-                    #field_num
-                }
-            } else {
-                fields = quote! {
-                    #fields, #field_num
-                }
-            }
-        }
-        quote! {
-            let mut tkp: ::tuple_key::TupleKeyParser = ::tuple_key::TupleKeyParser::new(&tk);
-            #sum
-            Ok(#ty_name ( #fields ))
-        }
-    }
-    let mut from_tuple_key = TupleKeyStructVisitor {
-        f: extract_from,
-    };
-    let from_tuple_key = from_tuple_key.visit_struct(ty_name, ds);
-
-    (into_tuple_key, from_tuple_key)
-}
-
-/////////////////////////////////////// TupleKeyStructVisitor //////////////////////////////////////
-
-struct TupleKeyStructVisitor<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> {
-    f: F,
-}
-
-impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> TupleKeyStructVisitor<O, F> {
-}
-
-impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>) -> O> StructVisitor for TupleKeyStructVisitor<O, F> {
-    type Output = O;
-
-    fn visit_struct_named_fields(
-        &mut self,
-        ty_name: &syn::Ident,
-        ds: &syn::DataStruct,
-        fields: &syn::FieldsNamed,
-    ) -> Self::Output {
-        (self.f)(ty_name, ds, &mut fields.named.iter().cloned())
-    }
-
-    fn visit_struct_unnamed_fields(
-        &mut self,
-        ty_name: &syn::Ident,
-        ds: &syn::DataStruct,
-        fields: &syn::FieldsUnnamed,
-    ) -> Self::Output {
-        (self.f)(ty_name, ds, &mut fields.unnamed.iter().cloned())
-    }
-
-    fn visit_struct_unit(&mut self, ty_name: &syn::Ident, ds: &syn::DataStruct) -> Self::Output {
-        let fields = syn::FieldsUnnamed {
-            paren_token: syn::token::Paren(ty_name.span()),
-            unnamed: syn::punctuated::Punctuated::new(),
-        };
-        (self.f)(ty_name, ds, &mut fields.unnamed.iter().cloned())
     }
 }
 
@@ -301,69 +193,50 @@ impl<O, F: Fn(&syn::Ident, &syn::DataStruct, &mut dyn Iterator<Item=syn::Field>)
 const USAGE: &str = "must provide attributes of the form `tuple_key(field_number, field_type?)`";
 const META_PATH: &str = "tuple_key";
 
-fn parse_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
+fn parse_attribute(attr: &syn::Attribute) -> (Option<syn::LitInt>, TokenStream) {
     let meta = &attr.parse_meta().unwrap();
     if meta.path().clone().into_token_stream().to_string() != META_PATH {
-        return None;
+        return (None, quote!{});
     }
     let meta_list = match meta {
         syn::Meta::Path(_) => {
-            panic!("{}", USAGE);
+            panic!("{}:{} {}", file!(), line!(), USAGE);
         }
         syn::Meta::List(ref ml) => ml,
         syn::Meta::NameValue(_) => {
-            panic!("{}", USAGE);
+            panic!("{}:{} {}", file!(), line!(), USAGE);
         }
     };
-    if meta_list.nested.len() == 1 {
-        match &meta_list.nested[0] {
+    if meta_list.nested.len() == 2 {
+        let num = match &meta_list.nested[0] {
             syn::NestedMeta::Lit(syn::Lit::Int(field_number)) => {
                 validate_field_number(field_number.base10_parse().unwrap());
                 Some(field_number.clone())
             }
-            _ => panic!("{}", USAGE),
-        }
+            _ => panic!("{}:{} {}", file!(), line!(), USAGE),
+        };
+        let ty = &meta_list.nested[1].to_token_stream();
+        (num, ty.clone())
     } else {
-        panic!("{}", USAGE);
+        panic!("{}:{} {}", file!(), line!(), USAGE);
     }
 }
 
-fn parse_attributes(attrs: &[syn::Attribute]) -> syn::LitInt {
+fn parse_attributes(attrs: &[syn::Attribute]) -> (Option<syn::LitInt>, TokenStream) {
     for attr in attrs.iter() {
-        if let Some(field_number) = parse_attribute(attr) {
-            return field_number;
+        if let (Some(field_number), token_stream) = parse_attribute(attr) {
+            return (Some(field_number), token_stream);
         }
     }
-    panic!("{}", USAGE);
+    (None, quote! {})
 }
 
 ////////////////////////////////////// protobuf field numbers //////////////////////////////////////
 
-use prototk::{
-    FIRST_FIELD_NUMBER, LAST_FIELD_NUMBER, FIRST_RESERVED_FIELD_NUMBER, LAST_RESERVED_FIELD_NUMBER,
-};
+use prototk::FieldNumber;
 
-fn validate_field_number(field_number: u64) {
-    if field_number > u32::max_value() as u64 {
-        panic!(
-            "field_number={} number too large:  must be less than {}",
-            field_number, LAST_FIELD_NUMBER
-        );
-    }
-    let field_number: u32 = field_number.try_into().unwrap();
-    if field_number < FIRST_FIELD_NUMBER {
-        panic!("field_number={} must be a positive integer", field_number);
-    }
-    if field_number > LAST_FIELD_NUMBER {
-        panic!(
-            "field_number={} number too large:  must be less than {}",
-            field_number, LAST_FIELD_NUMBER
-        );
-    }
-    if (FIRST_RESERVED_FIELD_NUMBER..=LAST_RESERVED_FIELD_NUMBER).contains(&field_number) {
-        panic!(
-            "field_number={} reserved: reserved range [{}, {}]",
-            field_number, FIRST_RESERVED_FIELD_NUMBER, LAST_RESERVED_FIELD_NUMBER
-        );
+fn validate_field_number(field_number: u32) {
+    if let Err(err) = FieldNumber::new(field_number) {
+        panic!("field_number={} number too invalid: {}", field_number, err);
     }
 }
