@@ -1,0 +1,25 @@
+[package]
+name = "mani"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "Mani provides an in-memory manifest of related files."
+license = "Apache-2.0"
+
+[dependencies]
+getopts = "0.2"
+crc32c = "0.6"
+rand = "0.7"
+
+armnod = { path = "../armnod", version = "0.3" }
+arrrg = { path = "../arrrg", version = "0.1" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
+biometrics = { path = "../biometrics", version = "0.3" }
+buffertk = { path = "../buffertk", version = "0.3" }
+guacamole = { path = "../guacamole", version = "0.2" }
+prototk = { path = "../prototk", version = "0.3" }
+prototk_derive = { path = "../prototk_derive", version = "0.3" }
+tatl = { path = "../tatl", version = "0.2" }
+utilz = { path = "../utilz", version = "0.1" }
+zerror = { path = "../zerror", version = "0.1" }
+zerror_core = { path = "../zerror_core", version = "0.2" }

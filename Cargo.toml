@@ -18,6 +18,7 @@ members = [
     "one_two_eight",
     "lsmgraph",
     "macarunes",
+    "mani",
     "paxos_pb",
     "prototk",
     "prototk_derive",
