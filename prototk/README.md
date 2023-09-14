@@ -72,6 +72,19 @@ Warts
 
 - The derive macro's errors are not the most easy to understand.
 
+Reserved Field Ranges
+---------------------
+
+The error types in my libraries all have diffrent field numbers.  Here is where I track them.
+
+- 262144..262400 prototk::Error
+- 278528..278784 rpc_pb::Error
+- 294912..295168 macarunes::Error
+- 311296..311552 tuple_key::Error
+- 376832..377088 mani::Error
+- 442368..442624 sst::Error
+
+
 Documentation
 -------------
 

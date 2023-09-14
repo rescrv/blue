@@ -94,7 +94,11 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
                 match tkp.extend(::prototk::FieldNumber::must(#num), #ty) {
                     Ok(x) => x,
                     Err(e) => {
-                        return Err(::tuple_key::Error::CouldNotExtend { field_number: #num, ty: #ty });
+                        return Err(::tuple_key::Error::CouldNotExtend {
+                            core: ::zerror_core::ErrorCore::default(),
+                            field_number: #num,
+                            ty: #ty,
+                        });
                     }
                 }
                 let #field_name = ();
@@ -105,7 +109,11 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
                 let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty) {
                     Ok(x) => x,
                     Err(e) => {
-                        return Err(::tuple_key::Error::CouldNotExtend { field_number: #num, ty: #ty });
+                        return Err(::tuple_key::Error::CouldNotExtend {
+                            core: ::zerror_core::ErrorCore::default(),
+                            field_number: #num,
+                            ty: #ty,
+                        });
                     }
                 };
             }

@@ -25,7 +25,7 @@ use tuple_key::TupleKey;
 use utilz::lockfile::Lockfile;
 use utilz::time::now;
 
-use zerror::Z;
+use zerror::{iotoz, Z};
 
 use zerror_core::ErrorCore;
 
@@ -93,17 +93,17 @@ pub fn get_lockfile(options: &LsmOptions, root: &PathBuf) -> Result<Lockfile, Er
         return Err(Error::DbNotExist { core: ErrorCore::default(), path: root.clone() });
     } else if !root.is_dir() {
         create_dir(root)
-            .map_io_err()
+            .as_z()
             .with_variable("root", root.to_string_lossy())?;
     }
     // Deal with the lockfile first.
     let lockfile = if options.fail_if_locked {
         Lockfile::lock(LOCKFILE(root))
-            .map_io_err()
+            .as_z()
             .with_variable("root", root.to_string_lossy())?
     } else {
         Lockfile::wait(LOCKFILE(root))
-            .map_io_err()
+            .as_z()
             .with_variable("root", root.to_string_lossy())?
     };
     if lockfile.is_none() {
@@ -122,7 +122,11 @@ pub fn get_lockfile(options: &LsmOptions, root: &PathBuf) -> Result<Lockfile, Er
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Clone, Debug)]
+// TODO(rescrv): don't have this inline the errors from elsewhere
 pub enum Error {
+    Success {
+        core: ErrorCore,
+    },
     KeyTooLarge {
         core: ErrorCore,
         length: usize,
@@ -207,6 +211,7 @@ pub enum Error {
 impl Error {
     fn core(&self) -> &ErrorCore {
         match self {
+            Error::Success { core, .. } => { core },
             Error::KeyTooLarge { core, .. } => { core },
             Error::ValueTooLarge { core, .. } => { core } ,
             Error::SortOrder { core, .. } => { core } ,
@@ -229,6 +234,7 @@ impl Error {
 
     fn core_mut(&mut self) -> &mut ErrorCore {
         match self {
+            Error::Success { core, .. } => { core },
             Error::KeyTooLarge { core, .. } => { core },
             Error::ValueTooLarge { core, .. } => { core } ,
             Error::SortOrder { core, .. } => { core } ,
@@ -250,41 +256,6 @@ impl Error {
     }
 }
 
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}", self) + "\n" + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.set_token(identifier, value);
-        self
-    }
-
-    fn set_token(&mut self, identifier: &str, value: &str) {
-        self.core_mut().set_token(identifier, value);
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.set_url(identifier, url);
-        self
-    }
-
-    fn set_url(&mut self, identifier: &str, url: &str) {
-        self.core_mut().set_url(identifier, url);
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.set_variable(variable, x);
-        self
-    }
-
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        self.core_mut().set_variable(variable, x);
-    }
-}
-
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         // TODO(rescrv):  Make sure this isn't infinitely co-recursive with long_form
@@ -301,6 +272,7 @@ impl From<std::io::Error> for Error {
 impl From<sst::Error> for Error {
     fn from(what: sst::Error) -> Error {
         match what {
+            sst::Error::Success { core } => Error::Success { core },
             sst::Error::KeyTooLarge { core, length, limit } => Error::KeyTooLarge { core, length, limit },
             sst::Error::ValueTooLarge { core, length, limit } => Error::ValueTooLarge { core, length, limit },
             sst::Error::SortOrder { core, last_key, last_timestamp, new_key, new_timestamp } => Error::SortOrder { core, last_key, last_timestamp, new_key, new_timestamp },
@@ -316,24 +288,31 @@ impl From<sst::Error> for Error {
     }
 }
 
-//////////////////////////////////////////// MapIoError ////////////////////////////////////////////
+impl Z for Error {
+    type Error = Self;
 
-pub trait MapIoError {
-    type Result;
+    fn long_form(&self) -> String {
+        // TODO(rescrv): make this pretty print without "core"
+        format!("{:?}", self) + "\n" + &self.core().long_form()
+    }
 
-    fn map_io_err(self) -> Self::Result;
-}
+    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
+        self.core_mut().set_token(identifier, value);
+        self
+    }
 
-impl<T> MapIoError for Result<T, std::io::Error> {
-    type Result = Result<T, Error>;
+    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
+        self.core_mut().set_url(identifier, url);
+        self
+    }
 
-    fn map_io_err(self) -> Self::Result {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(Error::from(e)),
-        }
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
+        self.core_mut().set_variable(variable, x);
+        self
     }
 }
+
+iotoz!{Error}
 
 //////////////////////////////////////////// LsmOptions ////////////////////////////////////////////
 
@@ -363,24 +342,24 @@ impl LsmOptions {
         let lockfile = get_lockfile(self, &root)?;
         let root: PathBuf = root
             .canonicalize()
-            .map_io_err()
+            .as_z()
             .with_variable("root", root.to_string_lossy())?;
         let file_manager = Arc::new(FileManager::new(self.max_open_files));
         let file_manager_p = Arc::clone(&file_manager);
         // Create the correct directories, or at least make sure they exist.
         if !META_ROOT(&self.path).is_dir() {
             create_dir(META_ROOT(&self.path))
-                .map_io_err()
+                .as_z()
                 .with_variable("meta", META_ROOT(&self.path))?;
         }
         if !SST_ROOT(&self.path).is_dir() {
             create_dir(SST_ROOT(&self.path))
-                .map_io_err()
+                .as_z()
                 .with_variable("sst", SST_ROOT(&self.path))?;
         }
         if !SST_ROOT(&self.path).is_dir() {
             create_dir(SST_ROOT(&self.path))
-                .map_io_err()
+                .as_z()
                 .with_variable("sst", SST_ROOT(&self.path))?;
         }
         let metadata = Mutex::new(Metadata::new(&self.path, file_manager_p)?);
@@ -611,7 +590,7 @@ impl DB {
                     what: target.to_string_lossy().to_string(),
                 });
             }
-            hard_link(sst_path, target).map_io_err()?;
+            hard_link(sst_path, target).as_z()?;
             // Extract the metadata.
             let metadata = sst.metadata()?;
             ssts.push(metadata);

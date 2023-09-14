@@ -3,6 +3,10 @@ use std::fmt::Debug;
 use buffertk::{v64, Packable};
 
 use prototk::FieldNumber;
+use prototk_derive::Message;
+
+use zerror::{iotoz, Z};
+use zerror_core::ErrorCore;
 
 mod combine7;
 mod iter7;
@@ -13,33 +17,130 @@ use iter7::Iterate7BitChunks;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Message)]
 pub enum Error {
-    CouldNotExtend { field_number: u32, ty: DataType },
-    UnpackError { err: prototk::Error },
-    NotValidUtf8,
-    InvalidTag,
+    #[prototk(311296, message)]
+    Success {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+    #[prototk(311297, message)]
+    CouldNotExtend {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, uint32)]
+        field_number: u32,
+        #[prototk(2, message)]
+        ty: DataType,
+    },
+    #[prototk(311298, message)]
+    UnpackError {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, message)]
+        err: prototk::Error,
+    },
+    #[prototk(311299, message)]
+    NotValidUtf8 {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+    #[prototk(311300, message)]
+    InvalidTag{
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+}
+
+impl Error {
+    fn core(&self) -> &ErrorCore {
+        match self {
+            Error::Success { core,  .. }  => { core },
+            Error::CouldNotExtend { core,  .. }  => { core },
+            Error::UnpackError { core,  .. }  => { core },
+            Error::NotValidUtf8 { core,  .. }  => { core },
+            Error::InvalidTag { core,  .. }  => { core },
+        }
+    }
+
+    fn core_mut(&mut self) -> &mut ErrorCore {
+        match self {
+            Error::Success { core,  .. }  => { core },
+            Error::CouldNotExtend { core,  .. }  => { core },
+            Error::UnpackError { core,  .. }  => { core },
+            Error::NotValidUtf8 { core,  .. }  => { core },
+            Error::InvalidTag { core,  .. }  => { core },
+        }
+    }
+}
+
+impl Default for Error {
+    fn default() -> Error {
+        Error::Success {
+            core: ErrorCore::default(),
+        }
+    }
 }
 
 impl From<prototk::Error> for Error {
     fn from(err: prototk::Error) -> Self {
-        Self::UnpackError { err }
+        Self::UnpackError {
+            core: ErrorCore::default(),
+            err,
+        }
     }
 }
 
+impl Z for Error {
+    type Error = Self;
+
+    fn long_form(&self) -> String {
+        // TODO(rescrv): put a one-line error as first line.
+        self.core().long_form()
+    }
+
+    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
+        self.core_mut().set_token(identifier, value);
+        self
+    }
+
+    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
+        self.core_mut().set_url(identifier, url);
+        self
+    }
+
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
+        self.core_mut().set_variable(variable, x);
+        self
+    }
+}
+
+iotoz!{Error}
+
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Message)]
 pub enum DataType {
+    #[prototk(14, message)]
+    #[default]
     Unit,
+    #[prototk(1, message)]
     Fixed32,
+    #[prototk(2, message)]
     Fixed64,
+    #[prototk(3, message)]
     SFixed32,
+    #[prototk(4, message)]
     SFixed64,
+    #[prototk(5, message)]
     Bytes,
+    #[prototk(6, message)]
     Bytes16,
+    #[prototk(7, message)]
     Bytes32,
+    #[prototk(8, message)]
     String,
+    #[prototk(15, message)]
     Message,
 }
 

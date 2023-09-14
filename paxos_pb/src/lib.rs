@@ -25,6 +25,7 @@ generate_id_prototk!(ReplicaID);
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Debug, Default, Message)]
+// TODO(rescrv): unique field numbers
 pub enum Error {
     #[prototk(1, message)]
     #[default]

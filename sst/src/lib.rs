@@ -17,7 +17,7 @@ use biometrics::Counter;
 
 use tatl::{HeyListen, Stationary};
 
-use zerror::Z;
+use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 
 pub mod block;
@@ -114,60 +114,108 @@ fn check_table_size(size: usize) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub enum Error {
+    #[prototk(442368, message)]
+    Success {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+    #[prototk(442369, message)]
     KeyTooLarge {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         length: usize,
+        #[prototk(3, uint64)]
         limit: usize,
     },
+    #[prototk(442370, message)]
     ValueTooLarge {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         length: usize,
+        #[prototk(3, uint64)]
         limit: usize,
     },
+    #[prototk(442371, message)]
     SortOrder {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, bytes)]
         last_key: Vec<u8>,
+        #[prototk(3, uint64)]
         last_timestamp: u64,
+        #[prototk(4, bytes)]
         new_key: Vec<u8>,
+        #[prototk(5, uint64)]
         new_timestamp: u64,
     },
+    #[prototk(442372, message)]
     TableFull {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         size: usize,
+        #[prototk(3, uint64)]
         limit: usize,
     },
+    #[prototk(442373, message)]
     BlockTooSmall {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         length: usize,
+        #[prototk(3, uint64)]
         required: usize,
     },
+    #[prototk(442374, message)]
     UnpackError {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, message)]
         error: prototk::Error,
+        #[prototk(3, string)]
         context: String,
     },
+    #[prototk(442375, message)]
     Crc32cFailure {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         start: u64,
+        #[prototk(3, uint64)]
         limit: u64,
+        #[prototk(3, fixed32)]
         crc32c: u32,
     },
+    #[prototk(442376, message)]
     Corruption {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         context: String,
     },
+    #[prototk(442377, message)]
     LogicError {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         context: String,
     },
+    #[prototk(442378, message)]
     SystemError {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         what: String,
     },
+    #[prototk(442379, message)]
     TooManyOpenFiles {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, uint64)]
         limit: usize,
     },
 }
@@ -175,6 +223,7 @@ pub enum Error {
 impl Error {
     fn core(&self) -> &ErrorCore {
         match self {
+            Error::Success { core, .. } => { core },
             Error::KeyTooLarge { core, .. } => { core },
             Error::ValueTooLarge { core, .. } => { core } ,
             Error::SortOrder { core, .. } => { core } ,
@@ -191,6 +240,7 @@ impl Error {
 
     fn core_mut(&mut self) -> &mut ErrorCore {
         match self {
+            Error::Success { core, .. } => { core },
             Error::KeyTooLarge { core, .. } => { core },
             Error::ValueTooLarge { core, .. } => { core } ,
             Error::SortOrder { core, .. } => { core } ,
@@ -206,45 +256,75 @@ impl Error {
     }
 }
 
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}", self) + "\n" + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.set_token(identifier, value);
-        self
-    }
-
-    fn set_token(&mut self, identifier: &str, value: &str) {
-        self.core_mut().set_token(identifier, value);
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.set_url(identifier, url);
-        self
-    }
-
-    fn set_url(&mut self, identifier: &str, url: &str) {
-        self.core_mut().set_url(identifier, url);
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.set_variable(variable, x);
-        self
-    }
-
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        self.core_mut().set_variable(variable, x);
+impl Default for Error {
+    fn default() -> Self {
+        Error::Success {
+            core: ErrorCore::default(),
+        }
     }
 }
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // TODO(rescrv):  Make sure this isn't infinitely co-recursive with long_form
-        write!(fmt, "{}", self.long_form())
+        match self {
+            Error::Success { core: _ } => fmt
+                .debug_struct("Success")
+                .finish(),
+            Error::KeyTooLarge { core: _, length, limit } => fmt
+                .debug_struct("KeyTooLarge")
+                .field("length", length)
+                .field("limit", limit)
+                .finish(),
+            Error::ValueTooLarge { core: _, length, limit } => fmt
+                .debug_struct("ValueTooLarge")
+                .field("length", length)
+                .field("limit", limit)
+                .finish(),
+            Error::SortOrder { core: _, last_key, last_timestamp, new_key, new_timestamp } => fmt
+                .debug_struct("SortOrder")
+                .field("last_key", last_key)
+                .field("last_timestamp", last_timestamp)
+                .field("new_key", new_key)
+                .field("new_timestamp", new_timestamp)
+                .finish(),
+            Error::TableFull { core: _, size, limit } => fmt
+                .debug_struct("TableFull")
+                .field("size", size)
+                .field("limit", limit)
+                .finish(),
+            Error::BlockTooSmall { core: _, length, required } => fmt
+                .debug_struct("BlockTooSmall")
+                .field("length", length)
+                .field("required", required)
+                .finish(),
+            Error::UnpackError { core: _, error, context } => fmt
+                .debug_struct("UnpackError")
+                .field("error", error)
+                .field("context", context)
+                .finish(),
+            Error::Crc32cFailure { core: _, start, limit, crc32c } => fmt
+                .debug_struct("Crc32cFailure")
+                .field("start", start)
+                .field("limit", limit)
+                .field("crc32c", crc32c)
+                .finish(),
+            Error::Corruption { core: _, context } => fmt
+                .debug_struct("Corruption")
+                .field("context", context)
+                .finish(),
+            Error::LogicError { core: _, context } => fmt
+                .debug_struct("LogicError")
+                .field("context", context)
+                .finish(),
+            Error::SystemError { core: _, what } => fmt
+                .debug_struct("SystemError")
+                .field("what", what)
+                .finish(),
+            Error::TooManyOpenFiles { core: _, limit } => fmt
+                .debug_struct("TooManyOpenFiles")
+                .field("limit", limit)
+                .finish(),
+        }
     }
 }
 
@@ -274,46 +354,30 @@ impl From<prototk::Error> for Error {
     }
 }
 
-//////////////////////////////////////////// MapIoError ////////////////////////////////////////////
+impl Z for Error {
+    type Error = Self;
 
-pub trait MapIoError {
-    type Result;
+    fn long_form(&self) -> String {
+        format!("{}", self) + "\n" + &self.core().long_form()
+    }
 
-    fn map_io_err(self) -> Self::Result;
-}
+    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
+        self.core_mut().set_token(identifier, value);
+        self
+    }
 
-impl<T> MapIoError for Result<T, std::io::Error> {
-    type Result = Result<T, Error>;
+    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
+        self.core_mut().set_url(identifier, url);
+        self
+    }
 
-    fn map_io_err(self) -> Self::Result {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(Error::from(e)),
-        }
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
+        self.core_mut().set_variable(variable, x);
+        self
     }
 }
 
-impl<T> MapIoError for Result<T, buffertk::Error> {
-    type Result = Result<T, Error>;
-
-    fn map_io_err(self) -> Self::Result {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(Error::from(e)),
-        }
-    }
-}
-
-impl<T> MapIoError for Result<T, prototk::Error> {
-    type Result = Result<T, Error>;
-
-    fn map_io_err(self) -> Self::Result {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(Error::from(e)),
-        }
-    }
-}
+iotoz!{Error}
 
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
@@ -927,7 +991,7 @@ impl SstBuilder {
             .create_new(true)
             .write(true)
             .open(path.as_ref())
-            .map_io_err()
+            .as_z()
             .with_variable("open", path.as_ref().to_string_lossy())?;
         Ok(SstBuilder {
             options,
@@ -1001,7 +1065,7 @@ impl SstBuilder {
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        self.bytes_written += pa.stream(&mut self.output).map_io_err()?;
+        self.bytes_written += pa.stream(&mut self.output).as_z()?;
         // Prepare the block metadata.
         let limit = self.bytes_written as u64;
         let block_metadata = BlockMetadata {
@@ -1090,7 +1154,7 @@ impl Builder for SstBuilder {
         let entry = SstEntry::PlainBlock(bytes);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output).map_io_err()?;
+        builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
         let index_block_limit = builder.bytes_written;
         // Update timestamps if nothing written
         if builder.smallest_timestamp > builder.biggest_timestamp {
@@ -1110,9 +1174,9 @@ impl Builder for SstBuilder {
             biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output).map_io_err()?;
+        builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
         // fsync
-        builder.output.sync_all().map_io_err()?;
+        builder.output.sync_all().as_z()?;
         Sst::new(builder.path)
     }
 }

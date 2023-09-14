@@ -23,14 +23,14 @@ static VERIFIER_THIRD_PARTY_SUCCESS: Counter = Counter::new("macaroons.verifier.
 
 #[derive(Clone, Debug, Default, Message)]
 pub enum Error {
-    #[prototk(1, message)]
+    #[prototk(294912, message)]
     #[default]
     Success,
-    #[prototk(2, message)]
+    #[prototk(294913, message)]
     Cycle,
-    #[prototk(3, message)]
+    #[prototk(294914, message)]
     ProofInvalid,
-    #[prototk(4, message)]
+    #[prototk(294915, message)]
     MissingLoader {
         #[prototk(1, string)]
         what: String,

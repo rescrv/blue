@@ -29,24 +29,33 @@ pub enum Error {
 }
 
 impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::BufferTooShort { required, had } => {
-                write!(f, "buffer too short:  expected {}, had {}", required, had)
-            }
-            Error::VarintOverflow { bytes } => {
-                write!(f, "varint did not fit in space={} bytes", bytes)
-            }
-            Error::UnsignedOverflow { value } => {
-                write!(f, "unsigned integer cannot hold value={}", value)
-            }
-            Error::SignedOverflow { value } => {
-                write!(f, "signed integer cannot hold value={}", value)
-            }
-            Error::TagTooLarge { tag } => write!(f, "tag={} overflows 32-bits", tag),
-            Error::UnknownDiscriminant { discriminant } => {
-                write!(f, "unknown discriminant {}", discriminant)
-            }
+            Error::BufferTooShort { required, had } => fmt
+                .debug_struct("BufferTooShort")
+                .field("required", required)
+                .field("had", had)
+                .finish(),
+            Error::VarintOverflow { bytes } => fmt
+                .debug_struct("VarintOverflow")
+                .field("bytes", bytes)
+                .finish(),
+            Error::UnsignedOverflow { value } => fmt
+                .debug_struct("UnsignedOverflow")
+                .field("value", value)
+                .finish(),
+            Error::SignedOverflow { value } => fmt
+                .debug_struct("SignedOverflow")
+                .field("value", value)
+                .finish(),
+            Error::TagTooLarge { tag } => fmt
+                .debug_struct("TagTooLarge")
+                .field("tag", tag)
+                .finish(),
+            Error::UnknownDiscriminant { discriminant } => fmt
+                .debug_struct("UnknownDiscriminant")
+                .field("discriminant", discriminant)
+                .finish(),
         }
     }
 }

@@ -8,11 +8,13 @@ use arrrg_derive::CommandLine;
 
 use biometrics::{Collector, Counter};
 
+use prototk_derive::Message;
+
 use tatl::{HeyListen, Stationary};
 
 use utilz::lockfile::Lockfile;
 
-use zerror::Z;
+use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -58,30 +60,53 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub enum Error {
+    #[prototk(376832, message)]
+    Success {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+    #[prototk(376833, message)]
     SystemError {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         what: String,
     },
+    #[prototk(376834, message)]
     Corruption {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         what: String,
     },
+    #[prototk(376835, message)]
     NewlineDisallowed {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         what: String,
     },
+    #[prototk(376836, message)]
     DbExists {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         path: PathBuf,
     },
+    #[prototk(376837, message)]
     DbNotExist {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         path: PathBuf,
     },
+    #[prototk(376838, message)]
     LockNotObtained {
+        #[prototk(1, message)]
         core: ErrorCore,
+        #[prototk(2, string)]
         path: PathBuf,
     },
 }
@@ -89,6 +114,7 @@ pub enum Error {
 impl Error {
     fn core(&self) -> &ErrorCore {
         match self {
+            Error::Success { core, .. } => { core } ,
             Error::SystemError { core, .. } => { core } ,
             Error::Corruption { core, .. } => { core } ,
             Error::NewlineDisallowed { core, .. } => { core } ,
@@ -100,12 +126,21 @@ impl Error {
 
     fn core_mut(&mut self) -> &mut ErrorCore {
         match self {
+            Error::Success { core, .. } => { core } ,
             Error::SystemError { core, .. } => { core } ,
             Error::Corruption { core, .. } => { core } ,
             Error::NewlineDisallowed { core, .. } => { core } ,
             Error::DbExists { core, .. } => { core } ,
             Error::DbNotExist { core, .. } => { core } ,
             Error::LockNotObtained { core, .. } => { core } ,
+        }
+    }
+}
+
+impl Default for Error {
+    fn default() -> Error {
+        Error::Success {
+            core: ErrorCore::default(),
         }
     }
 }
@@ -119,32 +154,22 @@ impl Z for Error {
     }
 
     fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.set_token(identifier, value);
-        self
-    }
-
-    fn set_token(&mut self, identifier: &str, value: &str) {
         self.core_mut().set_token(identifier, value);
+        self
     }
 
     fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.set_url(identifier, url);
-        self
-    }
-
-    fn set_url(&mut self, identifier: &str, url: &str) {
         self.core_mut().set_url(identifier, url);
+        self
     }
 
     fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.set_variable(variable, x);
+        self.core_mut().set_variable(variable, x);
         self
     }
-
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        self.core_mut().set_variable(variable, x);
-    }
 }
+
+iotoz!{Error}
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
@@ -155,25 +180,6 @@ impl From<std::io::Error> for Error {
 impl From<std::str::Utf8Error> for Error {
     fn from(what: std::str::Utf8Error) -> Error {
         Error::Corruption { core: ErrorCore::default(), what: "utf8 error:".to_owned() + &what.to_string() }
-    }
-}
-
-//////////////////////////////////////////// MapIoError ////////////////////////////////////////////
-
-pub trait MapIoError {
-    type Result;
-
-    fn map_io_err(self) -> Self::Result;
-}
-
-impl<T> MapIoError for Result<T, std::io::Error> {
-    type Result = Result<T, Error>;
-
-    fn map_io_err(self) -> Self::Result {
-        match self {
-            Ok(x) => Ok(x),
-            Err(e) => Err(Error::from(e)),
-        }
     }
 }
 
@@ -222,17 +228,17 @@ impl Manifest {
             return Err(Error::DbNotExist { core: ErrorCore::default(), path: root });
         } else if !root.is_dir() {
             create_dir(&root)
-                .map_io_err()
+                .as_z()
                 .with_variable("root", root.to_string_lossy())?;
         }
         // Deal with the lockfile first.
         let lockfile = if options.fail_if_locked {
             Lockfile::lock(LOCKFILE(&root))
-                .map_io_err()
+                .as_z()
                 .with_variable("root", root.to_string_lossy())?
         } else {
             Lockfile::wait(LOCKFILE(&root))
-                .map_io_err()
+                .as_z()
                 .with_variable("root", root.to_string_lossy())?
         };
         match lockfile {
@@ -343,7 +349,7 @@ impl Manifest {
         if !path.is_file() {
             return Ok(BTreeSet::new());
         }
-        let file = File::open(&path).map_io_err().with_variable("path", path.to_string_lossy())?;
+        let file = File::open(&path).as_z().with_variable("path", path.to_string_lossy())?;
         let file = BufReader::new(file);
         let mut paths = BTreeSet::new();
         for (idx, line) in file.lines().enumerate() {

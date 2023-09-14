@@ -9,7 +9,7 @@ use one_two_eight::{generate_id, generate_id_prototk};
 
 use prototk_derive::Message;
 
-use zerror:: Z;
+use zerror::{iotoz, Z};
 
 use zerror_core::ErrorCore;
 
@@ -148,31 +148,31 @@ pub enum Error {
 impl Error {
     fn core(&self) -> &ErrorCore {
         match self {
-            Error::Success { core, .. } => { core },
-            Error::SerializationError { core, .. } => { core } ,
-            Error::UnknownServerName { core, .. } => { core } ,
-            Error::UnknownMethodName { core, .. } => { core } ,
-            Error::RequestTooLarge { core, .. } => { core } ,
-            Error::TransportFailure { core, .. } => { core } ,
-            Error::EncryptionMisconfiguration { core, .. } => { core } ,
-            Error::UlimitParseError { core, .. } => { core } ,
-            Error::OsError { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
+            Error::Success { core, .. } => core,
+            Error::SerializationError { core, .. } => core,
+            Error::UnknownServerName { core, .. } => core,
+            Error::UnknownMethodName { core, .. } => core,
+            Error::RequestTooLarge { core, .. } => core,
+            Error::TransportFailure { core, .. } => core,
+            Error::EncryptionMisconfiguration { core, .. } => core,
+            Error::UlimitParseError { core, .. } => core,
+            Error::OsError { core, .. } => core,
+            Error::LogicError { core, .. } => core,
         }
     }
 
     fn core_mut(&mut self) -> &mut ErrorCore {
         match self {
-            Error::Success { core, .. } => { core },
-            Error::SerializationError { core, .. } => { core } ,
-            Error::UnknownServerName { core, .. } => { core } ,
-            Error::UnknownMethodName { core, .. } => { core } ,
-            Error::RequestTooLarge { core, .. } => { core } ,
-            Error::TransportFailure { core, .. } => { core } ,
-            Error::EncryptionMisconfiguration { core, .. } => { core } ,
-            Error::UlimitParseError { core, .. } => { core } ,
-            Error::OsError { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
+            Error::Success { core, .. } => core,
+            Error::SerializationError { core, .. } => core,
+            Error::UnknownServerName { core, .. } => core,
+            Error::UnknownMethodName { core, .. } => core,
+            Error::RequestTooLarge { core, .. } => core,
+            Error::TransportFailure { core, .. } => core,
+            Error::EncryptionMisconfiguration { core, .. } => core,
+            Error::UlimitParseError { core, .. } => core,
+            Error::OsError { core, .. } => core,
+            Error::LogicError { core, .. } => core,
         }
     }
 }
@@ -186,38 +186,50 @@ impl Default for Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Error::Success { core: _ } => {
-                write!(f, "success or default error")
-            },
-            Error::SerializationError { core: _, err, context } => {
-                write!(f, "serialization error in {}: {}", context, err)
-            },
-            Error::UnknownServerName { core: _, name } => {
-                write!(f, "unknown server name {}", name)
-            },
-            Error::UnknownMethodName { core: _, name } => {
-                write!(f, "unknown method {}", name)
-            },
-            Error::RequestTooLarge { core: _, size } => {
-                write!(f, "request too large: {} bytes", size)
-            },
-            Error::TransportFailure { core: _, what } => {
-                write!(f, "transport failure: {}", what)
-            }
-            Error::EncryptionMisconfiguration { core: _, what } => {
-                write!(f, "encyrption misconfiguration: {}", what)
-            }
-            Error::UlimitParseError { core: _, what } => {
-                write!(f, "ulimit parse failure: {}", what)
-            }
-            Error::OsError { core: _, what } => {
-                write!(f, "os error: {}", what)
-            }
-            Error::LogicError { core: _, what } => {
-                write!(f, "logic error: {}", what)
-            }
+            Error::Success { core: _ } => fmt.debug_struct("Success").finish(),
+            Error::SerializationError {
+                core: _,
+                err,
+                context,
+            } => fmt
+                .debug_struct("SerializationError")
+                .field("context", context)
+                .field("err", err)
+                .finish(),
+            Error::UnknownServerName { core: _, name } => fmt
+                .debug_struct("UnknownServerName")
+                .field("name", name)
+                .finish(),
+            Error::UnknownMethodName { core: _, name } => fmt
+                .debug_struct("UnknownMethodName")
+                .field("name", name)
+                .finish(),
+            Error::RequestTooLarge { core: _, size } => fmt
+                .debug_struct("RequestTooLarge")
+                .field("size", size)
+                .finish(),
+            Error::TransportFailure { core: _, what } => fmt
+                .debug_struct("TransportFailure")
+                .field("what", what)
+                .finish(),
+            Error::EncryptionMisconfiguration { core: _, what } => fmt
+                .debug_struct("EncryptionMisconfiguration")
+                .field("what", what)
+                .finish(),
+            Error::UlimitParseError { core: _, what } => fmt
+                .debug_struct("UlimitParseError")
+                .field("what", what)
+                .finish(),
+            Error::OsError { core: _, what } => fmt
+                .debug_struct("OsError")
+                .field("what", what)
+                .finish(),
+            Error::LogicError { core: _, what } => fmt
+                .debug_struct("LogicError")
+                .field("what", what)
+                .finish(),
         }
     }
 }
@@ -228,6 +240,51 @@ impl From<buffertk::Error> for Error {
             core: ErrorCore::default(),
             err: err.into(),
             context: "buffertk unpack error".to_string(),
+        }
+    }
+}
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Error) -> bool {
+        match (self, other) {
+            (Error::Success { core: _ }, Error::Success { core: _ }) => { true }
+            (Error::SerializationError { core: _, err: err_lhs, context: context_lhs },
+             Error::SerializationError { core: _, err: err_rhs, context: context_rhs }) => {
+                err_lhs == err_rhs && context_lhs == context_rhs
+            },
+            (Error::UnknownServerName { core: _, name: name_lhs },
+             Error::UnknownServerName { core: _, name: name_rhs }) => {
+                name_lhs == name_rhs
+            },
+            (Error::UnknownMethodName { core: _, name: name_lhs },
+             Error::UnknownMethodName { core: _, name: name_rhs }) => {
+                name_lhs == name_rhs
+            },
+            (Error::RequestTooLarge { core: _, size: size_lhs },
+             Error::RequestTooLarge { core: _, size: size_rhs }) => {
+                size_lhs == size_rhs
+            },
+            (Error::TransportFailure { core: _, what: what_lhs },
+             Error::TransportFailure { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (Error::EncryptionMisconfiguration { core: _, what: what_lhs },
+             Error::EncryptionMisconfiguration { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (Error::UlimitParseError { core: _, what: what_lhs },
+             Error::UlimitParseError { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (Error::OsError { core: _, what: what_lhs },
+             Error::OsError { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (Error::LogicError { core: _, what: what_lhs },
+             Error::LogicError { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (_, _) => { false }
         }
     }
 }
@@ -259,32 +316,25 @@ impl Z for Error {
     }
 
     fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.set_token(identifier, value);
-        self
-    }
-
-    fn set_token(&mut self, identifier: &str, value: &str) {
         self.core_mut().set_token(identifier, value);
+        self
     }
 
     fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.set_url(identifier, url);
-        self
-    }
-
-    fn set_url(&mut self, identifier: &str, url: &str) {
         self.core_mut().set_url(identifier, url);
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.set_variable(variable, x);
         self
     }
 
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
+    where
+        X: Debug,
+    {
         self.core_mut().set_variable(variable, x);
+        self
     }
 }
+
+iotoz! {Error}
 
 ////////////////////////////////////////////// Status //////////////////////////////////////////////
 
@@ -292,8 +342,7 @@ pub type Status = Result<Result<Buffer, Buffer>, Error>;
 
 ////////////////////////////////////////////// Service /////////////////////////////////////////////
 
-pub trait Service {
-}
+pub trait Service {}
 
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
@@ -396,17 +445,13 @@ macro_rules! client_method {
         fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error> {
             use buffertk::{stack_pack, Packable, Unpackable};
             let req = stack_pack(req).to_vec();
-            let status = self.client.call(ctx, stringify!($service), stringify!($method), &req);
+            let status = self
+                .client
+                .call(ctx, stringify!($service), stringify!($method), &req);
             match status {
-                Ok(Ok(msg)) => {
-                    Ok(<$resp as Unpackable>::unpack(msg.as_bytes())?.0)
-                },
-                Ok(Err(msg)) => {
-                    Err(<$error as Unpackable>::unpack(msg.as_bytes())?.0)
-                },
-                Err(err) => {
-                    Err(err.into())
-                },
+                Ok(Ok(msg)) => Ok(<$resp as Unpackable>::unpack(msg.as_bytes())?.0),
+                Ok(Err(msg)) => Err(<$error as Unpackable>::unpack(msg.as_bytes())?.0),
+                Err(err) => Err(err.into()),
             }
         }
     };
@@ -457,5 +502,131 @@ impl ServerRegistry {
 
     pub fn get_server(&self, name: &str) -> Option<&dyn Server> {
         self.registry.get(name).map(|x| x.as_ref())
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use buffertk::{stack_pack, Unpackable};
+
+    use super::*;
+
+    fn do_test(s: &str, exp: Error) {
+        assert_eq!(s, exp.to_string());
+        let buf = stack_pack(&exp).to_vec();
+        let got = Error::unpack(&buf).unwrap().0;
+        assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn success() {
+        do_test(
+            "Success",
+            Error::Success {
+                core: ErrorCore::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn serialization_error() {
+        do_test(
+            "SerializationError { context: \"Some context\", err: Success }",
+            Error::SerializationError {
+                core: ErrorCore::default(),
+                context: "Some context".to_owned(),
+                err: prototk::Error::Success,
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_server_name() {
+        do_test(
+            "UnknownServerName { name: \"hostname\" }",
+            Error::UnknownServerName {
+                core: ErrorCore::default(),
+                name: "hostname".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_method_name() {
+        do_test(
+            "UnknownMethodName { name: \"method\" }",
+            Error::UnknownMethodName {
+                core: ErrorCore::default(),
+                name: "method".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn request_too_large() {
+        do_test(
+            "RequestTooLarge { size: 10 }",
+            Error::RequestTooLarge {
+                core: ErrorCore::default(),
+                size: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn transport_failure() {
+        do_test(
+            "TransportFailure { what: \"socket closed\" }",
+            Error::TransportFailure {
+                core: ErrorCore::default(),
+                what: "socket closed".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn encryption_misconfiguration() {
+        do_test(
+            "EncryptionMisconfiguration { what: \"ssl misconfig\" }",
+            Error::EncryptionMisconfiguration {
+                core: ErrorCore::default(),
+                what: "ssl misconfig".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn ulimit_parse_error() {
+        do_test(
+            "UlimitParseError { what: \"could not read\" }",
+            Error::UlimitParseError {
+                core: ErrorCore::default(),
+                what: "could not read".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn os_error() {
+        do_test(
+            "OsError { what: \"some I/O error\" }",
+            Error::OsError {
+                core: ErrorCore::default(),
+                what: "some I/O error".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn logic_error() {
+        do_test(
+            "LogicError { what: \"some logic error\" }",
+            Error::LogicError {
+                core: ErrorCore::default(),
+                what: "some logic error".to_owned(),
+            }
+        );
     }
 }

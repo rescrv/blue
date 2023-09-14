@@ -26,9 +26,11 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
     fn long_form(&self) -> String {
         match self {
             Ok(_) => {
-                panic!("called \"<Result<T, E> as Z>.long_form()\" on Ok Result");
-            }
-            Err(e) => e.long_form(),
+                panic!("called long_form() on Ok Result");
+            },
+            Err(e) => {
+                e.long_form()
+            },
         }
     }
 
@@ -52,4 +54,22 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
             Err(e) => Err(e.with_variable(variable, x)),
         }
     }
+}
+
+#[macro_export]
+macro_rules! iotoz {
+    ($error:ident) => {
+        trait IoToZ<T> {
+            fn as_z(self) -> Result<T, $error>;
+        }
+
+        impl<T, E: Into<$error>> IoToZ<T> for Result<T, E> {
+            fn as_z(self) -> Result<T, $error> {
+                match self {
+                    Ok(t) => Ok(t),
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
+    };
 }

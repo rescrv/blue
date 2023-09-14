@@ -14,7 +14,7 @@ use tatl::{HeyListen, Stationary};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{LOGIC_ERROR, Error, MapIoError};
+use super::{LOGIC_ERROR, Error, IoToZ};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -51,7 +51,7 @@ impl FileHandle {
     }
 
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
-        self.file.read_exact_at(buf, offset).map_io_err()
+        self.file.read_exact_at(buf, offset).as_z()
             .with_variable("fd", self.file.as_raw_fd())
             .with_variable("offset", offset)
             .with_variable("amount", buf.len())

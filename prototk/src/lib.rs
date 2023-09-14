@@ -2,7 +2,7 @@
 //! that focus on ease of use, code generation, or performance, prototk aims to expose every level
 //! of abstraction it has internally so that developers can use as much or as little as they wish.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 
 pub mod field_types;
 pub mod zigzag;
@@ -10,15 +10,11 @@ pub mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use zerror::Z;
-
 use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error captures the possible error conditions for packing and unpacking.
-// TODO(rescrv):  Some notion of the error context so that these can be tracked down.
-// NOTE(rescrv):  When extending this, add a test to tests/error.rs.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Error {
     /// The default error is succes.
@@ -69,42 +65,54 @@ pub enum Error {
     },
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Error {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Error::Success => {
-                write!(f, "success or default error")
-            }
-            Error::BufferTooShort { required, had } => {
-                write!(f, "buffer too short:  expected {}, had {}", required, had)
-            }
-            Error::InvalidFieldNumber { field_number, what } => {
-                write!(f, "invalid field_number={}: {}", field_number, what)
-            }
-            Error::UnhandledWireType { wire_type } => write!(
-                f,
-                "wire_type={} not handled by this implementation",
-                wire_type
-            ),
-            Error::TagTooLarge { tag } => write!(f, "tag={} overflows 32-bits", tag),
-            Error::VarintOverflow { bytes } => {
-                write!(f, "varint did not fit in space={} bytes", bytes)
-            }
-            Error::UnsignedOverflow { value } => {
-                write!(f, "unsigned integer cannot hold value={}", value)
-            }
-            Error::SignedOverflow { value } => {
-                write!(f, "signed integer cannot hold value={}", value)
-            }
-            Error::WrongLength { required, had } => {
-                write!(f, "buffer wrong length: expected {}, had {}", required, had)
-            }
-            Error::StringEncoding => {
-                write!(f, "strings must be encoded in UTF-8")
-            }
-            Error::UnknownDiscriminant { discriminant } => {
-                write!(f, "unknown discriminant {}", discriminant)
-            }
+            Error::Success {} => fmt
+                .debug_struct("SerializationError")
+                .finish(),
+            Error::BufferTooShort { required, had } => fmt
+                .debug_struct("BufferTooShort")
+                .field("required", required)
+                .field("had", had)
+                .finish(),
+            Error::InvalidFieldNumber { field_number, what } => fmt
+                .debug_struct("InvalidFieldNumber")
+                .field("field_number", field_number)
+                .field("what", what)
+                .finish(),
+            Error::UnhandledWireType { wire_type } => fmt
+                .debug_struct("UnhandledWireType")
+                .field("wire_type", wire_type)
+                .finish(),
+            Error::TagTooLarge { tag } => fmt
+                .debug_struct("TagTooLarge")
+                .field("tag", tag)
+                .finish(),
+            Error::VarintOverflow { bytes } => fmt
+                .debug_struct("VarintOverflow")
+                .field("bytes", bytes)
+                .finish(),
+            Error::UnsignedOverflow { value } => fmt
+                .debug_struct("UnsignedOverflow")
+                .field("value", value)
+                .finish(),
+            Error::SignedOverflow { value } => fmt
+                .debug_struct("SignedOverflow")
+                .field("value", value)
+                .finish(),
+            Error::WrongLength { required, had } => fmt
+                .debug_struct("WrongLength")
+                .field("required", required)
+                .field("had", had)
+                .finish(),
+            Error::StringEncoding => fmt
+                .debug_struct("StringEncoding")
+                .finish(),
+            Error::UnknownDiscriminant { discriminant } => fmt
+                .debug_struct("UnknownDiscriminant")
+                .field("discriminant", discriminant)
+                .finish(),
         }
     }
 }
@@ -121,26 +129,6 @@ impl From<buffertk::Error> for Error {
             buffertk::Error::TagTooLarge { tag } => Error::TagTooLarge { tag },
             buffertk::Error::UnknownDiscriminant { discriminant } => Error::UnknownDiscriminant { discriminant },
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}", self)
-    }
-
-    fn with_token(self, _: &str, _: &str) -> Self::Error {
-        self
-    }
-
-    fn with_url(self, _: &str, _: &str) -> Self::Error {
-        self
-    }
-
-    fn with_variable<X: Debug>(self, _: &str, _: X) -> Self::Error {
-        self
     }
 }
 
