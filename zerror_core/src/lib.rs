@@ -102,38 +102,26 @@ impl Z for ErrorCore {
     }
 
     fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.set_token(identifier, value);
-        self
-    }
-
-    fn set_token(&mut self, identifier: &str, value: &str) {
         self.internals.toks.push(Token {
             identifier: identifier.to_owned(),
             value: value.to_owned(),
         });
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.set_url(identifier, url);
         self
     }
 
-    fn set_url(&mut self, identifier: &str, url: &str) {
+    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
         self.internals.urls.push(Url {
             identifier: identifier.to_owned(),
             url: url.to_owned(),
         });
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error {
-        self.set_variable(variable, x);
         self
     }
 
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error {
         self.internals.vars.push(Variable {
             identifier: variable.to_owned(),
             value: format!("{:?}", x),
         });
+        self
     }
 }

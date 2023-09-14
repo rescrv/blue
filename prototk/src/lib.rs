@@ -135,19 +135,13 @@ impl Z for Error {
         self
     }
 
-    fn set_token(&mut self, _: &str, _: &str) {}
-
     fn with_url(self, _: &str, _: &str) -> Self::Error {
         self
     }
 
-    fn set_url(&mut self, _: &str, _: &str) {}
-
     fn with_variable<X: Debug>(self, _: &str, _: X) -> Self::Error {
         self
     }
-
-    fn set_variable<X: Debug>(&mut self, _: &str, _: X) {}
 }
 
 impl Packable for Error {

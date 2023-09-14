@@ -14,19 +14,13 @@ pub trait Z {
 
     /// Add a token.
     fn with_token(self, identifier: &str, value: &str) -> Self::Error;
-    /// Add a token.
-    fn set_token(&mut self, identifier: &str, value: &str);
     /// Add a URL.
     fn with_url(self, identifier: &str, url: &str) -> Self::Error;
-    /// Add a URL.
-    fn set_url(&mut self, identifier: &str, url: &str);
     /// Add debug formatting of a local variable.
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
-    /// Add debug formatting of a local variable.
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X);
 }
 
-impl<T, E: Z<Error = E>> Z for Result<T, E> {
+impl<T, E: Z<Error=E>> Z for Result<T, E> {
     type Error = Result<T, E>;
 
     fn long_form(&self) -> String {
@@ -45,12 +39,6 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
         }
     }
 
-    fn set_token(&mut self, identifier: &str, value: &str) {
-        if let Err(e) = self {
-            e.set_token(identifier, value);
-        }
-    }
-
     fn with_url(self, identifier: &str, url: &str) -> Self::Error {
         match self {
             Ok(_) => self,
@@ -58,22 +46,10 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
         }
     }
 
-    fn set_url(&mut self, identifier: &str, url: &str) {
-        if let Err(e) = self {
-            e.set_url(identifier, url);
-        }
-    }
-
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error {
         match self {
             Ok(_) => self,
             Err(e) => Err(e.with_variable(variable, x)),
-        }
-    }
-
-    fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        if let Err(e) = self {
-            e.set_variable(variable, x);
         }
     }
 }
