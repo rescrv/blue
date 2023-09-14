@@ -20,8 +20,7 @@ use sst::{compare_bytes, Builder, Cursor, Sst, SstBuilder, SstMetadata, SstMulti
 
 use tatl::{Stationary, HeyListen};
 
-use tuple_key::{FromIntoTupleKey, TupleKey};
-use tuple_key_derive::FromIntoTupleKey;
+use tuple_key::TupleKey;
 
 use utilz::lockfile::Lockfile;
 use utilz::time::now;
@@ -456,11 +455,9 @@ impl Metadata {
 
 //////////////////////////////////////////// MetadataKey ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, FromIntoTupleKey)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MetadataKey (
-    #[tuple_key(1)]
     [u8; 16],
-    #[tuple_key(1)]
     [u8; 32],
 );
 
@@ -551,6 +548,8 @@ impl Compaction {
         let mut meta = SstBuilder::new(&meta_file, self.options.sst.clone())?;
         for (digest, buf) in digests.into_iter() {
             let key = MetadataKey(self.options.meta_id.id, digest.digest());
+            todo!();
+            /*
             let tuple_key = key.into_tuple_key();
             match buf {
                 Some(value) => {
@@ -560,6 +559,7 @@ impl Compaction {
                     meta.del(tuple_key.as_bytes(), meta_now)?;
                 },
             }
+            */
         }
         meta.seal()?;
         rename(meta_file, meta_file_final)?;
@@ -624,6 +624,7 @@ impl DB {
         let mut meta = SstBuilder::new(&meta_file, self.options.sst.clone())?;
         for metadata in ssts.iter() {
             let key = MetadataKey(self.options.meta_id.id, metadata.setsum);
+            /*
             let tuple_key = key.into_tuple_key();
             let ts = std::fs::metadata(SST_FILE(&self.root, metadata.setsum()))?.modified()?.duration_since(std::time::UNIX_EPOCH).map_err(|err| {
                 Error::SystemError {
@@ -633,6 +634,8 @@ impl DB {
             })?.as_secs();
             let value = stack_pack(metadata).to_buffer();
             meta.put(tuple_key.as_bytes(), ts, value.as_bytes())?;
+            */
+            todo!();
         }
         meta.seal()?;
         rename(meta_file, meta_file_final)?;
