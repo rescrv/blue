@@ -162,6 +162,11 @@ impl<T: Clone> WaitList<T> {
     }
 
     pub fn unlink(&self, mut guard: WaitGuard<T>) {
+        assert!(guard.owned, "must own the guard to explicitly unlink; it is safe to leave unlinking to the drop call");
+        self._unlink(&mut guard);
+    }
+
+    fn _unlink(&self, guard: &mut WaitGuard<T>) {
         let index = guard.index;
         let notify = {
             let mut state = self.state.lock().unwrap();
@@ -179,6 +184,7 @@ impl<T: Clone> WaitList<T> {
         if notify {
             self.wait_waiter_available.notify_one();
         }
+        guard.owned = false;
         guard.index = u64::max_value();
         UNLINK.click();
     }
@@ -305,7 +311,9 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
 
 impl<'a, T: Clone + 'a> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
-        assert!(!self.owned || u64::max_value() == self.index, "unlink not called on dropped guard");
+        if self.owned {
+            self.list._unlink(self)
+        }
     }
 }
 
