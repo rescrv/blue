@@ -1,3 +1,4 @@
+pub mod collector;
 pub mod state_hash_table;
 pub mod wait_list;
 

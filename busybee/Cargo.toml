@@ -19,7 +19,7 @@ prototk = { path = "../prototk", version = "0.3" }
 prototk_derive = { path = "../prototk_derive", version = "0.3" }
 rpc_pb = { path = "../rpc_pb", version = "0.2" }
 split_channel = { path = "../split_channel", version = "0.2" }
-sync42 = { path = "../sync42", version = "0.2" }
+sync42 = { path = "../sync42", version = "0.3" }
 tatl = { path = "../tatl", version = "0.2" }
 utilz = { path = "../utilz", version = "0.1" }
 zerror = { path = "../zerror", version = "0.1" }
