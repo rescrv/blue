@@ -1,8 +1,6 @@
 use std::ops::Deref;
 use std::sync::Mutex;
 
-use buffertk::Buffer;
-
 use prototk_derive::Message;
 
 use rpc_pb::{service, Context};
@@ -30,7 +28,7 @@ impl<'a> Default for CacheLoad<'a> {
 #[derive(Debug, Default, Message)]
 pub struct CacheResponse {
     #[prototk(2, bytes)]
-    val: Option<Buffer>,
+    val: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Message)]
@@ -78,7 +76,7 @@ impl Cache for CachedRegister {
         let guard = self.value.lock().unwrap();
         let (key, value) = guard.deref();
         if key == req.key {
-            let val = Some(Buffer::from(value));
+            let val = Some(value.clone());
             Ok(CacheResponse { val })
         } else {
             Ok(CacheResponse { val: None })

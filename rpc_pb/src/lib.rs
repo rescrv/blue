@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
-use buffertk::Buffer;
-
 use biometrics::Counter;
 
 use one_two_eight::{generate_id, generate_id_prototk};
@@ -338,7 +336,7 @@ iotoz! {Error}
 
 ////////////////////////////////////////////// Status //////////////////////////////////////////////
 
-pub type Status = Result<Result<Buffer, Buffer>, Error>;
+pub type Status = Result<Result<Vec<u8>, Vec<u8>>, Error>;
 
 ////////////////////////////////////////////// Service /////////////////////////////////////////////
 
@@ -371,7 +369,7 @@ pub struct Frame {
 #[derive(Clone, Debug, Default, Message)]
 pub struct Request<'a> {
     #[prototk(1, string)]
-    pub server: &'a str,
+    pub service: &'a str,
     #[prototk(2, string)]
     pub method: &'a str,
     #[prototk(3, uint64)]
@@ -449,8 +447,8 @@ macro_rules! client_method {
                 .client
                 .call(ctx, stringify!($service), stringify!($method), &req);
             match status {
-                Ok(Ok(msg)) => Ok(<$resp as Unpackable>::unpack(msg.as_bytes())?.0),
-                Ok(Err(msg)) => Err(<$error as Unpackable>::unpack(msg.as_bytes())?.0),
+                Ok(Ok(msg)) => Ok(<$resp as Unpackable>::unpack(&msg)?.0),
+                Ok(Err(msg)) => Err(<$error as Unpackable>::unpack(&msg)?.0),
                 Err(err) => Err(err.into()),
             }
         }
@@ -469,10 +467,10 @@ macro_rules! server_methods {
                     let ans: Result<$resp, $error> = self.server.$method(ctx, req);
                     match ans {
                         Ok(resp) => {
-                            Ok(Ok(stack_pack(resp).to_buffer()))
+                            Ok(Ok(stack_pack(resp).to_vec()))
                         }
                         Err(err) => {
-                            Ok(Err(stack_pack(err).to_buffer()))
+                            Ok(Err(stack_pack(err).to_vec()))
                         }
                     }
                 }
