@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -32,6 +33,13 @@ impl<T> SpinLock<T> {
 
     pub fn into_inner(self) -> T {
         self.data.into_inner()
+    }
+}
+
+impl<T> Debug for SpinLock<T> {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // TODO(rescrv): Make this T the type of T.
+        write!(fmt, "SpinLock<T>")
     }
 }
 
