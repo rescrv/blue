@@ -14,16 +14,16 @@ use std::sync::{Mutex, MutexGuard};
 pub trait Coordination<T> {
     /// Acquire the monitor.  Returns true if and only if the monitor can enter the critical
     /// section.
-    fn acquire<'a>(guard: MutexGuard<'a, Self>, t: &mut T) -> (bool, MutexGuard<'a, Self>);
+    fn acquire<'a: 'b, 'b>(guard: MutexGuard<'a, Self>, t: &'b mut T) -> (bool, MutexGuard<'a, Self>);
     /// Release the monitor.  In a proper monitor [`Coordination::release`] will always follow a call to
     /// acquire on the same thread.  Release is responsible for waking threads blocked in acquire.
-    fn release<'a>(guard: MutexGuard<'a, Self>, t: &mut T) -> MutexGuard<'a, Self>;
+    fn release<'a: 'b, 'b>(guard: MutexGuard<'a, Self>, t: &'b mut T) -> MutexGuard<'a, Self>;
 }
 
 /// Critical section captures the mutually-exclusive section of the monitor.  The monitor ensures
 /// that there will only be one thread in the [`CriticalSection::critical_section`] at a time.
 pub trait CriticalSection<T> {
-    fn critical_section(&mut self, t: &mut T);
+    fn critical_section<'a: 'b, 'b>(&'a mut self, t: &'b mut T);
 }
 
 /// Monitor provides the monitor pattern.  It will synchronize calls to acquire and release and the

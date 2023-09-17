@@ -34,7 +34,7 @@ struct CoalesceWrites {
 }
 
 impl Coordination<WriteState<'_>> for CoalesceWrites {
-    fn acquire<'a>(mut guard: MutexGuard<'a, Self>, ws: &mut WriteState<'_>) -> (bool, MutexGuard<'a, Self>) {
+    fn acquire<'a: 'b, 'b>(mut guard: MutexGuard<'a, Self>, ws: &'b mut WriteState<'_>) -> (bool, MutexGuard<'a, Self>) {
         loop {
             if !guard.writer_has_it {
                 WRITER_TAKES_IT.click();
@@ -55,7 +55,7 @@ impl Coordination<WriteState<'_>> for CoalesceWrites {
         }
     }
 
-    fn release<'a>(mut guard: MutexGuard<'a, Self>, ws: &mut WriteState<'_>) -> MutexGuard<'a, Self> {
+    fn release<'a: 'b, 'b>(mut guard: MutexGuard<'a, Self>, ws: &'b mut WriteState<'_>) -> MutexGuard<'a, Self> {
         guard.writer_has_it = false;
         if guard.writer_waiting {
             RELEASE_NOTIFIES.click();
@@ -75,7 +75,7 @@ impl WriteWithMutualExclusion {
 }
 
 impl CriticalSection<WriteState<'_>> for WriteWithMutualExclusion {
-    fn critical_section(&mut self, ws: &mut WriteState) {
+    fn critical_section<'a: 'b, 'b>(&'a mut self, ws: &'b mut WriteState) {
         let mut writes = Vec::new();
         std::mem::swap(&mut ws.writes, &mut writes);
         for write in writes.into_iter() {
