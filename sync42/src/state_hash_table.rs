@@ -1,10 +1,10 @@
-//! 
+//!
 //! ```
 //! use std::sync::atomic::{AtomicBool, Ordering};
 //! use std::sync::Arc;
 //! use sync42::state_hash_table::{Handle, Key, Value, StateHashTable};
 //!
-//! #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+//! #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 //! struct SampleKey {
 //!     key: u64,
 //! }
@@ -25,8 +25,8 @@
 //!     finished: AtomicBool,
 //! }
 //!
-//! impl From<&SampleKey> for SampleValue {
-//!     fn from(key: &SampleKey) -> Self {
+//! impl From<SampleKey> for SampleValue {
+//!     fn from(key: SampleKey) -> Self {
 //!         Self {
 //!             finished: AtomicBool::default(),
 //!         }
@@ -44,17 +44,17 @@
 //! const KEY: SampleKey = SampleKey::new(42);
 //!
 //! // There's nothing there until we create it.
-//! assert!(sht.get_state(&KEY).is_none());
-//! let mut state1 = sht.create_state(&KEY);
+//! assert!(sht.get_state(KEY).is_none());
+//! let mut state1 = sht.create_state(KEY);
 //! assert!(state1.is_some());
 //! let mut state1 = state1.unwrap();
 //!
 //! // Attempts to create twice fail with None.
-//! let mut state2 = sht.create_state(&KEY);
+//! let mut state2 = sht.create_state(KEY);
 //! assert!(state2.is_none());
 //!
 //! // But get_state will work.
-//! let mut state3 = sht.get_state(&KEY);
+//! let mut state3 = sht.get_state(KEY);
 //! assert!(state3.is_some());
 //! let mut state3 = state3.unwrap();
 //!
@@ -70,7 +70,7 @@
 //! drop(state3);
 //!
 //! // Notice that we use [get_state] here.  It uses the existing state.
-//! let mut state4 = sht.get_state(&KEY);
+//! let mut state4 = sht.get_state(KEY);
 //! assert!(state4.is_some());
 //! let mut state4 = state4.unwrap();
 //! state4.finished.store(true, Ordering::Relaxed);
@@ -81,7 +81,7 @@
 //! // Get state fails because we marked it finished and dropped all references.  Only when the
 //! // last reference is dropped will the item be collected, even if the outcome of the
 //! // [finished()] call changes.
-//! let mut state5 = sht.get_state(&KEY);
+//! let mut state5 = sht.get_state(KEY);
 //! assert!(state5.is_none());
 //! ```
 
@@ -129,12 +129,12 @@ pub trait Value: Debug + Default + 'static {
 
 pub struct Handle<'a, K: Key, V: Value> {
     table: &'a StateHashTable<K, V>,
-    key: &'a K,
+    key: K,
     value: Arc<V>,
 }
 
 impl<'a, K: Key, V: Value> Handle<'a, K, V> {
-    fn new(table: &'a StateHashTable<K, V>, key: &'a K, value: Arc<V>) -> Self  {
+    fn new(table: &'a StateHashTable<K, V>, key: K, value: Arc<V>) -> Self  {
         Self {
             table,
             key,
@@ -170,7 +170,7 @@ impl<'a, K: Key, V: Value> Drop for Handle<'a, K, V> {
         // will follow the rules to create a value.
         if Arc::strong_count(&self.value) == 2 && (*self.value).finished() {
             ENTRY_REMOVED.click();
-            entries.remove(self.key);
+            entries.remove(&self.key);
         }
         // NOTE(rescrv):  Here we're safe to drop the handle.  If the count is less than two we've
         // already cleaned up all but self.  If the count is two we cleanup when finished.
@@ -192,14 +192,14 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         }
     }
 
-    pub fn create_state<'a>(&'a self, key: &'a K) -> Option<Handle<'a, K, V>>
+    pub fn create_state<'a: 'b, 'b>(&'a self, key: K) -> Option<Handle<'a, K, V>>
     where
-        V: From<&'a K>,
+        V: From<K>,
     {
-        let value = Arc::new(V::from(key));
+        let value = Arc::new(V::from(key.clone()));
         let valuep = Arc::clone(&value);
         let mut entries = self.entries.lock().unwrap();
-        if !entries.contains_key(key) {
+        if !entries.contains_key(&key) {
             ENTRY_INSERTED.click();
             entries.insert(key.clone(), value);
             Some(Handle::new(self, key, valuep))
@@ -208,9 +208,9 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         }
     }
 
-    pub fn get_state<'a>(&'a self, key: &'a K) -> Option<Handle<'a, K, V>> {
+    pub fn get_state<'a: 'b, 'b>(&'a self, key: K) -> Option<Handle<'b, K, V>> {
         let entries = self.entries.lock().unwrap();
-        entries.get(key).map(|value| 
+        entries.get(&key).map(|value|
             Handle {
                 table: self,
                 key,
@@ -218,19 +218,19 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
             })
     }
 
-    pub fn get_or_create_state<'a>(&'a self, key: &'a K) -> Handle<'a, K, V>
+    pub fn get_or_create_state<'a: 'b, 'b>(&'a self, key: K) -> Handle<'b, K, V>
     where
-        V: From<&'a K>,
+        V: From<K>,
     {
         let mut value = None;
         let mut make_value = false;
 
         loop {
             if make_value && value.is_none() {
-                value = Some(Arc::new(V::from(key)));
+                value = Some(Arc::new(V::from(key.clone())));
             }
             let mut entries = self.entries.lock().unwrap();
-            let state = entries.get(key);
+            let state = entries.get(&key);
             match (state, &value) {
                 (None, None) => {
                     make_value = true;
