@@ -524,6 +524,78 @@ impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
     }
 }
 
+/////////////////////////////////////////// KeyValueEntry //////////////////////////////////////////
+
+#[derive(Clone, Debug, Message)]
+enum KeyValueEntry<'a> {
+    #[prototk(8, message)]
+    Put(KeyValuePut<'a>),
+    #[prototk(9, message)]
+    Del(KeyValueDel<'a>),
+}
+
+impl<'a> KeyValueEntry<'a> {
+    fn shared(&self) -> usize {
+        match self {
+            KeyValueEntry::Put(x) => x.shared as usize,
+            KeyValueEntry::Del(x) => x.shared as usize,
+        }
+    }
+
+    fn key_frag(&self) -> &'a [u8] {
+        match self {
+            KeyValueEntry::Put(x) => x.key_frag,
+            KeyValueEntry::Del(x) => x.key_frag,
+        }
+    }
+
+    fn timestamp(&self) -> u64 {
+        match self {
+            KeyValueEntry::Put(x) => x.timestamp,
+            KeyValueEntry::Del(x) => x.timestamp,
+        }
+    }
+
+    fn value(&self) -> Option<&'a [u8]> {
+        match self {
+            KeyValueEntry::Put(x) => Some(x.value),
+            KeyValueEntry::Del(_) => None,
+        }
+    }
+}
+
+impl<'a> Default for KeyValueEntry<'a> {
+    fn default() -> Self {
+        Self::Put(KeyValuePut::default())
+    }
+}
+
+//////////////////////////////////////////// KeyValuePut ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+struct KeyValuePut<'a> {
+    #[prototk(1, uint64)]
+    shared: u64,
+    #[prototk(2, bytes)]
+    key_frag: &'a [u8],
+    #[prototk(3, uint64)]
+    timestamp: u64,
+    #[prototk(4, bytes)]
+    value: &'a [u8],
+}
+
+//////////////////////////////////////////// KeyValueDel ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+struct KeyValueDel<'a> {
+    #[prototk(5, uint64)]
+    shared: u64,
+    #[prototk(6, bytes)]
+    key_frag: &'a [u8],
+    #[prototk(7, uint64)]
+    timestamp: u64,
+}
+
 ////////////////////////////////////////////// Builder /////////////////////////////////////////////
 
 pub trait Builder {

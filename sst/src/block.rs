@@ -4,14 +4,12 @@ use std::rc::Rc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 
-use prototk_derive::Message;
-
 use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
     LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
-    Buffer, Builder, Cursor, Error, KeyRef, KeyValueRef,
+    Buffer, Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -45,78 +43,6 @@ impl Default for BlockBuilderOptions {
             bytes_restart_interval: 1024,
             key_value_pairs_restart_interval: 16,
         }
-    }
-}
-
-//////////////////////////////////////////// KeyValuePut ///////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Message)]
-struct KeyValuePut<'a> {
-    #[prototk(1, uint64)]
-    shared: u64,
-    #[prototk(2, bytes)]
-    key_frag: &'a [u8],
-    #[prototk(3, uint64)]
-    timestamp: u64,
-    #[prototk(4, bytes)]
-    value: &'a [u8],
-}
-
-//////////////////////////////////////////// KeyValueDel ///////////////////////////////////////////
-
-#[derive(Clone, Debug, Default, Message)]
-struct KeyValueDel<'a> {
-    #[prototk(5, uint64)]
-    shared: u64,
-    #[prototk(6, bytes)]
-    key_frag: &'a [u8],
-    #[prototk(7, uint64)]
-    timestamp: u64,
-}
-
-//////////////////////////////////////////// BlockEntry ////////////////////////////////////////////
-
-#[derive(Clone, Debug, Message)]
-enum BlockEntry<'a> {
-    #[prototk(8, message)]
-    KeyValuePut(KeyValuePut<'a>),
-    #[prototk(9, message)]
-    KeyValueDel(KeyValueDel<'a>),
-}
-
-impl<'a> BlockEntry<'a> {
-    fn shared(&self) -> usize {
-        match self {
-            BlockEntry::KeyValuePut(x) => x.shared as usize,
-            BlockEntry::KeyValueDel(x) => x.shared as usize,
-        }
-    }
-
-    fn key_frag(&self) -> &'a [u8] {
-        match self {
-            BlockEntry::KeyValuePut(x) => x.key_frag,
-            BlockEntry::KeyValueDel(x) => x.key_frag,
-        }
-    }
-
-    fn timestamp(&self) -> u64 {
-        match self {
-            BlockEntry::KeyValuePut(x) => x.timestamp,
-            BlockEntry::KeyValueDel(x) => x.timestamp,
-        }
-    }
-
-    fn value(&self) -> Option<&'a [u8]> {
-        match self {
-            BlockEntry::KeyValuePut(x) => Some(x.value),
-            BlockEntry::KeyValueDel(_) => None,
-        }
-    }
-}
-
-impl<'a> Default for BlockEntry<'a> {
-    fn default() -> Self {
-        Self::KeyValuePut(KeyValuePut::default())
     }
 }
 
@@ -278,7 +204,7 @@ impl BlockBuilder {
     }
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
-    fn append(&mut self, be: BlockEntry<'_>) -> Result<(), Error> {
+    fn append(&mut self, be: KeyValueEntry<'_>) -> Result<(), Error> {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
@@ -331,7 +257,7 @@ impl Builder for BlockBuilder {
             timestamp,
             value,
         };
-        let be = BlockEntry::KeyValuePut(kvp);
+        let be = KeyValueEntry::Put(kvp);
         self.append(be)
     }
 
@@ -345,7 +271,7 @@ impl Builder for BlockBuilder {
             key_frag,
             timestamp,
         };
-        let be = BlockEntry::KeyValueDel(kvp);
+        let be = KeyValueEntry::Del(kvp);
         self.append(be)
     }
 
@@ -538,7 +464,7 @@ impl BlockCursor {
         // Parse the key-value pair.
         let bytes = block.bytes.as_bytes();
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
-        let be: BlockEntry = up.unpack().map_err(|e| {
+        let be: KeyValueEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
             Error::UnpackError {
                 core: ErrorCore::default(),
@@ -832,7 +758,7 @@ impl Cursor for BlockCursor {
                 // Parse the value from the block entry.
                 let bytes = self.block.bytes.as_bytes();
                 let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
-                let be: BlockEntry = up
+                let be: KeyValueEntry = up
                     .unpack()
                     .expect("already parsed this block with extract_key; corruption");
                 Some(KeyValueRef {
