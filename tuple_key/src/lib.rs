@@ -122,59 +122,94 @@ iotoz! {Error}
 
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Message)]
+// NOTE(rescrv): Enums always take type message for future extensibility.
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum DataType {
-    #[prototk(14, message)]
     #[default]
-    Unit,
     #[prototk(1, message)]
-    Fixed32,
+    unit,
     #[prototk(2, message)]
-    Fixed64,
+    int32,
     #[prototk(3, message)]
-    SFixed32,
+    int64,
     #[prototk(4, message)]
-    SFixed64,
+    uint32,
     #[prototk(5, message)]
-    Bytes,
+    uint64,
     #[prototk(6, message)]
-    Bytes16,
+    sint32,
     #[prototk(7, message)]
-    Bytes32,
+    sint64,
     #[prototk(8, message)]
-    String,
+    fixed32,
+    #[prototk(9, message)]
+    fixed64,
+    #[prototk(10, message)]
+    sfixed32,
+    #[prototk(11, message)]
+    sfixed64,
+    #[prototk(12, message)]
+    float,
+    #[prototk(13, message)]
+    double,
+    #[prototk(14, message)]
+    Bool,
     #[prototk(15, message)]
-    Message,
+    bytes,
+    #[prototk(16, message)]
+    bytes16,
+    #[prototk(17, message)]
+    bytes32,
+    #[prototk(18, message)]
+    bytes64,
+    #[prototk(19, message)]
+    string,
+    #[prototk(20, message)]
+    message,
 }
 
 impl DataType {
+    fn is_valid_tuple_key_type(&self) -> bool {
+        self.discriminant() < 16
+    }
+
     fn discriminant(&self) -> u64 {
         match self {
-            Self::Unit => 14,
-            Self::Fixed32 => 1,
-            Self::Fixed64 => 2,
-            Self::SFixed32 => 3,
-            Self::SFixed64 => 4,
-            Self::Bytes => 5,
-            Self::Bytes16 => 6,
-            Self::Bytes32 => 7,
-            Self::String => 8,
-            Self::Message => 15,
+            DataType::unit => 0,
+            DataType::uint32 => 1,
+            DataType::uint64 => 2,
+            DataType::sint32 => 3,
+            DataType::sint64 => 4,
+            DataType::fixed32 => 5,
+            DataType::fixed64 => 6,
+            DataType::sfixed32 => 7,
+            DataType::sfixed64 => 8,
+            DataType::bytes => 9,
+            DataType::bytes16 => 10,
+            DataType::bytes32 => 11,
+            DataType::string => 12,
+            DataType::message => 15,
+            _ => 16,
         }
     }
 
     fn from_discriminant(x: u64) -> Option<Self> {
         match x {
-            14 => Some(Self::Unit),
-            1 => Some(Self::Fixed32),
-            2 => Some(Self::Fixed64),
-            3 => Some(Self::SFixed32),
-            4 => Some(Self::SFixed64),
-            5 => Some(Self::Bytes),
-            6 => Some(Self::Bytes16),
-            7 => Some(Self::Bytes32),
-            8 => Some(Self::String),
-            15 => Some(Self::Message),
+            0 => Some(DataType::unit),
+            1 => Some(DataType::uint32),
+            2 => Some(DataType::uint64),
+            3 => Some(DataType::sint32),
+            4 => Some(DataType::sint64),
+            5 => Some(DataType::fixed32),
+            6 => Some(DataType::fixed64),
+            7 => Some(DataType::sfixed32),
+            8 => Some(DataType::sfixed64),
+            9 => Some(DataType::bytes),
+            10 => Some(DataType::bytes16),
+            11 => Some(DataType::bytes32),
+            12 => Some(DataType::string),
+            15 => Some(DataType::message),
             _ => None,
         }
     }
@@ -346,7 +381,7 @@ pub trait Element: Sized {
 }
 
 impl Element for u32 {
-    const DATA_TYPE: DataType = DataType::Fixed32;
+    const DATA_TYPE: DataType = DataType::fixed32;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -372,7 +407,7 @@ impl Element for u32 {
 }
 
 impl Element for u64 {
-    const DATA_TYPE: DataType = DataType::Fixed64;
+    const DATA_TYPE: DataType = DataType::fixed64;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -408,7 +443,7 @@ impl Element for u64 {
 }
 
 impl Element for i32 {
-    const DATA_TYPE: DataType = DataType::SFixed32;
+    const DATA_TYPE: DataType = DataType::sfixed32;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -435,7 +470,7 @@ impl Element for i32 {
 }
 
 impl Element for i64 {
-    const DATA_TYPE: DataType = DataType::SFixed64;
+    const DATA_TYPE: DataType = DataType::sfixed64;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -472,7 +507,7 @@ impl Element for i64 {
 }
 
 impl Element for Vec<u8> {
-    const DATA_TYPE: DataType = DataType::Bytes;
+    const DATA_TYPE: DataType = DataType::bytes;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = true;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -487,7 +522,7 @@ impl Element for Vec<u8> {
 }
 
 impl Element for [u8; 16] {
-    const DATA_TYPE: DataType = DataType::Bytes16;
+    const DATA_TYPE: DataType = DataType::bytes16;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -510,7 +545,7 @@ impl Element for [u8; 16] {
 }
 
 impl Element for [u8; 32] {
-    const DATA_TYPE: DataType = DataType::Bytes32;
+    const DATA_TYPE: DataType = DataType::bytes32;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
@@ -533,7 +568,7 @@ impl Element for [u8; 32] {
 }
 
 impl Element for String {
-    const DATA_TYPE: DataType = DataType::String;
+    const DATA_TYPE: DataType = DataType::string;
     const VARIABLE_VALUE_CAN_BE_EMPTY: bool = true;
 
     fn append_to(&self, key: &mut TupleKey) {
