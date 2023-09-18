@@ -1,9 +1,9 @@
-N=100000000
+N=1000000
 
 BINDIR=../target/release
 
 # Generate keys and values separately using armnod
-$BINDIR/armnod --number $N --chooser-mode set-once --cardinality $N --length-mode uniform --string-min-length 8 --string-max-length 32 > keys
+$BINDIR/armnod --number $N --chooser-mode set-once --cardinality $N --length-mode uniform --string-min-length 8 --string-max-length 32 --charset alnum > keys
 $BINDIR/armnod --number $N --chooser-mode random --length-mode uniform --string-min-length 64 --string-max-length 256 > values
 
 # Combine the keys and values into "{} {}\n" format.
@@ -18,6 +18,10 @@ rm key-value-pairs
 for table in table*.txt
 do
     LC_ALL=C sort -S 256M -o $table $table
-    rm -f ${table:r}.sst
+    rm -f ${table:r}.{log,sst}
+    # Must convert logs after sorting as plaintext timestamp is line number.
+    $BINDIR/log-from-plaintext --plaintext ${table} --output ${table:r}.log
     $BINDIR/sst-from-plaintext --plaintext ${table} --output ${table:r}.sst
+    $BINDIR/log-checksum ${table:r}.log
+    $BINDIR/sst-checksum ${table:r}.sst
 done

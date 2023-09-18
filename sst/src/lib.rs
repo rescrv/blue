@@ -29,7 +29,7 @@ pub mod reference;
 pub mod sequence_cursor;
 pub mod setsum;
 
-pub use log::{Log, LogIterator, LogOptions};
+pub use log::{LogBuilder, LogIterator, LogOptions};
 
 use block::{Block, BlockCursor, BlockBuilder, BlockBuilderOptions};
 use file_manager::{open_without_manager, FileHandle};

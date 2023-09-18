@@ -71,7 +71,7 @@ alphabet_tests! {
 fn alphabet(test: &str, builder_opts: SstOptions) -> SstCursor {
     let s = test.to_string() + ".sst";
     let path: PathBuf = s.into();
-    let mut builder = SstBuilder::new(path.clone(), builder_opts).unwrap();
+    let mut builder = SstBuilder::new(builder_opts, path.clone()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
     builder.put("C".as_bytes(), 0, "c".as_bytes()).unwrap();
@@ -110,7 +110,7 @@ fn guacamole_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompr
 ) -> SstBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
-    let builder = SstBuilder::new(path, opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096()).unwrap();
+    let builder = SstBuilder::new(opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(), path).unwrap();
     builder
 }
 
@@ -124,7 +124,7 @@ fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_unco
 ) -> SstBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
-    let builder = SstBuilder::new(path, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096()).unwrap();
+    let builder = SstBuilder::new(opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(), path).unwrap();
     builder
 }
 
@@ -138,7 +138,7 @@ fn guacamole_bytes_restart_interval_512_key_value_pairs_restart_interval_16_unco
 ) -> SstBuilder {
     let path: PathBuf = (test.to_string() + ".sst").into();
     remove_file(path.clone()).err();
-    let builder = SstBuilder::new(path, opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536()).unwrap();
+    let builder = SstBuilder::new(opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536(), path).unwrap();
     builder
 }
 
