@@ -69,35 +69,25 @@ pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::Tok
 fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream {
     let mut sum: TokenStream = quote! {};
     let mut field_names: TokenStream = quote! {};
-    // The prefix of the key must be of type message.
-    let mut witnessed_non_message = false;
     for (idx, field) in fields.iter().enumerate() {
-        if witnessed_non_message {
-            panic!("invalid tuple-key: all but the last extension of the key must be type message");
-        }
-        let (num, ty) = parse_attributes(&field.attrs);
+        let num = parse_attributes(&field.attrs);
         let num = match num {
             Some(num) => num,
             None => {
                 continue;
             },
         };
-        if format!("{}", ty) != "message" {
-            witnessed_non_message = true;
-        }
-        let ty = extract_type(ty);
         let field_name = &field.ident.as_ref().unwrap();
         let field_type = &field.ty;
         let line = if field_type.to_token_stream().to_string() == "()" {
             quote! {
                 #sum
-                match tkp.extend(::prototk::FieldNumber::must(#num), #ty) {
+                match tkp.extend(::prototk::FieldNumber::must(#num)) {
                     Ok(x) => x,
                     Err(e) => {
                         return Err(::tuple_key::Error::CouldNotExtend {
                             core: ::zerror_core::ErrorCore::default(),
                             field_number: #num,
-                            ty: #ty,
                         });
                     }
                 }
@@ -106,13 +96,12 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
         } else {
             quote! {
                 #sum
-                let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num), #ty) {
+                let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num)) {
                     Ok(x) => x,
                     Err(e) => {
                         return Err(::tuple_key::Error::CouldNotExtend {
                             core: ::zerror_core::ErrorCore::default(),
                             field_number: #num,
-                            ty: #ty,
                         });
                     }
                 };
@@ -130,6 +119,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
         }
     }
     quote! {
+        use ::tuple_key::Element;
         let mut tkp: ::tuple_key::TupleKeyParser = ::tuple_key::TupleKeyParser::new(&tk);
         #sum
         Ok(#ty_name { #field_names })
@@ -138,34 +128,24 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
 
 fn generate_into(fields: &[syn::Field]) -> TokenStream {
     let mut sum: TokenStream = quote! {};
-    // The prefix of the key must be of type message.
-    let mut witnessed_non_message = false;
     for field in fields.iter() {
-        if witnessed_non_message {
-            panic!("invalid tuple-key: all but the last extension of the key must be type message");
-        }
-        let (num, ty) = parse_attributes(&field.attrs);
+        let num = parse_attributes(&field.attrs);
         let num = match num {
             Some(num) => num,
             None => {
                 continue;
             },
         };
-        if format!("{}", ty) != "message" {
-            witnessed_non_message = true;
-        }
-        let ty = extract_type(ty);
         let field_name = &field.ident.as_ref().unwrap();
-        let field_type = &field.ty;
-        let line = if field_type.to_token_stream().to_string() == "()" {
+        let line = if field.ty.to_token_stream().to_string() == "()" {
             quote! {
                 #sum
-                tk.extend(::prototk::FieldNumber::must(#num), #ty);
+                tk.extend(::prototk::FieldNumber::must(#num));
             }
         } else {
             quote! {
                 #sum
-                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name, #ty);
+                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name);
             }
         };
         sum = line;
@@ -177,34 +157,15 @@ fn generate_into(fields: &[syn::Field]) -> TokenStream {
     }
 }
 
-fn extract_type(ty: TokenStream) -> TokenStream {
-    let ty_str = format!("{}", ty);
-    match ty_str.as_str() {
-        "unit" => quote!{ ::tuple_key::DataType::Unit },
-        "fixed32" => quote!{ ::tuple_key::DataType::Fixed32 },
-        "fixed64" => quote!{ ::tuple_key::DataType::Fixed64 },
-        "sfixed32" => quote!{ ::tuple_key::DataType::SFixed32 },
-        "sfixed64" => quote!{ ::tuple_key::DataType::SFixed64 },
-        "bytes" => quote!{ ::tuple_key::DataType::Bytes },
-        "bytes16" => quote!{ ::tuple_key::DataType::Bytes16 },
-        "bytes32" => quote!{ ::tuple_key::DataType::Bytes32 },
-        "string" => quote!{ ::tuple_key::DataType::String },
-        "message" => quote!{ ::tuple_key::DataType::Message },
-        _ => {
-            panic!("Don't know how to decode {}", ty_str);
-        }
-    }
-}
-
 //////////////////////////////////////////// attributes ////////////////////////////////////////////
 
 const USAGE: &str = "must provide attributes of the form `tuple_key(field_number, field_type?)`";
 const META_PATH: &str = "tuple_key";
 
-fn parse_attribute(attr: &syn::Attribute) -> (Option<syn::LitInt>, TokenStream) {
+fn parse_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
     let meta = &attr.parse_meta().unwrap();
     if meta.path().clone().into_token_stream().to_string() != META_PATH {
-        return (None, quote!{});
+        return None;
     }
     let meta_list = match meta {
         syn::Meta::Path(_) => {
@@ -215,28 +176,26 @@ fn parse_attribute(attr: &syn::Attribute) -> (Option<syn::LitInt>, TokenStream) 
             panic!("{}:{} {}", file!(), line!(), USAGE);
         }
     };
-    if meta_list.nested.len() == 2 {
-        let num = match &meta_list.nested[0] {
+    if meta_list.nested.len() == 1 {
+        match &meta_list.nested[0] {
             syn::NestedMeta::Lit(syn::Lit::Int(field_number)) => {
                 validate_field_number(field_number.base10_parse().unwrap());
                 Some(field_number.clone())
             }
             _ => panic!("{}:{} {}", file!(), line!(), USAGE),
-        };
-        let ty = &meta_list.nested[1].to_token_stream();
-        (num, ty.clone())
+        }
     } else {
         panic!("{}:{} {}", file!(), line!(), USAGE);
     }
 }
 
-fn parse_attributes(attrs: &[syn::Attribute]) -> (Option<syn::LitInt>, TokenStream) {
+fn parse_attributes(attrs: &[syn::Attribute]) -> Option<syn::LitInt> {
     for attr in attrs.iter() {
-        if let (Some(field_number), token_stream) = parse_attribute(attr) {
-            return (Some(field_number), token_stream);
+        if let Some(field_number) = parse_attribute(attr) {
+            return Some(field_number);
         }
     }
-    (None, quote! {})
+    None
 }
 
 ////////////////////////////////////// protobuf field numbers //////////////////////////////////////

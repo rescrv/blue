@@ -30,8 +30,6 @@ pub enum Error {
         core: ErrorCore,
         #[prototk(2, uint32)]
         field_number: u32,
-        #[prototk(2, message)]
-        ty: DataType,
     },
     #[prototk(311298, message)]
     UnpackError {
@@ -170,47 +168,19 @@ pub enum DataType {
 }
 
 impl DataType {
-    fn is_valid_tuple_key_type(&self) -> bool {
-        self.discriminant() < 16
-    }
-
     fn discriminant(&self) -> u64 {
         match self {
             DataType::unit => 0,
-            DataType::uint32 => 1,
-            DataType::uint64 => 2,
-            DataType::sint32 => 3,
-            DataType::sint64 => 4,
-            DataType::fixed32 => 5,
-            DataType::fixed64 => 6,
-            DataType::sfixed32 => 7,
-            DataType::sfixed64 => 8,
-            DataType::bytes => 9,
-            DataType::bytes16 => 10,
-            DataType::bytes32 => 11,
-            DataType::string => 12,
+            DataType::fixed32 => 1,
+            DataType::fixed64 => 2,
+            DataType::sfixed32 => 3,
+            DataType::sfixed64 => 4,
+            DataType::bytes => 5,
+            DataType::bytes16 => 6,
+            DataType::bytes32 => 7,
+            DataType::string => 8,
             DataType::message => 15,
             _ => 16,
-        }
-    }
-
-    fn from_discriminant(x: u64) -> Option<Self> {
-        match x {
-            0 => Some(DataType::unit),
-            1 => Some(DataType::uint32),
-            2 => Some(DataType::uint64),
-            3 => Some(DataType::sint32),
-            4 => Some(DataType::sint64),
-            5 => Some(DataType::fixed32),
-            6 => Some(DataType::fixed64),
-            7 => Some(DataType::sfixed32),
-            8 => Some(DataType::sfixed64),
-            9 => Some(DataType::bytes),
-            10 => Some(DataType::bytes16),
-            11 => Some(DataType::bytes32),
-            12 => Some(DataType::string),
-            15 => Some(DataType::message),
-            _ => None,
         }
     }
 }
@@ -239,25 +209,27 @@ impl TupleKey {
         self.buf.append(&mut other.buf);
     }
 
-    pub fn extend(&mut self, f: FieldNumber, value: DataType) {
-        self.extend_field_number(f, value);
+    pub fn extend(&mut self, f: FieldNumber) {
+        self.extend_field_number(f, DataType::unit);
+        ().append_to(self);
     }
 
-    pub fn extend_with_key<E: Element>(&mut self, f: FieldNumber, elem: E, value: DataType) {
-        self.extend_field_number(f, value);
-        let discriminant = E::DATA_TYPE.discriminant();
-        assert!(discriminant < 16);
-        self.buf.push((discriminant << 1) as u8);
+    pub fn extend_with_key<E: Element>(&mut self, f: FieldNumber, elem: E) {
+        self.extend_field_number(f, E::DATA_TYPE);
         elem.append_to(self);
     }
 
-    fn append_bytes(&mut self, iter: Iterate7BitChunks) {
+    fn append_bytes(&mut self, iter: impl Iterator<Item=u8>) -> usize {
+        let mut count = 0;
         for c in iter {
-            self.buf.push(c)
+            self.buf.push(c);
+            count += 1;
         }
+        count
     }
 
     fn from_field_number(f: FieldNumber, value: DataType) -> ([u8; 10], usize) {
+        assert!(value.discriminant() < 16);
         let f: v64 = v64::from(((f.get() as u64) << 4) | value.discriminant());
         let mut buf = [0u8; 10];
         let sz = f.pack_sz();
@@ -320,16 +292,16 @@ impl<'a> TupleKeyParser<'a> {
         }
     }
 
-    pub fn extend(&mut self, f: FieldNumber, value: DataType) -> Result<(), &'static str> {
-        let elem = match self.iter.next() {
-            Some(elem) => elem,
+    pub fn extend(&mut self, f: FieldNumber) -> Result<(), &'static str> {
+        self.extend_tag(f, DataType::unit)?;
+        let pad = match self.iter.next() {
+            Some(pad) => pad,
             None => {
                 return Err("no more elements to TupleKey");
             }
         };
-        let (buf, sz) = TupleKey::from_field_number(f, value);
-        if &buf[0..sz] != elem {
-            return Err("tag does not match");
+        if pad.len() != 1 {
+            return Err("unit struct with length != 1");
         }
         Ok(())
     }
@@ -337,36 +309,31 @@ impl<'a> TupleKeyParser<'a> {
     pub fn extend_with_key<E: Element>(
         &mut self,
         f: FieldNumber,
-        value: DataType,
     ) -> Result<E, &'static str> {
         // First we extend as normal.
-        self.extend(f, value)?;
-        // Check the discriminant.
-        let discriminant = match self.iter.next() {
-            Some(discriminant) => discriminant,
-            None => {
-                return Err("no more elements to TupleKey");
-            }
-        };
-        if discriminant.len() > 1 {
-            return Err("discriminant has too many bytes");
-        }
-        let data_type = DataType::from_discriminant(discriminant[0] as u64 >> 1);
-        if Some(E::DATA_TYPE) != data_type {
-            return Err("key is of wrong type");
-        }
+        self.extend_tag(f, E::DATA_TYPE)?;
         // Read the value
         let value = match self.iter.next() {
             Some(value) => value,
             None => {
-                if E::VARIABLE_VALUE_CAN_BE_EMPTY {
-                    &[]
-                } else {
-                    return Err("missing value element");
-                }
+                return Err("missing value element");
             }
         };
         E::parse_from(value)
+    }
+
+    fn extend_tag(&mut self, f: FieldNumber, ty: DataType) -> Result<(), &'static str> {
+        let elem = match self.iter.next() {
+            Some(elem) => elem,
+            None => {
+                return Err("no more elements to TupleKey");
+            }
+        };
+        let (buf, sz) = TupleKey::from_field_number(f, ty);
+        if &buf[0..sz] != elem {
+            return Err("tag does not match");
+        }
+        Ok(())
     }
 }
 
@@ -374,15 +341,28 @@ impl<'a> TupleKeyParser<'a> {
 
 pub trait Element: Sized {
     const DATA_TYPE: DataType;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool;
 
     fn append_to(&self, key: &mut TupleKey);
     fn parse_from(buf: &[u8]) -> Result<Self, &'static str>;
 }
 
+impl Element for () {
+    const DATA_TYPE: DataType = DataType::unit;
+
+    fn append_to(&self, key: &mut TupleKey) {
+        key.append_bytes(&mut [0u8].iter().copied());
+    }
+
+    fn parse_from(buf: &[u8]) -> Result<Self, &'static str> {
+        if buf.len() != 1 {
+            return Err("unit not exactly 1 bytes");
+        }
+        Ok(())
+    }
+}
+
 impl Element for u32 {
     const DATA_TYPE: DataType = DataType::fixed32;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         key.buf.push(((self >> 24) | 1) as u8);
@@ -408,7 +388,6 @@ impl Element for u32 {
 
 impl Element for u64 {
     const DATA_TYPE: DataType = DataType::fixed64;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         key.buf.push(((self >> 56) | 1) as u8);
@@ -444,7 +423,6 @@ impl Element for u64 {
 
 impl Element for i32 {
     const DATA_TYPE: DataType = DataType::sfixed32;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         let num: u32 = ordered::encode_i32(*self);
@@ -471,7 +449,6 @@ impl Element for i32 {
 
 impl Element for i64 {
     const DATA_TYPE: DataType = DataType::sfixed64;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         let num: u64 = ordered::encode_i64(*self);
@@ -508,14 +485,18 @@ impl Element for i64 {
 
 impl Element for Vec<u8> {
     const DATA_TYPE: DataType = DataType::bytes;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = true;
 
     fn append_to(&self, key: &mut TupleKey) {
         let iter = Iterate7BitChunks::new(self);
-        key.append_bytes(iter);
+        if key.append_bytes(iter) == 0 {
+            key.append_bytes(&mut [0u8].iter().copied());
+        }
     }
 
     fn parse_from(buf: &[u8]) -> Result<Self, &'static str> {
+        if buf.len() == 1 {
+            return Ok(Vec::new());
+        }
         let combiner = Combine7BitChunks::new(buf);
         Ok(combiner.collect())
     }
@@ -523,7 +504,6 @@ impl Element for Vec<u8> {
 
 impl Element for [u8; 16] {
     const DATA_TYPE: DataType = DataType::bytes16;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         let bytes: &[u8] = self;
@@ -546,7 +526,6 @@ impl Element for [u8; 16] {
 
 impl Element for [u8; 32] {
     const DATA_TYPE: DataType = DataType::bytes32;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = false;
 
     fn append_to(&self, key: &mut TupleKey) {
         let bytes: &[u8] = self;
@@ -569,14 +548,18 @@ impl Element for [u8; 32] {
 
 impl Element for String {
     const DATA_TYPE: DataType = DataType::string;
-    const VARIABLE_VALUE_CAN_BE_EMPTY: bool = true;
 
     fn append_to(&self, key: &mut TupleKey) {
         let iter = Iterate7BitChunks::new(self.as_bytes());
-        key.append_bytes(iter);
+        if key.append_bytes(iter) == 0 {
+            key.append_bytes(&mut [0u8].iter().copied());
+        }
     }
 
     fn parse_from(buf: &[u8]) -> Result<Self, &'static str> {
+        if buf.len() == 1 {
+            return Ok(String::new());
+        }
         let combiner = Combine7BitChunks::new(buf);
         String::from_utf8(combiner.collect()).map_err(|_| "invalid UTF-8 sequence")
     }
@@ -607,28 +590,27 @@ mod tuple_key {
         #[test]
         fn two_triplets() {
             let mut tk1 = TupleKey::default();
-            tk1.extend_with_key(FieldNumber::must(1), "A".to_owned(), DataType::Message);
-            tk1.extend_with_key(FieldNumber::must(2), "B".to_owned(), DataType::Message);
-            tk1.extend_with_key(FieldNumber::must(3), "C".to_owned(), DataType::Message);
+            tk1.extend_with_key(FieldNumber::must(1), "A".to_owned());
+            tk1.extend_with_key(FieldNumber::must(2), "B".to_owned());
+            tk1.extend_with_key(FieldNumber::must(3), "C".to_owned());
             let mut tk2 = TupleKey::default();
-            tk2.extend_with_key(FieldNumber::must(4), "D".to_owned(), DataType::Message);
-            tk2.extend_with_key(FieldNumber::must(5), "E".to_owned(), DataType::Message);
-            tk2.extend_with_key(FieldNumber::must(6), "F".to_owned(), DataType::Message);
+            tk2.extend_with_key(FieldNumber::must(4), "D".to_owned());
+            tk2.extend_with_key(FieldNumber::must(5), "E".to_owned());
+            tk2.extend_with_key(FieldNumber::must(6), "F".to_owned());
             // preconditions
             assert_eq!(
-                &[62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128],
+                &[48, 65, 128, 80, 67, 0, 112, 67, 128],
                 tk1.as_bytes()
             );
             assert_eq!(
-                &[158, 16, 69, 0, 190, 16, 69, 128, 222, 16, 71, 0],
+                &[144, 69, 0, 176, 69, 128, 208, 71, 0],
                 tk2.as_bytes()
             );
             // what we want to test
             tk1.append(&mut tk2);
             assert_eq!(
                 &[
-                    62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128, 158, 16, 69, 0, 190, 16, 69,
-                    128, 222, 16, 71, 0
+                    48, 65, 128, 80, 67, 0, 112, 67, 128, 144, 69, 0, 176, 69, 128, 208, 71, 0,
                 ],
                 tk1.as_bytes()
             );
@@ -649,28 +631,22 @@ mod tuple_key {
         #[test]
         fn abc() {
             let mut tk1 = TupleKey::default();
-            tk1.extend_with_key(FieldNumber::must(1), "A".to_string(), DataType::Message);
-            tk1.extend_with_key(FieldNumber::must(2), "B".to_string(), DataType::Message);
-            tk1.extend_with_key(FieldNumber::must(3), "C".to_string(), DataType::Message);
+            tk1.extend_with_key(FieldNumber::must(1), "A".to_string());
+            tk1.extend_with_key(FieldNumber::must(2), "B".to_string());
+            tk1.extend_with_key(FieldNumber::must(3), "C".to_string());
             let mut iter = TupleKeyIterator::new(&tk1);
 
-            let buf: &[u8] = &[62];
-            assert_eq!(Some(buf), iter.next());
-            let buf: &[u8] = &[16];
+            let buf: &[u8] = &[48];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[65, 128];
             assert_eq!(Some(buf), iter.next());
 
-            let buf: &[u8] = &[94];
-            assert_eq!(Some(buf), iter.next());
-            let buf: &[u8] = &[16];
+            let buf: &[u8] = &[80];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[67, 0];
             assert_eq!(Some(buf), iter.next());
 
-            let buf: &[u8] = &[126];
-            assert_eq!(Some(buf), iter.next());
-            let buf: &[u8] = &[16];
+            let buf: &[u8] = &[112];
             assert_eq!(Some(buf), iter.next());
             let buf: &[u8] = &[67, 128];
             assert_eq!(Some(buf), iter.next());
@@ -690,6 +666,15 @@ mod elements {
         assert_eq!(exp, tk.as_bytes());
         let got = E::parse_from(exp).unwrap();
         assert_eq!(got, elem);
+    }
+
+    #[test]
+    fn to_from_unit() {
+        const VALUE: () = ();
+        test_helper(
+            VALUE,
+            &[0],
+        );
     }
 
     #[test]
@@ -736,7 +721,7 @@ mod elements {
 
     #[test]
     fn to_from_vec_u8_empty() {
-        test_helper(vec![], &[]);
+        test_helper(vec![], &[0]);
     }
 
     #[test]
@@ -782,7 +767,7 @@ mod elements {
     #[test]
     fn to_from_string_empty() {
         let value: String = "".to_owned();
-        test_helper(value, &[]);
+        test_helper(value, &[0]);
     }
 
     #[test]
