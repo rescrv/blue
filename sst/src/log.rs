@@ -84,7 +84,6 @@ impl Default for LogOptions {
 //////////////////////////////////////////// LogBuilder ////////////////////////////////////////////
 
 pub struct LogBuilder<W: Write> {
-    options: LogOptions,
     output: BufWriter<W>,
     bytes_written: u64,
     setsum: Setsum,
@@ -105,7 +104,6 @@ impl<W: Write> LogBuilder<W> {
     pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
         let output = BufWriter::with_capacity(options.write_buffer, write);
         Ok(Self {
-            options,
             output,
             bytes_written: 0,
             setsum: Setsum::default(),
