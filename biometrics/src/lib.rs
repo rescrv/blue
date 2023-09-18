@@ -5,7 +5,8 @@
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use utilz::time::now;
 
 pub mod moments;
 pub mod sensors;
@@ -64,8 +65,8 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
     fn emit<EM: Emitter<Error = ERR>, ERR>(
         &self,
         emitter: &mut EM,
-        emit: &dyn Fn(&mut EM, &'static S, f64) -> Result<(), ERR>,
-        now: &dyn Fn() -> f64,
+        emit: &dyn Fn(&mut EM, &'static S, u64) -> Result<(), ERR>,
+        now: &dyn Fn() -> u64,
     ) -> Result<(), ERR> {
         let num_sensors = { self.sensors.lock().unwrap().len() };
         let mut sensors: Vec<&'static S> = Vec::with_capacity(num_sensors);
@@ -166,15 +167,8 @@ impl Collector {
         result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms))
     }
 
-    fn now_ms() -> f64 {
-        // TODO(rescrv):  Make this monotonic with std::time::Instant.
-        match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(now) => now.as_millis() as f64,
-            Err(_) => {
-                COLLECTOR_TIME_FAILURE.click();
-                f64::NAN
-            }
-        }
+    fn now_ms() -> u64 {
+        now::millis()
     }
 }
 
@@ -191,11 +185,11 @@ pub trait Emitter {
     type Error;
 
     /// Read the provided [Counter].
-    fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), Self::Error>;
+    fn emit_counter(&mut self, counter: &'static Counter, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Gauge].
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), Self::Error>;
+    fn emit_gauge(&mut self, gauge: &'static Gauge, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
-    fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), Self::Error>;
+    fn emit_moments(&mut self, moments: &'static Moments, now_millis: u64) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -216,7 +210,7 @@ impl PlainTextEmitter {
 impl Emitter for PlainTextEmitter {
     type Error = std::io::Error;
 
-    fn emit_counter(&mut self, counter: &'static Counter, now: f64) -> Result<(), std::io::Error> {
+    fn emit_counter(&mut self, counter: &'static Counter, now: u64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
             "{} {} {}\n",
             counter.label(),
@@ -225,12 +219,12 @@ impl Emitter for PlainTextEmitter {
         ))
     }
 
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), std::io::Error> {
+    fn emit_gauge(&mut self, gauge: &'static Gauge, now: u64) -> Result<(), std::io::Error> {
         self.output
             .write_fmt(format_args!("{} {} {}\n", gauge.label(), now, gauge.read()))
     }
 
-    fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), std::io::Error> {
+    fn emit_moments(&mut self, moments: &'static Moments, now: u64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
         self.output.write_fmt(format_args!(
