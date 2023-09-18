@@ -397,8 +397,8 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(log_options: LogOptions, log_p
     kvrs.sort_by(sort_key);
     for kvr in kvrs.into_iter() {
         match kvr.value {
-            Some(v) => { builder.put(&kvr.key, kvr.timestamp, &v); },
-            None => { builder.del(&kvr.key, kvr.timestamp); },
+            Some(v) => { builder.put(&kvr.key, kvr.timestamp, &v)?; },
+            None => { builder.del(&kvr.key, kvr.timestamp)?; },
         }
     }
     builder.seal()
