@@ -1,8 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use utilz::time::now;
-
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
@@ -34,13 +32,13 @@ fn main() {
     let opts = SstOptions::default();
     let mut sst = SstBuilder::new(cmdline.sst, opts).expect("could not open sst");
 
-    for line in plaintext.lines() {
+    for (idx, line) in plaintext.lines().enumerate() {
         let line = &line.expect("could not parse line");
         let split: Vec<&str> = line.split_whitespace().collect();
         if split.len() != 2 {
             panic!("Invalid line: {}", line);
         }
-        sst.put(split[0].as_bytes(), now::micros(), split[1].as_bytes())
+        sst.put(split[0].as_bytes(), idx as u64, split[1].as_bytes())
             .expect("could not put key-value pair");
     }
 
