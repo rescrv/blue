@@ -434,6 +434,18 @@ pub struct KeyValueRef<'a> {
     pub value: Option<&'a [u8]>,
 }
 
+impl<'a> Display for KeyValueRef<'a> {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let key = String::from_utf8(self.key.iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap();
+        if let Some(value) = self.value {
+            let value = String::from_utf8(value.iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap();
+            write!(fmt, "\"{}\" @ {} -> \"{}\"", key, self.timestamp, value)
+        } else {
+            write!(fmt, "\"{}\" @ {} -> <TOMBSTONE>", key, self.timestamp)
+        }
+    }
+}
+
 impl<'a> Eq for KeyValueRef<'a> {}
 
 impl<'a> PartialEq for KeyValueRef<'a> {
@@ -794,7 +806,7 @@ pub struct Sst {
 }
 
 impl Sst {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Self, Error> {
         let handle = open_without_manager(path.as_ref().to_path_buf())?;
         Sst::from_file_handle(handle)
     }
@@ -1058,7 +1070,7 @@ pub struct SstBuilder {
 }
 
 impl SstBuilder {
-    pub fn new<P: AsRef<Path>>(path: P, options: SstOptions) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, Error> {
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -1249,7 +1261,7 @@ impl Builder for SstBuilder {
         builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
         // fsync
         builder.output.sync_all().as_z()?;
-        Sst::new(builder.path)
+        Sst::new(builder.options, builder.path)
     }
 }
 
@@ -1289,7 +1301,7 @@ impl SstMultiBuilder {
         let path = self.prefix.join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
         self.paths.push(path.clone());
         self.counter += 1;
-        self.builder = Some(SstBuilder::new(path, self.options.clone())?);
+        self.builder = Some(SstBuilder::new(self.options.clone(), path)?);
         Ok(self.builder.as_mut().unwrap())
     }
 }

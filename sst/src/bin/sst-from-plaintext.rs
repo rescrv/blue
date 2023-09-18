@@ -11,26 +11,28 @@ struct SstFromPlaintextOptions {
     #[arrrg(required, "Input file in plaintext \"<KEY> <VALUE>\\n\" formatting.")]
     plaintext: String,
     #[arrrg(required, "Output file in SST format.")]
-    sst: String,
+    output: String,
+    #[arrrg(nested)]
+    sst: SstOptions,
 }
 
 impl Default for SstFromPlaintextOptions {
     fn default() -> Self {
         Self {
             plaintext: "/dev/stdin".to_string(),
-            sst: "plaintext.sst".to_string(),
+            output: "plaintext.sst".to_string(),
+            sst: SstOptions::default(),
         }
     }
 }
 
 fn main() {
-    let (cmdline, _) = SstFromPlaintextOptions::from_command_line("Usage: sst-from-plaintext --plaintext <FILE> --sst <FILE>");
+    let (cmdline, _) = SstFromPlaintextOptions::from_command_line("Usage: sst-from-plaintext --plaintext <FILE> --output <FILE>");
     // setup fin
     let plaintext = File::open(cmdline.plaintext).expect("could not open plaintext");
     let plaintext = BufReader::new(plaintext);
     // setup sst out
-    let opts = SstOptions::default();
-    let mut sst = SstBuilder::new(cmdline.sst, opts).expect("could not open sst");
+    let mut sst = SstBuilder::new(cmdline.sst, cmdline.output).expect("could not open sst");
 
     for (idx, line) in plaintext.lines().enumerate() {
         let line = &line.expect("could not parse line");
