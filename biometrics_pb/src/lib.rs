@@ -5,12 +5,12 @@ use prototk_derive::Message;
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
-pub struct Counter {
+pub struct CounterPb {
     #[prototk(1, uint64)]
     pub count: u64,
 }
 
-impl From<u64> for Counter {
+impl From<u64> for CounterPb {
     fn from(count: u64) -> Self {
         Self {
             count,
@@ -21,12 +21,12 @@ impl From<u64> for Counter {
 /////////////////////////////////////////////// Gauge //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
-pub struct Gauge {
+pub struct GaugePb {
     #[prototk(2, double)]
     pub value: f64,
 }
 
-impl From<f64> for Gauge {
+impl From<f64> for GaugePb {
     fn from(value: f64) -> Self {
         Self {
             value,
@@ -37,7 +37,7 @@ impl From<f64> for Gauge {
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
-pub struct Moments {
+pub struct MomentsPb {
     #[prototk(3, uint64)]
     pub n: u64,
     #[prototk(4, double)]
@@ -50,7 +50,7 @@ pub struct Moments {
     pub m4: f64,
 }
 
-impl From<biometrics::moments::Moments> for Moments {
+impl From<biometrics::moments::Moments> for MomentsPb {
     fn from(m: biometrics::moments::Moments) -> Self {
         Self {
             n: m.n,
