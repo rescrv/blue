@@ -33,6 +33,10 @@ impl<'a> FieldType<'a> for int32 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::int32
+    }
 }
 
 impl<'a> FieldPackHelper<'a, int32> for i32 {
@@ -87,6 +91,10 @@ impl<'a> FieldType<'a> for int64 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::int64
     }
 }
 
@@ -143,6 +151,10 @@ impl<'a> FieldType<'a> for uint32 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::uint32
+    }
 }
 
 impl<'a> FieldPackHelper<'a, uint32> for u32 {
@@ -197,6 +209,10 @@ impl<'a> FieldType<'a> for uint64 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::uint64
     }
 }
 
@@ -277,6 +293,10 @@ impl<'a> FieldType<'a> for sint32 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::sint32
+    }
 }
 
 impl<'a> FieldPackHelper<'a, sint32> for i32 {
@@ -338,6 +358,10 @@ impl<'a> FieldType<'a> for sint64 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::sint64
+    }
 }
 
 impl<'a> FieldPackHelper<'a, sint64> for i64 {
@@ -393,6 +417,10 @@ impl<'a> FieldType<'a> for fixed32 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::fixed32
+    }
 }
 
 impl<'a> FieldPackHelper<'a, fixed32> for u32 {
@@ -444,6 +472,10 @@ impl<'a> FieldType<'a> for fixed64 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::fixed64
     }
 }
 
@@ -497,6 +529,10 @@ impl<'a> FieldType<'a> for sfixed32 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::sfixed32
+    }
 }
 
 impl<'a> FieldPackHelper<'a, sfixed32> for i32 {
@@ -548,6 +584,10 @@ impl<'a> FieldType<'a> for sfixed64 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::sfixed64
     }
 }
 
@@ -601,6 +641,10 @@ impl<'a> FieldType<'a> for float {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::float
+    }
 }
 
 impl<'a> FieldPackHelper<'a, float> for f32 {
@@ -653,6 +697,10 @@ impl<'a> FieldType<'a> for double {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::double
+    }
 }
 
 impl<'a> FieldPackHelper<'a, double> for f64 {
@@ -703,6 +751,10 @@ impl<'a> FieldType<'a> for Bool {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::Bool
     }
 }
 
@@ -758,6 +810,10 @@ impl<'a> FieldType<'a> for bytes<'a> {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::bytes
     }
 }
 
@@ -891,6 +947,10 @@ impl<'a> FieldType<'a> for bytes16 {
     fn into_native(self) -> Self::Native {
         self.0
     }
+
+    fn data_type(&self) -> DataType {
+        DataType::bytes16
+    }
 }
 
 impl<'a> FieldPackHelper<'a, bytes16> for [u8; 16] {
@@ -965,6 +1025,10 @@ impl<'a> FieldType<'a> for bytes32 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::bytes32
     }
 }
 
@@ -1041,6 +1105,10 @@ impl<'a> FieldType<'a> for bytes64 {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::bytes64
     }
 }
 
@@ -1123,6 +1191,10 @@ impl<'a> FieldType<'a> for string<'a> {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::string
     }
 }
 
@@ -1247,6 +1319,10 @@ impl<'a, M> FieldType<'a> for message<M> {
 
     fn into_native(self) -> Self::Native {
         self.0
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::message
     }
 }
 

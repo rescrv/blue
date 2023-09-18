@@ -880,6 +880,8 @@ pub trait FieldType<'a>: Sized {
     fn from_native(x: Self::Native) -> Self;
     fn into_native(self) -> Self::Native;
 
+    fn data_type(&self) -> DataType;
+
     fn field_packer<'b, F: FieldPackHelper<'a, Self>>(
         field_number: FieldNumber,
         field_value: &'b F,
@@ -1145,4 +1147,32 @@ where
     <Self as Unpackable<'a>>::Error: Into<Error>,
     Error: From<Self::Error>,
 {
+}
+
+///////////////////////////////////////////// DataType /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[allow(non_camel_case_types)]
+pub enum DataType {
+    #[default]
+    unit,
+    int32,
+    int64,
+    uint32,
+    uint64,
+    sint32,
+    sint64,
+    fixed32,
+    fixed64,
+    sfixed32,
+    sfixed64,
+    float,
+    double,
+    Bool,
+    bytes,
+    bytes16,
+    bytes32,
+    bytes64,
+    string,
+    message,
 }
