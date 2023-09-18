@@ -7,7 +7,7 @@ use rand::{Rng, RngCore};
 
 use arrrg_derive::CommandLine;
 
-use biometrics::{Collector, Counter, Gauge, Moments, Sensor, TDigest};
+use biometrics::{Collector, Counter, Gauge, Moments, Sensor};
 
 use buffertk::{stack_pack, Unpacker};
 
@@ -435,7 +435,6 @@ struct LastValueEmitter {
     counters: HashMap<String, <Counter as Sensor>::Reading>,
     gauges: HashMap<String, <Gauge as Sensor>::Reading>,
     moments: HashMap<String, <Moments as Sensor>::Reading>,
-    t_digests: HashMap<String, <TDigest as Sensor>::Reading>,
 }
 
 impl LastValueEmitter {
@@ -458,11 +457,6 @@ impl LastValueEmitter {
                                      reading.skewness(), reading.kurtosis()));
             }
         }
-        for (label, _) in self.t_digests.iter() {
-            if fnmatch.fnmatch(label) {
-                strings.push(format!("{} = <t-digest is unsupported>", label));
-            }
-        }
         strings.sort();
         strings
     }
@@ -471,23 +465,18 @@ impl LastValueEmitter {
 impl biometrics::Emitter for LastValueEmitter {
     type Error = ();
 
-    fn emit_counter(&mut self, counter: &'static Counter, _: f64) -> Result<(), ()> {
+    fn emit_counter(&mut self, counter: &'static Counter, _: u64) -> Result<(), ()> {
         self.counters.insert(counter.label().to_owned(), counter.read());
         Ok(())
     }
 
-    fn emit_gauge(&mut self, gauge: &'static Gauge, _: f64) -> Result<(), ()> {
+    fn emit_gauge(&mut self, gauge: &'static Gauge, _: u64) -> Result<(), ()> {
         self.gauges.insert(gauge.label().to_owned(), gauge.read());
         Ok(())
     }
 
-    fn emit_moments(&mut self, moments: &'static Moments, _: f64) -> Result<(), ()> {
+    fn emit_moments(&mut self, moments: &'static Moments, _: u64) -> Result<(), ()> {
         self.moments.insert(moments.label().to_owned(), moments.read());
-        Ok(())
-    }
-
-    fn emit_t_digest(&mut self, t_digest: &'static TDigest, _: f64) -> Result<(), ()> {
-        self.t_digests.insert(t_digest.label().to_owned(), t_digest.read());
         Ok(())
     }
 }

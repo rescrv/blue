@@ -9,12 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod moments;
 pub mod sensors;
-pub mod t_digest;
 
 pub use sensors::Counter;
 pub use sensors::Gauge;
 pub use sensors::Moments;
-pub use sensors::TDigest;
 
 ////////////////////////////////////////////// Sensor //////////////////////////////////////////////
 
@@ -100,17 +98,14 @@ pub struct Collector {
     counters: SensorRegistry<Counter>,
     gauges: SensorRegistry<Gauge>,
     moments: SensorRegistry<Moments>,
-    t_digests: SensorRegistry<TDigest>,
 }
 
 static COLLECTOR_REGISTER_COUNTER: Counter = Counter::new("collector.register.counter");
 static COLLECTOR_REGISTER_GAUGE: Counter = Counter::new("collector.register.gauge");
 static COLLECTOR_REGISTER_MOMENTS: Counter = Counter::new("collector.register.moments");
-static COLLECTOR_REGISTER_T_DIGEST: Counter = Counter::new("collector.register.t_digest");
 static COLLECTOR_EMIT_COUNTER: Counter = Counter::new("collector.emit.counter");
 static COLLECTOR_EMIT_GAUGE: Counter = Counter::new("collector.emit.gauge");
 static COLLECTOR_EMIT_MOMENTS: Counter = Counter::new("collector.emit.moments");
-static COLLECTOR_EMIT_T_DIGEST: Counter = Counter::new("collector.emit.t_digest");
 static COLLECTOR_EMIT_FAILURE: Counter = Counter::new("collector.emit.failure");
 static COLLECTOR_TIME_FAILURE: Counter = Counter::new("collector.time.failure");
 
@@ -134,21 +129,14 @@ impl Collector {
                 &COLLECTOR_EMIT_MOMENTS,
                 &COLLECTOR_EMIT_FAILURE,
             ),
-            t_digests: SensorRegistry::new(
-                &COLLECTOR_REGISTER_T_DIGEST,
-                &COLLECTOR_EMIT_T_DIGEST,
-                &COLLECTOR_EMIT_FAILURE,
-            ),
         };
         // Register counters with the collector.
         collector.register_counter(&COLLECTOR_REGISTER_COUNTER);
         collector.register_counter(&COLLECTOR_REGISTER_GAUGE);
         collector.register_counter(&COLLECTOR_REGISTER_MOMENTS);
-        collector.register_counter(&COLLECTOR_REGISTER_T_DIGEST);
         collector.register_counter(&COLLECTOR_EMIT_COUNTER);
         collector.register_counter(&COLLECTOR_EMIT_GAUGE);
         collector.register_counter(&COLLECTOR_EMIT_MOMENTS);
-        collector.register_counter(&COLLECTOR_EMIT_T_DIGEST);
         collector.register_counter(&COLLECTOR_EMIT_FAILURE);
         collector.register_counter(&COLLECTOR_TIME_FAILURE);
         // Return the collector with counters initialized.
@@ -170,18 +158,12 @@ impl Collector {
         self.moments.register(moments);
     }
 
-    /// Register `t_digest` with the Collector.
-    pub fn register_t_digest(&self, t_digest: &'static TDigest) {
-        self.t_digests.register(t_digest);
-    }
-
     /// Output the sensors registered to this emitter.
     pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(&self, emitter: &mut EM) -> Result<(), ERR> {
         let result = Ok(());
         let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &Self::now_ms));
         let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now_ms));
-        let result = result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms));
-        result.and(self.t_digests.emit(emitter, &EM::emit_t_digest, &Self::now_ms))
+        result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms))
     }
 
     fn now_ms() -> f64 {
@@ -214,8 +196,6 @@ pub trait Emitter {
     fn emit_gauge(&mut self, gauge: &'static Gauge, now: f64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
     fn emit_moments(&mut self, moments: &'static Moments, now: f64) -> Result<(), Self::Error>;
-    /// Read the provided [TDigest].
-    fn emit_t_digest(&mut self, t_digest: &'static TDigest, now: f64) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -263,11 +243,6 @@ impl Emitter for PlainTextEmitter {
             moments.m3,
             moments.m4,
         ))
-    }
-
-    fn emit_t_digest(&mut self, _: &'static TDigest, _: f64) -> Result<(), std::io::Error> {
-        // TODO(rescrv): Emit the t-digest.
-        Err(std::io::Error::from_raw_os_error(95 /*ENOTSUP*/))
     }
 }
 

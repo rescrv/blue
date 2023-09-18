@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use crate::moments;
-use crate::t_digest;
 use crate::Sensor;
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
@@ -119,42 +118,6 @@ impl Sensor for Moments {
     }
 }
 
-////////////////////////////////////////////// TDigest /////////////////////////////////////////////
-
-pub struct TDigest {
-    label: &'static str,
-    value: Mutex<t_digest::TDigest>,
-}
-
-impl TDigest {
-    pub const fn new(label: &'static str, delta: u64) -> Self {
-        Self {
-            label,
-            value: Mutex::new(t_digest::TDigest::new(delta)),
-        }
-    }
-
-    pub fn add(&'static self, point: f64) {
-        let mut value = self.value.lock().unwrap();
-        value.add(point);
-    }
-}
-
-impl Sensor for TDigest {
-    type Reading = t_digest::TDigest;
-
-    #[inline(always)]
-    fn label(&'static self) -> &'static str {
-        self.label
-    }
-
-    #[inline(always)]
-    fn read(&'static self) -> t_digest::TDigest {
-        let value = self.value.lock().unwrap();
-        value.clone()
-    }
-}
-
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -192,10 +155,5 @@ mod tests {
         MOMENTS.add(10.0);
         assert_eq!(MOMENTS.read().n(), 3);
         assert_eq!(MOMENTS.read().mean(), 5.0);
-    }
-
-    #[test]
-    fn sync_t_digest_may_be_static() {
-        static _T_DIGEST: TDigest = TDigest::new("sync.moments.may.be.static", 1000);
     }
 }
