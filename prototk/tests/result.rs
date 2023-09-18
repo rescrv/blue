@@ -1,4 +1,3 @@
-
 extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
@@ -49,15 +48,13 @@ fn test_helper(res: Result<Foo, Error>, exp: &[u8]) {
 
 #[test]
 fn result_ok() {
-    test_helper(Ok(Foo {
-        x: 42,
-        y: 99,
-    }), &[10, 4, 8, 42, 16, 99]);
+    test_helper(Ok(Foo { x: 42, y: 99 }), &[10, 4, 8, 42, 16, 99]);
 }
 
 #[test]
 fn result_err() {
-    test_helper(Err(Error::UnknownDiscriminant {
-        discriminant: 33,
-    }), &[18, 7, 210, 128, 128, 1, 2, 8, 33]);
+    test_helper(
+        Err(Error::UnknownDiscriminant { discriminant: 33 }),
+        &[18, 7, 210, 128, 128, 1, 2, 8, 33],
+    );
 }

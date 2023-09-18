@@ -22,55 +22,32 @@ pub enum Error {
     Success,
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
-    BufferTooShort {
-        required: usize,
-        had: usize,
-    },
+    BufferTooShort { required: usize, had: usize },
     /// InvalidFieldNumber indicates that the field is not a user-assignable field.
-    InvalidFieldNumber {
-        field_number: u32,
-        what: String,
-    },
+    InvalidFieldNumber { field_number: u32, what: String },
     /// UnhandledWireType indicates that the wire_type is not understood by this process and cannot
     /// be skipped.
-    UnhandledWireType {
-        wire_type: u32,
-    },
+    UnhandledWireType { wire_type: u32 },
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge {
-        tag: u64,
-    },
+    TagTooLarge { tag: u64 },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow {
-        bytes: usize,
-    },
+    VarintOverflow { bytes: usize },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow {
-        value: u64,
-    },
+    UnsignedOverflow { value: u64 },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow {
-        value: i64,
-    },
+    SignedOverflow { value: i64 },
     /// WrongLength indicates that a bytes32 did not have 32 bytes.
-    WrongLength {
-        required: usize,
-        had: usize,
-    },
+    WrongLength { required: usize, had: usize },
     /// StringEncoding indicates that a value is not UTF-8 friendly.
     StringEncoding,
     /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant {
-        discriminant: u32,
-    },
+    UnknownDiscriminant { discriminant: u32 },
 }
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Error::Success {} => fmt
-                .debug_struct("SerializationError")
-                .finish(),
+            Error::Success {} => fmt.debug_struct("SerializationError").finish(),
             Error::BufferTooShort { required, had } => fmt
                 .debug_struct("BufferTooShort")
                 .field("required", required)
@@ -85,10 +62,9 @@ impl Display for Error {
                 .debug_struct("UnhandledWireType")
                 .field("wire_type", wire_type)
                 .finish(),
-            Error::TagTooLarge { tag } => fmt
-                .debug_struct("TagTooLarge")
-                .field("tag", tag)
-                .finish(),
+            Error::TagTooLarge { tag } => {
+                fmt.debug_struct("TagTooLarge").field("tag", tag).finish()
+            }
             Error::VarintOverflow { bytes } => fmt
                 .debug_struct("VarintOverflow")
                 .field("bytes", bytes)
@@ -106,9 +82,7 @@ impl Display for Error {
                 .field("required", required)
                 .field("had", had)
                 .finish(),
-            Error::StringEncoding => fmt
-                .debug_struct("StringEncoding")
-                .finish(),
+            Error::StringEncoding => fmt.debug_struct("StringEncoding").finish(),
             Error::UnknownDiscriminant { discriminant } => fmt
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
@@ -127,7 +101,9 @@ impl From<buffertk::Error> for Error {
             buffertk::Error::UnsignedOverflow { value } => Error::UnsignedOverflow { value },
             buffertk::Error::SignedOverflow { value } => Error::SignedOverflow { value },
             buffertk::Error::TagTooLarge { tag } => Error::TagTooLarge { tag },
-            buffertk::Error::UnknownDiscriminant { discriminant } => Error::UnknownDiscriminant { discriminant },
+            buffertk::Error::UnknownDiscriminant { discriminant } => {
+                Error::UnknownDiscriminant { discriminant }
+            }
         }
     }
 }
@@ -954,23 +930,39 @@ where
 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         match self {
-            Ok(x) => {
-                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(1), x)).length_prefixed()).pack_sz()
-            },
-            Err(e) => {
-                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(2), e)).length_prefixed()).pack_sz()
-            },
+            Ok(x) => stack_pack(tag)
+                .pack(
+                    stack_pack(field_types::message::field_packer(FieldNumber::must(1), x))
+                        .length_prefixed(),
+                )
+                .pack_sz(),
+            Err(e) => stack_pack(tag)
+                .pack(
+                    stack_pack(field_types::message::field_packer(FieldNumber::must(2), e))
+                        .length_prefixed(),
+                )
+                .pack_sz(),
         }
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
         match self {
             Ok(x) => {
-                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(1), x)).length_prefixed()).into_slice(out);
-            },
+                stack_pack(tag)
+                    .pack(
+                        stack_pack(field_types::message::field_packer(FieldNumber::must(1), x))
+                            .length_prefixed(),
+                    )
+                    .into_slice(out);
+            }
             Err(e) => {
-                stack_pack(tag).pack(stack_pack(field_types::message::field_packer(FieldNumber::must(2), e)).length_prefixed()).into_slice(out);
-            },
+                stack_pack(tag)
+                    .pack(
+                        stack_pack(field_types::message::field_packer(FieldNumber::must(2), e))
+                            .length_prefixed(),
+                    )
+                    .into_slice(out);
+            }
         }
     }
 }
@@ -1139,7 +1131,7 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
 pub trait Message<'a>:
     Default
     + buffertk::Packable
-    + buffertk::Unpackable<'a, Error=Error>
+    + buffertk::Unpackable<'a, Error = Error>
     + FieldPackHelper<'a, field_types::message<Self>>
     + FieldUnpackHelper<'a, field_types::message<Self>>
     + 'a
