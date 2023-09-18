@@ -9,7 +9,7 @@ use zerror_core::ErrorCore;
 
 use super::{
     LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
-    Buffer, Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef,
+    Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -51,7 +51,7 @@ impl Default for BlockBuilderOptions {
 #[derive(Clone)]
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
-    bytes: Rc<Buffer>,
+    bytes: Rc<Vec<u8>>,
 
     // The restart intervals.  restarts_boundary points to the first restart point.
     restarts_boundary: usize,
@@ -60,7 +60,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(bytes: Buffer) -> Result<Self, Error> {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
         // Load num_restarts.
         let bytes = Rc::new(bytes);
         if bytes.len() < 4 {
@@ -72,7 +72,7 @@ impl Block {
                 required: 4,
             });
         }
-        let mut up = Unpacker::new(&bytes.as_bytes()[bytes.len() - 4..]);
+        let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
         let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| {
             CORRUPTION.click();
             Error::UnpackError {
@@ -100,7 +100,7 @@ impl Block {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        self.bytes.as_bytes()
+        &self.bytes
     }
 
     pub fn cursor(&self) -> BlockCursor {
@@ -110,7 +110,7 @@ impl Block {
     fn restart_point(&self, restart_idx: usize) -> usize {
         assert!(restart_idx < self.num_restarts);
         let mut restart: [u8; 4] = <[u8; 4]>::default();
-        let bytes = self.bytes.as_bytes();
+        let bytes = &self.bytes;
         for i in 0..4 {
             restart[i] = bytes[self.restarts_idx + restart_idx * 4 + i];
         }
@@ -462,7 +462,7 @@ impl BlockCursor {
             return Ok(CursorPosition::Last);
         }
         // Parse the key-value pair.
-        let bytes = block.bytes.as_bytes();
+        let bytes = &block.bytes;
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
         let be: KeyValueEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
@@ -756,7 +756,7 @@ impl Cursor for BlockCursor {
                 timestamp,
             } => {
                 // Parse the value from the block entry.
-                let bytes = self.block.bytes.as_bytes();
+                let bytes = &self.block.bytes;
                 let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
                 let be: KeyValueEntry = up
                     .unpack()
@@ -787,8 +787,8 @@ mod tests {
     fn build_empty_block() {
         let builder = BlockBuilder::new(BlockBuilderOptions::default());
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_bytes();
-        let exp = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
+        let got: &[u8] = &block.bytes;
+        let exp: &[u8] = &[82, 4, 0, 0, 0, 0, 93, 1, 0, 0, 0];
         assert_eq!(exp, got);
         assert_eq!(11, got.len());
     }
@@ -800,7 +800,7 @@ mod tests {
             .put("key".as_bytes(), 0xc0ffee, "value".as_bytes())
             .unwrap();
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_bytes();
+        let got: &[u8] = &block.bytes;
         let exp = &[
             66, /*8*/
             19, /*sz*/
@@ -831,7 +831,7 @@ mod tests {
             .put("key2".as_bytes(), 0xc0ffee, "value2".as_bytes())
             .unwrap();
         let block = builder.seal().unwrap();
-        let got = block.bytes.as_bytes();
+        let got: &[u8] = &block.bytes;
         let exp = &[
             // first record
             66, /*8*/
@@ -917,7 +917,7 @@ mod tests {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let got = block.bytes.as_bytes();
+        let got: &[u8] = &block.bytes;
         assert_eq!(exp, got);
 
         let mut cursor = block.cursor();
@@ -939,10 +939,10 @@ mod tests {
         let mut cursor = block.cursor();
         let target = "jqCIzIbU";
         cursor.seek(target.as_bytes()).unwrap();
-        let key: Buffer = key.into();
+        let key: Vec<u8> = key.into();
         cursor.next().unwrap();
         let kvp = cursor.value().unwrap();
-        assert_eq!(key.as_bytes(), kvp.key);
+        assert_eq!(&key, kvp.key);
         assert_eq!(timestamp, kvp.timestamp);
     }
 
@@ -1078,7 +1078,7 @@ mod guacamole {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let bytes: &[u8] = block.bytes.as_bytes();
+        let bytes: &[u8] = &block.bytes;
         assert_eq!(exp, bytes);
 
         let mut cursor = block.cursor();

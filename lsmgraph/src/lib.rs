@@ -443,8 +443,8 @@ struct MetadataKey (
 ///////////////////////////////////////// key_range_overlap ////////////////////////////////////////
 
 fn key_range_overlap(lhs: &SstMetadata, rhs: &SstMetadata) -> bool {
-    compare_bytes(lhs.first_key.as_bytes(), rhs.last_key.as_bytes()) != Ordering::Greater
-        && compare_bytes(rhs.first_key.as_bytes(), lhs.last_key.as_bytes()) != Ordering::Greater
+    compare_bytes(&lhs.first_key, &rhs.last_key) != Ordering::Greater
+        && compare_bytes(&rhs.first_key, &lhs.last_key) != Ordering::Greater
 }
 
 //////////////////////////////////////////// Compaction ////////////////////////////////////////////
@@ -524,7 +524,7 @@ impl Compaction {
         let meta_now = now::millis();
         let meta_file_final = META_FILE(&self.options.path, acc_setsum.hexdigest());
         let meta_file = format!("tmp-{}-{}.sst", acc_setsum.hexdigest(), meta_now);
-        let mut meta = SstBuilder::new(&meta_file, self.options.sst.clone())?;
+        let mut meta = SstBuilder::new(self.options.sst.clone(), &meta_file)?;
         for (digest, buf) in digests.into_iter() {
             let key = MetadataKey(self.options.meta_id.id, digest.digest());
             todo!();
@@ -600,7 +600,7 @@ impl DB {
         // form of atomicity.
         let meta_file_final = META_FILE(&self.root, acc.hexdigest());
         let meta_file = format!("tmp-{}-{}.sst", acc.hexdigest(), now::millis());
-        let mut meta = SstBuilder::new(&meta_file, self.options.sst.clone())?;
+        let mut meta = SstBuilder::new(self.options.sst.clone(), &meta_file)?;
         for metadata in ssts.iter() {
             let key = MetadataKey(self.options.meta_id.id, metadata.setsum);
             /*

@@ -1,9 +1,62 @@
 use std::rc::Rc;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValuePair,
-    KeyValueRef, TableMetadata,
+    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValueRef,
+    TableMetadata,
 };
+
+/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct KeyValuePair {
+    pub key: Vec<u8>,
+    pub timestamp: u64,
+    pub value: Option<Vec<u8>>,
+}
+
+impl KeyValuePair {
+    pub fn from_key_value_ref(kvr: &KeyValueRef<'_>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: kvr.value.map(|v| v.into()),
+        }
+    }
+}
+
+impl Eq for KeyValuePair {}
+
+impl PartialEq for KeyValuePair {
+    fn eq(&self, rhs: &KeyValuePair) -> bool {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.eq(&rhs)
+    }
+}
+
+impl Ord for KeyValuePair {
+    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.cmp(&rhs)
+    }
+}
+
+impl PartialOrd for KeyValuePair {
+    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
+    fn from(kvr: KeyValueRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: kvr.value.map(|v| v.into()),
+        }
+    }
+}
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 

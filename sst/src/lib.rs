@@ -11,7 +11,7 @@ use std::fmt::{Debug, Display, Formatter, Write};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use buffertk::{stack_pack, Buffer, Packable, Unpacker};
+use buffertk::{stack_pack, Packable, Unpacker};
 
 use biometrics::Counter;
 
@@ -22,15 +22,19 @@ use zerror_core::ErrorCore;
 
 pub mod block;
 pub mod file_manager;
+pub mod log;
 pub mod merging_cursor;
 pub mod pruning_cursor;
 pub mod reference;
 pub mod sequence_cursor;
 pub mod setsum;
 
+pub use log::{Log, LogIterator, LogOptions};
+
 use block::{Block, BlockCursor, BlockBuilder, BlockBuilderOptions};
 use file_manager::{open_without_manager, FileHandle};
-use crate::setsum::Setsum;
+use reference::KeyValuePair;
+use setsum::Setsum;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -410,7 +414,7 @@ impl<'a> PartialOrd for KeyRef<'a> {
 impl<'a> From<&'a KeyValuePair> for KeyRef<'a> {
     fn from(kvp: &'a KeyValuePair) -> KeyRef<'a> {
         Self {
-            key: kvp.key.as_bytes(),
+            key: &kvp.key,
             timestamp: kvp.timestamp,
         }
     }
@@ -473,65 +477,12 @@ impl<'a> PartialOrd for KeyValueRef<'a> {
 impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
     fn from(kvp: &'a KeyValuePair) -> KeyValueRef<'a> {
         Self {
-            key: kvp.key.as_bytes(),
+            key: &kvp.key,
             timestamp: kvp.timestamp,
             value: match &kvp.value {
-                Some(v) => Some(v.as_bytes()),
+                Some(v) => Some(v),
                 None => None,
             },
-        }
-    }
-}
-
-/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyValuePair {
-    pub key: Buffer,
-    pub timestamp: u64,
-    pub value: Option<Buffer>,
-}
-
-impl KeyValuePair {
-    pub fn from_key_value_ref(kvr: &KeyValueRef<'_>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
-        }
-    }
-}
-
-impl Eq for KeyValuePair {}
-
-impl PartialEq for KeyValuePair {
-    fn eq(&self, rhs: &KeyValuePair) -> bool {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.eq(&rhs)
-    }
-}
-
-impl Ord for KeyValuePair {
-    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.cmp(&rhs)
-    }
-}
-
-impl PartialOrd for KeyValuePair {
-    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
-    fn from(kvr: KeyValueRef<'a>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
         }
     }
 }
@@ -723,9 +674,9 @@ pub struct SstMetadata {
     #[prototk(1, bytes32)]
     pub setsum: [u8; 32],
     #[prototk(2, bytes)]
-    pub first_key: Buffer,
+    pub first_key: Vec<u8>,
     #[prototk(3, bytes)]
-    pub last_key: Buffer,
+    pub last_key: Vec<u8>,
     #[prototk(4, uint64)]
     pub smallest_timestamp: u64,
     #[prototk(5, uint64)]
@@ -745,9 +696,9 @@ impl SstMetadata {
     }
 
     pub fn first_key_escaped(&self) -> String {
+        // TODO(rescrv): dedupe this with sst-dump
         String::from_utf8(
             self.first_key
-                .as_bytes()
                 .iter()
                 .flat_map(|b| std::ascii::escape_default(*b))
                 .collect::<Vec<u8>>(),
@@ -758,7 +709,6 @@ impl SstMetadata {
     pub fn last_key_escaped(&self) -> String {
         String::from_utf8(
             self.last_key
-                .as_bytes()
                 .iter()
                 .flat_map(|b| std::ascii::escape_default(*b))
                 .collect::<Vec<u8>>(),
@@ -769,13 +719,10 @@ impl SstMetadata {
 
 impl Default for SstMetadata {
     fn default() -> Self {
-        let mut last_key = Buffer::new(MAX_KEY_LEN);
-        for i in 0..MAX_KEY_LEN {
-            last_key.as_mut()[i] = 0xffu8;
-        }
+        let last_key = vec![0xffu8; MAX_KEY_LEN];
         Self {
             setsum: [0u8; 32],
-            first_key: Buffer::new(0),
+            first_key: Vec::new(),
             last_key,
             smallest_timestamp: 0,
             biggest_timestamp: u64::max_value(),
@@ -893,21 +840,17 @@ impl Sst {
         cursor.next()?;
         let kvr = cursor.value();
         let first_key = match kvr {
-            Some(kvr) => Buffer::from(kvr.key),
-            None => Buffer::new(0),
+            Some(kvr) => Vec::from(kvr.key),
+            None => Vec::new(),
         };
         // Last key.
         cursor.seek_to_last()?;
         cursor.prev()?;
         let kvr = cursor.value();
         let last_key = match kvr {
-            Some(kvr) => Buffer::from(kvr.key),
+            Some(kvr) => Vec::from(kvr.key),
             None => {
-                let mut buf = Buffer::new(MAX_KEY_LEN);
-                for i in 0..MAX_KEY_LEN {
-                    buf.as_mut()[i] = 0xffu8;
-                }
-                buf
+                vec![0xffu8; MAX_KEY_LEN]
             }
         };
         // Metadata
