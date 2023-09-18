@@ -46,7 +46,7 @@ pub enum Error {
         core: ErrorCore,
     },
     #[prototk(311300, message)]
-    InvalidTag{
+    InvalidTag {
         #[prototk(1, message)]
         core: ErrorCore,
     },
@@ -55,21 +55,21 @@ pub enum Error {
 impl Error {
     fn core(&self) -> &ErrorCore {
         match self {
-            Error::Success { core,  .. }  => { core },
-            Error::CouldNotExtend { core,  .. }  => { core },
-            Error::UnpackError { core,  .. }  => { core },
-            Error::NotValidUtf8 { core,  .. }  => { core },
-            Error::InvalidTag { core,  .. }  => { core },
+            Error::Success { core, .. } => core,
+            Error::CouldNotExtend { core, .. } => core,
+            Error::UnpackError { core, .. } => core,
+            Error::NotValidUtf8 { core, .. } => core,
+            Error::InvalidTag { core, .. } => core,
         }
     }
 
     fn core_mut(&mut self) -> &mut ErrorCore {
         match self {
-            Error::Success { core,  .. }  => { core },
-            Error::CouldNotExtend { core,  .. }  => { core },
-            Error::UnpackError { core,  .. }  => { core },
-            Error::NotValidUtf8 { core,  .. }  => { core },
-            Error::InvalidTag { core,  .. }  => { core },
+            Error::Success { core, .. } => core,
+            Error::CouldNotExtend { core, .. } => core,
+            Error::UnpackError { core, .. } => core,
+            Error::NotValidUtf8 { core, .. } => core,
+            Error::InvalidTag { core, .. } => core,
         }
     }
 }
@@ -109,13 +109,16 @@ impl Z for Error {
         self
     }
 
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
+    where
+        X: Debug,
+    {
         self.core_mut().set_variable(variable, x);
         self
     }
 }
 
-iotoz!{Error}
+iotoz! {Error}
 
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
 
@@ -285,7 +288,9 @@ impl<'a> TupleKeyParser<'a> {
     pub fn extend(&mut self, f: FieldNumber, value: DataType) -> Result<(), &'static str> {
         let elem = match self.iter.next() {
             Some(elem) => elem,
-            None => { return Err("no more elements to TupleKey"); },
+            None => {
+                return Err("no more elements to TupleKey");
+            }
         };
         let (buf, sz) = TupleKey::from_field_number(f, value);
         if &buf[0..sz] != elem {
@@ -294,7 +299,11 @@ impl<'a> TupleKeyParser<'a> {
         Ok(())
     }
 
-    pub fn extend_with_key<E: Element>(&mut self, f: FieldNumber, value: DataType) -> Result<E, &'static str> {
+    pub fn extend_with_key<E: Element>(
+        &mut self,
+        f: FieldNumber,
+        value: DataType,
+    ) -> Result<E, &'static str> {
         // First we extend as normal.
         self.extend(f, value)?;
         // Check the discriminant.
@@ -571,11 +580,23 @@ mod tuple_key {
             tk2.extend_with_key(FieldNumber::must(5), "E".to_owned(), DataType::Message);
             tk2.extend_with_key(FieldNumber::must(6), "F".to_owned(), DataType::Message);
             // preconditions
-            assert_eq!(&[62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128], tk1.as_bytes());
-            assert_eq!(&[158, 16, 69, 0, 190, 16, 69, 128, 222, 16, 71, 0], tk2.as_bytes());
+            assert_eq!(
+                &[62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128],
+                tk1.as_bytes()
+            );
+            assert_eq!(
+                &[158, 16, 69, 0, 190, 16, 69, 128, 222, 16, 71, 0],
+                tk2.as_bytes()
+            );
             // what we want to test
             tk1.append(&mut tk2);
-            assert_eq!(&[62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128, 158, 16, 69, 0, 190, 16, 69, 128, 222, 16, 71, 0], tk1.as_bytes());
+            assert_eq!(
+                &[
+                    62, 16, 65, 128, 94, 16, 67, 0, 126, 16, 67, 128, 158, 16, 69, 0, 190, 16, 69,
+                    128, 222, 16, 71, 0
+                ],
+                tk1.as_bytes()
+            );
             assert!(tk2.is_empty());
         }
     }

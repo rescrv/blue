@@ -111,14 +111,16 @@ mod tests {
 
     #[test]
     fn four_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter =
+            Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11110000]);
+        let mut iter =
+            Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11110000]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
@@ -128,7 +130,9 @@ mod tests {
 
     #[test]
     fn five_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000,
+        ]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
@@ -136,7 +140,9 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111000,
+        ]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
@@ -147,7 +153,9 @@ mod tests {
 
     #[test]
     fn six_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000,
+        ]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
@@ -156,7 +164,9 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111100]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111100,
+        ]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
@@ -168,7 +178,10 @@ mod tests {
 
     #[test]
     fn seven_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001,
+            0b00000000,
+        ]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
@@ -178,7 +191,10 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111110]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b11111110,
+        ]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
@@ -191,7 +207,10 @@ mod tests {
 
     #[test]
     fn eight_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001,
+            0b00000001, 0b00000001, 0b00000000,
+        ]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
@@ -202,7 +221,10 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b10000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b11111111, 0b11111111, 0b10000000,
+        ]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
@@ -216,7 +238,10 @@ mod tests {
 
     #[test]
     fn nine_bytes() {
-        let mut iter = Combine7BitChunks::new(&[0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001, 0b00000001,
+            0b00000001, 0b00000001, 0b00000001, 0b00000000,
+        ]);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(0), iter.next());
@@ -228,7 +253,10 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(None, iter.next());
 
-        let mut iter = Combine7BitChunks::new(&[0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11000000]);
+        let mut iter = Combine7BitChunks::new(&[
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b11111111, 0b11111111, 0b11111111, 0b11000000,
+        ]);
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());
         assert_eq!(Some(255), iter.next());

@@ -1,5 +1,5 @@
 const DIVIDE_32: u32 = 0x80000000u32;
-const DIVIDE_64: u64 = 0x8000000000000000u64 ;
+const DIVIDE_64: u64 = 0x8000000000000000u64;
 
 pub fn encode_i32(x: i32) -> u32 {
     let offset = if x >= 0 {
