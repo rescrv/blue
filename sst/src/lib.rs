@@ -22,6 +22,7 @@ use zerror_core::ErrorCore;
 
 pub mod block;
 pub mod file_manager;
+pub mod ingest;
 pub mod log;
 pub mod merging_cursor;
 pub mod pruning_cursor;

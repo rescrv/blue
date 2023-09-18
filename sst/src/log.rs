@@ -64,11 +64,11 @@ const HEADER_SECOND: u32 = 3;
 #[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
 pub struct LogOptions {
     #[arrrg(optional, "Size of the write buffer.")]
-    write_buffer: usize,
+    pub(crate) write_buffer: usize,
     #[arrrg(optional, "Size of the read buffer.")]
-    read_buffer: usize,
+    pub(crate) read_buffer: usize,
     #[arrrg(optional, "Roll over logs that exceed this number of bytes.")]
-    log_rollover_size: usize,
+    pub(crate) rollover_size: usize,
 }
 
 impl Default for LogOptions {
@@ -76,7 +76,7 @@ impl Default for LogOptions {
         Self {
             write_buffer: BUFFER_SIZE as usize,
             read_buffer: BUFFER_SIZE as usize,
-            log_rollover_size: 1 << 22,
+            rollover_size: 1<<22,
         }
     }
 }
@@ -84,6 +84,7 @@ impl Default for LogOptions {
 //////////////////////////////////////////// LogBuilder ////////////////////////////////////////////
 
 pub struct LogBuilder<W: Write> {
+    options: LogOptions,
     output: BufWriter<W>,
     bytes_written: u64,
     setsum: Setsum,
@@ -104,6 +105,7 @@ impl<W: Write> LogBuilder<W> {
     pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
         let output = BufWriter::with_capacity(options.write_buffer, write);
         Ok(Self {
+            options,
             output,
             bytes_written: 0,
             setsum: Setsum::default(),
@@ -122,6 +124,13 @@ impl<W: Write> LogBuilder<W> {
         let nb = next_boundary(self.bytes_written);
         let new_offset = self.bytes_written + (header_pa.pack_sz() + buffer.len()) as u64;
         check_table_size(new_offset as usize)?;
+        if new_offset > self.options.rollover_size as u64 {
+            return Err(Error::TableFull {
+                core: ErrorCore::default(),
+                size: new_offset as usize,
+                limit: self.options.rollover_size,
+            });
+        }
         if new_offset > nb {
             self.append_split(buffer)
         } else {
@@ -192,7 +201,7 @@ impl<W: Write> LogBuilder<W> {
 }
 
 impl<W: Write> Builder for LogBuilder<W> {
-    type Sealed = ();
+    type Sealed = Setsum;
 
     fn approximate_size(&self) -> usize {
         self.bytes_written as usize
@@ -201,7 +210,6 @@ impl<W: Write> Builder for LogBuilder<W> {
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
-        check_table_size(self.approximate_size())?;
         self.setsum.put(key, timestamp, value);
         let put = KeyValuePut {
             shared: 0,
@@ -216,7 +224,6 @@ impl<W: Write> Builder for LogBuilder<W> {
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
-        check_table_size(self.approximate_size())?;
         self.setsum.del(key, timestamp);
         let del = KeyValueDel {
             shared: 0,
@@ -230,7 +237,7 @@ impl<W: Write> Builder for LogBuilder<W> {
 
     fn seal(mut self) -> Result<Self::Sealed, Error> {
         self.flush()?;
-        Ok(())
+        Ok(self.setsum)
     }
 }
 
