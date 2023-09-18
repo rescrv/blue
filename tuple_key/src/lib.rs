@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::cmp::Reverse;
 
 use buffertk::{v64, Packable};
 
@@ -565,6 +566,26 @@ impl Element for String {
     }
 }
 
+impl<E: Element> Element for Reverse<E> {
+    const DATA_TYPE: DataType = E::DATA_TYPE;
+
+    fn append_to(&self, key: &mut TupleKey) {
+        let key_sz = key.buf.len();
+        E::append_to(&self.0, key);
+        for b in &mut key.buf[key_sz..] {
+            *b = (!*b & 0xfe) | (*b & 1)
+        }
+    }
+
+    fn parse_from(buf: &[u8]) -> Result<Self, &'static str> {
+        let mut buf: Vec<u8> = buf.to_vec();
+        for b in &mut buf {
+            *b = (!*b & 0xfe) | (*b & 1)
+        }
+        Ok(Reverse(E::parse_from(&buf)?))
+    }
+}
+
 /////////////////////////////////////////// TypedTupleKey //////////////////////////////////////////
 
 pub trait TypedTupleKey: TryFrom<TupleKey> + Into<TupleKey> {}
@@ -776,6 +797,18 @@ mod elements {
         test_helper(
             value,
             &[105, 51, 91, 141, 199, 121, 129, 239, 111, 185, 155, 141, 64],
+        );
+    }
+
+    #[test]
+    fn reverse() {
+        const VALUE: u64 = 0x1eaff00d00c0ffeeu64;
+        test_helper(
+            Reverse(VALUE),
+            &[
+                0b11100001, 0b10101001, 0b00000011, 0b11111111, 0b00101111, 0b11111001, 0b11111101,
+                0b00000001, 0b00010001, 0b11111110,
+            ],
         );
     }
 }
