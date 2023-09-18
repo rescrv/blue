@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -11,9 +12,8 @@ use prototk_derive::Message;
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{check_key_len, check_value_len, check_table_size, Builder, Cursor, Error, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE};
+use super::{check_key_len, check_value_len, check_table_size, compare_key, Builder, Error, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE};
 use super::setsum::Setsum;
-use super::reference::ReferenceBuilder;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -386,35 +386,22 @@ impl<R: Read + Seek> LogIterator<R> {
 }
 
 pub fn log_to_builder<P: AsRef<Path>, B: Builder>(log_options: LogOptions, log_path: P, mut builder: B) -> Result<B::Sealed, Error> {
-    /*
     let mut log_iter = LogIterator::new(log_options, log_path)?;
-    let mut entries = Vec::new();
-    while let Some(entry) = log_iter.next()? {
-        let buffer = stack_pack(entry).to_vec();
-        entries.push(buffer)
+    let mut kvrs = Vec::new();
+    while let Some(kvr) = log_iter.next().unwrap() {
+        kvrs.push(KeyValuePair::from(kvr));
     }
-    fn sort_key(lhs: &Vec<u8>, rhs: &Vec<u8>) -> Ordering {
-        // We serialize above so this should always unwrap.
-        let lhs = <KeyValueEntry as Unpackable>::unpack(lhs).unwrap().0;
-        let rhs = <KeyValueEntry as Unpackable>::unpack(rhs).unwrap().0;
-        compare_key(lhs.key_frag(), lhs.timestamp(), rhs.key_frag(), rhs.timestamp())
+    fn sort_key(lhs: &KeyValuePair, rhs: &KeyValuePair) -> Ordering {
+        compare_key(&lhs.key, lhs.timestamp, &rhs.key, rhs.timestamp)
     }
-    entries.sort_by(sort_key);
-    for entry in entries.into_iter() {
-        let entry = <KeyValueEntry as Unpackable>::unpack(&entry).unwrap().0;
-        match entry {
-            KeyValueEntry::Put(put) => {
-                builder.put(put.key_frag, put.timestamp, put.value)?;
-            },
-            KeyValueEntry::Del(del) => {
-                builder.del(del.key_frag, del.timestamp)?;
-            },
+    kvrs.sort_by(sort_key);
+    for kvr in kvrs.into_iter() {
+        match kvr.value {
+            Some(v) => { builder.put(&kvr.key, kvr.timestamp, &v); },
+            None => { builder.del(&kvr.key, kvr.timestamp); },
         }
     }
     builder.seal()
-
-    */
-    todo!();
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
