@@ -1,4 +1,5 @@
-/// Deal with the here and now.
+//! Deal with the here and now.
+
 pub mod now {
     use std::time::{SystemTime, UNIX_EPOCH};
 

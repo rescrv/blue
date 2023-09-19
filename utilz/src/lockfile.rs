@@ -1,3 +1,5 @@
+//! Support for unix file locking, with some concurrency protection.
+
 use std::fs::{File, OpenOptions};
 use std::io::Error;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};

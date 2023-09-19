@@ -1,4 +1,4 @@
-///////////////////////////////////////////// Internals ////////////////////////////////////////////
+//! Perform fnmatch on text, returning true if it matches pattern.
 
 fn fnmatch(pattern: &str, text: &str) -> bool {
     let mut pat = pattern.chars();
@@ -35,6 +35,8 @@ fn fnmatch(pattern: &str, text: &str) -> bool {
 
 ////////////////////////////////////////////// Pattern /////////////////////////////////////////////
 
+/// A [Pattern] captures the pattern for globbing.  Call `fnmatch` to check if a text string
+/// matches.
 pub struct Pattern {
     pattern: String,
 }
