@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use std::iter::zip;
