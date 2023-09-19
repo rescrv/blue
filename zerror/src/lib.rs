@@ -59,7 +59,7 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 #[macro_export]
 macro_rules! iotoz {
     ($error:ident) => {
-        trait IoToZ<T> {
+        pub trait IoToZ<T> {
             fn as_z(self) -> Result<T, $error>;
         }
 
