@@ -1,6 +1,4 @@
-//! Biometrics provide the vitals of a process in the form of counters, gauges, moments, and
-//! T-digests.  Collectively, these sensors paint a picture of what's happening within a process in
-//! timeseries form.
+#![doc = include_str!("../README.md")]
 
 use std::fs::File;
 use std::io::Write;
@@ -9,7 +7,7 @@ use std::sync::Mutex;
 use utilz::time::now;
 
 pub mod moments;
-pub mod sensors;
+mod sensors;
 
 pub use sensors::Counter;
 pub use sensors::Gauge;
@@ -17,7 +15,9 @@ pub use sensors::Moments;
 
 ////////////////////////////////////////////// Sensor //////////////////////////////////////////////
 
-/// [Sensor] is the core type of the system.
+/// [Sensor] is the core type of the system.  A sensor must be algebraic to be included in this
+/// library.  An algebraic sensor allows one to take two readings, one on each side of a bucket,
+/// and compute the bucket with a single subtraction.
 pub trait Sensor {
     type Reading;
 

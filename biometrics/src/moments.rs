@@ -1,4 +1,4 @@
-////////////////////////////////////////////// Moments /////////////////////////////////////////////
+//! Statistical moments.
 
 /// Moments are the statistical moments of mean (m1), standard deviation (m2), skewness (m3) and
 /// kurtosis (m4).  When a distribution goes long tailed, skewness and kurtosis blow up, so the

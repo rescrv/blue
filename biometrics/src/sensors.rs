@@ -1,3 +1,5 @@
+//! Sensors that implement the [Sensor] trait.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -6,6 +8,7 @@ use crate::Sensor;
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
+/// [Counter] captures a monotonically increasing value.
 pub struct Counter {
     label: &'static str,
     count: AtomicU64,
@@ -48,6 +51,7 @@ impl Sensor for Counter {
 
 const GAUGE_INIT: u64 = 0;
 
+/// [Gauge] captures a floating point value.
 pub struct Gauge {
     label: &'static str,
     value: AtomicU64,
@@ -84,6 +88,7 @@ impl Sensor for Gauge {
 
 ////////////////////////////////////////////// Moments /////////////////////////////////////////////
 
+/// [Moments] captures mean, stdev, skewness, and kurtosis.
 pub struct Moments {
     label: &'static str,
     value: Mutex<moments::Moments>,
