@@ -253,4 +253,23 @@ mod proto_builder {
         let msg: &[u8] = &pb.seal().unwrap();
         assert_eq!(&[10, 2, 8, 42], &msg);
     }
+
+    #[test]
+    fn map_with_message_value() {
+        let mut pb = ProtoBuilder::default();
+        // The key for the map.  The value will be a message.
+        let key_tag: &[u8] = &stack_pack(Tag { field_number: FieldNumber::must(1), wire_type: WireType::Varint }).to_vec();
+        let key_buf: &[u8] = &[42];
+        let value_tag: &[u8] = &stack_pack(Tag { field_number: FieldNumber::must(2), wire_type: WireType::LengthDelimited }).to_vec();
+        let value_buf: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
+        // Let's create a protocol buffers message with a map field.
+        let tag = Tag { field_number: FieldNumber::must(7), wire_type: WireType::LengthDelimited };
+        let begin = pb.begin_map_with_message(tag, &[&key_tag, &key_buf, &value_tag]);
+        // Emit the value inline because we captured the value tag.
+        pb.emit_inline(value_buf);
+        // Finish the message
+        pb.end_message(begin);
+        let msg: &[u8] = &pb.seal().unwrap();
+        assert_eq!(&[58, 12, 8, 42, 18, 8, 0, 1, 2, 3, 4, 5, 6, 7], &msg);
+    }
 }
