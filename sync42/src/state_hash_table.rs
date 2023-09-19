@@ -1,3 +1,4 @@
+//! [StateHashTable] solves the rendezvous problem.
 //!
 //! ```
 //! use std::sync::atomic::{AtomicBool, Ordering};

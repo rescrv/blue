@@ -1,3 +1,5 @@
+//! A RCU-like quiescent state detector.
+
 use std::collections::{BinaryHeap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -58,12 +60,14 @@ impl ThreadStateNode {
 
 //////////////////////////////////////////// ThreadState ///////////////////////////////////////////
 
+/// A thread state belongs to a single thread.
 pub struct ThreadState<'a> {
     collector: &'a Collector,
     index: usize,
 }
 
 impl<'a> ThreadState<'a> {
+    /// Call `quiescent` regularly at a time when the thread holds no garbage-collectible pointers.
     pub fn quiescent(&mut self) {
         let (timestamp, min_timestamp) = loop {
             // This loop finds the largest timestamp that is less than each thread state's
@@ -111,6 +115,7 @@ impl<'a> ThreadState<'a> {
         self.node().purge(min_timestamp);
     }
 
+    /// Take the thread offline for a time.  It will act as if permanently quiescent.
     pub fn offline(&mut self) {
         let timestamp = self.collector.read_timestamp();
         assert!(self.node().quiescent_timestamp.load(Ordering::Relaxed) < timestamp);
@@ -122,6 +127,7 @@ impl<'a> ThreadState<'a> {
         self.collector.read_timestamp();
     }
 
+    /// Take the thread online.  It will need to begin calling quiescent again.
     pub fn online(&mut self) {
         let timestamp = self.collector.read_timestamp();
         assert!(self.node().quiescent_timestamp.load(Ordering::Relaxed) < timestamp);
@@ -134,6 +140,7 @@ impl<'a> ThreadState<'a> {
         self.collector.read_timestamp();
     }
 
+    /// Collect a unit of garbage once every thread calls quiescent or offline.
     pub fn collect<F: FnOnce() + Send + Sync + 'static>(&mut self, cleanup: F) {
         let timestamp = self.collector.read_timestamp();
         let cleanup = Box::new(cleanup);
@@ -157,6 +164,7 @@ impl<'a> Drop for ThreadState<'a> {
 
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
 
+/// [Collector] allows for garbage collection of lock-free data structures.
 pub struct Collector {
     incrementing_timestamp: AtomicU64,
     watermark_timestamp: AtomicU64,
@@ -166,6 +174,7 @@ pub struct Collector {
 }
 
 impl Collector {
+    /// Create a new collector that supports `threads` threads.
     pub fn new(threads: usize) -> Self {
         let mut nodes = Vec::new();
         let mut free = VecDeque::new();
@@ -182,6 +191,7 @@ impl Collector {
         }
     }
 
+    /// Register a thread and get the thread state.
     pub fn register_thread(&self) -> Option<ThreadState<'_>> {
         if let Some(index) = self.free.lock().unwrap().pop_front() {
             let ts = ThreadState {

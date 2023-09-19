@@ -29,4 +29,5 @@ The latest documentation is always available at [docs.rs](https://docs.rs/sync42
 Updating
 --------
 
+- 0.3.0 -> 0.4.0:  Changes to `StateHashTable` and `WaitList`.
 - 0.2.0 -> 0.3.0:  Added the `StateHashTable`.  Backwards compatible for existing structures.
