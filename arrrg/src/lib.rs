@@ -1,35 +1,4 @@
-//! arrrg provides an opinionated [CommandLine] parser.
-//!
-//! For example, let's consider the parser specified here using the derive syntax:
-//!
-//! ```
-//! use arrrg_derive::CommandLine;
-//!
-//! #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
-//! struct Options {
-//!     #[arrrg(optional, "this is the help text", "PLACEHOLDER")]
-//!     some_string: String,
-//!     #[arrrg(nested)]
-//!     some_prefix: SomeOptions,
-//! }
-//!
-//! #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
-//! struct SomeOptions {
-//!     #[arrrg(required, "this is the help text", "PLACEHOLDER")]
-//!     a: String,
-//!     #[arrrg(optional, "this is the help text", "PLACEHOLDER")]
-//!     b: String,
-//! }
-//! ```
-//!
-//! This will provide the options to getopts of `--some-string`, `--some-prefix-a`,
-//! `--some-prefix-b`.  In general the rule is to derive the flag names from the identifiers of
-//! struct members.  When nesting the name will be the concatenation of the prefix from the parent
-//! struct and the member identifier from the child struct.  Unlimited nesting is possible.
-//!
-//! This library takes an opinionated stance on the command line.  There should be exactly one
-//! canonical argument order on the command-line and all applications must be built with this in
-//! mind.  Users of the library can call [from_command_line_relaxed] to disable this checking.
+#![doc = include_str!("../README.md")]
 
 use std::str::FromStr;
 
