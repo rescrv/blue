@@ -5,11 +5,13 @@ use toml::Table;
 
 const EXCLUDE_MEMBERS: &[&str] = &[
     "meta",
+    "scrunch",
 ];
 
 const EXCLUDE_DIRS: &[&str] = &[
     ".git",
     "target",
+    "napkins",
     // TODO(rescrv): Stuff to integrate eventually.
     "statslicer",
 ];
