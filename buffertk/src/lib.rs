@@ -1,7 +1,7 @@
-//! Buffertk provides tooling for serializing and deserializing data.
+#![doc = include_str!("../README.md")]
 
-pub mod buffer;
-pub mod varint;
+mod buffer;
+mod varint;
 
 pub use buffer::Buffer;
 pub use varint::v64;

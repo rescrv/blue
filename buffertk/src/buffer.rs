@@ -83,6 +83,8 @@ impl Packable for Buffer {
     }
 }
 
+// TODO(rescrv): Make this Send, somehow.
+
 //////////////////////////////////////////// AsRef/AsMut ///////////////////////////////////////////
 
 impl AsRef<[u8]> for Buffer {

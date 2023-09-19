@@ -1,7 +1,7 @@
 use buffertk::Unpackable;
 
 /// For each u64 provided as an argument on the command line, print the varint representation as
-/// bytes.
+/// bytes.  Provide the bytes in base 10, one argument per byte.
 fn main() {
     let mut bytes = Vec::new();
     for argument in std::env::args().skip(1) {
