@@ -7,14 +7,14 @@ Status
 ------
 
 Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
-The clock was last reset 2023-09-07.
+The clock was last reset 2023-09-19.
 
 Scope
 -----
 
 This library is about serialization and deserialization of messages.  It strives to distil protocol buffers to this:
 
-```
+```ignore
 #[derive(Debug, Default, Message)]
 pub enum Error {
     #[prototk(278528, message)]
@@ -83,7 +83,6 @@ The error types in my libraries all have diffrent field numbers.  Here is where 
 - 311296..311552 tuple_key::Error
 - 376832..377088 mani::Error
 - 442368..442624 sst::Error
-
 
 Documentation
 -------------

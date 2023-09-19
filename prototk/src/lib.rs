@@ -1,11 +1,9 @@
-//! prototk is a protocol buffer (protobuf) library with a low-level API.  Unlike protobuf libraries
-//! that focus on ease of use, code generation, or performance, prototk aims to expose every level
-//! of abstraction it has internally so that developers can use as much or as little as they wish.
+#![doc = include_str!("../README.md")]
 
 use std::fmt::{Debug, Display, Formatter};
 
 pub mod field_types;
-pub mod zigzag;
+mod zigzag;
 
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;

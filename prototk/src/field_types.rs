@@ -1,3 +1,8 @@
+//! Field types supported by prototk.
+//!
+//! Add `use prototk::field_types::*` to your includes to access all field types in the derive
+//! macros.
+
 #![allow(non_camel_case_types)]
 
 // We allow non-CamelCase types here because we want the struct names to appear as close to they do
