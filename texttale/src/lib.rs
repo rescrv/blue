@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::fs::read_to_string;
 use std::io::Write;
 use std::path::Path;
@@ -8,12 +10,16 @@ use rustyline::Editor;
 
 ///////////////////////////////////////////// TextTale /////////////////////////////////////////////
 
+/// A [TextTale] creates a text-mode adventure by feeding the next command from the command prompt
+/// as a string.  Will return None when the user kills the session or the underlying writer is
+/// exhausted.
 pub trait TextTale: Write {
     fn next_command(&mut self) -> Option<String>;
 }
 
 /////////////////////////////////////////// ShellTextTale //////////////////////////////////////////
 
+/// A [ShellTextTale] gives an interactive shell for testing.  It's intended to be interactive.
 pub struct ShellTextTale {
     rl: Editor<(), MemHistory>,
     prompt: &'static str,
@@ -60,6 +66,9 @@ impl TextTale for ShellTextTale {
 
 ////////////////////////////////////////// ExpectTextTale //////////////////////////////////////////
 
+/// An [ExpectTextTale] gives an adventure that gets recorded and compared against the input.  It's
+/// intended to run the script and compare its output to the file.  See `CHECKSUMS.zsh` for an
+/// example of the tests in the `scripts/` directory.
 #[derive(Default)]
 pub struct ExpectTextTale {
     input_lines: Vec<String>,
@@ -117,6 +126,7 @@ impl TextTale for ExpectTextTale {
 
 /////////////////////////////////////////// StoryElement ///////////////////////////////////////////
 
+/// A [StoryElement] dictates what to do next in the story.
 pub enum StoryElement {
     Continue,
     Return,
@@ -125,6 +135,82 @@ pub enum StoryElement {
 
 //////////////////////////////////////////// story macro ///////////////////////////////////////////
 
+/// A [story] always takes the same form.  It is addressed to the method that it will generate for
+/// the author.  It is always followed by the prompt that will be displayed when the user asks for
+/// help.  Then, it's a sequence of commands that need to be interpreted.
+///
+/// ```
+/// use texttale::{story, StoryElement, TextTale};
+///
+/// struct Player<T: TextTale> {
+///     name: String,
+///     age: u8,
+///     gender: String,
+///     race: String,
+///     tale: T,
+/// }
+///
+/// story! {
+///     self cmd,
+///     character by Player<T>;
+/// "Craft your character.
+///
+/// help: .... Print this help menu.
+/// name: .... Set your character's name.
+/// age: ..... Set your character's age.
+/// gender: .. Set your character's gender.
+/// race: .... Set your character's race.
+/// print: ... Print your character.
+/// save: .... Commit changes to the configuration and return to previous menu.
+/// ";
+///     "name" => {
+///         self.name = cmd[1..].to_vec().join(" ");
+///         StoryElement::Continue
+///     }
+///     "gender" => {
+///         self.gender = cmd[1..].to_vec().join(" ");
+///         StoryElement::Continue
+///     }
+///     "race" => {
+///         self.race = cmd[1..].to_vec().join(" ");
+///         StoryElement::Continue
+///     }
+///     "age" => {
+///         if cmd.len() != 2 {
+///             writeln!(self.tale, "USAGE: age [age]").unwrap();
+///         } else {
+///             match cmd[1].parse::<u8>() {
+///                 Ok(age) => {
+///                     self.age = age;
+///                 },
+///                 Err(err) => {
+///                     writeln!(self.tale, "invalid age: {}", err).unwrap();
+///                 },
+///             };
+///         }
+///         StoryElement::Continue
+///     }
+///     "print" => {
+///         let debug = format!("{:#?}", self);
+///         writeln!(self.tale, "{}", debug).unwrap();
+///         StoryElement::Continue
+///     }
+///     "save" => {
+///         StoryElement::Return
+///     }
+/// }
+///
+/// impl<T: TextTale> std::fmt::Debug for Player<T> {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         f.debug_struct("Player")
+///             .field("name", &self.name)
+///             .field("age", &self.age)
+///             .field("gender", &self.gender)
+///             .field("race", &self.race)
+///             .finish()
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! story {
     ($sel:ident $cmd:ident, $story_title:ident by $story_teller:ty; $help:literal; $($command:literal => $code:tt)*) => {

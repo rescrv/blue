@@ -18,6 +18,8 @@ then replayed.  See the `scripts/` folder and `src/bin/texttale.rs` for an examp
 Warts
 -----
 
+- Tests are run in repo using a combination of shell scripts and the expect interface.
+
 Documentation
 -------------
 
