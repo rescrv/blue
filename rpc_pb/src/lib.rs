@@ -11,6 +11,8 @@ use zerror::{iotoz, Z};
 
 use zerror_core::ErrorCore;
 
+pub mod sd;
+
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 pub const MAX_REQUEST_SIZE: usize = 1usize << 20;
@@ -141,6 +143,13 @@ pub enum Error {
         #[prototk(2, string)]
         what: String,
     },
+    #[prototk(278538, message)]
+    NotFound {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
 }
 
 impl Error {
@@ -156,6 +165,7 @@ impl Error {
             Error::UlimitParseError { core, .. } => core,
             Error::OsError { core, .. } => core,
             Error::LogicError { core, .. } => core,
+            Error::NotFound { core, .. } => core,
         }
     }
 
@@ -171,6 +181,7 @@ impl Error {
             Error::UlimitParseError { core, .. } => core,
             Error::OsError { core, .. } => core,
             Error::LogicError { core, .. } => core,
+            Error::NotFound { core, .. } => core,
         }
     }
 }
@@ -228,6 +239,10 @@ impl Display for Error {
                 .debug_struct("LogicError")
                 .field("what", what)
                 .finish(),
+            Error::NotFound { core: _, what } => fmt
+                .debug_struct("NotFound")
+                .field("what", what)
+                .finish(),
         }
     }
 }
@@ -280,6 +295,10 @@ impl PartialEq for Error {
             },
             (Error::LogicError { core: _, what: what_lhs },
              Error::LogicError { core: _, what: what_rhs }) => {
+                what_lhs == what_rhs
+            },
+            (Error::NotFound { core: _, what: what_lhs },
+             Error::NotFound { core: _, what: what_rhs }) => {
                 what_lhs == what_rhs
             },
             (_, _) => { false }
@@ -405,17 +424,17 @@ macro_rules! service {
     (name = $service:ident; server = $server:ident; client = $client:ident; error = $error:ty; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
         pub trait $service {
             $(
-                fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error>;
+                fn $method(&self, ctx: &$crate::Context, req: $req) -> Result<$resp, $error>;
             )*
         }
 
-        pub struct $client<C: rpc_pb::Client> {
+        pub struct $client<C: $crate::Client> {
             client: C,
         }
 
-        impl<C: rpc_pb::Client> $service for $client<C> where {
+        impl<C: $crate::Client> $service for $client<C> where {
             $(
-                rpc_pb::client_method! { $service, $method, $req, $resp, $error }
+                $crate::client_method! { $service, $method, $req, $resp, $error }
             )*
         }
 
@@ -431,8 +450,8 @@ macro_rules! service {
             }
         }
 
-        impl<S: $service> rpc_pb::Server for $server<S> {
-            rpc_pb::server_methods! { $service, $error, $($method, $req, $resp),* }
+        impl<S: $service> $crate::Server for $server<S> {
+            $crate::server_methods! { $service, $error, $($method, $req, $resp),* }
         }
     };
 }
@@ -440,15 +459,14 @@ macro_rules! service {
 #[macro_export]
 macro_rules! client_method {
     ($service:ident, $method:ident, $req:ident, $resp:ty, $error:ty) => {
-        fn $method(&self, ctx: &rpc_pb::Context, req: $req) -> Result<$resp, $error> {
-            use buffertk::{stack_pack, Packable, Unpackable};
-            let req = stack_pack(req).to_vec();
+        fn $method(&self, ctx: &$crate::Context, req: $req) -> Result<$resp, $error> {
+            let req = ::buffertk::stack_pack(req).to_vec();
             let status = self
                 .client
                 .call(ctx, stringify!($service), stringify!($method), &req);
             match status {
-                Ok(Ok(msg)) => Ok(<$resp as Unpackable>::unpack(&msg)?.0),
-                Ok(Err(msg)) => Err(<$error as Unpackable>::unpack(&msg)?.0),
+                Ok(Ok(msg)) => Ok(<$resp as ::buffertk::Unpackable>::unpack(&msg)?.0),
+                Ok(Err(msg)) => Err(<$error as ::buffertk::Unpackable>::unpack(&msg)?.0),
                 Err(err) => Err(err.into()),
             }
         }
@@ -458,12 +476,12 @@ macro_rules! client_method {
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $error:ty, $($method:ident, $req:ident, $resp:ident),+) => {
-        fn call(&self, ctx: &rpc_pb::Context, method: &str, req: &[u8]) -> rpc_pb::Status {
-            use buffertk::{stack_pack, Packable, Unpackable};
+        fn call(&self, ctx: &$crate::Context, method: &str, req: &[u8]) -> $crate::Status {
+            use buffertk::stack_pack;
             match method {
                 $(
                 stringify!($method) => {
-                    let req = <$req as buffertk::Unpackable>::unpack(req)?.0;
+                    let req = <$req as ::buffertk::Unpackable>::unpack(req)?.0;
                     let ans: Result<$resp, $error> = self.server.$method(ctx, req);
                     match ans {
                         Ok(resp) => {
@@ -476,7 +494,7 @@ macro_rules! server_methods {
                 }
                 ),*
                 _ => {
-                    Err(rpc_pb::Error::UnknownMethodName {
+                    Err($crate::Error::UnknownMethodName {
                         core: zerror_core::ErrorCore::default(),
                         name: method.to_string(),
                     }.into())
@@ -493,9 +511,9 @@ pub struct ServerRegistry {
 }
 
 impl ServerRegistry {
-    pub fn register(&mut self, name: &'static str, server: Box<dyn Server>) {
+    pub fn register<S: Server + 'static>(&mut self, name: &'static str, server: S) {
         assert!(!self.registry.contains_key(name));
-        self.registry.insert(name, server);
+        self.registry.insert(name, Box::new(server));
     }
 
     pub fn get_server(&self, name: &str) -> Option<&dyn Server> {
@@ -624,6 +642,17 @@ mod tests {
             Error::LogicError {
                 core: ErrorCore::default(),
                 what: "some logic error".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn not_found_error() {
+        do_test(
+            "NotFound { what: \"deployment\" }",
+            Error::NotFound {
+                core: ErrorCore::default(),
+                what: "deployment".to_owned(),
             }
         );
     }

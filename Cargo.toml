@@ -6,7 +6,6 @@ members = [
     "arrrg_derive",
     "biometrics",
     "biometrics_pb",
-    "biometrics_tuple_db",
     "bloomcalc",
     "buffertk",
     "busybee",
