@@ -289,7 +289,7 @@ impl Builder for BlockBuilder {
         let pa = pa.pack(self.restarts.len() as u32);
         let mut contents = self.buffer;
         pa.append_to_vec(&mut contents);
-        Block::new(contents.into())
+        Block::new(contents)
     }
 }
 
