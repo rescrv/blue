@@ -100,8 +100,25 @@ impl ProtoBuilder {
         self.msg.extend_from_slice(value);
     }
 
-    fn shift_frame(&mut self, offset_of_u64: usize) -> Result<usize, &'static str> {
-        todo!();
+    fn shift_frame(&mut self, offset_of_u64: usize, in_progress_offset: usize, msg_sz: usize, bytes_dropped: usize) -> Result<usize, &'static str> {
+        let post_u64_offset = offset_of_u64 + 8;
+        if post_u64_offset >= in_progress_offset {
+            return Err("logic error: offset too small");
+        }
+        let msg_sz_v64 = v64::from(msg_sz);
+        if msg_sz_v64.pack_sz() > 8 {
+            return Err("logic error: data too large");
+        }
+        let msg_sz_v64_pack_sz = msg_sz_v64.pack_sz();
+        let newly_dropped_bytes = 8 - msg_sz_v64_pack_sz;
+        for src in post_u64_offset..in_progress_offset {
+            let dst = src + bytes_dropped;
+            self.msg[dst] = self.msg[src];
+        }
+        let length_start = offset_of_u64 + bytes_dropped + newly_dropped_bytes;
+        let length_slice = &mut self.msg[length_start..length_start + msg_sz_v64_pack_sz];
+        stack_pack(msg_sz_v64).into_slice(length_slice);
+        Ok(newly_dropped_bytes)
     }
 
     fn seal(mut self) -> Result<Vec<u8>, &'static str> {
@@ -119,63 +136,33 @@ impl ProtoBuilder {
                     if in_progress_idx != frame_idx {
                         return Err("logic error: index miscalculation");
                     }
-                    let post_tag_offset = begin_offset + tag_sz + 8;
-                    if post_tag_offset >= in_progress_offset {
-                        return Err("logic error: offset too small");
-                    }
-                    let to_move = in_progress_offset - post_tag_offset;
-                    let to_move_v64 = v64::from(to_move);
-                    if to_move_v64.pack_sz() > 8 {
-                        return Err("logic error: data too large");
-                    }
-                    let to_move_v64_pack_sz = to_move_v64.pack_sz();
-                    let newly_dropped_bytes = 8 - to_move_v64_pack_sz;
-                    for src in post_tag_offset..in_progress_offset {
-                        let dst = src + bytes_dropped;
-                        self.msg[dst] = self.msg[src];
-                    }
+                    let msg_sz = in_progress_offset - begin_offset - tag_sz - 8;
+                    let newly_dropped_bytes = self.shift_frame(begin_offset + tag_sz, in_progress_offset, msg_sz, bytes_dropped)?;
                     for tag_byte in begin_offset..begin_offset + tag_sz {
                         self.msg[tag_byte + newly_dropped_bytes] = self.msg[tag_byte];
                     }
-                    let length_start = begin_offset + tag_sz + newly_dropped_bytes;
-                    let length_slice = &mut self.msg[length_start..length_start + to_move_v64_pack_sz];
-                    stack_pack(to_move_v64).into_slice(length_slice);
                     bytes_dropped += newly_dropped_bytes;
                     self.frames.pop();
                 },
-                MessageFrame::BeginMapWithMessage { offset, tag_sz, key_offset } => {
+                MessageFrame::BeginMapWithMessage { offset: begin_offset, tag_sz, key_offset } => {
                     if in_progress.is_empty() {
                         return Err("logic error: in_progress was empty");
                     }
                     let (in_progress_offset, in_progress_idx) = in_progress.pop().unwrap();
-                    /*
                     if in_progress_idx != frame_idx {
                         return Err("logic error: index miscalculation");
                     }
-                    let post_tag_offset = begin_offset + tag_sz + 8;
-                    if post_tag_offset >= in_progress_offset {
-                        return Err("logic error: offset too small");
-                    }
-                    let to_move = in_progress_offset - post_tag_offset;
-                    let to_move_v64 = v64::from(to_move);
-                    if to_move_v64.pack_sz() > 8 {
-                        return Err("logic error: data too large");
-                    }
-                    let to_move_v64_pack_sz = to_move_v64.pack_sz();
-                    let newly_dropped_bytes = 8 - to_move_v64_pack_sz;
-                    for src in post_tag_offset..in_progress_offset {
-                        let dst = src + bytes_dropped;
-                        self.msg[dst] = self.msg[src];
-                    }
+                    let msg_sz = in_progress_offset - key_offset - 8;
+                    let first_dropped_bytes = self.shift_frame(key_offset, in_progress_offset, msg_sz, bytes_dropped)?;
+                    bytes_dropped += first_dropped_bytes;
+                    let msg_sz = in_progress_offset - begin_offset - tag_sz - 16 + (8 - first_dropped_bytes);
+                    let second_dropped_bytes = self.shift_frame(begin_offset + tag_sz, key_offset, msg_sz, bytes_dropped)?;
+                    bytes_dropped += second_dropped_bytes;
+                    let newly_dropped_bytes = first_dropped_bytes + second_dropped_bytes;
                     for tag_byte in begin_offset..begin_offset + tag_sz {
                         self.msg[tag_byte + newly_dropped_bytes] = self.msg[tag_byte];
                     }
-                    let length_start = begin_offset + tag_sz + newly_dropped_bytes;
-                    let length_slice = &mut self.msg[length_start..length_start + to_move_v64_pack_sz];
-                    stack_pack(to_move_v64).into_slice(length_slice);
-                    bytes_dropped += newly_dropped_bytes;
                     self.frames.pop();
-                    */
                 },
                 MessageFrame::End { offset, begin } => {
                     in_progress.push((offset, begin));
@@ -255,7 +242,7 @@ mod proto_builder {
     }
 
     #[test]
-    fn map_with_message_value() {
+    fn map_with_scalar_key_message_value() {
         let mut pb = ProtoBuilder::default();
         // The key for the map.  The value will be a message.
         let key_tag: &[u8] = &stack_pack(Tag { field_number: FieldNumber::must(1), wire_type: WireType::Varint }).to_vec();
@@ -271,5 +258,24 @@ mod proto_builder {
         pb.end_message(begin);
         let msg: &[u8] = &pb.seal().unwrap();
         assert_eq!(&[58, 12, 8, 42, 18, 8, 0, 1, 2, 3, 4, 5, 6, 7], &msg);
+    }
+
+    #[test]
+    fn map_with_message_key_message_value() {
+        let mut pb = ProtoBuilder::default();
+        // The key for the map.  The value will be a message.
+        let key_tag: &[u8] = &stack_pack(Tag { field_number: FieldNumber::must(1), wire_type: WireType::LengthDelimited }).to_vec();
+        let key_buf: &[u8] = &[4, 42, 43, 44, 45];
+        let value_tag: &[u8] = &stack_pack(Tag { field_number: FieldNumber::must(2), wire_type: WireType::LengthDelimited }).to_vec();
+        let value_buf: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7];
+        // Let's create a protocol buffers message with a map field.
+        let tag = Tag { field_number: FieldNumber::must(7), wire_type: WireType::LengthDelimited };
+        let begin = pb.begin_map_with_message(tag, &[&key_tag, &key_buf, &value_tag]);
+        // Emit the value inline because we captured the value tag.
+        pb.emit_inline(value_buf);
+        // Finish the message
+        pb.end_message(begin);
+        let msg: &[u8] = &pb.seal().unwrap();
+        assert_eq!(&[58, 16, 10, 4, 42, 43, 44, 45, 18, 8, 0, 1, 2, 3, 4, 5, 6, 7], &msg);
     }
 }
