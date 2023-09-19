@@ -1,5 +1,5 @@
 #![recursion_limit = "128"]
-//! derive_util is a library for writing [StructVisitor] and [EnumVisitor] types.
+#![doc = include_str!("../README.md")]
 
 extern crate proc_macro;
 extern crate quote;
