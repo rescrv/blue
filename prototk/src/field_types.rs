@@ -19,7 +19,7 @@ use super::*;
 /// [int32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
 /// represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct int32(i32);
+pub struct int32(pub i32);
 
 impl<'a> FieldType<'a> for int32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -37,13 +37,11 @@ impl<'a> FieldType<'a> for int32 {
 
 impl<'a> FieldPackHelper<'a, int32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(int32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(int32(*self)).into_slice(out);
     }
 }
 
@@ -56,6 +54,18 @@ impl<'a> FieldUnpackHelper<'a, int32> for i32 {
 impl From<int32> for i32 {
     fn from(f: int32) -> Self {
         f.0
+    }
+}
+
+impl Packable for int32 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -74,7 +84,7 @@ impl<'a> Unpackable<'a> for int32 {
 /// [int64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
 /// represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct int64(i64);
+pub struct int64(pub i64);
 
 impl<'a> FieldType<'a> for int64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -92,13 +102,11 @@ impl<'a> FieldType<'a> for int64 {
 
 impl<'a> FieldPackHelper<'a, int64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(int64(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(int64(*self)).into_slice(out);
     }
 }
 
@@ -111,6 +119,18 @@ impl<'a> FieldUnpackHelper<'a, int64> for i64 {
 impl From<int64> for i64 {
     fn from(f: int64) -> i64 {
         f.0
+    }
+}
+
+impl Packable for int64 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -129,7 +149,7 @@ impl<'a> Unpackable<'a> for int64 {
 /// [uint32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
 /// represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct uint32(u32);
+pub struct uint32(pub u32);
 
 impl<'a> FieldType<'a> for uint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -147,13 +167,11 @@ impl<'a> FieldType<'a> for uint32 {
 
 impl<'a> FieldPackHelper<'a, uint32> for u32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(uint32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(uint32(*self)).into_slice(out);
     }
 }
 
@@ -166,6 +184,18 @@ impl<'a> FieldUnpackHelper<'a, uint32> for u32 {
 impl From<uint32> for u32 {
     fn from(f: uint32) -> u32 {
         f.0
+    }
+}
+
+impl Packable for uint32 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -184,7 +214,7 @@ impl<'a> Unpackable<'a> for uint32 {
 /// [uint64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
 /// represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct uint64(u64);
+pub struct uint64(pub u64);
 
 impl<'a> FieldType<'a> for uint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -226,13 +256,11 @@ impl From<uint64> for u64 {
 
 impl<'a> FieldPackHelper<'a, uint64> for usize {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(uint64(*self as u64)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(*self);
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(uint64(*self as u64)).into_slice(out);
     }
 }
 
@@ -245,6 +273,18 @@ impl<'a> FieldUnpackHelper<'a, uint64> for usize {
 impl From<uint64> for usize {
     fn from(f: uint64) -> usize {
         f.0 as usize
+    }
+}
+
+impl Packable for uint64 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(self.0);
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -263,7 +303,7 @@ impl<'a> Unpackable<'a> for uint64 {
 /// [sint32] corresponds to the protobuf type of the same name.  It's a signed 32-bit
 /// zig-zag-integer represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct sint32(i32);
+pub struct sint32(pub i32);
 
 impl<'a> FieldType<'a> for sint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -281,13 +321,11 @@ impl<'a> FieldType<'a> for sint32 {
 
 impl<'a> FieldPackHelper<'a, sint32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(zigzag(*self as i64));
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(sint32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(zigzag(*self as i64));
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(sint32(*self)).into_slice(out);
     }
 }
 
@@ -300,6 +338,18 @@ impl<'a> FieldUnpackHelper<'a, sint32> for i32 {
 impl From<sint32> for i32 {
     fn from(f: sint32) -> i32 {
         f.0
+    }
+}
+
+impl Packable for sint32 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(zigzag(self.0 as i64));
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(zigzag(self.0 as i64));
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -324,7 +374,7 @@ impl<'a> Unpackable<'a> for sint32 {
 /// [sint64] corresponds to the protobuf type of the same name.  It's a signed 64-bit
 /// zig-zag-integer represented as a varint.
 #[derive(Clone, Debug, Default)]
-pub struct sint64(i64);
+pub struct sint64(pub i64);
 
 impl<'a> FieldType<'a> for sint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -342,13 +392,11 @@ impl<'a> FieldType<'a> for sint64 {
 
 impl<'a> FieldPackHelper<'a, sint64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(zigzag(*self));
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(sint64(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(zigzag(*self));
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(sint64(*self)).into_slice(out);
     }
 }
 
@@ -361,6 +409,18 @@ impl<'a> FieldUnpackHelper<'a, sint64> for i64 {
 impl From<sint64> for i64 {
     fn from(f: sint64) -> i64 {
         f.0
+    }
+}
+
+impl Packable for sint64 {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(zigzag(self.0));
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(zigzag(self.0));
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -379,7 +439,7 @@ impl<'a> Unpackable<'a> for sint64 {
 /// [fixed32] corresponds to the protobuf type of the same name.  It's an unsigned 32-bit integer
 /// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
-pub struct fixed32(u32);
+pub struct fixed32(pub u32);
 
 impl<'a> FieldType<'a> for fixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
@@ -397,11 +457,11 @@ impl<'a> FieldType<'a> for fixed32 {
 
 impl<'a> FieldPackHelper<'a, fixed32> for u32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(fixed32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(fixed32(*self)).into_slice(out);
     }
 }
 
@@ -414,6 +474,16 @@ impl<'a> FieldUnpackHelper<'a, fixed32> for u32 {
 impl From<fixed32> for u32 {
     fn from(f: fixed32) -> u32 {
         f.0
+    }
+}
+
+impl Packable for fixed32 {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -431,7 +501,7 @@ impl<'a> Unpackable<'a> for fixed32 {
 /// [fixed64] corresponds to the protobuf type of the same name.  It's an unsigned 64-bit integer
 /// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
-pub struct fixed64(u64);
+pub struct fixed64(pub u64);
 
 impl<'a> FieldType<'a> for fixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
@@ -449,11 +519,11 @@ impl<'a> FieldType<'a> for fixed64 {
 
 impl<'a> FieldPackHelper<'a, fixed64> for u64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(fixed64(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(fixed64(*self)).into_slice(out);
     }
 }
 
@@ -466,6 +536,16 @@ impl<'a> FieldUnpackHelper<'a, fixed64> for u64 {
 impl From<fixed64> for u64 {
     fn from(f: fixed64) -> u64 {
         f.0
+    }
+}
+
+impl Packable for fixed64 {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -483,7 +563,7 @@ impl<'a> Unpackable<'a> for fixed64 {
 /// [sfixed32] corresponds to the protobuf type of the same name.  It's a signed 32-bit integer
 /// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
-pub struct sfixed32(i32);
+pub struct sfixed32(pub i32);
 
 impl<'a> FieldType<'a> for sfixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
@@ -501,11 +581,11 @@ impl<'a> FieldType<'a> for sfixed32 {
 
 impl<'a> FieldPackHelper<'a, sfixed32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(sfixed32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(sfixed32(*self)).into_slice(out);
     }
 }
 
@@ -518,6 +598,16 @@ impl<'a> FieldUnpackHelper<'a, sfixed32> for i32 {
 impl From<sfixed32> for i32 {
     fn from(f: sfixed32) -> i32 {
         f.0
+    }
+}
+
+impl Packable for sfixed32 {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -535,7 +625,7 @@ impl<'a> Unpackable<'a> for sfixed32 {
 /// [sfixed64] corresponds to the protobuf type of the same name.  It's a signed 64-bit integer
 /// represented as a little-endian unsigned integer.
 #[derive(Clone, Debug, Default)]
-pub struct sfixed64(i64);
+pub struct sfixed64(pub i64);
 
 impl<'a> FieldType<'a> for sfixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
@@ -553,11 +643,11 @@ impl<'a> FieldType<'a> for sfixed64 {
 
 impl<'a> FieldPackHelper<'a, sfixed64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(sfixed64(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(sfixed64(*self)).into_slice(out);
     }
 }
 
@@ -570,6 +660,16 @@ impl<'a> FieldUnpackHelper<'a, sfixed64> for i64 {
 impl From<sfixed64> for i64 {
     fn from(f: sfixed64) -> i64 {
         f.0
+    }
+}
+
+impl Packable for sfixed64 {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -587,7 +687,7 @@ impl<'a> Unpackable<'a> for sfixed64 {
 /// [float] corresponds to the protobuf type of the same name.  It's a 32-bit IEEE 754 float point
 /// number in little-endian format.
 #[derive(Clone, Debug, Default)]
-pub struct float(f32);
+pub struct float(pub f32);
 
 impl<'a> FieldType<'a> for float {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
@@ -605,11 +705,11 @@ impl<'a> FieldType<'a> for float {
 
 impl<'a> FieldPackHelper<'a, float> for f32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(float(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(float(*self)).into_slice(out);
     }
 }
 
@@ -622,6 +722,16 @@ impl<'a> FieldUnpackHelper<'a, float> for f32 {
 impl From<float> for f32 {
     fn from(f: float) -> f32 {
         f.0
+    }
+}
+
+impl Packable for float {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -639,7 +749,7 @@ impl<'a> Unpackable<'a> for float {
 /// [double] corresponds to the protobuf type of the same name.  It's a 64-bit IEEE 754 float point
 /// number in little-endian format.
 #[derive(Clone, Debug, Default)]
-pub struct double(f64);
+pub struct double(pub f64);
 
 impl<'a> FieldType<'a> for double {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
@@ -657,11 +767,11 @@ impl<'a> FieldType<'a> for double {
 
 impl<'a> FieldPackHelper<'a, double> for f64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(double(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(double(*self)).into_slice(out);
     }
 }
 
@@ -674,6 +784,16 @@ impl<'a> FieldUnpackHelper<'a, double> for f64 {
 impl From<double> for f64 {
     fn from(f: double) -> f64 {
         f.0
+    }
+}
+
+impl Packable for double {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -690,7 +810,7 @@ impl<'a> Unpackable<'a> for double {
 
 /// [Bool] corresponds to the protobuf type of the same name.
 #[derive(Clone, Debug, Default)]
-pub struct Bool(bool);
+pub struct Bool(pub bool);
 
 impl<'a> FieldType<'a> for Bool {
     const WIRE_TYPE: WireType = WireType::Varint;
@@ -708,13 +828,11 @@ impl<'a> FieldType<'a> for Bool {
 
 impl<'a> FieldPackHelper<'a, Bool> for bool {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let v: v64 = v64::from(if *self { 1 } else { 0 });
-        stack_pack(tag).pack(v).pack_sz()
+        stack_pack(tag).pack(Bool(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let v: v64 = v64::from(if *self { 1 } else { 0 });
-        stack_pack(tag).pack(v).into_slice(out);
+        stack_pack(tag).pack(Bool(*self)).into_slice(out);
     }
 }
 
@@ -727,6 +845,18 @@ impl<'a> FieldUnpackHelper<'a, Bool> for bool {
 impl From<Bool> for bool {
     fn from(f: Bool) -> bool {
         f.0
+    }
+}
+
+impl Packable for Bool {
+    fn pack_sz(&self) -> usize {
+        let v: v64 = v64::from(if self.0 { 1 } else { 0 });
+        stack_pack(v).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let v: v64 = v64::from(if self.0 { 1 } else { 0 });
+        stack_pack(v).into_slice(out);
     }
 }
 
@@ -745,7 +875,7 @@ impl<'a> Unpackable<'a> for Bool {
 
 /// [bytes] represents a variable-number of bytes.
 #[derive(Clone, Debug, Default)]
-pub struct bytes<'a>(&'a [u8]);
+pub struct bytes<'a>(pub &'a [u8]);
 
 impl<'a> FieldType<'a> for bytes<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -763,11 +893,11 @@ impl<'a> FieldType<'a> for bytes<'a> {
 
 impl<'a> FieldPackHelper<'a, bytes<'a>> for &'a [u8] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag).pack(self).pack_sz()
+        stack_pack(tag).pack(bytes(self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self).into_slice(out);
+        stack_pack(tag).pack(bytes(self)).into_slice(out);
     }
 }
 
@@ -786,12 +916,12 @@ impl<'a> From<bytes<'a>> for &'a [u8] {
 impl<'a> FieldPackHelper<'a, bytes<'a>> for Vec<u8> {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         let field: &[u8] = self;
-        stack_pack(tag).pack(field).pack_sz()
+        stack_pack(tag).pack(bytes(field)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
         let field: &[u8] = self;
-        stack_pack(tag).pack(field).into_slice(out);
+        stack_pack(tag).pack(bytes(field)).into_slice(out);
     }
 }
 
@@ -810,12 +940,12 @@ impl<'a> From<bytes<'a>> for Vec<u8> {
 impl<'a> FieldPackHelper<'a, bytes<'a>> for Buffer {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         let b: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(b).pack_sz()
+        stack_pack(tag).pack(bytes(b)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
         let b: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(b).into_slice(out);
+        stack_pack(tag).pack(bytes(b)).into_slice(out);
     }
 }
 
@@ -834,12 +964,12 @@ impl<'a> From<bytes<'a>> for Buffer {
 impl<'a> FieldPackHelper<'a, bytes<'a>> for PathBuf {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         let field: &[u8] = self.as_os_str().as_bytes();
-        stack_pack(tag).pack(field).pack_sz()
+        stack_pack(tag).pack(bytes(field)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
         let field: &[u8] = self.as_os_str().as_bytes();
-        stack_pack(tag).pack(field).into_slice(out);
+        stack_pack(tag).pack(bytes(field)).into_slice(out);
     }
 }
 
@@ -852,6 +982,16 @@ impl<'a> FieldUnpackHelper<'a, bytes<'a>> for PathBuf {
 impl<'a> From<bytes<'a>> for PathBuf {
     fn from(f: bytes<'a>) -> PathBuf {
         PathBuf::from(OsStr::from_bytes(f.0))
+    }
+}
+
+impl<'a> Packable for bytes<'a> {
+    fn pack_sz(&self) -> usize {
+        stack_pack(self.0).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        stack_pack(self.0).into_slice(out);
     }
 }
 
@@ -877,7 +1017,7 @@ impl<'a> Unpackable<'a> for bytes<'a> {
 
 /// [bytes] represents 16 bytes.
 #[derive(Clone, Debug, Default)]
-pub struct bytes16([u8; 16]);
+pub struct bytes16(pub [u8; 16]);
 
 impl<'a> FieldType<'a> for bytes16 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -895,13 +1035,11 @@ impl<'a> FieldType<'a> for bytes16 {
 
 impl<'a> FieldPackHelper<'a, bytes16> for [u8; 16] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).pack_sz()
+        stack_pack(tag).pack(bytes16(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).into_slice(out);
+        stack_pack(tag).pack(bytes16(*self)).into_slice(out);
     }
 }
 
@@ -914,6 +1052,18 @@ impl<'a> FieldUnpackHelper<'a, bytes16> for [u8; 16] {
 impl From<bytes16> for [u8; 16] {
     fn from(f: bytes16) -> [u8; 16] {
         f.0
+    }
+}
+
+impl Packable for bytes16 {
+    fn pack_sz(&self) -> usize {
+        let b: &[u8] = &self.0;
+        stack_pack(b).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let b: &[u8] = &self.0;
+        stack_pack(b).into_slice(out);
     }
 }
 
@@ -952,7 +1102,7 @@ impl<'a> Unpackable<'a> for bytes16 {
 
 /// [bytes] represents 32 bytes.
 #[derive(Clone, Debug, Default)]
-pub struct bytes32([u8; 32]);
+pub struct bytes32(pub [u8; 32]);
 
 impl<'a> FieldType<'a> for bytes32 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -970,13 +1120,11 @@ impl<'a> FieldType<'a> for bytes32 {
 
 impl<'a> FieldPackHelper<'a, bytes32> for [u8; 32] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).pack_sz()
+        stack_pack(tag).pack(bytes32(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).into_slice(out);
+        stack_pack(tag).pack(bytes32(*self)).into_slice(out);
     }
 }
 
@@ -989,6 +1137,18 @@ impl<'a> FieldUnpackHelper<'a, bytes32> for [u8; 32] {
 impl From<bytes32> for [u8; 32] {
     fn from(f: bytes32) -> [u8; 32] {
         f.0
+    }
+}
+
+impl Packable for bytes32 {
+    fn pack_sz(&self) -> usize {
+        let b: &[u8] = &self.0;
+        stack_pack(b).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let b: &[u8] = &self.0;
+        stack_pack(b).into_slice(out);
     }
 }
 
@@ -1028,7 +1188,7 @@ impl<'a> Unpackable<'a> for bytes32 {
 
 /// [bytes] represents 64 bytes.
 #[derive(Clone, Debug)]
-pub struct bytes64([u8; 64]);
+pub struct bytes64(pub [u8; 64]);
 
 impl<'a> FieldType<'a> for bytes64 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -1052,13 +1212,11 @@ impl Default for bytes64 {
 
 impl<'a> FieldPackHelper<'a, bytes64> for [u8; 64] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).pack_sz()
+        stack_pack(tag).pack(bytes64(*self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let b: &[u8] = self;
-        stack_pack(tag).pack(b).into_slice(out);
+        stack_pack(tag).pack(bytes64(*self)).into_slice(out);
     }
 }
 
@@ -1071,6 +1229,18 @@ impl<'a> FieldUnpackHelper<'a, bytes64> for [u8; 64] {
 impl From<bytes64> for [u8; 64] {
     fn from(f: bytes64) -> [u8; 64] {
         f.0
+    }
+}
+
+impl Packable for bytes64 {
+    fn pack_sz(&self) -> usize {
+        let b: &[u8] = &self.0;
+        stack_pack(b).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let b: &[u8] = &self.0;
+        stack_pack(b).into_slice(out);
     }
 }
 
@@ -1110,7 +1280,7 @@ impl<'a> Unpackable<'a> for bytes64 {
 
 /// [string] represents a UTF-8 string of variable length.
 #[derive(Clone, Debug, Default)]
-pub struct string<'a>(&'a str);
+pub struct string<'a>(pub &'a str);
 
 impl<'a> FieldType<'a> for string<'a> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
@@ -1128,13 +1298,11 @@ impl<'a> FieldType<'a> for string<'a> {
 
 impl<'a> FieldPackHelper<'a, string<'a>> for &'a str {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let field: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(field).pack_sz()
+        stack_pack(tag).pack(string(self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let field: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(field).into_slice(out);
+        stack_pack(tag).pack(string(self)).into_slice(out);
     }
 }
 
@@ -1152,13 +1320,11 @@ impl<'a> From<string<'a>> for &'a str {
 
 impl<'a> FieldPackHelper<'a, string<'a>> for String {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let field: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(field).pack_sz()
+        stack_pack(tag).pack(string(self)).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let field: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(field).into_slice(out);
+        stack_pack(tag).pack(string(self)).into_slice(out);
     }
 }
 
@@ -1176,13 +1342,11 @@ impl<'a> From<string<'a>> for String {
 
 impl<'a> FieldPackHelper<'a, string<'a>> for PathBuf {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let field: &[u8] = self.as_os_str().as_bytes();
-        stack_pack(tag).pack(field).pack_sz()
+        stack_pack(tag).pack(self.as_os_str().as_bytes()).pack_sz()
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let field: &[u8] = self.as_os_str().as_bytes();
-        stack_pack(tag).pack(field).into_slice(out);
+        stack_pack(tag).pack(self.as_os_str().as_bytes()).into_slice(out);
     }
 }
 
@@ -1195,6 +1359,18 @@ impl<'a> FieldUnpackHelper<'a, string<'a>> for PathBuf {
 impl<'a> From<string<'a>> for PathBuf {
     fn from(f: string<'a>) -> PathBuf {
         f.0.into()
+    }
+}
+
+impl<'a> Packable for string<'a> {
+    fn pack_sz(&self) -> usize {
+        let b: &[u8] = self.0.as_bytes();
+        stack_pack(b).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let b: &[u8] = self.0.as_bytes();
+        stack_pack(b).into_slice(out);
     }
 }
 
@@ -1227,7 +1403,7 @@ impl<'a> Unpackable<'a> for string<'a> {
 
 /// [message] represents a ProtoTK message.
 #[derive(Clone, Debug)]
-pub struct message<M>(M);
+pub struct message<M>(pub M);
 
 impl<M> message<M> {
     /// Return the message that's held by this [message].
@@ -1249,6 +1425,17 @@ impl<'a, M> FieldType<'a> for message<M> {
         self.0
     }
 }
+
+impl<M: Packable> Packable for message<M> {
+    fn pack_sz(&self) -> usize {
+        self.0.pack_sz()
+    }
+
+    fn pack(&self, buf: &mut [u8]) {
+        self.0.pack(buf)
+    }
+}
+
 
 impl<'a, M> Unpackable<'a> for message<M>
 where
@@ -1519,6 +1706,18 @@ mod tests {
         let buf: &[u8] = &[0u8, 1, 2, 3, 4, 5, 6, 7];
         let buf: Buffer = Buffer::from(buf);
         helper_test::<bytes, Buffer>(buf, &[8, 0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn bytes16() {
+        let mut input: [u8; 16] = [0u8; 16];
+        let mut expect: Vec<u8> = Vec::new();
+        expect.push(16);
+        for i in 0..16 {
+            input[i] = i as u8;
+            expect.push(i as u8);
+        }
+        helper_test::<bytes16, [u8; 16]>(input, &expect);
     }
 
     #[test]
