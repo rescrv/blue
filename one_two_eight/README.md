@@ -1,22 +1,24 @@
 one_two_eight
 =============
 
-one_two_eight provides typed 128-bit identifiers.
+one_two_eight provides typed 128-bit identifiers.  Use `generate_id` to create a type, and possibly `generate_id_protok`
+to implement `prototk::Message`.
 
 Status
 ------
 
 Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
-The clock was last reset 2023-08-02.
+The clock was last reset 2023-09-19.
 
 Scope
 -----
 
-This library provides the [generate_id](https://docs.rs/one_two_eight/latest/one_two_eight/macro.generate_id.html) and
-[generate_id_prototk](https://docs.rs/one_two_eight/latest/one_two_eight/macro.generate_id_prototk.html).
+This library provides the `generate_id` and `generate_id_prototk` macros.
 
 Warts
 -----
+
+- Macros duplicate code, but that's what they do.
 
 Documentation
 -------------

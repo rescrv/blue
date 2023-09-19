@@ -1,5 +1,4 @@
-//! one_two_eight provides typed 128-bit identifiers.  Use [generate_id] to create a type, and
-//! possibly [generate_id_protok] to implement [prototk::Message].
+#![doc = include_str!("../README.md")]
 
 use std::fmt::Write;
 use std::fs::File;
@@ -72,6 +71,7 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
     Some(result)
 }
 
+/// Generate a type with the given name and literal string prefix for human-readable types.
 #[macro_export]
 macro_rules! generate_id {
     ($what:ident, $prefix:literal) => {
@@ -154,6 +154,7 @@ macro_rules! generate_id {
     };
 }
 
+/// Implement protocol buffers for the id.
 #[macro_export]
 macro_rules! generate_id_prototk {
     ($what:ident) => {
@@ -226,6 +227,7 @@ macro_rules! generate_id_prototk {
     };
 }
 
+/// Implement TupleKey support for a type.
 #[macro_export]
 macro_rules! generate_id_tuple_element {
     ($what:ident) => {
