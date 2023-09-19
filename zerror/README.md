@@ -16,7 +16,8 @@ This library is scoped to provide the Z trait.
 Warts
 -----
 
-- zerror_core is a separate crate that provides a wrappable struct for implementing Z.
+- zerror_core is a separate crate that provides a wrappable struct for implementing Z.  This is mildly inconvenient, but
+  was done to separate this library from the zerror_core dependencies.
 
 Documentation
 -------------

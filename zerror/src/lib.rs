@@ -1,4 +1,4 @@
-//! zerror is a module for creating rich error types.
+#![doc = include_str!("../README.md")]
 
 use std::fmt::Debug;
 
@@ -56,6 +56,8 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
     }
 }
 
+/// Create an IoToZ trait that gets implemented for `Result<T, $error>` where `$error` is the macro
+/// arg.
 #[macro_export]
 macro_rules! iotoz {
     ($error:ident) => {
