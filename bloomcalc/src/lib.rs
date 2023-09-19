@@ -1,4 +1,4 @@
-//////////////////////////////////////////// parameters ////////////////////////////////////////////
+#![doc = include_str!("../README.md")]
 
 pub trait Parameter {
     fn new(x: f64) -> Self;
@@ -6,6 +6,7 @@ pub trait Parameter {
 
 const LN2_2: f64 = 0.4804530139182014; // ln^2 2
 
+/// N is the number of items expected to be inserted into the bloom filter.
 #[derive(Clone, Copy)]
 pub struct N(pub f64);
 
@@ -15,6 +16,7 @@ impl Parameter for N {
     }
 }
 
+/// P is the probability of false positives.
 #[derive(Clone, Copy)]
 pub struct P(pub f64);
 
@@ -24,6 +26,7 @@ impl Parameter for P {
     }
 }
 
+/// M is the number of bits to use in the bloom filter.
 #[derive(Clone, Copy)]
 pub struct M(pub f64);
 
@@ -33,6 +36,7 @@ impl Parameter for M {
     }
 }
 
+/// K is the number of keys to insert/hash.
 #[derive(Clone, Copy)]
 pub struct K(pub f64);
 
