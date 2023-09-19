@@ -49,3 +49,23 @@ For each third party, a Loader should be developed that negotiates the
 protocol to get discharge macaroons.  A location that's not known to a client
 cannot be trusted.  Given that we have to trust servers that give us
 macaroons, this is not a compromise or limitation.
+
+Status
+------
+
+Active development.
+
+Scope
+-----
+
+This library should provide a verifier and a client-side library.
+
+Warts
+-----
+
+- This library is under-used and will see active development in the future.
+
+Documentation
+-------------
+
+The latest documentation is always available at [docs.rs](https://docs.rs/buffertk/latest/buffertk/).
