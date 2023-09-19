@@ -118,12 +118,12 @@ impl Trace {
         });
     }
 
-    pub fn panic<S: AsRef<str>>(self, message: S) -> ! {
+    pub fn panic<S: AsRef<str>>(self, msg: S) -> ! {
         self.finish();
         TRACER.with(|t| {
             t.lock().unwrap().flush();
         });
-        panic!("{}\n", message.as_ref());
+        panic!("{}\n", msg.as_ref());
     }
 }
 
