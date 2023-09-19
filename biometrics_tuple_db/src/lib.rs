@@ -7,15 +7,18 @@ use biometrics::{Counter, Gauge, Moments, Sensor};
 
 use biometrics_pb::{CounterPb, GaugePb, MomentsPb, SensorID};
 
+use buffertk::stack_pack;
+
 use indicio::Trace;
 
 use prototk::Message;
 use prototk::field_types::*;
 use prototk_derive::Message;
 
-use sst::{LogBuilder, LogOptions};
+use sst::Builder;
+use sst::ingest::{IngestOptions, Jester};
 
-use tuple_key::TypedTupleKey;
+use tuple_key::{TupleKey, TypedTupleKey};
 use tuple_key_derive::TypedTupleKey;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -220,6 +223,7 @@ struct MomentsReading {
 
 ////////////////////////////////////////// SensorsByLabel //////////////////////////////////////////
 
+#[derive(Default)]
 struct SensorsByLabel {
     sensors: HashMap<&'static str, SensorID>,
 }
@@ -243,7 +247,7 @@ impl SensorsByLabel {
                 let root_msg = Root {
                     start_ms: now_millis,
                 };
-                if let Err(err) = writer.emit_message(root_key, root_msg) {
+                if let Err(err) = writer.emit_message(root_key, now_millis, root_msg) {
                     EMIT_ROOT_FAILURE.click();
                     Trace::new("biometrics.tuple_db.root_error")
                         .with_value::<message<sst::Error>, 1>(err)
@@ -257,6 +261,7 @@ impl SensorsByLabel {
 
 ////////////////////////////////////////// SensorLastSeen //////////////////////////////////////////
 
+#[derive(Default)]
 struct SensorLastSeen {
     last_seen: HashMap<SensorID, u64>,
 }
@@ -268,7 +273,7 @@ impl SensorLastSeen {
             let valid_through = now_millis + WINDOW_SIZE_MS;
             self.last_seen.insert(sensor_id, valid_through);
             let max = MAX::new(table, label, sensor_id);
-            if let Err(err) = writer.emit_uint64(max, valid_through) {
+            if let Err(err) = writer.emit_uint64(max, now_millis, valid_through) {
                 EMIT_MAX_FAILURE.click();
                 Trace::new("biometrics.tuple_db.max_error")
                     .with_value::<message<sst::Error>, 1>(err)
@@ -281,23 +286,36 @@ impl SensorLastSeen {
 ////////////////////////////////////////////// Writer //////////////////////////////////////////////
 
 struct Writer {
+    jester: Jester,
 }
 
 impl Writer {
+    fn new(options: IngestOptions) -> Self {
+        Self {
+            jester: Jester::new(options),
+        }
+    }
+
     fn emit_message<'a, K: TypedTupleKey, V: Message<'a>>(
         &mut self,
         key: K,
+        timestamp: u64,
         value: V,
     ) -> Result<(), sst::Error> {
-        todo!();
+        let tk: TupleKey = key.into();
+        let value = stack_pack(value).to_vec();
+        self.jester.put(tk.as_bytes(), timestamp, &value)
     }
 
     fn emit_uint64<K: TypedTupleKey>(
         &mut self,
         key: K,
+        timestamp: u64,
         value: u64,
     ) -> Result<(), sst::Error> {
-        todo!();
+        let tk: TupleKey = key.into();
+        let value = stack_pack(uint64(value)).to_vec();
+        self.jester.put(tk.as_bytes(), timestamp, &value)
     }
 }
 
@@ -315,12 +333,26 @@ pub struct Emitter {
 }
 
 impl Emitter {
+    pub fn new(options: IngestOptions, table: [u8; 16]) -> Self {
+        Self {
+            table,
+            writer: Writer::new(options),
+            counters: SensorsByLabel::default(),
+            counter_last_seen: SensorLastSeen::default(),
+            gauges: SensorsByLabel::default(),
+            gauge_last_seen: SensorLastSeen::default(),
+            moments: SensorsByLabel::default(),
+            moments_last_seen: SensorLastSeen::default(),
+        }
+    }
+
     fn emit_reading<'a, K: TypedTupleKey, V: Message<'a>>(
         &mut self,
         key: K,
+        timestamp: u64,
         value: V,
     ) {
-        match self.writer.emit_message(key, value) {
+        match self.writer.emit_message(key, timestamp, value) {
             Ok(_) => {},
             Err(err) => {
                 EMIT_READING_FAILURE.click();
@@ -349,7 +381,7 @@ impl EmitterTrait for Emitter {
             time_ms: Reverse(now_millis),
         };
         let reading_value: CounterPb = counter.read().into();
-        self.emit_reading(reading_key, reading_value);
+        self.emit_reading(reading_key, now_millis, reading_value);
         Ok(())
     }
 
@@ -367,7 +399,7 @@ impl EmitterTrait for Emitter {
             time_ms: Reverse(now_millis),
         };
         let reading_value: GaugePb = gauge.read().into();
-        self.emit_reading(reading_key, reading_value);
+        self.emit_reading(reading_key, now_millis, reading_value);
         Ok(())
     }
 
@@ -385,7 +417,7 @@ impl EmitterTrait for Emitter {
             time_ms: Reverse(now_millis),
         };
         let reading_value: MomentsPb = moments.read().into();
-        self.emit_reading(reading_key, reading_value);
+        self.emit_reading(reading_key, now_millis, reading_value);
         Ok(())
     }
 }
