@@ -9,16 +9,18 @@ order in which they occur in the stream.
 
 In code it looks like this:
 
-```rust
-    let mut setsum1 = Setsum::default();
-    setsum1.insert("A".as_bytes())
-    setsum1.insert("B".as_bytes())
+```
+use setsum::Setsum;
 
-    let mut setsum2 = Setsum::default();
-    setsum2.insert("B".as_bytes())
-    setsum2.insert("A".as_bytes())
+let mut setsum1 = Setsum::default();
+setsum1.insert("A".as_bytes());
+setsum1.insert("B".as_bytes());
 
-    assert_eq!(setsum1.digest(), setsum2.digest())
+let mut setsum2 = Setsum::default();
+setsum2.insert("B".as_bytes());
+setsum2.insert("A".as_bytes());
+
+assert_eq!(setsum1.digest(), setsum2.digest());
 ```
 
 Practical Use Cases
