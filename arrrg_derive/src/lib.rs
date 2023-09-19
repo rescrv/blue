@@ -1,6 +1,5 @@
-//!  Derive macro for arrrg::CommandLine.
-
 #![recursion_limit = "128"]
+#![doc = include_str!("../README.md")]
 
 extern crate proc_macro;
 #[macro_use]
