@@ -118,15 +118,6 @@ macro_rules! generate_id {
             pub fn new(id: [u8; $crate::BYTES]) -> Self {
                 Self { id }
             }
-
-            pub fn from_words(high: u64, low: u64) -> Self {
-                let high = high.to_be_bytes();
-                let low = low.to_be_bytes();
-                let mut id: [u8; $crate::BYTES] = [0u8; $crate::BYTES];
-                id[0..8].copy_from_slice(&high);
-                id[8..16].copy_from_slice(&low);
-                Self::new(id)
-            }
         }
 
         impl Default for $what {
