@@ -1,7 +1,7 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use guacamole::zipf::Zipf;
+use guacamole::Zipf;
 use guacamole::Guacamole;
 
 #[derive(CommandLine, PartialEq)]

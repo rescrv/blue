@@ -1,11 +1,10 @@
-//! [Guacamole] provides a linearly-seekable random number generator.
-//! [Zipf] provides a zipf-distribution sampler.
+#![doc = include_str!("../README.md")]
 
 extern crate rand;
 
 use rand::RngCore;
 
-pub mod zipf;
+mod zipf;
 
 pub use zipf::Zipf;
 
