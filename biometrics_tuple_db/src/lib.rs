@@ -18,6 +18,8 @@ use prototk_derive::Message;
 use sst::Builder;
 use sst::ingest::{IngestOptions, Jester};
 
+use tatl::{HeyListen, Stationary};
+
 use tuple_key::{TupleKey, TypedTupleKey};
 use tuple_key_derive::TypedTupleKey;
 
@@ -29,9 +31,33 @@ const WINDOW_SIZE_MS: u64 = 3600 * 1000;
 
 static SENSOR_ID_GENERATE_FAILURE: Counter =
     Counter::new("biometrics.tuple_db.sensor_id_generate_failure");
+static SENSOR_ID_GENERATE_FAILURE_MONITOR: Stationary =
+    Stationary::new("biometrics.tuple_db.sensor_id_generate_failure", &SENSOR_ID_GENERATE_FAILURE);
+
 static EMIT_ROOT_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_root_failure");
+static EMIT_ROOT_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_root_failure", &EMIT_ROOT_FAILURE);
+
 static EMIT_MAX_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_max_failure");
+static EMIT_MAX_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_max_failure", &EMIT_MAX_FAILURE);
+
 static EMIT_READING_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_reading_failure");
+static EMIT_READING_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_reading_failure", &EMIT_READING_FAILURE);
+
+/// Register all biometrics for the crate.
+pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&SENSOR_ID_GENERATE_FAILURE);
+    collector.register_counter(&EMIT_ROOT_FAILURE);
+    collector.register_counter(&EMIT_MAX_FAILURE);
+    collector.register_counter(&EMIT_READING_FAILURE);
+}
+
+/// Register all monitors for the crate.
+pub fn register_monitors(hey_listen: &mut HeyListen) {
+    hey_listen.register_stationary(&SENSOR_ID_GENERATE_FAILURE_MONITOR);
+    hey_listen.register_stationary(&EMIT_ROOT_FAILURE_MONITOR);
+    hey_listen.register_stationary(&EMIT_MAX_FAILURE_MONITOR);
+    hey_listen.register_stationary(&EMIT_READING_FAILURE_MONITOR);
+}
 
 /////////////////////////////////////////////// Root ///////////////////////////////////////////////
 
