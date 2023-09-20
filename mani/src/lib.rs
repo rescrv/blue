@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fs::{create_dir, hard_link, metadata, remove_file, rename, File, OpenOptions};
@@ -60,6 +62,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// Error for the manifest.
 #[derive(Clone, Debug, Message)]
 pub enum Error {
     #[prototk(376832, message)]
@@ -185,6 +188,7 @@ impl From<std::str::Utf8Error> for Error {
 
 ////////////////////////////////////////// ManifestOptions /////////////////////////////////////////
 
+/// [ManifestOptions] provides the options for commandline programs.
 #[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
 pub struct ManifestOptions {
     #[arrrg(flag, "Fail if the manifest directory exists.")]
@@ -210,6 +214,7 @@ impl Default for ManifestOptions {
 
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
 
+/// Manifest provies an append-driven log.
 pub struct Manifest {
     options: ManifestOptions,
     _lockfile: Lockfile,
@@ -219,6 +224,7 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Open a new manifest.
     pub fn open<P: AsRef<Path>>(options: ManifestOptions, root: P) -> Result<Self, Error> {
         let root = root.as_ref().to_path_buf();
         if root.is_dir() && options.fail_if_exists {
@@ -264,18 +270,22 @@ impl Manifest {
         }
     }
 
+    /// Iterate over the log's contents (in-memory).
     pub fn strs(&self) -> impl Iterator<Item=&String> {
         self.strs.iter()
     }
 
+    /// Number of bytes used for this log.
     pub fn size(&self) -> u64 {
         self.strs.iter().map(|s| s.len() as u64).sum()
     }
 
+    /// Apply an edit to the log.
     pub fn apply(&mut self, edit: Edit) -> Result<(), Error> {
         self._apply(&MANIFEST(&self.root), edit, true)
     }
 
+    /// Rollover the log.
     pub fn rollover(&mut self) -> Result<(), Error> {
         let strs = self.poison(Self::read_strs(MANIFEST(&self.root)))?;
         let mut edit = Edit::default();
@@ -399,6 +409,7 @@ impl Manifest {
 
 /////////////////////////////////////////////// Edit ///////////////////////////////////////////////
 
+/// An edit adds some strings and removes others.
 #[derive(Debug, Default)]
 pub struct Edit {
     add_strs: BTreeSet<String>,
