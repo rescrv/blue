@@ -61,15 +61,30 @@ impl<T, E: Z<Error=E>> Z for Result<T, E> {
 #[macro_export]
 macro_rules! iotoz {
     ($error:ident) => {
-        pub trait IoToZ<T> {
+        pub trait IoToZ<T>: Sized
+        where
+            $error: Z,
+        {
             fn as_z(self) -> Result<T, $error>;
+            fn pretty_unwrap(self) -> T;
         }
 
-        impl<T, E: Into<$error>> IoToZ<T> for Result<T, E> {
+        impl<T, E: Into<$error>> IoToZ<T> for Result<T, E>
+        {
             fn as_z(self) -> Result<T, $error> {
                 match self {
                     Ok(t) => Ok(t),
                     Err(e) => Err(e.into()),
+                }
+            }
+
+            fn pretty_unwrap(self) -> T {
+                match self {
+                    Ok(t) => t,
+                    Err(err) => {
+                        let err: $error = err.into();
+                        panic!("{}", err.long_form());
+                    },
                 }
             }
         }

@@ -37,6 +37,7 @@ members = [
     "tuple_key_derive",
     "utilz",
     "zerror",
+    "zerror_derive",
     "zerror_core",
 ]
 

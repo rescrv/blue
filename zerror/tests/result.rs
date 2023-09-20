@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use zerror::{iotoz, Z};
 
 #[derive(Debug)]
-struct SampleError {
+pub struct SampleError {
     err: std::io::Error,
     var: Vec<String>,
 }
