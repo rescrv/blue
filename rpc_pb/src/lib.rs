@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 
 use biometrics::Counter;
 
@@ -8,8 +8,8 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use prototk_derive::Message;
 
 use zerror::{iotoz, Z};
-
 use zerror_core::ErrorCore;
+use zerror_derive::ZerrorCore;
 
 pub mod sd;
 
@@ -71,7 +71,7 @@ impl<'a> From<&Request<'a>> for Context {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Debug, Message, ZerrorCore)]
 pub enum Error {
     #[prototk(278528, message)]
     Success {
@@ -152,97 +152,10 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::SerializationError { core, .. } => core,
-            Error::UnknownServerName { core, .. } => core,
-            Error::UnknownMethodName { core, .. } => core,
-            Error::RequestTooLarge { core, .. } => core,
-            Error::TransportFailure { core, .. } => core,
-            Error::EncryptionMisconfiguration { core, .. } => core,
-            Error::UlimitParseError { core, .. } => core,
-            Error::OsError { core, .. } => core,
-            Error::LogicError { core, .. } => core,
-            Error::NotFound { core, .. } => core,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::SerializationError { core, .. } => core,
-            Error::UnknownServerName { core, .. } => core,
-            Error::UnknownMethodName { core, .. } => core,
-            Error::RequestTooLarge { core, .. } => core,
-            Error::TransportFailure { core, .. } => core,
-            Error::EncryptionMisconfiguration { core, .. } => core,
-            Error::UlimitParseError { core, .. } => core,
-            Error::OsError { core, .. } => core,
-            Error::LogicError { core, .. } => core,
-            Error::NotFound { core, .. } => core,
-        }
-    }
-}
-
 impl Default for Error {
     fn default() -> Error {
         Error::Success {
             core: ErrorCore::default(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
-        match self {
-            Error::Success { core: _ } => fmt.debug_struct("Success").finish(),
-            Error::SerializationError {
-                core: _,
-                err,
-                context,
-            } => fmt
-                .debug_struct("SerializationError")
-                .field("context", context)
-                .field("err", err)
-                .finish(),
-            Error::UnknownServerName { core: _, name } => fmt
-                .debug_struct("UnknownServerName")
-                .field("name", name)
-                .finish(),
-            Error::UnknownMethodName { core: _, name } => fmt
-                .debug_struct("UnknownMethodName")
-                .field("name", name)
-                .finish(),
-            Error::RequestTooLarge { core: _, size } => fmt
-                .debug_struct("RequestTooLarge")
-                .field("size", size)
-                .finish(),
-            Error::TransportFailure { core: _, what } => fmt
-                .debug_struct("TransportFailure")
-                .field("what", what)
-                .finish(),
-            Error::EncryptionMisconfiguration { core: _, what } => fmt
-                .debug_struct("EncryptionMisconfiguration")
-                .field("what", what)
-                .finish(),
-            Error::UlimitParseError { core: _, what } => fmt
-                .debug_struct("UlimitParseError")
-                .field("what", what)
-                .finish(),
-            Error::OsError { core: _, what } => fmt
-                .debug_struct("OsError")
-                .field("what", what)
-                .finish(),
-            Error::LogicError { core: _, what } => fmt
-                .debug_struct("LogicError")
-                .field("what", what)
-                .finish(),
-            Error::NotFound { core: _, what } => fmt
-                .debug_struct("NotFound")
-                .field("what", what)
-                .finish(),
         }
     }
 }
@@ -253,55 +166,6 @@ impl From<buffertk::Error> for Error {
             core: ErrorCore::default(),
             err: err.into(),
             context: "buffertk unpack error".to_string(),
-        }
-    }
-}
-
-impl PartialEq for Error {
-    fn eq(&self, other: &Error) -> bool {
-        match (self, other) {
-            (Error::Success { core: _ }, Error::Success { core: _ }) => { true }
-            (Error::SerializationError { core: _, err: err_lhs, context: context_lhs },
-             Error::SerializationError { core: _, err: err_rhs, context: context_rhs }) => {
-                err_lhs == err_rhs && context_lhs == context_rhs
-            },
-            (Error::UnknownServerName { core: _, name: name_lhs },
-             Error::UnknownServerName { core: _, name: name_rhs }) => {
-                name_lhs == name_rhs
-            },
-            (Error::UnknownMethodName { core: _, name: name_lhs },
-             Error::UnknownMethodName { core: _, name: name_rhs }) => {
-                name_lhs == name_rhs
-            },
-            (Error::RequestTooLarge { core: _, size: size_lhs },
-             Error::RequestTooLarge { core: _, size: size_rhs }) => {
-                size_lhs == size_rhs
-            },
-            (Error::TransportFailure { core: _, what: what_lhs },
-             Error::TransportFailure { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (Error::EncryptionMisconfiguration { core: _, what: what_lhs },
-             Error::EncryptionMisconfiguration { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (Error::UlimitParseError { core: _, what: what_lhs },
-             Error::UlimitParseError { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (Error::OsError { core: _, what: what_lhs },
-             Error::OsError { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (Error::LogicError { core: _, what: what_lhs },
-             Error::LogicError { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (Error::NotFound { core: _, what: what_lhs },
-             Error::NotFound { core: _, what: what_rhs }) => {
-                what_lhs == what_rhs
-            },
-            (_, _) => { false }
         }
     }
 }
@@ -322,32 +186,6 @@ impl From<std::io::Error> for Error {
             core: ErrorCore::default(),
             what: format!("{}", err),
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}\n", self) + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
-    where
-        X: Debug,
-    {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 
@@ -549,7 +387,7 @@ mod tests {
     #[test]
     fn serialization_error() {
         do_test(
-            "SerializationError { context: \"Some context\", err: Success }",
+            "SerializationError { err: Success, context: \"Some context\" }",
             Error::SerializationError {
                 core: ErrorCore::default(),
                 context: "Some context".to_owned(),
