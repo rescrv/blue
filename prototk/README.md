@@ -83,6 +83,7 @@ The error types in my libraries all have diffrent field numbers.  Here is where 
 - 311296..311552 tuple_key::Error
 - 376832..377088 mani::Error
 - 442368..442624 sst::Error
+- 507904..508160 tuple_db::Error
 
 Documentation
 -------------

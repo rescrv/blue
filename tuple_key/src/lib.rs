@@ -1,9 +1,9 @@
-use std::fmt::Debug;
 use std::cmp::Reverse;
+use std::fmt::{Debug, Display, Formatter};
 
-use buffertk::{v64, Packable};
+use buffertk::{v64, Packable, Unpackable};
 
-use prototk::FieldNumber;
+use prototk::{FieldNumber, WireType};
 use prototk_derive::Message;
 
 use zerror::{iotoz, Z};
@@ -49,6 +49,20 @@ pub enum Error {
         #[prototk(1, message)]
         core: ErrorCore,
     },
+    #[prototk(311301, message)]
+    SchemaIncompatibility {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
+    #[prototk(311301, message)]
+    Corruption {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    },
 }
 
 impl Error {
@@ -59,6 +73,8 @@ impl Error {
             Error::UnpackError { core, .. } => core,
             Error::NotValidUtf8 { core, .. } => core,
             Error::InvalidTag { core, .. } => core,
+            Error::SchemaIncompatibility { core, .. } => core,
+            Error::Corruption { core, .. } => core,
         }
     }
 
@@ -69,6 +85,8 @@ impl Error {
             Error::UnpackError { core, .. } => core,
             Error::NotValidUtf8 { core, .. } => core,
             Error::InvalidTag { core, .. } => core,
+            Error::SchemaIncompatibility { core, .. } => core,
+            Error::Corruption { core, .. } => core,
         }
     }
 }
@@ -81,11 +99,96 @@ impl Default for Error {
     }
 }
 
+impl Display for Error {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Error::Success { core: _ } => fmt.debug_struct("Success").finish(),
+            Error::CouldNotExtend {
+                core: _,
+                field_number,
+            } => fmt
+                .debug_struct("CouldNotExtend")
+                .field("field_number", field_number)
+                .finish(),
+            Error::UnpackError { core: _, err } => {
+                fmt.debug_struct("UnpackError").field("err", err).finish()
+            }
+            Error::NotValidUtf8 { core: _ } => fmt.debug_struct("NotValidUtf8").finish(),
+            Error::InvalidTag { core: _ } => fmt.debug_struct("InvalidTag").finish(),
+            Error::SchemaIncompatibility { core: _, what } => fmt
+                .debug_struct("SchemaIncompatibility")
+                .field("what", what)
+                .finish(),
+            Error::Corruption { core: _, what } => {
+                fmt.debug_struct("Corruption").field("what", what).finish()
+            }
+        }
+    }
+}
+
+impl From<buffertk::Error> for Error {
+    fn from(err: buffertk::Error) -> Self {
+        let err: prototk::Error = err.into();
+        Self::from(err)
+    }
+}
+
 impl From<prototk::Error> for Error {
     fn from(err: prototk::Error) -> Self {
         Self::UnpackError {
             core: ErrorCore::default(),
             err,
+        }
+    }
+}
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Error) -> bool {
+        match (self, other) {
+            (Error::Success { core: _ }, Error::Success { core: _ }) => true,
+            (
+                Error::CouldNotExtend {
+                    core: _,
+                    field_number: lhs_field_number,
+                },
+                Error::CouldNotExtend {
+                    core: _,
+                    field_number: rhs_field_number,
+                },
+            ) => lhs_field_number == rhs_field_number,
+            (
+                Error::UnpackError {
+                    core: _,
+                    err: lhs_error,
+                },
+                Error::UnpackError {
+                    core: _,
+                    err: rhs_error,
+                },
+            ) => lhs_error == rhs_error,
+            (Error::NotValidUtf8 { core: _ }, Error::NotValidUtf8 { core: _ }) => true,
+            (Error::InvalidTag { core: _ }, Error::InvalidTag { core: _ }) => true,
+            (
+                Error::SchemaIncompatibility {
+                    core: _,
+                    what: lhs_what,
+                },
+                Error::SchemaIncompatibility {
+                    core: _,
+                    what: rhs_what,
+                },
+            ) => lhs_what == rhs_what,
+            (
+                Error::Corruption {
+                    core: _,
+                    what: lhs_what,
+                },
+                Error::Corruption {
+                    core: _,
+                    what: rhs_what,
+                },
+            ) => lhs_what == rhs_what,
+            _ => false,
         }
     }
 }
@@ -122,7 +225,7 @@ iotoz! {Error}
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
 
 // NOTE(rescrv): Enums always take type message for future extensibility.
-#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Message, Eq, PartialEq, Ord, PartialOrd)]
 #[allow(non_camel_case_types)]
 pub enum DataType {
     #[default]
@@ -184,6 +287,79 @@ impl DataType {
             _ => 16,
         }
     }
+
+    fn from_discriminant(x: u64) -> Option<Self> {
+        match x {
+            0 => Some(DataType::unit),
+            1 => Some(DataType::fixed32),
+            2 => Some(DataType::fixed64),
+            3 => Some(DataType::sfixed32),
+            4 => Some(DataType::sfixed64),
+            5 => Some(DataType::bytes),
+            6 => Some(DataType::bytes16),
+            7 => Some(DataType::bytes32),
+            8 => Some(DataType::string),
+            15 => Some(DataType::message),
+            _ => None,
+        }
+    }
+
+    pub fn wire_type(self) -> WireType {
+        match self {
+            DataType::unit => WireType::LengthDelimited,
+            DataType::int32 => WireType::Varint,
+            DataType::int64 => WireType::Varint,
+            DataType::uint32 => WireType::Varint,
+            DataType::uint64 => WireType::Varint,
+            DataType::sint32 => WireType::Varint,
+            DataType::sint64 => WireType::Varint,
+            DataType::fixed32 => WireType::ThirtyTwo,
+            DataType::fixed64 => WireType::SixtyFour,
+            DataType::sfixed32 => WireType::ThirtyTwo,
+            DataType::sfixed64 => WireType::SixtyFour,
+            DataType::float => WireType::ThirtyTwo,
+            DataType::double => WireType::SixtyFour,
+            DataType::Bool => WireType::Varint,
+            DataType::bytes => WireType::LengthDelimited,
+            DataType::bytes16 => WireType::LengthDelimited,
+            DataType::bytes32 => WireType::LengthDelimited,
+            DataType::bytes64 => WireType::LengthDelimited,
+            DataType::string => WireType::LengthDelimited,
+            DataType::message => WireType::LengthDelimited,
+        }
+    }
+
+    pub fn can_cast(lhs: Self, rhs: Self) -> bool {
+        if lhs == rhs {
+            return true;
+        }
+        matches! {
+            (lhs, rhs),
+            (DataType::unit, DataType::unit) |
+            (DataType::int32, DataType::int32) |
+            (DataType::int32, DataType::sfixed32) |
+            (DataType::int32, DataType::sint32) |
+            (DataType::sfixed32, DataType::int32) |
+            (DataType::sfixed32, DataType::sfixed32) |
+            (DataType::sfixed32, DataType::sint32) |
+            (DataType::sint32, DataType::int32) |
+            (DataType::sint32, DataType::sfixed32) |
+            (DataType::sint32, DataType::sint32) |
+            (DataType::int64, DataType::int64) |
+            (DataType::int64, DataType::sfixed64) |
+            (DataType::int64, DataType::sint64) |
+            (DataType::sfixed64, DataType::int64) |
+            (DataType::sfixed64, DataType::sfixed64) |
+            (DataType::sfixed64, DataType::sint64) |
+            (DataType::sint64, DataType::int64) |
+            (DataType::sint64, DataType::sfixed64) |
+            (DataType::sint64, DataType::sint64) |
+            (DataType::uint32, DataType::fixed32) |
+            (DataType::fixed32, DataType::uint32) |
+            (DataType::uint64, DataType::fixed64) |
+            (DataType::fixed64, DataType::uint64)
+        }
+    }
 }
 
 ///////////////////////////////////////////// TupleKey /////////////////////////////////////////////
@@ -220,7 +396,12 @@ impl TupleKey {
         elem.append_to(self);
     }
 
-    fn append_bytes(&mut self, iter: impl Iterator<Item=u8>) -> usize {
+    pub fn iter(&self) -> TupleKeyIterator<'_> {
+        let buf: &[u8] = &self.buf;
+        TupleKeyIterator::from(buf)
+    }
+
+    fn append_bytes(&mut self, iter: impl Iterator<Item = u8>) -> usize {
         let mut count = 0;
         for c in iter {
             self.buf.push(c);
@@ -240,9 +421,46 @@ impl TupleKey {
         (buf, sz)
     }
 
+    fn to_field_number(buf: &[u8]) -> Result<(FieldNumber, DataType), Error> {
+        let mut copy = [0u8; 10];
+        let sz = std::cmp::min(buf.len(), copy.len());
+        for (c, b) in std::iter::zip(&mut copy[..sz], &buf[..sz]) {
+            *c = b.rotate_right(1);
+        }
+        let x: v64 = v64::unpack(&copy[..sz])?.0;
+        let x: u64 = x.into();
+        if x >= u32::max_value() as u64 || FieldNumber::new(x as u32).is_err() {
+            return Err(Error::Corruption {
+                core: ErrorCore::default(),
+                what: "invalid field number".to_owned(),
+            })
+            .as_z()
+            .with_variable("x", x);
+        }
+        let f = FieldNumber::new((x >> 4) as u32)?;
+        let v = match DataType::from_discriminant(x & 15) {
+            Some(v) => v,
+            None => {
+                return Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    what: "invalid discriminant".to_owned(),
+                })
+                .as_z()
+                .with_variable("discriminant", x & 15);
+            }
+        };
+        Ok((f, v))
+    }
+
     fn extend_field_number(&mut self, f: FieldNumber, value: DataType) {
         let (buf, sz) = Self::from_field_number(f, value);
         self.buf.extend_from_slice(&buf[0..sz])
+    }
+}
+
+impl From<&[u8]> for TupleKey {
+    fn from(buf: &[u8]) -> Self {
+        Self { buf: buf.to_vec() }
     }
 }
 
@@ -250,13 +468,33 @@ impl TupleKey {
 
 #[derive(Clone, Debug)]
 pub struct TupleKeyIterator<'a> {
-    tk: &'a TupleKey,
+    buf: &'a [u8],
     offset: usize,
 }
 
 impl<'a> TupleKeyIterator<'a> {
-    pub fn new(tk: &'a TupleKey) -> Self {
-        Self { tk, offset: 0 }
+    pub fn number_of_elements_in_common_prefix(lhs: Self, rhs: Self) -> usize {
+        let mut max_idx = 0;
+        for (idx, (x, y)) in std::iter::zip(lhs, rhs).enumerate() {
+            if x != y {
+                return idx / 2;
+            }
+            max_idx = idx;
+        }
+        (max_idx + 1) / 2
+    }
+}
+
+impl<'a> From<&'a [u8]> for TupleKeyIterator<'a> {
+    fn from(buf: &'a [u8]) -> Self {
+        Self { buf, offset: 0 }
+    }
+}
+
+impl<'a> From<&'a TupleKey> for TupleKeyIterator<'a> {
+    fn from(tk: &'a TupleKey) -> Self {
+        let buf: &'a [u8] = &tk.buf;
+        Self::from(buf)
     }
 }
 
@@ -264,18 +502,18 @@ impl<'a> Iterator for TupleKeyIterator<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.tk.buf.len() {
+        if self.offset >= self.buf.len() {
             None
         } else {
             let start = self.offset;
-            while self.offset < self.tk.buf.len() && self.tk.buf[self.offset] & 0x1 != 0 {
+            while self.offset < self.buf.len() && self.buf[self.offset] & 0x1 != 0 {
                 self.offset += 1;
             }
-            if self.offset < self.tk.buf.len() {
+            if self.offset < self.buf.len() {
                 self.offset += 1;
             }
             let limit = self.offset;
-            Some(&self.tk.buf[start..limit])
+            Some(&self.buf[start..limit])
         }
     }
 }
@@ -289,7 +527,7 @@ pub struct TupleKeyParser<'a> {
 impl<'a> TupleKeyParser<'a> {
     pub fn new(tk: &'a TupleKey) -> Self {
         Self {
-            iter: TupleKeyIterator::new(tk),
+            iter: TupleKeyIterator::from(tk),
         }
     }
 
@@ -307,10 +545,7 @@ impl<'a> TupleKeyParser<'a> {
         Ok(())
     }
 
-    pub fn extend_with_key<E: Element>(
-        &mut self,
-        f: FieldNumber,
-    ) -> Result<E, &'static str> {
+    pub fn extend_with_key<E: Element>(&mut self, f: FieldNumber) -> Result<E, &'static str> {
         // First we extend as normal.
         self.extend_tag(f, E::DATA_TYPE)?;
         // Read the value
@@ -590,6 +825,288 @@ impl<E: Element> Element for Reverse<E> {
 
 pub trait TypedTupleKey: TryFrom<TupleKey> + Into<TupleKey> {}
 
+//////////////////////////////////////////// TupleSchema ///////////////////////////////////////////
+
+// NOTE(rescrv): This is inefficient for simplicity's sake.  Make it correct with tests, then fast.
+#[derive(Clone, Debug, Message)]
+pub struct TupleSchema {
+    #[prototk(1, message)]
+    entries: Vec<SchemaEntry>,
+}
+
+impl TupleSchema {
+    pub fn new() -> Self {
+        Self {
+            entries: vec![SchemaEntry {
+                key: SchemaKey::default(),
+                value: DataType::message,
+            }],
+        }
+    }
+
+    pub fn add_to_schema(&mut self, entry: SchemaEntry) -> Result<(), Error> {
+        let mut prefixes = Vec::new();
+        prefixes.push(entry.clone());
+        while let Some(back) = prefixes[prefixes.len() - 1].prefix() {
+            prefixes.push(back);
+        }
+        let mut register = Vec::new();
+        while let Some(back) = prefixes.pop() {
+            let mut found = false;
+            for entry in self.entries.iter() {
+                back.check_compatibility(entry)?;
+                if back == *entry {
+                    found = true;
+                }
+            }
+            if !found {
+                register.push(back);
+            }
+        }
+        self.entries.append(&mut register);
+        self.entries.sort();
+        self.check_self_compatible()?;
+        Ok(())
+    }
+
+    pub fn lookup_schema_for_key(&self, key: &[u8]) -> Result<Option<&SchemaEntry>, Error> {
+        let mut tki = TupleKeyIterator::from(key);
+        let mut fields = Vec::new();
+        'looping: loop {
+            let tag = match tki.next() {
+                Some(tag) => tag,
+                None => {
+                    break 'looping;
+                }
+            };
+            let _ = match tki.next() {
+                Some(value) => value,
+                None => {
+                    return Err(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: "tuple key should always have fields in pairs".to_owned(),
+                    });
+                }
+            };
+            let (number, ty) = TupleKey::to_field_number(tag)?;
+            fields.push(SchemaField {
+                number: number.get(),
+                ty,
+            });
+        }
+        for idx in 0..self.entries.len() {
+            if self.entries[idx].key.matches_fields(&fields) {
+                return Ok(Some(&self.entries[idx]));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn check_self_compatible(&self) -> Result<(), Error> {
+        for entry_lhs in self.entries.iter() {
+            for entry_rhs in self.entries.iter() {
+                entry_lhs.check_compatibility(entry_rhs)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn check_compatibility(&self, other: &Self) -> Result<(), Error> {
+        self.check_self_compatible()?;
+        other.check_self_compatible()?;
+        for entry_lhs in self.entries.iter() {
+            for entry_rhs in other.entries.iter() {
+                entry_lhs.check_compatibility(entry_rhs)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for TupleSchema {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+//////////////////////////////////////////// SchemaEntry ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Message, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SchemaEntry {
+    #[prototk(1, message)]
+    key: SchemaKey,
+    #[prototk(2, message)]
+    value: DataType,
+}
+
+impl SchemaEntry {
+    pub fn new(key: SchemaKey, value: DataType) -> Self {
+        Self { key, value }
+    }
+
+    pub fn key(&self) -> &SchemaKey {
+        &self.key
+    }
+
+    pub fn value(&self) -> DataType {
+        self.value
+    }
+
+    pub fn is_extendable_by(&self, other: &Self) -> bool {
+        #[allow(clippy::comparison_chain)]
+        if self.key.fields.len() < other.key.fields.len() {
+            self.key.fields == other.key.fields[..self.key.fields.len()]
+                && self.value == DataType::message
+        } else if self.key.fields.len() == other.key.fields.len() {
+            self.key.fields == other.key.fields[..self.key.fields.len()]
+                && self.value == other.value
+        } else {
+            false
+        }
+    }
+
+    pub fn pop_field(&mut self) {
+        if !self.key.fields.is_empty() {
+            self.key.fields.pop();
+            self.value = DataType::message;
+        }
+    }
+
+    pub fn push_field(&mut self, field: SchemaField, value: DataType) {
+        assert_eq!(DataType::message, self.value);
+        self.key.fields.push(field);
+        self.value = value;
+    }
+
+    pub fn check_compatibility(&self, other: &Self) -> Result<(), Error> {
+        let mut breaked = false;
+        for (idx, (lhs, rhs)) in
+            std::iter::zip(self.key.fields.iter(), other.key.fields.iter()).enumerate()
+        {
+            if lhs.number == rhs.number && lhs.ty != rhs.ty {
+                return Err(Error::SchemaIncompatibility {
+                    core: ErrorCore::default(),
+                    what: "field number same; type different".to_owned(),
+                })
+                .as_z()
+                .with_variable("index", idx)
+                .with_variable("lhs.number", lhs.number)
+                .with_variable("rhs.number", rhs.number)
+                .with_variable("lhs.ty", lhs.ty)
+                .with_variable("rhs.ty", rhs.ty);
+            }
+            if lhs.number != rhs.number {
+                breaked = true;
+                break;
+            }
+        }
+        if !breaked {
+            if self.key.fields.len() < other.key.fields.len() && self.value != DataType::message {
+                return Err(Error::SchemaIncompatibility {
+                    core: ErrorCore::default(),
+                    what: "lhs has non-message type and is prefix of rhs".to_owned(),
+                })
+                .as_z()
+                .with_variable("lhs.ty", self.value);
+            }
+            if self.key.fields.len() > other.key.fields.len() && other.value != DataType::message {
+                return Err(Error::SchemaIncompatibility {
+                    core: ErrorCore::default(),
+                    what: "rhs has non-message type and is prefix of lhs".to_owned(),
+                })
+                .as_z()
+                .with_variable("rhs.ty", other.value);
+            }
+            if self.key.fields == other.key.fields && self.value != other.value {
+                return Err(Error::SchemaIncompatibility {
+                    core: ErrorCore::default(),
+                    what: "lhs and rhs have same fields, but different values".to_owned(),
+                })
+                .as_z()
+                .with_variable("lhs.value", self.value)
+                .with_variable("rhs.value", other.value);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn prefix(&self) -> Option<Self> {
+        if self.key.fields.is_empty() {
+            return None;
+        }
+        let mut fields = self.key.fields.clone();
+        fields.pop();
+        Some(SchemaEntry {
+            key: SchemaKey::new(fields),
+            value: DataType::message,
+        })
+    }
+}
+
+impl Default for SchemaEntry {
+    fn default() -> Self {
+        Self {
+            key: SchemaKey::default(),
+            value: DataType::message,
+        }
+    }
+}
+
+///////////////////////////////////////////// SchemaKey ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SchemaKey {
+    #[prototk(1, message)]
+    fields: Vec<SchemaField>,
+}
+
+impl SchemaKey {
+    pub fn new(fields: Vec<SchemaField>) -> Self {
+        Self { fields }
+    }
+
+    pub fn matches_fields(&self, fields: &[SchemaField]) -> bool {
+        if self.fields.len() != fields.len() {
+            false
+        } else {
+            for (lhs, rhs) in std::iter::zip(self.fields.iter(), fields.iter()) {
+                if lhs.number != rhs.number || !DataType::can_cast(lhs.ty(), rhs.ty()) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    pub fn fields(&self) -> &[SchemaField] {
+        &self.fields
+    }
+}
+
+//////////////////////////////////////////// SchemaField ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SchemaField {
+    #[prototk(1, uint32)]
+    number: u32,
+    #[prototk(2, message)]
+    ty: DataType,
+}
+
+impl SchemaField {
+    pub fn new(number: u32, ty: DataType) -> Self {
+        Self { number, ty }
+    }
+
+    pub fn number(&self) -> u32 {
+        self.number
+    }
+
+    pub fn ty(&self) -> DataType {
+        self.ty
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -619,20 +1136,12 @@ mod tuple_key {
             tk2.extend_with_key(FieldNumber::must(5), "E".to_owned());
             tk2.extend_with_key(FieldNumber::must(6), "F".to_owned());
             // preconditions
-            assert_eq!(
-                &[48, 65, 128, 80, 67, 0, 112, 67, 128],
-                tk1.as_bytes()
-            );
-            assert_eq!(
-                &[144, 69, 0, 176, 69, 128, 208, 71, 0],
-                tk2.as_bytes()
-            );
+            assert_eq!(&[48, 65, 128, 80, 67, 0, 112, 67, 128], tk1.as_bytes());
+            assert_eq!(&[144, 69, 0, 176, 69, 128, 208, 71, 0], tk2.as_bytes());
             // what we want to test
             tk1.append(&mut tk2);
             assert_eq!(
-                &[
-                    48, 65, 128, 80, 67, 0, 112, 67, 128, 144, 69, 0, 176, 69, 128, 208, 71, 0,
-                ],
+                &[48, 65, 128, 80, 67, 0, 112, 67, 128, 144, 69, 0, 176, 69, 128, 208, 71, 0,],
                 tk1.as_bytes()
             );
             assert!(tk2.is_empty());
@@ -645,7 +1154,7 @@ mod tuple_key {
         #[test]
         fn empty() {
             let tk1 = TupleKey::default();
-            let mut iter = TupleKeyIterator::new(&tk1);
+            let mut iter = TupleKeyIterator::from(&tk1);
             assert_eq!(None, iter.next());
         }
 
@@ -655,7 +1164,7 @@ mod tuple_key {
             tk1.extend_with_key(FieldNumber::must(1), "A".to_string());
             tk1.extend_with_key(FieldNumber::must(2), "B".to_string());
             tk1.extend_with_key(FieldNumber::must(3), "C".to_string());
-            let mut iter = TupleKeyIterator::new(&tk1);
+            let mut iter = TupleKeyIterator::from(&tk1);
 
             let buf: &[u8] = &[48];
             assert_eq!(Some(buf), iter.next());
@@ -673,6 +1182,45 @@ mod tuple_key {
             assert_eq!(Some(buf), iter.next());
 
             assert_eq!(None, iter.next());
+        }
+
+        #[test]
+        fn common_prefix() {
+            let mut tk1 = TupleKey::default();
+            tk1.extend_with_key(FieldNumber::must(1), "A".to_string());
+            tk1.extend_with_key(FieldNumber::must(2), "B".to_string());
+            tk1.extend_with_key(FieldNumber::must(3), "C".to_string());
+            let mut tk2 = TupleKey::default();
+            // (A, B, C), (), 0
+            assert_eq!(
+                0,
+                TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk2.iter())
+            );
+            // (A, B, C), (A), 1
+            tk2.extend_with_key(FieldNumber::must(1), "A".to_string());
+            assert_eq!(
+                1,
+                TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk2.iter())
+            );
+            // (A, B, C), (A, B), 2
+            tk2.extend_with_key(FieldNumber::must(2), "B".to_string());
+            assert_eq!(
+                2,
+                TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk2.iter())
+            );
+            // (A, B, C), (A, B, C), 3
+            let mut tk3 = tk2.clone();
+            tk2.extend_with_key(FieldNumber::must(3), "C".to_string());
+            assert_eq!(
+                3,
+                TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk2.iter())
+            );
+            // (A, B, C, D), (A, B, D), 2
+            tk3.extend_with_key(FieldNumber::must(4), "D".to_string());
+            assert_eq!(
+                2,
+                TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk3.iter())
+            );
         }
     }
 }
@@ -692,10 +1240,7 @@ mod elements {
     #[test]
     fn to_from_unit() {
         const VALUE: () = ();
-        test_helper(
-            VALUE,
-            &[0],
-        );
+        test_helper(VALUE, &[0]);
     }
 
     #[test]
@@ -810,5 +1355,301 @@ mod elements {
                 0b00000001, 0b00010001, 0b11111110,
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod schema {
+    use super::*;
+
+    #[test]
+    fn empty_schema_is_compatible() {
+        let schema1 = TupleSchema::default();
+        let schema2 = TupleSchema::default();
+        schema1.check_compatibility(&schema2).unwrap();
+    }
+
+    #[test]
+    fn compatible_schemas() {
+        let mut schema1 = TupleSchema::default();
+        let mut schema2 = TupleSchema::default();
+        schema1
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::unit,
+                        },
+                        SchemaField {
+                            number: 3,
+                            ty: DataType::string,
+                        },
+                    ],
+                },
+                value: DataType::uint64,
+            })
+            .unwrap();
+        schema2
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::unit,
+                        },
+                        SchemaField {
+                            number: 4,
+                            ty: DataType::uint64,
+                        },
+                    ],
+                },
+                value: DataType::uint64,
+            })
+            .unwrap();
+        schema1.check_compatibility(&schema2).unwrap();
+    }
+
+    #[test]
+    fn incompatible_schemas_prefix() {
+        let mut schema1 = TupleSchema::default();
+        let mut schema2 = TupleSchema::default();
+        schema1
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::unit,
+                        },
+                        SchemaField {
+                            number: 3,
+                            ty: DataType::string,
+                        },
+                    ],
+                },
+                value: DataType::uint64,
+            })
+            .unwrap();
+        schema2
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::uint64,
+                        },
+                    ],
+                },
+                value: DataType::uint64,
+            })
+            .unwrap();
+        if let Err(err) = schema1.check_compatibility(&schema2) {
+            assert_eq!(
+                "SchemaIncompatibility { what: \"field number same; type different\" }",
+                err.to_string()
+            );
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn incompatible_schemas_value() {
+        let mut schema1 = TupleSchema::default();
+        let mut schema2 = TupleSchema::default();
+        schema1
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::unit,
+                        },
+                        SchemaField {
+                            number: 3,
+                            ty: DataType::string,
+                        },
+                    ],
+                },
+                value: DataType::uint64,
+            })
+            .unwrap();
+        schema2
+            .add_to_schema(SchemaEntry {
+                key: SchemaKey {
+                    fields: vec![
+                        SchemaField {
+                            number: 1,
+                            ty: DataType::message,
+                        },
+                        SchemaField {
+                            number: 2,
+                            ty: DataType::unit,
+                        },
+                        SchemaField {
+                            number: 3,
+                            ty: DataType::string,
+                        },
+                    ],
+                },
+                value: DataType::int64,
+            })
+            .unwrap();
+        if let Err(err) = schema1.check_compatibility(&schema2) {
+            assert_eq!("SchemaIncompatibility { what: \"lhs and rhs have same fields, but different values\" }", err.to_string());
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn lookup_schema_for_key1() {
+        let mut schema = TupleSchema::default();
+        let entry = SchemaEntry {
+            key: SchemaKey {
+                fields: vec![
+                    SchemaField {
+                        number: 1,
+                        ty: DataType::string,
+                    },
+                    SchemaField {
+                        number: 2,
+                        ty: DataType::unit,
+                    },
+                    SchemaField {
+                        number: 3,
+                        ty: DataType::string,
+                    },
+                ],
+            },
+            value: DataType::uint64,
+        };
+        schema.add_to_schema(entry.clone()).unwrap();
+        let mut tk = TupleKey::default();
+        tk.extend_with_key(FieldNumber::must(1), "Element 1".to_owned());
+        tk.extend(FieldNumber::must(2));
+        tk.extend_with_key(FieldNumber::must(3), "Element 3".to_owned());
+        assert_eq!(Ok(Some(&entry)), schema.lookup_schema_for_key(&tk.buf));
+    }
+
+    #[test]
+    fn lookup_schema_for_key_cast() {
+        let mut schema = TupleSchema::default();
+        let entry = SchemaEntry {
+            key: SchemaKey {
+                fields: vec![SchemaField {
+                    number: 1,
+                    ty: DataType::uint64,
+                }],
+            },
+            value: DataType::uint64,
+        };
+        schema.add_to_schema(entry.clone()).unwrap();
+        let mut tk = TupleKey::default();
+        tk.extend_with_key(FieldNumber::must(1), 42u64);
+        assert_eq!(Ok(Some(&entry)), schema.lookup_schema_for_key(&tk.buf));
+    }
+
+    #[test]
+    fn lookup_schema_for_key_not_found() {
+        let mut schema = TupleSchema::default();
+        let entry = SchemaEntry {
+            key: SchemaKey {
+                fields: vec![
+                    SchemaField {
+                        number: 1,
+                        ty: DataType::string,
+                    },
+                    SchemaField {
+                        number: 2,
+                        ty: DataType::unit,
+                    },
+                    SchemaField {
+                        number: 3,
+                        ty: DataType::string,
+                    },
+                ],
+            },
+            value: DataType::uint64,
+        };
+        schema.add_to_schema(entry.clone()).unwrap();
+        let mut tk = TupleKey::default();
+        tk.extend_with_key(FieldNumber::must(2), "Element 1".to_owned());
+        tk.extend(FieldNumber::must(2));
+        tk.extend_with_key(FieldNumber::must(4), "Element 3".to_owned());
+        assert_eq!(Ok(None), schema.lookup_schema_for_key(&tk.buf));
+    }
+
+    #[test]
+    fn schema_entry_extends() {
+        let mut entry1 = SchemaEntry {
+            key: SchemaKey {
+                fields: vec![
+                    SchemaField {
+                        number: 1,
+                        ty: DataType::string,
+                    },
+                    SchemaField {
+                        number: 2,
+                        ty: DataType::unit,
+                    },
+                    SchemaField {
+                        number: 3,
+                        ty: DataType::string,
+                    },
+                ],
+            },
+            value: DataType::message,
+        };
+        let entry2 = SchemaEntry {
+            key: SchemaKey {
+                fields: vec![
+                    SchemaField {
+                        number: 1,
+                        ty: DataType::string,
+                    },
+                    SchemaField {
+                        number: 2,
+                        ty: DataType::unit,
+                    },
+                    SchemaField {
+                        number: 3,
+                        ty: DataType::string,
+                    },
+                    SchemaField {
+                        number: 4,
+                        ty: DataType::unit,
+                    },
+                ],
+            },
+            value: DataType::uint64,
+        };
+
+        assert!(entry1.is_extendable_by(&entry1));
+        assert!(entry1.is_extendable_by(&entry2));
+        assert!(!entry2.is_extendable_by(&entry1));
+        entry1.value = DataType::string;
+        assert!(!entry1.is_extendable_by(&entry2));
     }
 }
