@@ -8,7 +8,6 @@ members = [
     "biometrics_pb",
     "bloomcalc",
     "buffertk",
-    "busybee",
     "databuf",
     "derive_util",
     "gremlins",
