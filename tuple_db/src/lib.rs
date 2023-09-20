@@ -351,6 +351,8 @@ impl ProtoBuilder {
 
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
+// TODO(rescrv): dedupe KeyRef and KeyValueRef with sst.
+
 #[derive(Clone, Debug)]
 pub struct KeyRef<'a> {
     pub key: &'a [u8],

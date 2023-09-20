@@ -29,6 +29,8 @@ use zerror::{iotoz, Z};
 
 use zerror_core::ErrorCore;
 
+use zerror_derive::ZerrorCore;
+
 mod graph;
 
 use graph::Graph;
@@ -121,8 +123,7 @@ pub fn get_lockfile(options: &LsmOptions, root: &PathBuf) -> Result<Lockfile, Er
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
-// TODO(rescrv): don't have this inline the errors from elsewhere
+#[derive(Clone, Debug, ZerrorCore)]
 pub enum Error {
     Success {
         core: ErrorCore,
@@ -208,61 +209,6 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core },
-            Error::KeyTooLarge { core, .. } => { core },
-            Error::ValueTooLarge { core, .. } => { core } ,
-            Error::SortOrder { core, .. } => { core } ,
-            Error::TableFull { core, .. } => { core } ,
-            Error::BlockTooSmall { core, .. } => { core } ,
-            Error::UnpackError { core, .. } => { core } ,
-            Error::Crc32cFailure { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-            Error::DuplicateSst { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::TooManyOpenFiles { core, .. } => { core } ,
-            Error::SstNotFound { core, .. } => { core } ,
-            Error::DbExists { core, .. } => { core } ,
-            Error::DbNotExist { core, .. } => { core } ,
-            Error::PathError { core, .. } => { core } ,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core },
-            Error::KeyTooLarge { core, .. } => { core },
-            Error::ValueTooLarge { core, .. } => { core } ,
-            Error::SortOrder { core, .. } => { core } ,
-            Error::TableFull { core, .. } => { core } ,
-            Error::BlockTooSmall { core, .. } => { core } ,
-            Error::UnpackError { core, .. } => { core } ,
-            Error::Crc32cFailure { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-            Error::DuplicateSst { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::TooManyOpenFiles { core, .. } => { core } ,
-            Error::SstNotFound { core, .. } => { core } ,
-            Error::DbExists { core, .. } => { core } ,
-            Error::DbNotExist { core, .. } => { core } ,
-            Error::PathError { core, .. } => { core } ,
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // TODO(rescrv):  Make sure this isn't infinitely co-recursive with long_form
-        write!(fmt, "{}", self.long_form())
-    }
-}
-
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
         Error::SystemError { core: ErrorCore::default(), what: what.to_string() }
@@ -285,30 +231,6 @@ impl From<sst::Error> for Error {
             sst::Error::SystemError { core, what } => Error::SystemError { core, what },
             sst::Error::TooManyOpenFiles { core, limit } => Error::TooManyOpenFiles { core, limit },
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        // TODO(rescrv): make this pretty print without "core"
-        format!("{:?}", self) + "\n" + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 

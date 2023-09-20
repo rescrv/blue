@@ -13,7 +13,7 @@ Scope
 
 This library provides the basics of a bloom filter with the bloomcalc command.
 
-```
+```ignore
 % target/debug/bloomcalc --prob 0.01
 a bloom filter with false positive rate of 0.01 will work best with 6.643856189774724 keys
 
