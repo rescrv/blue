@@ -8,6 +8,7 @@ members = [
     "biometrics_pb",
     "bloomcalc",
     "buffertk",
+    "busyrpc",
     "databuf",
     "derive_util",
     "gremlins",

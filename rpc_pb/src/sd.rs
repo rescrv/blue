@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use one_two_eight::{generate_id, generate_id_prototk};
 
 use prototk_derive::Message;
 
+use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{service, Context, Error};
@@ -25,9 +27,47 @@ pub struct Host {
     #[prototk(1, message)]
     host_id: HostID,
     #[prototk(2, string)]
-    host: String,
-    #[prototk(3, uint32)]
-    port: u32,
+    connect: String,
+}
+
+impl Host {
+    pub fn host_id(&self) -> HostID {
+        self.host_id
+    }
+
+    pub fn connect(&self) -> &str {
+        &self.connect
+    }
+}
+
+impl FromStr for Host {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Host, Error> {
+        let parts: Vec<String> = s.split(';').map(String::from).collect();
+        if parts.len() != 2 {
+            return Err(Error::ResolveFailure {
+                core: ErrorCore::default(),
+                what: "could not parse string".to_owned(),
+            }
+            .with_variable("parts", parts));
+        }
+        let host_id: HostID = match parts[0].parse::<HostID>() {
+            Ok(host_id) => host_id,
+            Err(err) => {
+                return Err(Error::ResolveFailure {
+                    core: ErrorCore::default(),
+                    what: "could not parse HostID".to_owned(),
+                }
+                .with_variable("err", err)
+                .with_variable("host_id", parts[0].to_owned()));
+            }
+        };
+        Ok(Host {
+            host_id,
+            connect: parts[1].to_owned(),
+        })
+    }
 }
 
 ///////////////////////////////////////// ServiceDiscovery /////////////////////////////////////////
@@ -64,6 +104,8 @@ pub struct ResolveResponse {
     #[prototk(1, message)]
     hosts: Vec<Host>,
 }
+
+////////////////////////////////////// ServiceDiscoveryService /////////////////////////////////////
 
 service! {
     name = ServiceDiscoveryService;
@@ -169,8 +211,7 @@ mod tests {
                 host_id,
                 host: Host {
                     host_id,
-                    host: "127.0.0.1".to_owned(),
-                    port: 2049 + i,
+                    connect: format!("127.0.0.1:{}", 2049 + i),
                 },
             }).unwrap());
         }

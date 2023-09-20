@@ -1037,6 +1037,7 @@ where
 
 /////////////////////////////////////////// FieldIterator //////////////////////////////////////////
 
+// TODO(rescrv): This panicked once and I didn't debug it.  Fix that.
 pub struct FieldIterator<'a, 'b> {
     up: Unpacker<'a>,
     err: &'b mut Option<Error>,

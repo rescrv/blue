@@ -17,6 +17,7 @@ pub mod sd;
 
 pub const MAX_REQUEST_SIZE: usize = 1usize << 20;
 pub const MAX_RESPONSE_SIZE: usize = 1usize << 20;
+pub const MAX_BODY_SIZE: usize = 1usize << 20;
 
 //////////////////////////////////////////// Biometrics ////////////////////////////////////////////
 
@@ -150,6 +151,13 @@ pub enum Error {
         #[prototk(2, string)]
         what: String,
     },
+    #[prototk(278539, message)]
+    ResolveFailure {
+        #[prototk(1, message)]
+        core: ErrorCore,
+        #[prototk(2, string)]
+        what: String,
+    }
 }
 
 impl Default for Error {
@@ -219,6 +227,15 @@ pub struct Frame {
     pub size: u64,
     #[prototk(2, fixed32)]
     pub crc32c: u32,
+}
+
+impl Frame {
+    pub fn from_buffer(buf: &[u8]) -> Self {
+        Self {
+            size: buf.len() as u64,
+            crc32c: crc32c::crc32c(buf),
+        }
+    }
 }
 
 ////////////////////////////////////////////// Request /////////////////////////////////////////////

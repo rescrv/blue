@@ -108,14 +108,14 @@ pub fn register_biometrics(collector: &Collector) {
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
-pub trait Key: Clone + Debug + Hash + Eq + PartialEq + 'static {}
+pub trait Key: Clone + Debug + Hash + Eq + PartialEq {}
 
 impl Key for u64 {}
 impl Key for String {}
 
 /////////////////////////////////////////////// Value //////////////////////////////////////////////
 
-pub trait Value: Debug + Default + 'static {
+pub trait Value: Default {
     /// True iff the value is at a quiescent/finished state.  This means it can be collected, not
     /// that it will be collected.  It is perfectly acceptable to pickup a handle to finished state
     /// and take a transition that leads to it being unfinished.  Consequently, finished should be
