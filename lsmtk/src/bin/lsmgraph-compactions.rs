@@ -1,9 +1,9 @@
 use arrrg::CommandLine;
 
-use lsmgraph::LsmOptions;
+use lsmtk::LsmOptions;
 
 fn main() {
-    let (options, free) = LsmOptions::from_command_line("USAGE: lsmgraph-compactions [OPTIONS]");
+    let (options, free) = LsmOptions::from_command_line("USAGE: lsmtk-compactions [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command takes no arguments");
         std::process::exit(1);

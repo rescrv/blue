@@ -328,7 +328,7 @@ pub struct LsmOptions {
     max_open_files: usize,
     #[arrrg(nested)]
     sst: SstOptions,
-    #[arrrg(required, "Root path for the lsmgraph", "PATH")]
+    #[arrrg(required, "Root path for the lsmtk", "PATH")]
     path: String,
     #[arrrg(optional, "Root Table's 16B identifier", "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX")]
     meta_id: MetaID,

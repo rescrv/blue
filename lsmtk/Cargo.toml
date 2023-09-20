@@ -1,9 +1,9 @@
 [package]
-name = "lsmgraph"
+name = "lsmtk"
 version = "0.1.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
-description = "lsmgraph provides a log-structured-merge-graph"
+description = "lsmtk provides a log-structured-merge-graph"
 license = "Apache-2.0"
 
 [dependencies]
