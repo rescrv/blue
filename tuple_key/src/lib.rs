@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::cmp::Reverse;
 use std::fmt::{Debug, Display, Formatter};
 

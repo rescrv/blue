@@ -1,7 +1,9 @@
 tuple_key
 =========
 
-A serialization format for lexicographically sorted tuples.
+A serialization format for lexicographically sorted tuples.  The keys have the property that any TypedTupleKey that
+implements lexicographically sorted Ord, PartialOrd traits in field declaration order will serialize to a valid byte
+string that sorts in the same way.
 
 Status
 ------
@@ -27,4 +29,5 @@ The latest documentation is always available at [docs.rs](https://docs.rs/tuple_
 Updating
 --------
 
+- 0.2.0 -> 0.3.0: Add schema support.
 - 0.1.1 -> 0.2.0: Added support for empty tuples in named structs.  Backwards-compatible otherwise.
