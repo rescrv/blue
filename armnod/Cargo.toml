@@ -11,5 +11,5 @@ getopts = "0.2"
 rand = "0.7"
 
 arrrg = { path = "../arrrg", version = "0.1" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 guacamole = { path = "../guacamole", version = "0.2.0" }

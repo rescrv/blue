@@ -10,4 +10,4 @@ license = "Apache-2.0"
 getopts = "0.2"
 
 arrrg = { path = "../arrrg", version = "0.1" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2" }

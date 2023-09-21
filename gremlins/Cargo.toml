@@ -12,7 +12,7 @@ rand = "0.7"
 rustyline = "11.0"
 
 arrrg = { path = "../arrrg", version = "0.1" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.1" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 biometrics = { path = "../biometrics", version = "0.3" }
 buffertk = { path = "../buffertk", version = "0.4" }
 guacamole = { path = "../guacamole", version = "0.2.0" }
