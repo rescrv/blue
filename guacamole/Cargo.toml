@@ -1,6 +1,6 @@
 [package]
 name = "guacamole"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Guacamole provides a linearly-seekable random number generator."
