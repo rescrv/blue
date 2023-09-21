@@ -1,6 +1,6 @@
 [package]
 name = "utilz"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "utilz provides miscellaneous utilities too small for their own crates."
