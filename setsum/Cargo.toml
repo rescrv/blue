@@ -1,6 +1,6 @@
 [package]
 name = "setsum"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Setsum provides an order-agnostic checksum."
