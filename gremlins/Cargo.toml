@@ -20,7 +20,7 @@ indicio = { path = "../indicio", version = "0.1.0" }
 one_two_eight = { path = "../one_two_eight", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.4" }
-rpc_pb = { path = "../rpc_pb", version = "0.2" }
+rpc_pb = { path = "../rpc_pb", version = "0.3" }
 split_channel = { path = "../split_channel", version = "0.2" }
 texttale = { path = "../texttale", version = "0.2" }
 utilz = { path = "../utilz", version = "0.2" }
