@@ -2,7 +2,7 @@ use std::cmp::{max, min, Ordering};
 use std::fmt::Debug;
 use std::fs::{create_dir, hard_link, rename, remove_dir, remove_file};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use arrrg_derive::CommandLine;
 
@@ -22,7 +22,7 @@ mod graph;
 mod in_flight;
 
 use graph::Graph;
-use in_flight::{CompactionInFlight, CompactionsInFlight};
+use in_flight::CompactionsInFlight;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -225,6 +225,8 @@ impl LsmOptions {
             options: self,
             file_manager,
             in_flight: CompactionsInFlight::default(),
+            mtx: Mutex::default(),
+            cnd: Condvar::default(),
         };
         Ok(db)
     }
@@ -359,6 +361,8 @@ pub struct DB {
     mani: RwLock<Manifest>,
     file_manager: Arc<FileManager>,
     in_flight: CompactionsInFlight,
+    mtx: Mutex<usize>,
+    cnd: Condvar,
 }
 
 impl DB {
@@ -384,6 +388,8 @@ impl DB {
             edit.add(&setsum.hexdigest())?;
         }
         self.mani.write().unwrap().apply(edit)?;
+        *self.mtx.lock().unwrap() += 1;
+        self.cnd.notify_one();
         Ok(())
     }
 
@@ -422,5 +428,20 @@ impl DB {
         }
         compaction.perform(self)?;
         Ok(())
+    }
+
+    pub fn compaction_background_thread(&self) -> Result<(), Error> {
+        loop {
+            {
+                let mut mtx = self.mtx.lock().unwrap();
+                while *mtx == 0 {
+                    mtx = self.cnd.wait(mtx).unwrap();
+                }
+                let compactions = self.compactions()?;
+                if !compactions.is_empty() {
+                    compactions[0].perform(self)?;
+                }
+            }
+        }
     }
 }
