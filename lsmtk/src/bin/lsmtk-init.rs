@@ -1,6 +1,6 @@
 use arrrg::CommandLine;
 
-use lsmtk::LsmOptions;
+use lsmtk::{IoToZ, LsmOptions};
 
 fn main() {
     let (options, free) = LsmOptions::from_command_line("USAGE: lsmtk-init [OPTIONS] <db>");
@@ -8,5 +8,5 @@ fn main() {
         eprintln!("expected no positional arguments");
         std::process::exit(1);
     }
-    options.open().expect("opening graph");
+    options.open().as_z().pretty_unwrap();
 }

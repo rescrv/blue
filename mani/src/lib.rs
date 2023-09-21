@@ -18,6 +18,7 @@ use utilz::lockfile::Lockfile;
 
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
+use zerror_derive::ZerrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -63,7 +64,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error for the manifest.
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Debug, Message, ZerrorCore)]
 pub enum Error {
     #[prototk(376832, message)]
     Success {
@@ -114,61 +115,11 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::NewlineDisallowed { core, .. } => { core } ,
-            Error::DbExists { core, .. } => { core } ,
-            Error::DbNotExist { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::NewlineDisallowed { core, .. } => { core } ,
-            Error::DbExists { core, .. } => { core } ,
-            Error::DbNotExist { core, .. } => { core } ,
-            Error::LockNotObtained { core, .. } => { core } ,
-        }
-    }
-}
-
 impl Default for Error {
     fn default() -> Error {
         Error::Success {
             core: ErrorCore::default(),
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        // TODO(rescrv): put a one-line error as first line.
-        self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 

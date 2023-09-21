@@ -28,8 +28,8 @@ pub struct Vertex {
 #[derive(Debug)]
 pub struct Graph<'a> {
     options: LsmOptions,
-    metadata: &'a Vec<SstMetadata>,
-    pub(crate) vertices: Vec<Vertex>,
+    metadata: &'a [SstMetadata],
+    vertices: Vec<Vertex>,
     colors: BTreeSet<usize>,
     color_adj_list: BTreeSet<(usize, usize)>,
 }
@@ -37,7 +37,7 @@ pub struct Graph<'a> {
 impl<'a> Graph<'a> {
     pub fn new(
         options: LsmOptions,
-        metadata: &'a Vec<SstMetadata>,
+        metadata: &'a [SstMetadata],
     ) -> Result<Self, Error> {
         let mut vertices = Vec::with_capacity(metadata.len());
         vertices.resize(
