@@ -18,7 +18,7 @@ biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 guacamole = { path = "../guacamole", version = "0.3" }
 prototk = { path = "../prototk", version = "0.3" }
-prototk_derive = { path = "../prototk_derive", version = "0.3" }
+prototk_derive = { path = "../prototk_derive", version = "0.4" }
 setsum = { path = "../setsum", version = "0.4" }
 tatl = { path = "../tatl", version = "0.2" }
 utilz = { path = "../utilz", version = "0.2" }
