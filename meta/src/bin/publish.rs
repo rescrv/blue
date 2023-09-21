@@ -11,6 +11,8 @@ const EXCLUDE_MEMBERS: &[&str] = &[
 const EXCLUDE_DIRS: &[&str] = &[
     ".git",
     "target",
+    "biometrics_tuple_db",
+    "busyrpc",
     "napkins",
     // TODO(rescrv): Stuff to integrate eventually.
     "statslicer",
