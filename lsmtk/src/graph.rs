@@ -1,5 +1,4 @@
-use std::cmp::{max, min, Reverse};
-use std::collections::binary_heap::BinaryHeap;
+use std::cmp::{max, min};
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -94,10 +93,6 @@ impl<'a> Graph<'a> {
             vertices[color].peers += 1;
             vertices[color].bytes_within_color += metadata[idx].file_size;
         }
-        for idx in 0..vertices.len() {
-            vertices[idx].peers = vertices[vertices[idx].color].peers;
-            vertices[idx].bytes_within_color = vertices[vertices[idx].color].bytes_within_color;
-        }
         // Use the strongly connected components to make a graph of the links between components.
         // An edge (u, v) in this graph means there's at least one edge from color u to color v.
         //
@@ -115,36 +110,33 @@ impl<'a> Graph<'a> {
                 color_reverse_adj_list.insert((vertices[dst].color, vertices[src].color));
             }
         }
-        // Find colors with no incoming edges from other colors.
-        // Put colors in level 1 when the file has no peers (a single SST); else 0.
-        for color in colors.iter() {
-            let color: usize = *color;
+        // Fill in the level for each color.
+        let mut colors_stack = Vec::new();
+        for color in colors.iter().copied() {
             let lower = Bound::Included((color, 0));
             let upper = Bound::Included((color, usize::max_value()));
             if color_reverse_adj_list.range((lower, upper)).count() == 0 {
-                if vertices[color].peers == 1 {
-                    vertices[color].level = 1;
-                } else {
-                    vertices[color].level = 0;
-                }
-                let mut heap: BinaryHeap<Reverse<(usize, usize)>> = BinaryHeap::with_capacity(vertices.len());
-                heap.push(Reverse((vertices[color].level, color)));
-                while let Some(Reverse((level, color))) = heap.pop() {
-                    if vertices[color].level < level {
-                        vertices[color].level = level;
-                        let lower = Bound::Included((color, 0));
-                        let upper = Bound::Included((color, usize::max_value()));
-                        for (u, v) in color_forward_adj_list.range((lower, upper)) {
-                            assert_eq!(color, *u);
-                            heap.push(Reverse((level + 1, *v)));
-                        }
-                    }
+                vertices[color].level = 0;
+                colors_stack.push(color);
+            }
+        }
+        // Perform a bfs across all colors to set the level to the max level based upon bfs depth.
+        while let Some(color) = colors_stack.pop() {
+            let lower = Bound::Included((color, usize::min_value()));
+            let upper = Bound::Included((color, usize::max_value()));
+            for (u, v) in color_forward_adj_list.range((lower, upper)).copied() {
+                assert_eq!(color, u);
+                if vertices[v].level == vertices.len() || vertices[v].level <= vertices[color].level {
+                    vertices[v].level = vertices[color].level + 1;
+                    colors_stack.push(v);
                 }
             }
         }
-        // Fill in the level by copying from color.
+        // Now fill in the level for every vertex, copying from the color.
         for idx in 0..vertices.len() {
             vertices[idx].level = vertices[vertices[idx].color].level;
+            vertices[idx].peers = vertices[vertices[idx].color].peers;
+            vertices[idx].bytes_within_color = vertices[vertices[idx].color].bytes_within_color;
         }
         Ok(Self {
             options,
@@ -241,69 +233,84 @@ fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
 }
 
 impl<'a> Graph<'a> {
-    pub fn compactions(&self) -> Vec<Compaction> {
+    pub fn compactions(&mut self) -> Vec<Compaction> {
         let mut max_level = 0;
         for idx in 0..self.vertices.len() {
             max_level = max(max_level, self.vertices[idx].level);
         }
         let mut compactions = Vec::new();
-        // There are two bad patterns that come from overlapping keyspaces within imported SSTs:
-        // - Overlapping keyspaces with overlapping timestamps.  Each such overlap is one color.
-        // - Overlapping keyspaces with disjoint timestamps.  This creates many colors/levels.
-        //
-        // The first case will be handled explicitly in the event that the algorithm below does not
-        // handle it.
-        //
-        // NOTE(rescrv):  The adjacency lists, and thus the color adjacency lists are a transitive
+        // The adjacency lists, and thus the color adjacency lists are a transitive
         // closure of edges.  We make use of that here.
-        for color in self.colors.iter() {
-            let level = self.vertices[*color].level;
+        for color in self.colors.iter().copied() {
             let mut overlap = vec![0u64; max_level + 1];
-            overlap[level] = self.vertices[*color].bytes_within_color;
-            let lower = Bound::Included((*color, 0));
-            let upper = Bound::Included((*color, usize::max_value()));
-            for (u, v) in self.color_adj_list.range((lower, upper)) {
-                assert_eq!(*color, *u);
-                overlap[self.vertices[*v].level] += self.vertices[*v].bytes_within_color;
+            if self.vertices[color].level >= max_level {
+                continue;
+            }
+            overlap[self.vertices[color].level] = self.vertices[color].bytes_within_color;
+            let lower = Bound::Included((color, usize::min_value()));
+            let upper = Bound::Included((color, usize::max_value()));
+            let mut found = false;
+            for (u, v) in self.color_adj_list.range((lower, upper)).copied() {
+                assert_eq!(color, u);
+                overlap[self.vertices[v].level] += self.vertices[v].bytes_within_color;
+                found = true;
+            }
+            if !found {
+                continue;
             }
             // Select the level with the best ratio of levels N-1 to level N.
             let mut upper_level = None;
-            for to_consider in level + 1..overlap.len() {
-                let to_n_minus_one: u64 = overlap[level..to_consider].iter().sum();
-                let to_n: u64 = overlap[level..to_consider + 1].iter().sum();
-                if to_n > self.options.max_compaction_bytes as u64 {
+            let mut prev_ratio = 0.0;
+            for to_consider in self.vertices[color].level + 1..overlap.len() {
+                if overlap[to_consider] == 0 {
+                    break;
+                }
+                let mut acc = 0;
+                for level in self.vertices[color].level..to_consider {
+                    acc += acc + overlap[level];
+                }
+                let waste = overlap[to_consider];
+                let ratio = acc as f64 / (acc + waste) as f64;
+                let to_n_minus_one: u64 = overlap[self.vertices[color].level..to_consider].iter().sum();
+                let to_n: u64 = overlap[self.vertices[color].level..to_consider + 1].iter().sum();
+                if to_n >= self.options.max_compaction_bytes as u64 {
+                    break;
+                }
+                if to_n == to_n_minus_one {
                     continue;
                 }
-                let ratio = (to_n_minus_one as f64) / (to_n as f64);
-                if upper_level.is_none() {
-                    upper_level = Some((to_consider, ratio));
+                if prev_ratio < ratio {
+                    upper_level = Some(to_consider);
+                    prev_ratio = ratio;
                 }
-                if let Some((_, prev_ratio)) = upper_level {
-                    if prev_ratio <= ratio {
-                        upper_level = Some((to_consider, ratio));
-                    }
-                }
-            }
-            if upper_level.is_none() && self.vertices[*color].peers > 1 {
-                upper_level = Some((level, 0.0));
             }
             // See if there was a candidate for compaction.
-            if let Some((upper_level, _)) = upper_level {
+            if let Some(upper_level) = upper_level {
                 let mut colors = HashSet::new();
-                colors.insert(*color);
-                for (u, v) in self.color_adj_list.range((lower, upper)) {
-                    assert_eq!(*color, *u);
-                    if self.vertices[*v].level <= upper_level {
-                        colors.insert(*v);
+                colors.insert(color);
+                for (u, v) in self.color_adj_list.range((lower, upper)).copied() {
+                    assert_eq!(color, u);
+                    if self.vertices[v].level <= upper_level {
+                        colors.insert(v);
                     }
                 }
-                let mut compaction = Compaction::default();
+                let mut compaction = Compaction {
+                    options: self.options.clone(),
+                    inputs: Vec::new(),
+                    stats: CompactionStats {
+                        lower_level: self.vertices[color].level,
+                        upper_level: upper_level,
+                        bytes_input: 0,
+                        ratio: prev_ratio,
+                    },
+                };
                 for idx in 0..self.vertices.len() {
                     if colors.contains(&self.vertices[idx].color) {
+                        compaction.stats.bytes_input += self.metadata[idx].file_size as usize;
                         compaction.inputs.push(self.metadata[idx].clone());
                     }
                 }
-                if compaction.inputs.len() > 1 {
+                if compaction.inputs.len() > 2 {
                     compactions.push(compaction);
                 }
             }

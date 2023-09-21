@@ -54,6 +54,14 @@ static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.value_to
 static TABLE_FULL: Counter = Counter::new("sst.error.table_full");
 static TABLE_FULL_MONITOR: Stationary = Stationary::new("sst.error.table_full", &TABLE_FULL);
 
+pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&LOGIC_ERROR);
+    collector.register_counter(&CORRUPTION);
+    collector.register_counter(&KEY_TOO_LARGE);
+    collector.register_counter(&VALUE_TOO_LARGE);
+    collector.register_counter(&TABLE_FULL);
+}
+
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOGIC_ERROR_MONITOR);
     hey_listen.register_stationary(&CORRUPTION_MONITOR);

@@ -6,6 +6,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use arrrg_derive::CommandLine;
 
+use biometrics::{Collector, Counter};
+
 use mani::{Edit, Manifest, ManifestOptions};
 
 use setsum::Setsum;
@@ -23,6 +25,16 @@ mod in_flight;
 
 use graph::Graph;
 use in_flight::CompactionsInFlight;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static BYTES_INGESTED: Counter = Counter::new("lsmtk.bytes_ingested");
+static COMPACTION_BYTES_WRITTEN: Counter = Counter::new("lsmtk.compaction.bytes_written");
+
+pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&BYTES_INGESTED);
+    collector.register_counter(&COMPACTION_BYTES_WRITTEN);
+}
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -271,34 +283,12 @@ fn key_range_overlap(lhs: &SstMetadata, rhs: &SstMetadata) -> bool {
 pub struct Compaction {
     pub options: LsmOptions,
     pub inputs: Vec<SstMetadata>,
+    stats: CompactionStats,
 }
 
 impl Compaction {
     pub fn stats(&self) -> CompactionStats {
-        let graph = Graph::new(self.options.clone(), &self.inputs).unwrap();
-        let mut stats = CompactionStats::default();
-        stats.num_inputs += self.inputs.len();
-        if stats.num_inputs > 0 {
-            stats.lower_level = usize::max_value();
-        }
-        for input in self.inputs.iter() {
-            stats.bytes_input += input.file_size as usize;
-        }
-        let mut lower = 0;
-        let mut upper = 0;
-        for idx in 0..self.inputs.len() {
-            let level = graph.level_for_vertex(idx);
-            stats.lower_level = min(stats.lower_level, level);
-            stats.upper_level = max(stats.upper_level, level);
-            upper += self.inputs[idx].file_size;
-            if level < stats.upper_level {
-                lower += self.inputs[idx].file_size;
-            }
-        }
-        if upper > 0 {
-            stats.ratio = (lower as f64) / (upper as f64);
-        }
-        stats
+        self.stats.clone()
     }
 
     pub fn perform(&self, db: &DB) -> Result<(), Error> {
@@ -341,6 +331,7 @@ impl Compaction {
             let file = db.file_manager.open(path.clone())?;
             let sst = Sst::from_file_handle(file)?;
             let sst_setsum = sst.setsum().hexdigest();
+            COMPACTION_BYTES_WRITTEN.count(sst.metadata()?.file_size);
             mani_edit.add(&sst_setsum)?;
             let new_path = SST_FILE(&self.options.path, sst_setsum);
             hard_link(path, new_path)?;
@@ -361,7 +352,6 @@ impl Compaction {
 
 #[derive(Clone, Debug, Default)]
 pub struct CompactionStats {
-    pub num_inputs: usize,
     pub bytes_input: usize,
     pub lower_level: usize,
     pub upper_level: usize,
@@ -388,6 +378,7 @@ impl DB {
         for sst_path in sst_paths {
             let file = self.file_manager.open(sst_path.clone())?;
             let sst = Sst::from_file_handle(file)?;
+            BYTES_INGESTED.count(sst.metadata()?.file_size);
             // Update the setsum for the ingest.
             let setsum = sst.setsum();
             acc = acc + Setsum::from_digest(setsum.digest());
@@ -416,7 +407,7 @@ impl DB {
             let sst = Sst::from_file_handle(file)?;
             sst_metadata.push(sst.metadata()?);
         }
-        let graph = Graph::new(self.options.clone(), &sst_metadata)?;
+        let mut graph = Graph::new(self.options.clone(), &sst_metadata)?;
         let mut compactions = graph.compactions();
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
@@ -427,6 +418,8 @@ impl DB {
         let mut compaction = Compaction {
             options: self.options.clone(),
             inputs: Vec::new(),
+            // NOTE(rescrv): this is ugly but we won't call stats from within perform.
+            stats: CompactionStats::default(),
         };
         let mut in_flight = self.in_flight.start();
         for sst_setsum in ssts {
@@ -455,9 +448,13 @@ impl DB {
                     }
                     *mtx = 0;
                 }
-                let compactions = self.compactions()?;
-                if !compactions.is_empty() {
-                    compactions[0].perform(self)?;
+                loop {
+                    let compactions = self.compactions()?;
+                    if !compactions.is_empty() {
+                        compactions[0].perform(self)?;
+                    } else {
+                        break;
+                    }
                 }
             }
         }

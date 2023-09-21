@@ -1,8 +1,10 @@
-use std::fs::{read_dir, remove_file};
+use std::fs::{read_dir, remove_file, File};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrrg::CommandLine;
+
+use biometrics::{Collector, PlainTextEmitter};
 
 use zerror::Z;
 
@@ -14,6 +16,19 @@ fn main() {
         eprintln!("command takes no arguments");
         std::process::exit(1);
     }
+    std::thread::spawn(|| {
+        let mut collector = Collector::new();
+        sst::register_biometrics(&mut collector);
+        lsmtk::register_biometrics(&mut collector);
+        let fout = File::create("/dev/stdout").unwrap();
+        let mut emit = PlainTextEmitter::new(fout);
+        loop {
+            if let Err(e) = collector.emit(&mut emit) {
+                eprintln!("collector error: {}", e);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(249));
+        }
+    });
     let root = PathBuf::from(options.path().clone());
     let db = Arc::new(options.open().as_z().pretty_unwrap());
     let db_p = Arc::clone(&db);
