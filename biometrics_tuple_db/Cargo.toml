@@ -18,4 +18,4 @@ tatl = { path = "../tatl", version = "0.3" }
 tuple_key = { path = "../tuple_key", version = "0.2" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.2" }
 utilz = { path = "../utilz", version = "0.2" }
-zerror_core = { path = "../zerror_core", version = "0.2" }
+zerror_core = { path = "../zerror_core", version = "0.3" }

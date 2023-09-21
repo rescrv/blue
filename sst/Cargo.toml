@@ -23,4 +23,4 @@ setsum = { path = "../setsum", version = "0.4" }
 tatl = { path = "../tatl", version = "0.3" }
 utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }
-zerror_core = { path = "../zerror_core", version = "0.2" }
+zerror_core = { path = "../zerror_core", version = "0.3" }
