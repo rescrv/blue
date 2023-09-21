@@ -61,6 +61,11 @@ fn RM_FILE<P: AsRef<Path>>(root: P, setsum: String) -> PathBuf {
     RM_ROOT(root).join(setsum + ".sst")
 }
 
+#[allow(non_snake_case)]
+fn INGEST_ROOT<P: AsRef<Path>>(root: P) -> PathBuf {
+    root.as_ref().to_path_buf().join("ingest")
+}
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Clone, Debug, ZerrorCore)]
@@ -195,6 +200,10 @@ pub struct LsmOptions {
 }
 
 impl LsmOptions {
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
     pub fn open(self) -> Result<DB, Error> {
         let root: PathBuf = PathBuf::from(&self.path);
         if !root.is_dir() {
@@ -217,6 +226,11 @@ impl LsmOptions {
             create_dir(RM_ROOT(&root))
                 .as_z()
                 .with_variable("rm", RM_ROOT(&root))?;
+        }
+        if !INGEST_ROOT(&root).is_dir() {
+            create_dir(INGEST_ROOT(&root))
+                .as_z()
+                .with_variable("ingest", INGEST_ROOT(&root))?;
         }
         let file_manager = Arc::new(FileManager::new(self.max_open_files));
         let db = DB {
@@ -310,11 +324,12 @@ impl Compaction {
         let prefix = COMPACTION_DIR(&self.options.path, acc_setsum.hexdigest());
         create_dir(prefix.clone())?;
         let mut sstmb = SstMultiBuilder::new(prefix.clone(), ".sst".to_string(), self.options.sst.clone());
+        'looping:
         loop {
             cursor.next()?;
             let kvr = match cursor.value() {
                 Some(v) => { v },
-                None => { break; },
+                None => { break 'looping; },
             };
             match kvr.value {
                 Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
@@ -433,9 +448,12 @@ impl DB {
     pub fn compaction_background_thread(&self) -> Result<(), Error> {
         loop {
             {
-                let mut mtx = self.mtx.lock().unwrap();
-                while *mtx == 0 {
-                    mtx = self.cnd.wait(mtx).unwrap();
+                {
+                    let mut mtx = self.mtx.lock().unwrap();
+                    while *mtx == 0 {
+                        mtx = self.cnd.wait(mtx).unwrap();
+                    }
+                    *mtx = 0;
                 }
                 let compactions = self.compactions()?;
                 if !compactions.is_empty() {
