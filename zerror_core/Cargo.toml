@@ -7,7 +7,7 @@ description = "A complete implementation of the zerror:Z trait."
 license = "Apache-2.0"
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.3" }
+biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 tatl = { path = "../tatl", version = "0.2" }
 prototk = { path = "../prototk", version = "0.3" }
