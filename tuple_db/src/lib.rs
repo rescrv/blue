@@ -14,6 +14,7 @@ use zerror_core::ErrorCore;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// Error enumerates all conditions of the TupleDB API.
 #[derive(Clone, Debug, Message)]
 pub enum Error {
     #[prototk(442368, message)]
@@ -353,6 +354,7 @@ impl ProtoBuilder {
 
 // TODO(rescrv): dedupe KeyRef and KeyValueRef with sst.
 
+/// A key-value key represented by a bytestring and a timestamp.
 #[derive(Clone, Debug)]
 pub struct KeyRef<'a> {
     pub key: &'a [u8],
@@ -390,6 +392,7 @@ impl<'a, 'b: 'a> From<&'a KeyValueRef<'b>> for KeyRef<'a> {
 
 //////////////////////////////////////////// KeyValueRef ///////////////////////////////////////////
 
+/// A key-value pair represented by a bytestring, a timestamp, and an optional value.
 #[derive(Clone, Debug)]
 pub struct KeyValueRef<'a> {
     pub key: &'a [u8],
@@ -475,6 +478,7 @@ pub fn compare_key(
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
+/// A Cursor returns a set of keys in sorted order.
 pub trait Cursor {
     type Error: From<tuple_key::Error>;
     fn next(&mut self) -> Result<Option<KeyValueRef<'_>>, Self::Error>;
@@ -513,6 +517,8 @@ fn parse_as_prototk(val: &[u8], ty: DataType) -> Result<Vec<u8>, &'static str> {
 
 /////////////////////////////////////////////// Merge //////////////////////////////////////////////
 
+/// Merge is implemented for `tuple_key::TupleSchema` to allow one to construct a schema and call
+/// `merge`.
 pub trait Merge {
     type Error: From<tuple_key::Error>;
     fn merge(&self, cursor: impl Cursor<Error = Self::Error>) -> Result<Vec<u8>, Self::Error>;
@@ -521,6 +527,8 @@ pub trait Merge {
 impl Merge for TupleSchema {
     type Error = Error;
 
+    /// Merge stitches together the keys and values to construct a protocol buffers message
+    /// matching the cursor.  See the tests in mod merge for an example.
     fn merge(&self, mut cursor: impl Cursor<Error = Self::Error>) -> Result<Vec<u8>, Self::Error> {
         let mut builder = ProtoBuilder::default();
         let mut current_type = SchemaEntry::default();
