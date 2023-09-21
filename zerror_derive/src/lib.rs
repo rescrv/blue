@@ -63,6 +63,12 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
             }
         }
 
+        impl ::std::fmt::Debug for #ty_name {
+            fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                <Self as ::std::fmt::Display>::fmt(self, fmt)
+            }
+        }
+
         #core_methods
         #display_method
         #partial_eq_method

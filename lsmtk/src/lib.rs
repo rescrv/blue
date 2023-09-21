@@ -80,7 +80,7 @@ fn INGEST_ROOT<P: AsRef<Path>>(root: P) -> PathBuf {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug, ZerrorCore)]
+#[derive(Clone, ZerrorCore)]
 pub enum Error {
     Success {
         core: ErrorCore,

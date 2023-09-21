@@ -64,7 +64,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error for the manifest.
-#[derive(Clone, Debug, Message, ZerrorCore)]
+#[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
     #[prototk(376832, message)]
     Success {

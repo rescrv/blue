@@ -71,7 +71,7 @@ impl<'a> From<&Request<'a>> for Context {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Message, ZerrorCore)]
+#[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
     #[prototk(278528, message)]
     Success {

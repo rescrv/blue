@@ -4,7 +4,7 @@ use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 use zerror_derive::ZerrorCore;
 
-#[derive(Debug, ZerrorCore)]
+#[derive(ZerrorCore)]
 pub enum SampleError {
     Success {
         core: ErrorCore,
