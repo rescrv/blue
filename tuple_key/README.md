@@ -29,5 +29,5 @@ The latest documentation is always available at [docs.rs](https://docs.rs/tuple_
 Updating
 --------
 
-- 0.2.0 -> 0.3.0: Add schema support.
+- 0.2.0 -> 0.3.0: Add schema support.  Changed the encoding format in a backwards-incompatible way.
 - 0.1.1 -> 0.2.0: Added support for empty tuples in named structs.  Backwards-compatible otherwise.
