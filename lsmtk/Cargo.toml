@@ -18,6 +18,6 @@ prototk = { path = "../prototk", version = "0.3" }
 prototk_derive = { path = "../prototk_derive", version = "0.3" }
 setsum = { path = "../setsum", version = "0.4" }
 sst = { path = "../sst", version = "0.3" }
-zerror = { path = "../zerror", version = "0.1" }
+zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.2" }
 zerror_derive = { path = "../zerror_derive", version = "0.1" }

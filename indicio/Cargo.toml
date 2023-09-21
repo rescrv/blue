@@ -13,4 +13,4 @@ one_two_eight = { path = "../one_two_eight", version = "0.2" }
 prototk = { path = "../prototk", version = "0.3" }
 rpc_pb = { path = "../rpc_pb", version = "0.2" }
 utilz = { path = "../utilz", version = "0.2" }
-zerror = { path = "../zerror", version = "0.1.0" }
+zerror = { path = "../zerror", version = "0.2" }
