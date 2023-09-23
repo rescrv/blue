@@ -130,7 +130,7 @@ impl Trace {
 ////////////////////////////////////////////// Tracer //////////////////////////////////////////////
 
 thread_local! {
-    static TRACER: Arc<Mutex<Tracer>> = Arc::new(Mutex::new(Tracer::new()));
+    static TRACER: Mutex<Tracer> = Mutex::new(Tracer::new());
 }
 
 struct Tracer {
