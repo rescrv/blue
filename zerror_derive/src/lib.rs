@@ -37,7 +37,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let mut pemv = PartialEqMethodVisitor {};
     let partial_eq_method = pemv.visit_enum(&ty_name, &data);
     let gen = quote! {
-        impl Z for #ty_name {
+        impl ::zerror::Z for #ty_name {
             type Error = Self;
         
             fn long_form(&self) -> String {
@@ -54,9 +54,9 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
                 self
             }
         
-            fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
+            fn with_variable<X: ::std::fmt::Debug>(mut self, variable: &str, x: X) -> Self::Error
             where
-                X: Debug,
+                X: ::std::fmt::Debug,
             {
                 self.core_mut().set_variable(variable, x);
                 self
