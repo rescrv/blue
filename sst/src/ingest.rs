@@ -51,6 +51,10 @@ impl Jester {
         }
     }
 
+    pub fn flush(&mut self) -> Result<(), Error> {
+        self.get_builder()?.flush()
+    }
+
     fn get_builder(&mut self) -> Result<&mut LogBuilder<File>, Error> {
         if let Some(builder) = &self.builder {
             let size = builder.approximate_size();
