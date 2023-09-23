@@ -7,6 +7,7 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use rpc_pb::service;
 
 use zerror_core::ErrorCore;
+use zerror_derive::ZerrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -24,33 +25,42 @@ generate_id_prototk!(ReplicaID);
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug, Default, Message)]
-// TODO(rescrv): unique field numbers
+#[derive(Message, ZerrorCore)]
 pub enum Error {
-    #[prototk(1, message)]
-    #[default]
-    Success,
-    #[prototk(2, message)]
+    #[prototk(573440, message)]
+    Success {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
+    #[prototk(573441, message)]
     SerializationError {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, message)]
         what: prototk::Error,
     },
-    #[prototk(3, message)]
+    #[prototk(573441, message)]
     RpcError {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, message)]
         what: rpc_pb::Error,
     },
-    #[prototk(4, message)]
+    #[prototk(573441, message)]
     IoError {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, string)]
         what: String,
     },
+}
+
+impl Default for Error {
+    fn default() -> Self {
+        Self::Success {
+            core: ErrorCore::default(),
+        }
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -229,6 +239,8 @@ pub struct Phase1A {
     starting_slot: u64,
     #[prototk(3, uint64)]
     ending_slot: u64,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ////////////////////////////////////////////// Phase1B /////////////////////////////////////////////
@@ -240,6 +252,8 @@ pub struct Phase1B {
     ballot: Ballot,
     #[prototk(2, message)]
     pvalues: Vec<PValue>,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ////////////////////////////////////////////// Phase2A /////////////////////////////////////////////
@@ -250,6 +264,8 @@ pub struct Phase1B {
 pub struct Phase2A {
     #[prototk(1, message)]
     pvalue: PValue,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ////////////////////////////////////////////// Phase2B /////////////////////////////////////////////
@@ -259,6 +275,8 @@ pub struct Phase2A {
 pub struct Phase2B {
     #[prototk(1, Bool)]
     accepted: bool,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ///////////////////////////////////////////// Acceptor /////////////////////////////////////////////
@@ -277,20 +295,24 @@ service! {
 
 ///////////////////////////////////////// GenNoncesRequest /////////////////////////////////////////
 
-/// [GenNonceRequest] messages embed the number of nonces to fetch.
+/// [GenNoncesRequest] messages embed the number of nonces to fetch.
 #[derive(Clone, Debug, Default, Message)]
 pub struct GenNoncesRequest {
     #[prototk(1, uint64)]
     count: u64,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ///////////////////////////////////////// GenNoncesResponse ////////////////////////////////////////
 
-/// [GenNonceResponse] messages embed the first nonce in a sequence of `count` nonces.
+/// [GenNoncesResponse] messages embed the first nonce in a sequence of `count` nonces.
 #[derive(Clone, Debug, Default, Message)]
 pub struct GenNoncesResponse {
     #[prototk(1, uint64)]
-    nonce: u64,
+    first_nonce: u64,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 //////////////////////////////////////// IssueCommandRequest ///////////////////////////////////////
@@ -304,6 +326,8 @@ pub struct IssueCommandRequest {
     nonce: u64,
     #[prototk(2, message)]
     command: Command,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 /////////////////////////////////////// IssueCommandResponse ///////////////////////////////////////
@@ -314,6 +338,8 @@ pub struct IssueCommandRequest {
 pub struct IssueCommandResponse {
     #[prototk(1, uint64)]
     nonce: u64,
+    #[prototk(4, message)]
+    group: PaxosID,
 }
 
 ///////////////////////////////////////////// Proposer /////////////////////////////////////////////
