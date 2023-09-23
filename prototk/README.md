@@ -86,6 +86,12 @@ The error types in my libraries all have diffrent field numbers.  Here is where 
 - 507904..508160 tuple_db::Error
 - 573440..573696 paxos_pb::Error
 
+Maps
+----
+
+Maps are not supported by prototk natively because the typing is too complicated.  Make a MapEntry type that has field
+number 1 for the key and 2 for the value.  Put it in a `Vec` tagged as a `message`.
+
 Documentation
 -------------
 
