@@ -1,9 +1,12 @@
 use std::cmp::Reverse;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
+
+use arrrg_derive::CommandLine;
 
 use biometrics::Emitter as EmitterTrait;
-use biometrics::{Counter, Gauge, Moments, Sensor};
+use biometrics::{Collector, Counter, Gauge, Moments, Sensor};
 
 use biometrics_pb::{CounterPb, GaugePb, MomentsPb, SensorID};
 
@@ -11,12 +14,16 @@ use buffertk::stack_pack;
 
 use indicio::Trace;
 
+use one_two_eight::{generate_id, generate_id_tuple_element};
+
 use prototk::Message;
 use prototk::field_types::*;
 use prototk_derive::Message;
 
 use sst::Builder;
 use sst::ingest::{IngestOptions, Jester};
+
+use sync42::background::BackgroundThread;
 
 use tatl::{HeyListen, Stationary};
 
@@ -43,6 +50,9 @@ static EMIT_MAX_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_
 static EMIT_READING_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_reading_failure");
 static EMIT_READING_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_reading_failure", &EMIT_READING_FAILURE);
 
+static EMIT_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit.failure");
+static EMIT_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit.failure", &EMIT_FAILURE);
+
 /// Register all biometrics for the crate.
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&SENSOR_ID_GENERATE_FAILURE);
@@ -57,6 +67,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&EMIT_ROOT_FAILURE_MONITOR);
     hey_listen.register_stationary(&EMIT_MAX_FAILURE_MONITOR);
     hey_listen.register_stationary(&EMIT_READING_FAILURE_MONITOR);
+    hey_listen.register_stationary(&EMIT_FAILURE_MONITOR);
 }
 
 /////////////////////////////////////////////// Root ///////////////////////////////////////////////
@@ -70,13 +81,13 @@ struct Root {
 //////////////////////////////////////////// SensorRoot ////////////////////////////////////////////
 
 trait SensorRoot {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self;
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self;
 }
 
 ///////////////////////////////////////////// SensorMax ////////////////////////////////////////////
 
 trait SensorMax {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self;
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self;
 }
 
 /////////////////////////////////////////// Counter Types //////////////////////////////////////////
@@ -84,7 +95,7 @@ trait SensorMax {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct CounterRoot {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(1)]
     label: String,
     #[tuple_key(1)]
@@ -92,7 +103,7 @@ struct CounterRoot {
 }
 
 impl SensorRoot for CounterRoot {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -104,7 +115,7 @@ impl SensorRoot for CounterRoot {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct CounterMax {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(1)]
     label: String,
     #[tuple_key(1)]
@@ -115,7 +126,7 @@ struct CounterMax {
 }
 
 impl SensorMax for CounterMax {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -128,7 +139,7 @@ impl SensorMax for CounterMax {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct CounterReading {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(2)]
     sensor_id: SensorID,
     #[tuple_key(1)]
@@ -140,7 +151,7 @@ struct CounterReading {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct GaugeRoot {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(3)]
     label: String,
     #[tuple_key(1)]
@@ -148,7 +159,7 @@ struct GaugeRoot {
 }
 
 impl SensorRoot for GaugeRoot {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -160,7 +171,7 @@ impl SensorRoot for GaugeRoot {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct GaugeMax {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(3)]
     label: String,
     #[tuple_key(1)]
@@ -171,7 +182,7 @@ struct GaugeMax {
 }
 
 impl SensorMax for GaugeMax {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -184,7 +195,7 @@ impl SensorMax for GaugeMax {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct GaugeReading {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(4)]
     sensor_id: SensorID,
     #[tuple_key(1)]
@@ -196,7 +207,7 @@ struct GaugeReading {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct MomentsRoot {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(5)]
     label: String,
     #[tuple_key(1)]
@@ -204,7 +215,7 @@ struct MomentsRoot {
 }
 
 impl SensorRoot for MomentsRoot {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -216,7 +227,7 @@ impl SensorRoot for MomentsRoot {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct MomentsMax {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(5)]
     label: String,
     #[tuple_key(1)]
@@ -227,7 +238,7 @@ struct MomentsMax {
 }
 
 impl SensorMax for MomentsMax {
-    fn new(table: [u8; 16], label: &'static str, sensor_id: SensorID) -> Self {
+    fn new(table: BiometricsTableID, label: &'static str, sensor_id: SensorID) -> Self {
         Self {
             table,
             label: label.to_owned(),
@@ -240,7 +251,7 @@ impl SensorMax for MomentsMax {
 #[derive(Clone, Debug, Default, TypedTupleKey)]
 struct MomentsReading {
     #[tuple_key(1)]
-    table: [u8; 16],
+    table: BiometricsTableID,
     #[tuple_key(6)]
     sensor_id: SensorID,
     #[tuple_key(1)]
@@ -255,7 +266,7 @@ struct SensorsByLabel {
 }
 
 impl SensorsByLabel {
-    fn get<ROOT: SensorRoot + TypedTupleKey>(&mut self, table: [u8; 16], label: &'static str, now_millis: u64, writer: &mut Writer) -> Option<SensorID> {
+    fn get<ROOT: SensorRoot + TypedTupleKey>(&mut self, table: BiometricsTableID, label: &'static str, now_millis: u64, writer: &mut Writer) -> Option<SensorID> {
         match self.sensors.entry(label) {
             Entry::Occupied(occupied) => Some(*occupied.get()),
             Entry::Vacant(vacant) => {
@@ -293,7 +304,7 @@ struct SensorLastSeen {
 }
 
 impl SensorLastSeen {
-    fn update<MAX: SensorMax + TypedTupleKey>(&mut self, table: [u8; 16], label: &'static str, sensor_id: SensorID, now_millis: u64, writer: &mut Writer) {
+    fn update<MAX: SensorMax + TypedTupleKey>(&mut self, table: BiometricsTableID, label: &'static str, sensor_id: SensorID, now_millis: u64, writer: &mut Writer) {
         let last_seen = self.last_seen.entry(sensor_id).or_insert(0);
         if *last_seen < now_millis {
             let valid_through = now_millis + WINDOW_SIZE_MS;
@@ -347,8 +358,8 @@ impl Writer {
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
-pub struct Emitter {
-    table: [u8; 16],
+struct Emitter {
+    table: BiometricsTableID,
     writer: Writer,
     counters: SensorsByLabel,
     counter_last_seen: SensorLastSeen,
@@ -359,10 +370,10 @@ pub struct Emitter {
 }
 
 impl Emitter {
-    pub fn new(options: IngestOptions, table: [u8; 16]) -> Self {
+    pub fn new(options: BiometricsOptions) -> Self {
         Self {
-            table,
-            writer: Writer::new(options),
+            table: options.table,
+            writer: Writer::new(options.ingest.clone()),
             counters: SensorsByLabel::default(),
             counter_last_seen: SensorLastSeen::default(),
             gauges: SensorsByLabel::default(),
@@ -446,4 +457,38 @@ impl EmitterTrait for Emitter {
         self.emit_reading(reading_key, now_millis, reading_value);
         Ok(())
     }
+}
+
+////////////////////////////////////////////// TableID /////////////////////////////////////////////
+
+generate_id!{BiometricsTableID, "biometrics:"}
+generate_id_tuple_element!{BiometricsTableID}
+
+///////////////////////////////////////// BiometricsOptions ////////////////////////////////////////
+
+#[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
+pub struct BiometricsOptions {
+    #[arrrg(optional, "Emit biometrics every this many milliseconds.")]
+    emit_interval_millis: u64,
+    #[arrrg(optional, "Emit biometrics to this table.")]
+    table: BiometricsTableID,
+    #[arrrg(nested)]
+    ingest: IngestOptions,
+}
+
+///////////////////////////////////////// BackgroundThread /////////////////////////////////////////
+
+pub fn spawn(options: BiometricsOptions, collector: Collector) -> BackgroundThread {
+    let mut emit = Emitter::new(options.clone());
+    BackgroundThread::spawn(move |done| {
+        while !done.load(Ordering::Relaxed) {
+            if let Err(err) = collector.emit(&mut emit) {
+                EMIT_FAILURE.click();
+                Trace::new("biometrics.tuple_db.error")
+                    .with_value::<message<sst::Error>, 1>(err)
+                    .finish();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(options.emit_interval_millis));
+        }
+    })
 }

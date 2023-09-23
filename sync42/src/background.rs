@@ -9,6 +9,7 @@ pub struct BackgroundThread {
 }
 
 impl BackgroundThread {
+    // TODO(rescrv): Make this pass in something to call rather than an Arc<AtomicBool>.
     pub fn spawn<F: FnOnce(Arc<AtomicBool>) + Send + 'static>(f: F) -> Self {
         let done = Arc::new(AtomicBool::new(false));
         let done_p = Arc::clone(&done);
