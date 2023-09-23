@@ -14,6 +14,7 @@ members = [
     "gremlins",
     "guacamole",
     "indicio",
+    "indicio_tuple_db",
     "lsmtk",
     "macarunes",
     "mani",

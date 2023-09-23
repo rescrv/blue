@@ -11,6 +11,6 @@ biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 one_two_eight = { path = "../one_two_eight", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }
-rpc_pb = { path = "../rpc_pb", version = "0.3" }
+tuple_key = { path = "../tuple_key", version = "0.3" }
 utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }

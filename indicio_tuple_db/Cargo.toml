@@ -1,0 +1,28 @@
+[package]
+name = "indicio_tuple_db"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "indicio_tuple_db outputs indicio tracing to tuple_db format"
+license = "Apache-2.0"
+
+[dependencies]
+getopts = "0.2"
+
+arrrg = { path = "../arrrg", version = "0.2" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
+biometrics = { path = "../biometrics", version = "0.4" }
+biometrics_pb = { path = "../biometrics_pb", version = "0.2" }
+buffertk = { path = "../buffertk", version = "0.4" }
+indicio = { path = "../indicio", version = "0.1" }
+one_two_eight = { path = "../one_two_eight", version = "0.3" }
+prototk = { path = "../prototk", version = "0.4" }
+prototk_derive = { path = "../prototk_derive", version = "0.4" }
+rpc_pb = { path = "../rpc_pb", version = "0.3" }
+sst = { path = "../sst", version = "0.4" }
+sync42 = { path = "../sync42", version = "0.4" }
+tatl = { path = "../tatl", version = "0.3" }
+tuple_key = { path = "../tuple_key", version = "0.3" }
+tuple_key_derive = { path = "../tuple_key_derive", version = "0.3" }
+utilz = { path = "../utilz", version = "0.2" }
+zerror_core = { path = "../zerror_core", version = "0.3" }

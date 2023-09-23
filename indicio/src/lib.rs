@@ -6,12 +6,12 @@ use biometrics::{Collector, Counter};
 
 use buffertk::stack_pack;
 
-use utilz::stopwatch::Stopwatch;
+use one_two_eight::{generate_id, generate_id_prototk, generate_id_tuple_element};
 
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldPackHelper, FieldType};
 
-use rpc_pb::TraceID;
+use utilz::stopwatch::Stopwatch;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -43,6 +43,12 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&TRACE_WITH_BACKTRACE);
     collector.register_counter(&TRACE_WITH_STOPWATCH);
 }
+
+////////////////////////////////////////////// TraceID /////////////////////////////////////////////
+
+generate_id! {TraceID, "trace:"}
+generate_id_prototk! {TraceID}
+generate_id_tuple_element! {TraceID}
 
 /////////////////////////////////////////////// Trace //////////////////////////////////////////////
 
@@ -124,6 +130,14 @@ impl Trace {
             t.lock().unwrap().flush();
         });
         panic!("{}\n", msg.as_ref());
+    }
+
+    pub fn id(&self) -> Option<TraceID> {
+        self.id
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.value
     }
 }
 
