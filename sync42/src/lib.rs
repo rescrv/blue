@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod background;
 pub mod collector;
 pub mod monitor;
 pub mod spin_lock;
