@@ -9,7 +9,6 @@ members = [
     "bloomcalc",
     "buffertk",
     "busyrpc",
-    "databuf",
     "derive_util",
     "gremlins",
     "guacamole",
