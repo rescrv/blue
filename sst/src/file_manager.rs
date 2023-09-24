@@ -4,7 +4,7 @@ use std::ffi::c_int;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
 use biometrics::Counter;
@@ -125,15 +125,15 @@ impl FileManager {
         }
     }
 
-    pub fn open(&self, path: PathBuf) -> Result<FileHandle, Error> {
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<FileHandle, Error> {
         // Check if the file is opened or opening.
         {
             let mut state = self.state.lock().unwrap();
-            while state.opening.contains(&path) {
+            while state.opening.contains(path.as_ref()) {
                 state = self.wake_opening.wait(state).unwrap();
             }
             // We have it by name
-            if let Some(fd) = state.names.get(&path) {
+            if let Some(fd) = state.names.get(path.as_ref()) {
                 // Check that we won't exceed the vector's bounds.
                 if state.files.len() <= *fd {
                     LOGIC_ERROR.click();
@@ -173,15 +173,15 @@ impl FileManager {
                 .with_variable("open_files", state.opening.len() + state.names.len());
                 return Err(err);
             }
-            state.opening.insert(path.clone());
+            state.opening.insert(path.as_ref().to_path_buf());
         }
         // Open the file
-        let file = match open(path.clone()) {
+        let file = match open(path.as_ref().to_path_buf()) {
             Ok(file) => file,
             Err(e) => {
                 {
                     let mut state = self.state.lock().unwrap();
-                    state.opening.remove(&path);
+                    state.opening.remove(path.as_ref());
                 }
                 self.wake_opening.notify_all();
                 return Err(e);
@@ -191,11 +191,11 @@ impl FileManager {
         // Setup the file as a managed file.
         let file = Arc::new(file);
         let file2 = Arc::clone(&file);
-        let path2 = path.clone();
+        let path2 = path.as_ref().to_path_buf();
         {
             let mut state = self.state.lock().unwrap();
-            state.opening.remove(&path);
-            state.names.insert(path, fd);
+            state.opening.remove(&path.as_ref().to_path_buf());
+            state.names.insert(path.as_ref().to_path_buf(), fd);
             if state.files.len() <= fd {
                 state.files.resize(fd + 1, None);
             }
