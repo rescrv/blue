@@ -499,7 +499,7 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
     fn from(kvp: &'a KeyValuePair) -> Self {
         let value = match &kvp.value {
             Some(value) => {
-                let value: &'a [u8] = &value;
+                let value: &'a [u8] = value;
                 Some(value)
             },
             None => None,
