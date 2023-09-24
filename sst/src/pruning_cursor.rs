@@ -35,6 +35,11 @@ impl<C: Cursor> PruningCursor<C> {
 }
 
 impl<C: Cursor> Cursor for PruningCursor<C> {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.skip_key = None;
+        self.cursor.reset()
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.skip_key = None;
         self.cursor.seek_to_first()

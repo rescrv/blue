@@ -264,6 +264,7 @@ impl<R: Read + Seek> LogIterator<R> {
         })
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<KeyValueRef>, Error> {
         self.buffer.clear();
         let header = match self.next_frame()? {
@@ -375,7 +376,7 @@ impl<R: Read + Seek> LogIterator<R> {
     }
 
     fn true_up(&mut self) -> Result<(), Error> {
-        let offset = self.input.seek(SeekFrom::Current(0))?;
+        let offset = self.input.stream_position()?;
         let trued_up = compute_true_up(offset);
         if trued_up - offset > HEADER_MAX_SIZE {
             return Err(Error::Corruption {

@@ -4,7 +4,8 @@ use super::{Cursor, Error, KeyRef, KeyValueRef, TableMetadata};
 
 pub struct SequenceCursor<T: TableMetadata, C: Cursor>
 where
-    C: From<T>,
+    C: TryFrom<T>,
+    Error: From<<C as TryFrom<T>>::Error>,
 {
     tables: Vec<T>,
     position: usize,
@@ -13,12 +14,13 @@ where
 
 impl<T: TableMetadata + Clone, C: Cursor> SequenceCursor<T, C>
 where
-    C: From<T>,
+    C: TryFrom<T>,
+    Error: From<<C as TryFrom<T>>::Error>,
 {
     pub fn new(tables: Vec<T>) -> Result<Self, Error> {
         assert!(!tables.is_empty());
         let position = 0;
-        let mut cursor: C = C::from(tables[position].clone());
+        let mut cursor: C = C::try_from(tables[position].clone())?;
         cursor.seek_to_first()?;
         Ok(Self {
             tables,
@@ -27,24 +29,34 @@ where
         })
     }
 
-    fn reposition(&mut self, idx: usize) {
+    fn reposition(&mut self, idx: usize) -> Result<(), Error> {
         assert!(!self.tables.is_empty());
-        self.position = idx;
-        self.cursor = C::from(self.tables[self.position].clone());
+        if self.position != idx {
+            self.position = idx;
+            self.cursor.reset()?;
+            self.cursor = C::try_from(self.tables[self.position].clone())?;
+        }
+        Ok(())
     }
 }
 
 impl<T: TableMetadata + Clone, C: Cursor> Cursor for SequenceCursor<T, C>
 where
-    C: From<T>,
+    C: TryFrom<T>,
+    Error: From<<C as TryFrom<T>>::Error>,
 {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.position = 0;
+        self.cursor.reset()
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
-        self.reposition(0);
+        self.reposition(0)?;
         self.cursor.seek_to_first()
     }
 
     fn seek_to_last(&mut self) -> Result<(), Error> {
-        self.reposition(self.tables.len() - 1);
+        self.reposition(self.tables.len() - 1)?;
         self.cursor.seek_to_last()
     }
 
@@ -68,7 +80,7 @@ where
             }
         }
 
-        self.reposition(left);
+        self.reposition(left)?;
         self.cursor.seek(key)
     }
 
@@ -76,7 +88,7 @@ where
         loop {
             self.cursor.prev()?;
             if self.cursor.value().is_none() && self.position > 0 {
-                self.reposition(self.position - 1);
+                self.reposition(self.position - 1)?;
                 self.cursor.seek_to_last()?;
             } else {
                 break;
@@ -89,7 +101,7 @@ where
         loop {
             self.cursor.next()?;
             if self.cursor.value().is_none() && self.position + 1 < self.tables.len() {
-                self.reposition(self.position + 1);
+                self.reposition(self.position + 1)?;
                 self.cursor.seek_to_first()?;
             } else {
                 break;

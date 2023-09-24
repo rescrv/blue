@@ -1,4 +1,4 @@
-#[macro_use]
+
 extern crate arrrg_derive;
 
 extern crate prototk;
@@ -10,6 +10,8 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+
+use arrrg_derive::CommandLine;
 
 use buffertk::{stack_pack, Packable, Unpacker};
 
@@ -23,6 +25,7 @@ use zerror_core::ErrorCore;
 pub mod block;
 pub mod file_manager;
 pub mod ingest;
+pub mod lazy_cursor;
 pub mod log;
 pub mod merging_cursor;
 pub mod pruning_cursor;
@@ -363,6 +366,14 @@ impl From<prototk::Error> for Error {
             core: ErrorCore::default(),
             error,
             context: "From<prototk::Error>".to_owned(),
+        }
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(_: std::convert::Infallible) -> Error {
+        Error::Success {
+            core: ErrorCore::default(),
         }
     }
 }
@@ -1307,6 +1318,8 @@ impl Builder for SstMultiBuilder {
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 pub trait Cursor {
+    fn reset(&mut self) -> Result<(), Error>;
+
     fn seek_to_first(&mut self) -> Result<(), Error>;
     fn seek_to_last(&mut self) -> Result<(), Error>;
     fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
@@ -1388,6 +1401,12 @@ impl SstCursor {
 }
 
 impl Cursor for SstCursor {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.meta_cursor.seek_to_first()?;
+        self.block_cursor = None;
+        Ok(())
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.meta_cursor.seek_to_first()?;
         self.block_cursor = None;

@@ -103,6 +103,14 @@ impl MergingCursor {
 }
 
 impl Cursor for MergingCursor {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.comparator = Comparator::Forward;
+        for cursor in self.cursors.iter_mut() {
+            cursor.reset()?;
+        }
+        Ok(())
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {

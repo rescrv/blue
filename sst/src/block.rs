@@ -2,6 +2,8 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
+use arrrg_derive::CommandLine;
+
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 
 use zerror::Z;
@@ -489,6 +491,11 @@ impl BlockCursor {
 }
 
 impl Cursor for BlockCursor {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.position = CursorPosition::First;
+        Ok(())
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::First;
         Ok(())

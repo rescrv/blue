@@ -158,6 +158,12 @@ pub struct ReferenceCursor {
 }
 
 impl Cursor for ReferenceCursor {
+    fn reset(&mut self) -> Result<(), Error> {
+        self.index = -1;
+        self.returned = true;
+        Ok(())
+    }
+
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.index = -1;
         self.returned = true;
