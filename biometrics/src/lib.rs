@@ -101,14 +101,14 @@ pub struct Collector {
     moments: SensorRegistry<Moments>,
 }
 
-static COLLECTOR_REGISTER_COUNTER: Counter = Counter::new("collector.register.counter");
-static COLLECTOR_REGISTER_GAUGE: Counter = Counter::new("collector.register.gauge");
-static COLLECTOR_REGISTER_MOMENTS: Counter = Counter::new("collector.register.moments");
-static COLLECTOR_EMIT_COUNTER: Counter = Counter::new("collector.emit.counter");
-static COLLECTOR_EMIT_GAUGE: Counter = Counter::new("collector.emit.gauge");
-static COLLECTOR_EMIT_MOMENTS: Counter = Counter::new("collector.emit.moments");
-static COLLECTOR_EMIT_FAILURE: Counter = Counter::new("collector.emit.failure");
-static COLLECTOR_TIME_FAILURE: Counter = Counter::new("collector.time.failure");
+static COLLECTOR_REGISTER_COUNTER: Counter = Counter::new("biometrics.collector.register.counter");
+static COLLECTOR_REGISTER_GAUGE: Counter = Counter::new("biometrics.collector.register.gauge");
+static COLLECTOR_REGISTER_MOMENTS: Counter = Counter::new("biometrics.collector.register.moments");
+static COLLECTOR_EMIT_COUNTER: Counter = Counter::new("biometrics.collector.emit.counter");
+static COLLECTOR_EMIT_GAUGE: Counter = Counter::new("biometrics.collector.emit.gauge");
+static COLLECTOR_EMIT_MOMENTS: Counter = Counter::new("biometrics.collector.emit.moments");
+static COLLECTOR_EMIT_FAILURE: Counter = Counter::new("biometrics.collector.emit.failure");
+static COLLECTOR_TIME_FAILURE: Counter = Counter::new("biometrics.collector.time.failure");
 
 impl Collector {
     /// Get a new [Collector].  The collector will use the global registries and emit to the

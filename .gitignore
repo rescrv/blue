@@ -1,6 +1,7 @@
 # wildcards
 **/*.rs.bk
 **/*.sst
+**/table*.txt
 # specific files
 /Cargo.lock
 /target/

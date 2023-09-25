@@ -6,11 +6,36 @@ use std::ops::Bound;
 
 use sst::SstMetadata;
 
+use biometrics::{Collector, Counter, Moments};
+
 use zerror::Z;
 
 use zerror_core::ErrorCore;
 
 use super::*;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static SKIP_LOCKED: Counter = Counter::new("lsmtk.graph.skip_locked");
+static LEVEL_EXCEEDS_MAX_LEVEL: Counter = Counter::new("lsmtk.graph.exceeds_max_level");
+static OVERLAP_NOT_FOUND: Counter = Counter::new("lsmtk.graph.overlap_not_found");
+static EMPTY_FINAL_LEVEL: Counter = Counter::new("lsmtk.graph.empty_final_level");
+static EXCEEDS_MAX_BYTES: Counter = Counter::new("lsmtk.graph.exceeds_max_bytes");
+static NOT_A_COMPACTION: Counter = Counter::new("lsmtk.graph.not_a_compaction");
+static CONSIDERING: Counter = Counter::new("lsmtk.graph.considering");
+
+static NUM_CANDIDATES: Moments = Moments::new("lsmtk.graph.candidates");
+
+pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&SKIP_LOCKED);
+    collector.register_counter(&LEVEL_EXCEEDS_MAX_LEVEL);
+    collector.register_counter(&OVERLAP_NOT_FOUND);
+    collector.register_counter(&EMPTY_FINAL_LEVEL);
+    collector.register_counter(&EXCEEDS_MAX_BYTES);
+    collector.register_counter(&NOT_A_COMPACTION);
+    collector.register_counter(&CONSIDERING);
+    collector.register_moments(&NUM_CANDIDATES);
+}
 
 ////////////////////////////////////////////// Vertex //////////////////////////////////////////////
 
@@ -234,6 +259,27 @@ fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
 
 impl<'a> Graph<'a> {
     pub fn compactions(&mut self) -> Vec<Compaction> {
+        if self.colors.len() <= 1 {
+            let mut compaction = Compaction {
+                options: self.options.clone(),
+                inputs: Vec::new(),
+                stats: CompactionStats {
+                    lower_level: 0,
+                    upper_level: 0,
+                    bytes_input: 0,
+                    ratio: 0.0,
+                },
+            };
+            for idx in 0..self.vertices.len() {
+                compaction.stats.bytes_input += self.metadata[idx].file_size as usize;
+                compaction.inputs.push(self.metadata[idx].clone());
+            }
+            return if compaction.inputs.len() > 2 {
+                vec![compaction]
+            } else {
+                Vec::new()
+            }
+        }
         let mut max_level = 0;
         for idx in 0..self.vertices.len() {
             max_level = max(max_level, self.vertices[idx].level);
@@ -244,6 +290,7 @@ impl<'a> Graph<'a> {
         for color in self.colors.iter().copied() {
             let mut overlap = vec![0u64; max_level + 1];
             if self.vertices[color].level >= max_level {
+                LEVEL_EXCEEDS_MAX_LEVEL.click();
                 continue;
             }
             overlap[self.vertices[color].level] = self.vertices[color].bytes_within_color;
@@ -256,6 +303,7 @@ impl<'a> Graph<'a> {
                 found = true;
             }
             if !found {
+                OVERLAP_NOT_FOUND.click();
                 continue;
             }
             // Select the level with the best ratio of levels N-1 to level N.
@@ -263,23 +311,27 @@ impl<'a> Graph<'a> {
             let mut prev_ratio = 0.0;
             for to_consider in self.vertices[color].level + 1..overlap.len() {
                 if overlap[to_consider] == 0 {
+                    EMPTY_FINAL_LEVEL.click();
                     break;
                 }
-                let mut acc = 0;
+                let mut acc = 0u64;
                 for level in self.vertices[color].level..to_consider {
-                    acc += acc + overlap[level];
+                    acc = acc.saturating_add(overlap[level]);
                 }
                 let waste = overlap[to_consider];
-                let ratio = acc as f64 / (acc + waste) as f64;
+                let ratio = acc as f64 / acc.saturating_add(waste) as f64;
                 let to_n_minus_one: u64 = overlap[self.vertices[color].level..to_consider].iter().sum();
                 let to_n: u64 = overlap[self.vertices[color].level..to_consider + 1].iter().sum();
                 if to_n >= self.options.max_compaction_bytes as u64 {
+                    EXCEEDS_MAX_BYTES.click();
                     break;
                 }
                 if to_n == to_n_minus_one {
+                    NOT_A_COMPACTION.click();
                     continue;
                 }
                 if prev_ratio < ratio {
+                    CONSIDERING.click();
                     upper_level = Some(to_consider);
                     prev_ratio = ratio;
                 }
@@ -299,7 +351,7 @@ impl<'a> Graph<'a> {
                     inputs: Vec::new(),
                     stats: CompactionStats {
                         lower_level: self.vertices[color].level,
-                        upper_level: upper_level,
+                        upper_level,
                         bytes_input: 0,
                         ratio: prev_ratio,
                     },
@@ -317,12 +369,14 @@ impl<'a> Graph<'a> {
         }
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
+        NUM_CANDIDATES.add(compactions.len() as f64);
         let mut selected = Vec::with_capacity(compactions.len());
         let mut locked = HashSet::new();
         for compaction in compactions.into_iter() {
             let mut skip = false;
             for input in compaction.inputs.iter() {
                 if locked.contains(&input.setsum) {
+                    SKIP_LOCKED.click();
                     skip = true;
                 }
             }

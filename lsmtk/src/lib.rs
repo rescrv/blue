@@ -1,4 +1,4 @@
-use std::cmp::{max, min, Ordering};
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fs::{create_dir, hard_link, rename, remove_dir, remove_file};
 use std::path::{Path, PathBuf};
@@ -28,12 +28,41 @@ use in_flight::CompactionsInFlight;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
+static OPEN_DB: Counter = Counter::new("lsmtk.open");
+
+static COMPACTION_PERFORM: Counter = Counter::new("lsmtk.compaction");
+static COMPACTION_NEW_CURSOR: Counter = Counter::new("lsmtk.compaction.new_cursor");
+static COMPACTION_LINK: Counter = Counter::new("lsmtk.compaction.link");
+static COMPACTION_RENAME: Counter = Counter::new("lsmtk.compaction.rename");
+static COMPACTION_REMOVE: Counter = Counter::new("lsmtk.compaction.remove");
+static COMPACTION_COUNT: Counter = Counter::new("lsmtk.compaction.count");
+static COMPACTION_METADATA: Counter = Counter::new("lsmtk.compaction.metadata");
+static COMPACTION_KEYS_WRITTEN: Counter = Counter::new("lsmtk.compaction.keys_written");
+
+static INGEST_LINK: Counter = Counter::new("lsmtk.ingest.link");
+
 static BYTES_INGESTED: Counter = Counter::new("lsmtk.bytes_ingested");
 static COMPACTION_BYTES_WRITTEN: Counter = Counter::new("lsmtk.compaction.bytes_written");
 
+static BACKGROUND_THREAD_ACTIVE: Counter = Counter::new("lsmtk.background.active");
+static BACKGROUND_THREAD_PASSIVE: Counter = Counter::new("lsmtk.background.passive");
+
 pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&OPEN_DB);
+    collector.register_counter(&COMPACTION_PERFORM);
+    collector.register_counter(&COMPACTION_NEW_CURSOR);
+    collector.register_counter(&COMPACTION_LINK);
+    collector.register_counter(&COMPACTION_RENAME);
+    collector.register_counter(&COMPACTION_REMOVE);
+    collector.register_counter(&COMPACTION_COUNT);
+    collector.register_counter(&COMPACTION_METADATA);
+    collector.register_counter(&COMPACTION_KEYS_WRITTEN);
+    collector.register_counter(&INGEST_LINK);
     collector.register_counter(&BYTES_INGESTED);
     collector.register_counter(&COMPACTION_BYTES_WRITTEN);
+    collector.register_counter(&BACKGROUND_THREAD_ACTIVE);
+    collector.register_counter(&BACKGROUND_THREAD_PASSIVE);
+    graph::register_biometrics(collector);
 }
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -254,6 +283,7 @@ impl LsmOptions {
             mtx: Mutex::default(),
             cnd: Condvar::default(),
         };
+        OPEN_DB.click();
         Ok(db)
     }
 }
@@ -265,7 +295,7 @@ impl Default for LsmOptions {
             sst: SstOptions::default(),
             path: "db".to_owned(),
             max_open_files: 1 << 20,
-            max_compaction_bytes: usize::max_value(),
+            max_compaction_bytes: 1 << 28,
         }
     }
 }
@@ -292,6 +322,7 @@ impl Compaction {
     }
 
     pub fn perform(&self, db: &DB) -> Result<(), Error> {
+        COMPACTION_PERFORM.click();
         let mut mani_edit = Edit::default();
         let mut to_remove = Vec::new();
         let mut cursors: Vec<Box<dyn Cursor + 'static>> = Vec::new();
@@ -307,6 +338,7 @@ impl Compaction {
             mani_edit.rm(&sst_setsum.hexdigest())?;
             let sst = Sst::from_file_handle(file)?;
             cursors.push(Box::new(sst.cursor()));
+            COMPACTION_NEW_CURSOR.click();
         }
         let mut cursor = MergingCursor::new(cursors)?;
         cursor.seek_to_first()?;
@@ -321,6 +353,7 @@ impl Compaction {
                 Some(v) => { v },
                 None => { break 'looping; },
             };
+            COMPACTION_KEYS_WRITTEN.click();
             match kvr.value {
                 Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
                 None => { sstmb.del(kvr.key, kvr.timestamp)?; }
@@ -334,13 +367,16 @@ impl Compaction {
             COMPACTION_BYTES_WRITTEN.count(sst.metadata()?.file_size);
             mani_edit.add(&sst_setsum)?;
             let new_path = SST_FILE(&self.options.path, sst_setsum);
+            COMPACTION_LINK.click();
             hard_link(path, new_path)?;
         }
         db.mani.write().unwrap().apply(mani_edit)?;
         for (path, trash) in to_remove.into_iter() {
+            COMPACTION_RENAME.click();
             rename(path, trash)?;
         }
         for path in paths.into_iter() {
+            COMPACTION_REMOVE.click();
             remove_file(path)?;
         }
         remove_dir(prefix)?;
@@ -390,6 +426,7 @@ impl DB {
                     what: target.to_string_lossy().to_string(),
                 });
             }
+            INGEST_LINK.click();
             hard_link(sst_path, target).as_z()?;
             edit.add(&setsum.hexdigest())?;
         }
@@ -405,12 +442,14 @@ impl DB {
         for sst_setsum in setsums.iter() {
             let file = self.file_manager.open(SST_FILE(&self.options.path, sst_setsum.clone()))?;
             let sst = Sst::from_file_handle(file)?;
+            COMPACTION_METADATA.click();
             sst_metadata.push(sst.metadata()?);
         }
         let mut graph = Graph::new(self.options.clone(), &sst_metadata)?;
         let mut compactions = graph.compactions();
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
+        COMPACTION_COUNT.count(compactions.len() as u64);
         Ok(compactions)
     }
 
@@ -434,6 +473,7 @@ impl DB {
             }
             compaction.inputs.push(meta);
         }
+        COMPACTION_PERFORM.click();
         compaction.perform(self)?;
         Ok(())
     }
@@ -448,6 +488,7 @@ impl DB {
                     }
                     *mtx = 0;
                 }
+                BACKGROUND_THREAD_ACTIVE.click();
                 loop {
                     let compactions = self.compactions()?;
                     if !compactions.is_empty() {
@@ -456,6 +497,7 @@ impl DB {
                         break;
                     }
                 }
+                BACKGROUND_THREAD_PASSIVE.click();
             }
         }
     }

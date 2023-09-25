@@ -17,9 +17,9 @@ fn main() {
         std::process::exit(1);
     }
     std::thread::spawn(|| {
-        let mut collector = Collector::new();
-        sst::register_biometrics(&mut collector);
-        lsmtk::register_biometrics(&mut collector);
+        let collector = Collector::new();
+        sst::register_biometrics(&collector);
+        lsmtk::register_biometrics(&collector);
         let fout = File::create("/dev/stdout").unwrap();
         let mut emit = PlainTextEmitter::new(fout);
         loop {

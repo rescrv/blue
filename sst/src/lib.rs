@@ -7,8 +7,10 @@ extern crate prototk_derive;
 
 use std::cmp;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Write as FmtWrite;
 use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use arrrg_derive::CommandLine;
@@ -21,6 +23,7 @@ use tatl::{HeyListen, Stationary};
 
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
+use zerror_derive::ZerrorCore;
 
 pub mod block;
 pub mod file_manager;
@@ -57,12 +60,58 @@ static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.value_to
 static TABLE_FULL: Counter = Counter::new("sst.error.table_full");
 static TABLE_FULL_MONITOR: Stationary = Stationary::new("sst.error.table_full", &TABLE_FULL);
 
+static SST_OPEN: Counter = Counter::new("sst.table.open");
+static SST_SETSUM: Counter = Counter::new("sst.table.setsum");
+static SST_METADATA: Counter = Counter::new("sst.table.metadata");
+static SST_LOAD_BLOCK: Counter = Counter::new("sst.table.load_block");
+static BUILDER_NEW: Counter = Counter::new("sst.builder.new");
+static BUILDER_COMPARE_KEY: Counter = Counter::new("sst.builder.compare_key");
+static BUILDER_ASSIGN_LAST_KEY: Counter = Counter::new("sst.builder.assign_last_key");
+static BUILDER_START_NEW_BLOCK: Counter = Counter::new("sst.builder.start_new_block");
+static BUILDER_FLUSH_BLOCK: Counter = Counter::new("sst.builder.flush_block");
+static BUILDER_APPROX_SIZE: Counter = Counter::new("sst.builder.approx_size");
+static BUILDER_PUT: Counter = Counter::new("sst.builder.put");
+static BUILDER_DEL: Counter = Counter::new("sst.builder.del");
+static BUILDER_SEAL: Counter = Counter::new("sst.builder.seal");
+static SST_CURSOR_META_PREV: Counter = Counter::new("sst.cursor.meta_prev");
+static SST_CURSOR_META_NEXT: Counter = Counter::new("sst.cursor.meta_next");
+static SST_CURSOR_RESET: Counter = Counter::new("sst.cursor.reset");
+static SST_CURSOR_SEEK_TO_FIRST: Counter = Counter::new("sst.cursor.seek_to_first");
+static SST_CURSOR_SEEK_TO_LAST: Counter = Counter::new("sst.cursor.seek_to_last");
+static SST_CURSOR_SEEK: Counter = Counter::new("sst.cursor.seek");
+static SST_CURSOR_PREV: Counter = Counter::new("sst.cursor.prev");
+static SST_CURSOR_NEXT: Counter = Counter::new("sst.cursor.next");
+static SST_CURSOR_NEW: Counter = Counter::new("sst.cursor.new");
+
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&LOGIC_ERROR);
     collector.register_counter(&CORRUPTION);
     collector.register_counter(&KEY_TOO_LARGE);
     collector.register_counter(&VALUE_TOO_LARGE);
     collector.register_counter(&TABLE_FULL);
+	collector.register_counter(&SST_OPEN);
+	collector.register_counter(&SST_CURSOR_NEW);
+	collector.register_counter(&SST_SETSUM);
+	collector.register_counter(&SST_METADATA);
+	collector.register_counter(&SST_LOAD_BLOCK);
+	collector.register_counter(&BUILDER_NEW);
+	collector.register_counter(&BUILDER_COMPARE_KEY);
+	collector.register_counter(&BUILDER_ASSIGN_LAST_KEY);
+	collector.register_counter(&BUILDER_START_NEW_BLOCK);
+	collector.register_counter(&BUILDER_FLUSH_BLOCK);
+	collector.register_counter(&BUILDER_APPROX_SIZE);
+	collector.register_counter(&BUILDER_PUT);
+	collector.register_counter(&BUILDER_DEL);
+	collector.register_counter(&BUILDER_SEAL);
+	collector.register_counter(&SST_CURSOR_META_PREV);
+	collector.register_counter(&SST_CURSOR_META_NEXT);
+	collector.register_counter(&SST_CURSOR_RESET);
+	collector.register_counter(&SST_CURSOR_SEEK_TO_FIRST);
+	collector.register_counter(&SST_CURSOR_SEEK_TO_LAST);
+	collector.register_counter(&SST_CURSOR_SEEK);
+	collector.register_counter(&SST_CURSOR_PREV);
+	collector.register_counter(&SST_CURSOR_NEXT);
+	collector.register_counter(&SST_CURSOR_NEW);
 }
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
@@ -130,7 +179,7 @@ fn check_table_size(size: usize) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
     #[prototk(442368, message)]
     Success {
@@ -236,110 +285,10 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core },
-            Error::KeyTooLarge { core, .. } => { core },
-            Error::ValueTooLarge { core, .. } => { core } ,
-            Error::SortOrder { core, .. } => { core } ,
-            Error::TableFull { core, .. } => { core } ,
-            Error::BlockTooSmall { core, .. } => { core } ,
-            Error::UnpackError { core, .. } => { core } ,
-            Error::Crc32cFailure { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::TooManyOpenFiles { core, .. } => { core } ,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => { core },
-            Error::KeyTooLarge { core, .. } => { core },
-            Error::ValueTooLarge { core, .. } => { core } ,
-            Error::SortOrder { core, .. } => { core } ,
-            Error::TableFull { core, .. } => { core } ,
-            Error::BlockTooSmall { core, .. } => { core } ,
-            Error::UnpackError { core, .. } => { core } ,
-            Error::Crc32cFailure { core, .. } => { core } ,
-            Error::Corruption { core, .. } => { core } ,
-            Error::LogicError { core, .. } => { core } ,
-            Error::SystemError { core, .. } => { core } ,
-            Error::TooManyOpenFiles { core, .. } => { core } ,
-        }
-    }
-}
-
 impl Default for Error {
     fn default() -> Self {
         Error::Success {
             core: ErrorCore::default(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Error::Success { core: _ } => fmt
-                .debug_struct("Success")
-                .finish(),
-            Error::KeyTooLarge { core: _, length, limit } => fmt
-                .debug_struct("KeyTooLarge")
-                .field("length", length)
-                .field("limit", limit)
-                .finish(),
-            Error::ValueTooLarge { core: _, length, limit } => fmt
-                .debug_struct("ValueTooLarge")
-                .field("length", length)
-                .field("limit", limit)
-                .finish(),
-            Error::SortOrder { core: _, last_key, last_timestamp, new_key, new_timestamp } => fmt
-                .debug_struct("SortOrder")
-                .field("last_key", last_key)
-                .field("last_timestamp", last_timestamp)
-                .field("new_key", new_key)
-                .field("new_timestamp", new_timestamp)
-                .finish(),
-            Error::TableFull { core: _, size, limit } => fmt
-                .debug_struct("TableFull")
-                .field("size", size)
-                .field("limit", limit)
-                .finish(),
-            Error::BlockTooSmall { core: _, length, required } => fmt
-                .debug_struct("BlockTooSmall")
-                .field("length", length)
-                .field("required", required)
-                .finish(),
-            Error::UnpackError { core: _, error, context } => fmt
-                .debug_struct("UnpackError")
-                .field("error", error)
-                .field("context", context)
-                .finish(),
-            Error::Crc32cFailure { core: _, start, limit, crc32c } => fmt
-                .debug_struct("Crc32cFailure")
-                .field("start", start)
-                .field("limit", limit)
-                .field("crc32c", crc32c)
-                .finish(),
-            Error::Corruption { core: _, context } => fmt
-                .debug_struct("Corruption")
-                .field("context", context)
-                .finish(),
-            Error::LogicError { core: _, context } => fmt
-                .debug_struct("LogicError")
-                .field("context", context)
-                .finish(),
-            Error::SystemError { core: _, what } => fmt
-                .debug_struct("SystemError")
-                .field("what", what)
-                .finish(),
-            Error::TooManyOpenFiles { core: _, limit } => fmt
-                .debug_struct("TooManyOpenFiles")
-                .field("limit", limit)
-                .finish(),
         }
     }
 }
@@ -375,29 +324,6 @@ impl From<std::convert::Infallible> for Error {
         Error::Success {
             core: ErrorCore::default(),
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}", self) + "\n" + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error where X: Debug {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 
@@ -795,6 +721,7 @@ impl Sst {
     }
 
     pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
+        SST_OPEN.click();
         // Read and parse the final block's offset
         let file_size = handle.size()?;
         if file_size < 8 {
@@ -862,14 +789,17 @@ impl Sst {
     }
 
     pub fn cursor(&self) -> SstCursor {
+        SST_CURSOR_NEW.click();
         SstCursor::new(self.clone())
     }
 
     pub fn setsum(&self) -> Setsum {
+        SST_SETSUM.click();
         Setsum::from_digest(self.final_block.setsum)
     }
 
     pub fn metadata(&self) -> Result<SstMetadata, Error> {
+        SST_METADATA.click();
         let mut cursor = self.cursor();
         // First key.
         cursor.seek_to_first()?;
@@ -904,6 +834,7 @@ impl Sst {
         file: &FileHandle,
         block_metadata: &BlockMetadata,
     ) -> Result<Block, Error> {
+        SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
         let mut buf: Vec<u8> = vec![0u8; amt];
@@ -976,6 +907,8 @@ pub struct SstOptions {
     target_block_size: usize,
     #[arrrg(optional, "Target file size.", "BYTES")]
     target_file_size: usize,
+    #[arrrg(optional, "Write buffer size.", "BYTES")]
+    write_buffer_size: usize,
 }
 
 impl SstOptions {
@@ -1019,6 +952,7 @@ impl Default for SstOptions {
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
             target_file_size: 1<<22,
+            write_buffer_size: 1<<22,
         }
     }
 }
@@ -1044,12 +978,15 @@ pub struct SstBuilder {
     smallest_timestamp: u64,
     biggest_timestamp: u64,
     // Output information.
-    output: File,
+    output: BufWriter<File>,
     path: PathBuf,
 }
 
 impl SstBuilder {
     pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, Error> {
+        BUILDER_NEW.click();
+        let block_options = options.block.clone();
+        let write_buffer_size = options.write_buffer_size;
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -1063,16 +1000,17 @@ impl SstBuilder {
             block_builder: None,
             block_start_offset: 0,
             bytes_written: 0,
-            index_block: BlockBuilder::new(BlockBuilderOptions::default()),
+            index_block: BlockBuilder::new(block_options),
             setsum: Setsum::default(),
             smallest_timestamp: u64::max_value(),
             biggest_timestamp: 0,
-            output,
+            output: BufWriter::with_capacity(write_buffer_size, output),
             path: path.as_ref().to_path_buf(),
         })
     }
 
     fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        BUILDER_COMPARE_KEY.click();
         if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
             Err(Error::SortOrder {
                 core: ErrorCore::default(),
@@ -1087,6 +1025,7 @@ impl SstBuilder {
     }
 
     fn assign_last_key(&mut self, key: &[u8], timestamp: u64) {
+        BUILDER_ASSIGN_LAST_KEY.click();
         self.last_key.truncate(0);
         self.last_key.extend_from_slice(key);
         self.last_timestamp = timestamp;
@@ -1099,6 +1038,7 @@ impl SstBuilder {
     }
 
     fn start_new_block(&mut self) -> Result<(), Error> {
+        BUILDER_START_NEW_BLOCK.click();
         if self.block_builder.is_some() {
             LOGIC_ERROR.click();
             return Err(Error::LogicError {
@@ -1112,6 +1052,7 @@ impl SstBuilder {
     }
 
     fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        BUILDER_FLUSH_BLOCK.click();
         if self.block_builder.is_none() {
             LOGIC_ERROR.click();
             return Err(Error::LogicError {
@@ -1170,6 +1111,7 @@ impl Builder for SstBuilder {
     type Sealed = Sst;
 
     fn approximate_size(&self) -> usize {
+        BUILDER_APPROX_SIZE.click();
         let mut sum = self.bytes_written;
         sum += match &self.block_builder {
             Some(block) => block.approximate_size(),
@@ -1181,6 +1123,7 @@ impl Builder for SstBuilder {
     }
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        BUILDER_PUT.click();
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
@@ -1193,6 +1136,7 @@ impl Builder for SstBuilder {
     }
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        BUILDER_DEL.click();
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
         self.enforce_sort_order(key, timestamp)?;
@@ -1204,6 +1148,7 @@ impl Builder for SstBuilder {
     }
 
     fn seal(self) -> Result<Sst, Error> {
+        BUILDER_SEAL.click();
         let mut builder = self;
         // Flush the block we have.
         if builder.block_builder.is_some() {
@@ -1239,7 +1184,8 @@ impl Builder for SstBuilder {
         let pa = stack_pack(final_block);
         builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
         // fsync
-        builder.output.sync_all().as_z()?;
+        builder.output.flush().as_z()?;
+        builder.output.get_mut().sync_all().as_z()?;
         Sst::new(builder.options, builder.path)
     }
 }
@@ -1353,6 +1299,7 @@ impl SstCursor {
     }
 
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
+        SST_CURSOR_META_PREV.click();
         self.meta_cursor.prev()?;
         let kvp = match self.meta_cursor.value() {
             Some(kvp) => kvp,
@@ -1365,6 +1312,7 @@ impl SstCursor {
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
+        SST_CURSOR_META_NEXT.click();
         self.meta_cursor.next()?;
         let kvp = match self.meta_cursor.value() {
             Some(kvp) => kvp,
@@ -1402,24 +1350,28 @@ impl SstCursor {
 
 impl Cursor for SstCursor {
     fn reset(&mut self) -> Result<(), Error> {
+        SST_CURSOR_RESET.click();
         self.meta_cursor.seek_to_first()?;
         self.block_cursor = None;
         Ok(())
     }
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
+        SST_CURSOR_SEEK_TO_FIRST.click();
         self.meta_cursor.seek_to_first()?;
         self.block_cursor = None;
         Ok(())
     }
 
     fn seek_to_last(&mut self) -> Result<(), Error> {
+        SST_CURSOR_SEEK_TO_LAST.click();
         self.meta_cursor.seek_to_last()?;
         self.block_cursor = None;
         Ok(())
     }
 
     fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+        SST_CURSOR_SEEK.click();
         self.meta_cursor.seek(key)?;
         let metadata = match self.meta_next()? {
             Some(m) => m,
@@ -1435,6 +1387,7 @@ impl Cursor for SstCursor {
     }
 
     fn prev(&mut self) -> Result<(), Error> {
+        SST_CURSOR_PREV.click();
         if self.block_cursor.is_none() {
             let metadata = match self.meta_prev()? {
                 Some(m) => m,
@@ -1460,6 +1413,7 @@ impl Cursor for SstCursor {
     }
 
     fn next(&mut self) -> Result<(), Error> {
+        SST_CURSOR_NEXT.click();
         if self.block_cursor.is_none() {
             let metadata = match self.meta_next()? {
                 Some(m) => m,
@@ -1501,6 +1455,7 @@ impl Cursor for SstCursor {
 
 impl From<Sst> for SstCursor {
     fn from(table: Sst) -> Self {
+        SST_CURSOR_NEW.click();
         Self::new(table)
     }
 }
