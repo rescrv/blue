@@ -26,6 +26,7 @@ members = [
     "rpc_pb",
     "scrunch",
     "setsum",
+    "skipfree",
     "split_channel",
     "sst",
     "sync42",
