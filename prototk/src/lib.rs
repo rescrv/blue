@@ -919,6 +919,22 @@ where
     }
 }
 
+impl<'a, T, F> FieldPackHelper<'a, T> for Box<F>
+where
+    T: FieldType<'a>,
+    F: FieldPackHelper<'a, T>,
+{
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        let f: &F = &*self;
+        f.field_pack_sz(tag)
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        let f: &F = &*self;
+        f.field_pack(tag, out)
+    }
+}
+
 impl<'a, T, E> FieldPackHelper<'a, field_types::message<Result<T, E>>> for Result<T, E>
 where
     T: FieldPackHelper<'a, field_types::message<T>> + 'a,
@@ -986,6 +1002,16 @@ where
 {
     fn merge_field(&mut self, proto: T) {
         *self = Some(proto.into());
+    }
+}
+
+impl<'a, T, F> FieldUnpackHelper<'a, T> for Box<F>
+where
+    T: FieldType<'a> + Into<F>,
+    F: FieldUnpackHelper<'a, T>,
+{
+    fn merge_field(&mut self, proto: T) {
+        *self = Box::new(proto.into());
     }
 }
 
