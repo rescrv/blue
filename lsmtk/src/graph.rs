@@ -171,10 +171,6 @@ impl<'a> Graph<'a> {
             color_adj_list: color_forward_adj_list,
         })
     }
-
-    pub fn level_for_vertex(&self, idx: usize) -> usize {
-        self.vertices[idx].level
-    }
 }
 
 /////////////////////////////// Tarjan Strongly Connected Components ///////////////////////////////

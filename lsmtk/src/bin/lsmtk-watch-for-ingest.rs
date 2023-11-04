@@ -29,7 +29,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let root = PathBuf::from(options.path().clone());
+    let root = PathBuf::from(options.path());
     let db = Arc::new(options.open().as_z().pretty_unwrap());
     let db_p = Arc::clone(&db);
     let _compactor = std::thread::spawn(move || {
