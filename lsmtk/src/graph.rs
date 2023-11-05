@@ -133,9 +133,7 @@ impl Graph {
             to_add_idx += 1;
         }
         let map = |(src, dst)| {
-            if removes.contains(&src) {
-                None
-            } else if removes.contains(&dst) {
+            if removes.contains(&src) || removes.contains(&dst) {
                 None
             } else {
                 let src = *renames.get(&src).unwrap_or(&src);
