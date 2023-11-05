@@ -171,6 +171,7 @@ pub struct Manifest {
     _lockfile: Lockfile,
     root: PathBuf,
     strs: BTreeSet<String>,
+    info: BTreeMap<char, String>,
     last_rollover: u64,
     poison: Option<Error>,
 }
@@ -203,12 +204,14 @@ impl Manifest {
             Some(_lockfile) => {
                 LOCK_OBTAINED.click();
                 let strs = Self::read_strs(MANIFEST(&root))?;
+                let info = Self::read_info(MANIFEST(&root))?;
                 let last_rollover = Self::next_manifest_identifier(&root)?;
                 Ok(Self {
                     options,
                     _lockfile,
                     root,
                     strs,
+                    info,
                     last_rollover,
                     poison: None,
                 })
@@ -231,7 +234,9 @@ impl Manifest {
 
     /// Number of bytes used for this log.
     pub fn size(&self) -> u64 {
-        self.strs.iter().map(|s| s.len() as u64).sum()
+        let strs: u64 = self.strs.iter().map(|s| s.len() as u64).sum();
+        let info: u64 = self.info.iter().map(|(_, s)| s.len() as u64).sum();
+        strs + info
     }
 
     /// Apply an edit to the log.
@@ -241,10 +246,12 @@ impl Manifest {
 
     /// Rollover the log.
     pub fn rollover(&mut self) -> Result<(), Error> {
-        let strs = self.poison(Self::read_strs(MANIFEST(&self.root)))?;
         let mut edit = Edit::default();
-        for s in strs {
-            self.poison(edit.add(&s))?;
+        for s in self.strs.iter() {
+            edit.add(&s).expect("previously added string should always add");
+        }
+        for (c, s) in self.info.iter() {
+            edit.info(*c, &s).expect("previously added info should always add");
         }
         let next_id = self.last_rollover;
         self.last_rollover += 1;
@@ -260,7 +267,7 @@ impl Manifest {
     }
 
     fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), Error> {
-        let mut was_empty = self.strs.is_empty();
+        let was_empty = self.strs.is_empty();
         let mut edit_str = String::new();
         for path in edit.rm_strs.iter() {
             self.strs.remove(&String::from(path));
@@ -271,6 +278,12 @@ impl Manifest {
         for path in edit.add_strs.iter() {
             self.strs.insert(String::from(path));
             let line = "+".to_owned() + path;
+            let cksum = crc32c::crc32c(line.as_bytes());
+            edit_str += &format!("{:08x}{}\n", cksum, line);
+        }
+        for (key, value) in edit.info.iter() {
+            self.info.insert(*key, value.clone());
+            let line = format!("{}{}", key, value);
             let cksum = crc32c::crc32c(line.as_bytes());
             edit_str += &format!("{:08x}{}\n", cksum, line);
         }
@@ -346,10 +359,10 @@ impl Manifest {
                     paths.insert(String::from(&line[9..]));
                 } else if action == '-' {
                     paths.remove(&String::from(&line[9..]));
-                } else {
+                } else if action == '\n' {
                     return Err(Error::Corruption {
                         core: ErrorCore::default(),
-                        what: format!("operation {} is not supported", action),
+                        what: "operation \\n is not supported".to_owned(),
                     });
                 }
             } else {
@@ -360,6 +373,63 @@ impl Manifest {
             }
         }
         Ok(paths)
+    }
+
+    fn read_info(path: PathBuf) -> Result<BTreeMap<char, String>, Error> {
+        if path.is_dir() {
+            return Err(Error::Corruption {
+                core: ErrorCore::default(),
+                what: "MANIFEST file is a directory".to_owned(),
+            });
+        }
+        if !path.is_file() {
+            return Ok(BTreeMap::new());
+        }
+        let file = File::open(&path).as_z().with_variable("path", path.to_string_lossy())?;
+        let file = BufReader::new(file);
+        let mut info = BTreeMap::new();
+        for (idx, line) in file.lines().enumerate() {
+            let line = line?;
+            if !line.is_ascii() {
+                return Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    what: format!("line {} is not ascii", idx),
+                });
+            }
+            if line == TX_SEPARATOR {
+            } else if line.len() > 9 {
+                let crc32c_expected = u32::from_str_radix(&line[..8], 16)
+                    .map_err(|err| {
+                        Error::Corruption {
+                            core: ErrorCore::default(),
+                            what: format!("crc32c is not hex on line {}: {}", idx, err),
+                        }
+                    })?;
+                if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
+                    return Err(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: format!("crc32c failure on line {}", idx),
+                    });
+                }
+                let action = line.as_bytes()[8] as char;
+                if action == '+' || action == '-' {
+                    // pass
+                } else if action == '\n' {
+                    return Err(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: "operation \\n is not supported".to_owned(),
+                    });
+                } else {
+                    info.insert(action, String::from(&line[9..]));
+                }
+            } else {
+                return Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    what: format!("unhandled case on line {}", idx),
+                });
+            }
+        }
+        Ok(info)
     }
 
     fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, Error> {
@@ -392,6 +462,7 @@ impl Manifest {
 pub struct Edit {
     add_strs: BTreeSet<String>,
     rm_strs: BTreeSet<String>,
+    info: BTreeMap<char, String>,
 }
 
 impl Edit {
@@ -404,6 +475,13 @@ impl Edit {
     pub fn rm(&mut self, s: &str) -> Result<(), Error> {
         let s = Self::check_str(s)?;
         self.rm_strs.insert(s);
+        Ok(())
+    }
+
+    pub fn info(&mut self, c: char, s: &str) -> Result<(), Error> {
+        Self::check_str(&c.to_string())?;
+        let s = Self::check_str(s)?;
+        self.info.insert(c, s);
         Ok(())
     }
 
@@ -516,16 +594,46 @@ a4e79c62+thing two
 ", read_to_string(root.join("MANIFEST")).unwrap());
         assert!(root.join("MANIFEST").exists());
         assert!(root.join("MANIFEST.1").exists());
-        assert!(root.join("MANIFEST.2").exists());
-        assert_eq!("dcab9d28+thing one
-a4e79c62+thing two
---------
-", read_to_string(root.join("MANIFEST.1")).unwrap());
         assert_eq!("dcab9d28+thing one
 a4e79c62+thing two
 --------
 6c866914-thing one
 --------
-", read_to_string(root.join("MANIFEST.2")).unwrap());
+", read_to_string(root.join("MANIFEST.1")).unwrap());
+    }
+
+    #[test]
+    fn info() {
+        let root = test_root(module_path!(), line!());
+        let opts = ManifestOptions::default();
+        let mut mani = Manifest::open(opts.clone(), &root).unwrap();
+        let mut edit = Edit::default();
+        edit.add("thing one").unwrap();
+        edit.add("thing two").unwrap();
+        // We want to record the following for the target use case of mani:
+        // C:  A unique client identifier string.  Used for debugging who wrote what.
+        // A:  The setsum over the added files.
+        // R:  The setsum over the removed files.
+        // T:  The setsum of trash removed.
+        // S:  The setsum that covers the set of strings after the edit is applied.
+        //
+        // NOTE(rescrv):  Lacking setsum tooling I just made up a value for each of the following.
+        // It doesn't get verified by mani, only the tooling built on top that can read information
+        // knows about these setsums.
+        edit.info('C', "some-client-identifier").unwrap();
+        edit.info('A', "71332261daaa6dc30ad627b09349c6af").unwrap();
+        edit.info('R', "00000000000000000000000000000000").unwrap();
+        edit.info('T', "e0785f2a185aaf6fe0a099bc98ce1e70").unwrap();
+        edit.info('S', "9ba1e4d7aa7a39a91b00d90c36436414").unwrap();
+        mani.apply(edit).unwrap();
+        assert_eq!("dcab9d28+thing one
+a4e79c62+thing two
+4d82ac08A71332261daaa6dc30ad627b09349c6af
+a2281ab8Csome-client-identifier
+442a0186R00000000000000000000000000000000
+1736a268S9ba1e4d7aa7a39a91b00d90c36436414
+79810703Te0785f2a185aaf6fe0a099bc98ce1e70
+--------
+", read_to_string(root.join("MANIFEST")).unwrap());
     }
 }
