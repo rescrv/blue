@@ -44,6 +44,22 @@ fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
 
 const TX_SEPARATOR: &str = "--------";
 
+fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
+    let path = path.as_ref().as_os_str().to_str();
+    let path = match path {
+        Some(path) => path,
+        None => { return None; },
+    };
+    if let Some(path) = path.strip_prefix("MANIFEST.") {
+        match path.parse::<u64>() {
+            Ok(idx) => Some(idx),
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
+}
+
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static LOCK_OBTAINED: Counter = Counter::new("mani.lock_obtained");
@@ -346,16 +362,7 @@ impl Manifest {
         for dir in read_dir(root.as_ref())? {
             let dir = dir?;
             let path = dir.path();
-            let path = path.as_os_str().to_str();
-            let path = match path {
-                Some(path) => path,
-                None => { continue },
-            };
-            if let Some(path) = path.strip_prefix("MANIFEST.") {
-                let next_id = match path.parse::<u64>() {
-                    Ok(next_id) => next_id,
-                    Err(_) => { continue },
-                };
+            if let Some(next_id) = extract_backup(path) {
                 max_next_id = std::cmp::max(max_next_id, next_id);
             }
         }
