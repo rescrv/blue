@@ -234,7 +234,7 @@ impl Manifest {
     /// Number of bytes used for this log.
     pub fn size(&self) -> u64 {
         let strs: u64 = self.strs.iter().map(|s| s.len() as u64).sum();
-        let info: u64 = self.info.iter().map(|(_, s)| s.len() as u64).sum();
+        let info: u64 = self.info.values().map(|s| s.len() as u64).sum();
         strs + info
     }
 
@@ -262,10 +262,10 @@ impl Manifest {
     fn to_edit(&self) -> Edit {
         let mut edit = Edit::default();
         for s in self.strs.iter() {
-            edit.add(&s).expect("previously added string should always add");
+            edit.add(s).expect("previously added string should always add");
         }
         for (c, s) in self.info.iter() {
-            edit.info(*c, &s).expect("previously added info should always add");
+            edit.info(*c, s).expect("previously added info should always add");
         }
         edit
     }
@@ -345,15 +345,14 @@ impl Manifest {
         let mut max_next_id = 0;
         for dir in read_dir(root.as_ref())? {
             let dir = dir?;
-            const MANIFEST: &'static str = "MANIFEST.";
             let path = dir.path();
             let path = path.as_os_str().to_str();
             let path = match path {
                 Some(path) => path,
                 None => { continue },
             };
-            if path.starts_with(MANIFEST) {
-                let next_id = match path[MANIFEST.len()..].parse::<u64>() {
+            if let Some(path) = path.strip_prefix("MANIFEST.") {
+                let next_id = match path.parse::<u64>() {
                     Ok(next_id) => next_id,
                     Err(_) => { continue },
                 };
@@ -496,10 +495,8 @@ impl Iterator for ManifestIterator {
                         core: ErrorCore::default(),
                         what: "operation \\n is not supported".to_owned(),
                     });
-                } else {
-                    if let Err(err) = edit.info(action, &line[9..]) {
-                        return self.poison(err);
-                    }
+                } else if let Err(err) = edit.info(action, &line[9..]) {
+                    return self.poison(err);
                 }
             } else {
                 return self.poison(Error::Corruption {
