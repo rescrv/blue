@@ -261,7 +261,7 @@ impl Manifest {
 
     /// Rollover the log.
     pub fn rollover(&mut self) -> Result<(), Error> {
-        let edit = self.to_edit();
+        let edit = Self::to_edit(&self.strs, &self.info);
         let next_id = self.last_rollover;
         self.last_rollover += 1;
         let back = BACKUP(&self.root, next_id);
@@ -275,12 +275,101 @@ impl Manifest {
         Ok(())
     }
 
-    fn to_edit(&self) -> Edit {
+    /// Verify all known invariants of the manifest.
+    pub fn verify<P: AsRef<Path>>(_options: ManifestOptions, root: P) -> impl Iterator<Item=Error> {
+        let mut errs = Vec::new();
+        let mut ids = Vec::new();
+        let rd = match read_dir(&root) {
+            Ok(rd) => rd,
+            Err(err) => {
+                errs.push(err.into());
+                return errs.into_iter();
+            },
+        };
+        for dir in rd {
+            let dir = match dir {
+                Ok(dir) => dir,
+                Err(err) => {
+                    errs.push(err.into());
+                    continue;
+                },
+            };
+            let path = dir.path();
+            if let Some(id) = extract_backup(path) {
+                ids.push(id);
+            }
+        }
+        ids.sort();
+        let mut paths = Vec::new();
+        for id in ids.into_iter() {
+            paths.push((id, BACKUP(&root, id)));
+        }
+        if paths.is_empty() {
+            paths.push((0, MANIFEST(&root)));
+        } else {
+            paths.push((paths[paths.len() -1].0 + 1, MANIFEST(&root)));
+        }
+        let mut prev = None;
+        for (id, path) in paths.into_iter() {
+            let (strs, info) = match Self::read_mani(&path) {
+                Ok(mani) => mani,
+                Err(err) => {
+                    errs.push(err);
+                    continue;
+                },
+            };
+            let edit = Self::to_edit(&strs, &info);
+            if let Some((prev_id, prev_edit)) = prev {
+                if prev_id + 1 != id {
+                    errs.push(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: format!("MANIFEST has gaps at {}", id),
+                    });
+                } else {
+                    let first = match Self::read_first_edit(&path) {
+                        Ok(first) => first,
+                        Err(err) => {
+                            // NOTE(rescrv):  Because this log is corrupt we cannot expect it to
+                            // thread into the next log.  Set prev = None and continue so we don't
+                            // set prev = Some(...) below.
+                            errs.push(err);
+                            prev = None;
+                            continue;
+                        },
+                    };
+                    if Some(prev_edit) != first {
+                        errs.push(Error::Corruption {
+                            core: ErrorCore::default(),
+                            what: format!("MANIFEST rollover to {} does not match rollup of {}", id, prev_id),
+                        });
+                    } else {
+                        println!("{} rolled over properly", path.to_string_lossy());
+                    }
+                }
+            }
+            prev = Some((id, edit));
+        }
+        errs.into_iter()
+    }
+
+    fn apply_edit(edit: &Edit, strs: &mut BTreeSet<String>, info: &mut BTreeMap<char, String>) {
+        for path in edit.rm_strs.iter() {
+            strs.remove(path);
+        }
+        for path in edit.add_strs.iter() {
+            strs.insert(String::from(path));
+        }
+        for (key, value) in edit.info.iter() {
+            info.insert(*key, value.clone());
+        }
+    }
+
+    fn to_edit(strs: &BTreeSet<String>, info: &BTreeMap<char, String>) -> Edit {
         let mut edit = Edit::default();
-        for s in self.strs.iter() {
+        for s in strs.iter() {
             edit.add(s).expect("previously added string should always add");
         }
-        for (c, s) in self.info.iter() {
+        for (c, s) in info.iter() {
             edit.info(*c, s).expect("previously added info should always add");
         }
         edit
@@ -289,23 +378,19 @@ impl Manifest {
     fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), Error> {
         let was_empty = self.strs.is_empty();
         let mut edit_str = String::new();
-        for path in edit.rm_strs.iter() {
-            self.strs.remove(&String::from(path));
-            let line = "-".to_owned() + path;
+        Self::apply_edit(&edit, &mut self.strs, &mut self.info);
+        fn to_crc_line(line: String) -> String {
             let cksum = crc32c::crc32c(line.as_bytes());
-            edit_str += &format!("{:08x}{}\n", cksum, line);
+            format!("{:08x}{}\n", cksum, line)
+        }
+        for path in edit.rm_strs.iter() {
+            edit_str += &to_crc_line("-".to_owned() + path);
         }
         for path in edit.add_strs.iter() {
-            self.strs.insert(String::from(path));
-            let line = "+".to_owned() + path;
-            let cksum = crc32c::crc32c(line.as_bytes());
-            edit_str += &format!("{:08x}{}\n", cksum, line);
+            edit_str += &to_crc_line("+".to_owned() + path);
         }
         for (key, value) in edit.info.iter() {
-            self.info.insert(*key, value.clone());
-            let line = format!("{}{}", key, value);
-            let cksum = crc32c::crc32c(line.as_bytes());
-            edit_str += &format!("{:08x}{}\n", cksum, line);
+            edit_str += &to_crc_line(format!("{}{}", key, value));
         }
         edit_str += TX_SEPARATOR;
         edit_str += "\n";
@@ -338,23 +423,24 @@ impl Manifest {
         }
     }
 
-    fn read_mani(path: PathBuf) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
+    fn read_mani<P: AsRef<Path>>(path: P) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
         let mut strs = BTreeSet::new();
         let mut info = BTreeMap::new();
         let iter = ManifestIterator::open(path)?;
         for edit in iter {
             let edit = edit?;
-            for s in edit.rm_strs.iter() {
-                strs.remove(s);
-            }
-            for s in edit.add_strs.iter() {
-                strs.insert(s.clone());
-            }
-            for (c, s) in edit.info.iter() {
-                info.insert(*c, s.clone());
-            }
+            Self::apply_edit(&edit, &mut strs, &mut info);
         }
         Ok((strs, info))
+    }
+
+    fn read_first_edit<P: AsRef<Path>>(path: P) -> Result<Option<Edit>, Error> {
+        let mut iter = ManifestIterator::open(path)?;
+        match iter.next() {
+            Some(Ok(edit)) => Ok(Some(edit)),
+            Some(Err(err)) => Err(err),
+            None => Ok(None),
+        }
     }
 
     fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, Error> {
@@ -373,7 +459,7 @@ impl Manifest {
 /////////////////////////////////////////////// Edit ///////////////////////////////////////////////
 
 /// An edit adds some strings and removes others.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct Edit {
     add_strs: BTreeSet<String>,
     rm_strs: BTreeSet<String>,
@@ -522,6 +608,10 @@ impl Iterator for ManifestIterator {
 #[cfg(test)]
 mod tests {
     use std::fs::{read_to_string, remove_dir_all};
+
+    use rand::Rng;
+
+    use guacamole::Guacamole;
 
     use super::*;
 
@@ -701,5 +791,306 @@ bc9dae362thing two metadata
         assert_eq!(Some("thing two metadata"), edit.info.get(&'2').map(|s| s.as_str()));
         // no record
         assert!(iter.next().is_none());
+    }
+
+    struct GuacamoleParameters {
+        iterations: usize,
+        num_strs: usize,
+        info_set: &'static [char],
+        num_to_add: u64,
+        num_to_rm: u64,
+        num_info: u64,
+        retries: u64,
+        seed: u64,
+        options: ManifestOptions,
+    }
+
+    fn build_string(params: &GuacamoleParameters, seed: usize) -> String {
+        let mut guac2 = Guacamole::new((seed % params.num_strs) as u64);
+        format!("string:{}_{}_{}",
+            guac2.gen::<u64>(),
+            guac2.gen::<u64>(),
+            guac2.gen::<u64>())
+    }
+
+    fn build_info(params: &GuacamoleParameters, guac: &mut Guacamole) -> (char, String) {
+        let info_set_idx = guac.gen::<usize>() % params.info_set.len();
+        assert!(info_set_idx < params.info_set.len());
+        (params.info_set[info_set_idx],
+         format!("info:{}_{}_{}",
+            guac.gen::<u64>(),
+            guac.gen::<u64>(),
+            guac.gen::<u64>()))
+
+    }
+
+    fn build_edit_randomly(
+        params: &GuacamoleParameters,
+        mani: &Manifest,
+        guac: &mut Guacamole
+    ) -> Edit {
+        let mut edit = Edit::default();
+        let num_to_add = guac.gen::<u64>() % params.num_to_add;
+        let num_to_rm = guac.gen::<u64>() % params.num_to_rm;
+        let num_info = guac.gen::<u64>() % params.num_info;
+        'to_add:
+        for _ in 0..num_to_add {
+            let mut retries = 0;
+            let s = loop {
+                let s = build_string(params, guac.gen::<usize>());
+                if !mani.strs.contains(&s) {
+                    break s;
+                }
+                if retries >= params.retries {
+                    break 'to_add;
+                }
+                retries += 1;
+            };
+            edit.add(&s).unwrap();
+        }
+        'to_rm:
+        for _ in 0..num_to_rm {
+            let mut retries = 0;
+            let s = loop {
+                let s = build_string(params, guac.gen::<usize>());
+                if mani.strs.contains(&s) {
+                    break s;
+                }
+                if retries >= params.retries {
+                    break 'to_rm;
+                }
+                retries += 1;
+            };
+            edit.rm(&s).unwrap();
+        }
+        for _ in 0..num_info {
+            let (c, s) = build_info(params, guac);
+            edit.info(c, &s).unwrap();
+        }
+        edit
+    }
+
+    fn guacamole(root: PathBuf, params: GuacamoleParameters) {
+        let mut mani = Manifest::open(params.options.clone(), &root).unwrap();
+        let mut guac = Guacamole::new(params.seed);
+        for _ in 0..params.iterations {
+            let edit = build_edit_randomly(&params, &mani, &mut guac);
+            mani.apply(edit).expect("that the manifest will apply cleanly");
+        }
+        let mut found = false;
+        for err in Manifest::verify(params.options.clone(), &root) {
+            eprintln!("error: {}", err);
+            found = true;
+        }
+        if found {
+            panic!("the test encountered one or more errors listed above");
+        }
+    }
+
+    fn seed_guacamole(root: PathBuf, seed: u64) {
+        let params = GuacamoleParameters {
+            iterations: 1_000,
+            num_strs: 1_000,
+            info_set: &['a', 'b', 'c', 'x', 'y', 'z'],
+            num_to_add: 16,
+            num_to_rm: 4,
+            num_info: 2,
+            retries: 5,
+            seed,
+            options: ManifestOptions::default(),
+        };
+        guacamole(root, params);
+    }
+
+    #[test]
+    fn guacamole5138398090444284702() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 5138398090444284702);
+    }
+
+    #[test]
+    fn guacamole8642048216479126580() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 8642048216479126580);
+    }
+
+    #[test]
+    fn guacamole12537599354512252906() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 12537599354512252906);
+    }
+
+    #[test]
+    fn guacamole6529534099269622277() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6529534099269622277);
+    }
+
+    #[test]
+    fn guacamole10358298905320955451() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 10358298905320955451);
+    }
+
+    #[test]
+    fn guacamole16454412700383951410() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 16454412700383951410);
+    }
+
+    #[test]
+    fn guacamole9511704728995062883() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 9511704728995062883);
+    }
+
+    #[test]
+    fn guacamole8803705925841794254() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 8803705925841794254);
+    }
+
+    #[test]
+    fn guacamole5789036567548627700() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 5789036567548627700);
+    }
+
+    #[test]
+    fn guacamole5103614593344147373() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 5103614593344147373);
+    }
+
+    #[test]
+    fn guacamole11818449540631631494() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 11818449540631631494);
+    }
+
+    #[test]
+    fn guacamole8550330511375764379() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 8550330511375764379);
+    }
+
+    #[test]
+    fn guacamole6201227612047565798() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6201227612047565798);
+    }
+
+    #[test]
+    fn guacamole1708810195070469314() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 1708810195070469314);
+    }
+
+    #[test]
+    fn guacamole16522073696062617966() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 16522073696062617966);
+    }
+
+    #[test]
+    fn guacamole5455191989502336247() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 5455191989502336247);
+    }
+
+    #[test]
+    fn guacamole339144299880732473() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 339144299880732473);
+    }
+
+    #[test]
+    fn guacamole12362118245363321655() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 12362118245363321655);
+    }
+
+    #[test]
+    fn guacamole4746277455620226487() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 4746277455620226487);
+    }
+
+    #[test]
+    fn guacamole6790628719305542712() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6790628719305542712);
+    }
+
+    #[test]
+    fn guacamole18304996681997520367() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 18304996681997520367);
+    }
+
+    #[test]
+    fn guacamole12802728284796977004() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 12802728284796977004);
+    }
+
+    #[test]
+    fn guacamole6973530866944566264() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6973530866944566264);
+    }
+
+    #[test]
+    fn guacamole13529428643801212671() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 13529428643801212671);
+    }
+
+    #[test]
+    fn guacamole4638516517372565728() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 4638516517372565728);
+    }
+
+    #[test]
+    fn guacamole12822242740959125050() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 12822242740959125050);
+    }
+
+    #[test]
+    fn guacamole7024140106675445226() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 7024140106675445226);
+    }
+
+    #[test]
+    fn guacamole6347841211835453748() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6347841211835453748);
+    }
+
+    #[test]
+    fn guacamole6553105980673864496() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 6553105980673864496);
+    }
+
+    #[test]
+    fn guacamole3874053857599375105() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 3874053857599375105);
+    }
+
+    #[test]
+    fn guacamole5125406484949886747() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 5125406484949886747);
+    }
+
+    #[test]
+    fn guacamole15697792074142826936() {
+        let root = test_root(module_path!(), line!());
+        seed_guacamole(root, 15697792074142826936);
     }
 }
