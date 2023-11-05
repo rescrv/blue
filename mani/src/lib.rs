@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::fs::{create_dir, hard_link, metadata, remove_file, rename, File, OpenOptions};
+use std::fs::{create_dir, hard_link, metadata, read_dir, remove_file, rename, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
@@ -171,6 +171,7 @@ pub struct Manifest {
     _lockfile: Lockfile,
     root: PathBuf,
     strs: BTreeSet<String>,
+    last_rollover: u64,
     poison: Option<Error>,
 }
 
@@ -202,11 +203,13 @@ impl Manifest {
             Some(_lockfile) => {
                 LOCK_OBTAINED.click();
                 let strs = Self::read_strs(MANIFEST(&root))?;
+                let last_rollover = Self::next_manifest_identifier(&root)?;
                 Ok(Self {
                     options,
                     _lockfile,
                     root,
                     strs,
+                    last_rollover,
                     poison: None,
                 })
             },
@@ -243,13 +246,10 @@ impl Manifest {
         for s in strs {
             self.poison(edit.add(&s))?;
         }
-        for idx in 0..u64::max_value() {
-            let back = BACKUP(&self.root, idx);
-            if !back.exists() {
-                self.poison(hard_link(MANIFEST(&self.root), back))?;
-                break;
-            }
-        }
+        let next_id = self.last_rollover;
+        self.last_rollover += 1;
+        let back = BACKUP(&self.root, next_id);
+        self.poison(hard_link(MANIFEST(&self.root), back))?;
         let tmp = TEMPORARY(&self.root);
         if tmp.exists() {
             self.poison(remove_file(&tmp))?
@@ -260,6 +260,7 @@ impl Manifest {
     }
 
     fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), Error> {
+        let mut was_empty = self.strs.is_empty();
         let mut edit_str = String::new();
         for path in edit.rm_strs.iter() {
             self.strs.remove(&String::from(path));
@@ -279,8 +280,12 @@ impl Manifest {
         self.poison(fout.write_all(edit_str.as_bytes()))?;
         self.poison(fout.flush())?;
         self.poison(fout.sync_data())?;
-        if allow_rollover && self.poison(metadata(output))?.len() > self.options.log_rollover_ratio * self.size() {
-            self.rollover()?;
+        if allow_rollover {
+            let on_disk_bytes = self.poison(metadata(output))?.len();
+            let in_memory_bytes = self.size();
+            if on_disk_bytes > self.options.log_rollover_ratio * in_memory_bytes && !was_empty {
+                self.rollover()?;
+            }
         }
         Ok(())
     }
@@ -355,6 +360,28 @@ impl Manifest {
             }
         }
         Ok(paths)
+    }
+
+    fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, Error> {
+        let mut max_next_id = 0;
+        for dir in read_dir(root.as_ref())? {
+            let dir = dir?;
+            const MANIFEST: &'static str = "MANIFEST.";
+            let path = dir.path();
+            let path = path.as_os_str().to_str();
+            let path = match path {
+                Some(path) => path,
+                None => { continue },
+            };
+            if path.starts_with(MANIFEST) {
+                let next_id = match path[MANIFEST.len()..].parse::<u64>() {
+                    Ok(next_id) => next_id,
+                    Err(_) => { continue },
+                };
+                max_next_id = std::cmp::max(max_next_id, next_id);
+            }
+        }
+        Ok(max_next_id + 1)
     }
 }
 
@@ -487,9 +514,18 @@ a4e79c62+thing two
         assert_eq!("a4e79c62+thing two
 --------
 ", read_to_string(root.join("MANIFEST")).unwrap());
+        assert!(root.join("MANIFEST").exists());
+        assert!(root.join("MANIFEST.1").exists());
+        assert!(root.join("MANIFEST.2").exists());
         assert_eq!("dcab9d28+thing one
 a4e79c62+thing two
 --------
-", read_to_string(root.join("MANIFEST.0")).unwrap());
+", read_to_string(root.join("MANIFEST.1")).unwrap());
+        assert_eq!("dcab9d28+thing one
+a4e79c62+thing two
+--------
+6c866914-thing one
+--------
+", read_to_string(root.join("MANIFEST.2")).unwrap());
     }
 }
