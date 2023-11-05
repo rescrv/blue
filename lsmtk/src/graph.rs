@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 use std::collections::btree_set::BTreeSet;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
-use std::ops::Bound;
+use std::ops::{Bound, Deref, DerefMut};
 
 use sst::SstMetadata;
 
@@ -47,22 +47,55 @@ pub struct Vertex {
     bytes_within_color: u64,
 }
 
+/////////////////////////////////////////// AdjacencyList //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct AdjacencyList(BTreeSet<(usize, usize)>);
+
+impl Deref for AdjacencyList {
+    type Target = BTreeSet<(usize, usize)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for AdjacencyList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /////////////////////////////////////////////// Graph //////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct Graph<'a> {
+pub struct Graph {
     options: LsmOptions,
-    metadata: &'a [SstMetadata],
+    metadata: Vec<SstMetadata>,
     vertices: Vec<Vertex>,
+    forward_adj_list: AdjacencyList,
+    reverse_adj_list: AdjacencyList,
     colors: BTreeSet<usize>,
     color_adj_list: BTreeSet<(usize, usize)>,
 }
 
-impl<'a> Graph<'a> {
+impl Graph {
     pub fn new(
         options: LsmOptions,
-        metadata: &'a [SstMetadata],
+        metadata: Vec<SstMetadata>,
     ) -> Result<Self, Error> {
+        // Create the adjacency lists.
+        let (forward_adj_list, reverse_adj_list) = Self::construct_adj_lists(&metadata)?;
+        Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
+    }
+
+    fn from_adj_lists(
+        options: LsmOptions,
+        metadata: Vec<SstMetadata>,
+        forward_adj_list: AdjacencyList,
+        reverse_adj_list: AdjacencyList,
+    ) -> Result<Self, Error> {
+        // Create a list of vertices.
         let mut vertices = Vec::with_capacity(metadata.len());
         vertices.resize(
             metadata.len(),
@@ -73,40 +106,6 @@ impl<'a> Graph<'a> {
                 bytes_within_color: 0,
             },
         );
-        // Create the adjacency lists.
-        let mut forward_adj_list = BTreeSet::new();
-        let mut reverse_adj_list = BTreeSet::new();
-        for i in 0..metadata.len() {
-            if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "metadata timestamps not in order".to_string(),
-                }
-                .with_variable("SST", metadata[i].setsum())
-                .with_variable("smallest_timestamp", metadata[i].smallest_timestamp)
-                .with_variable("biggest_timestamp", metadata[i].biggest_timestamp);
-                return Err(err);
-            }
-            for j in i + 1..metadata.len() {
-                if !key_range_overlap(&metadata[i], &metadata[j]) {
-                    continue;
-                }
-                // NOTE(rescrv):  This will establish a link in the adjacency list between every
-                // SST that has an overlap in the keyspace.  We use this fact elsewhere.
-                if metadata[i].biggest_timestamp < metadata[j].smallest_timestamp {
-                    forward_adj_list.insert((j, i));
-                    reverse_adj_list.insert((i, j));
-                } else if metadata[j].biggest_timestamp < metadata[i].smallest_timestamp {
-                    forward_adj_list.insert((i, j));
-                    reverse_adj_list.insert((j, i));
-                } else {
-                    forward_adj_list.insert((i, j));
-                    forward_adj_list.insert((j, i));
-                    reverse_adj_list.insert((i, j));
-                    reverse_adj_list.insert((j, i));
-                }
-            }
-        }
         // Compute the strongly-connected components.
         tarjan_scc(&mut vertices, &forward_adj_list);
         // Find the number of peers for each vertex.  First do a pass to calculate the peers, then
@@ -167,9 +166,49 @@ impl<'a> Graph<'a> {
             options,
             metadata,
             vertices,
+            forward_adj_list,
+            reverse_adj_list,
             colors,
             color_adj_list: color_forward_adj_list,
         })
+    }
+
+    fn construct_adj_lists(metadata: &[SstMetadata]) -> Result<(AdjacencyList, AdjacencyList), Error> {
+        // Create the adjacency lists.
+        let mut forward_adj_list = AdjacencyList::default();
+        let mut reverse_adj_list = AdjacencyList::default();
+        for i in 0..metadata.len() {
+            if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
+                let err = Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: "metadata timestamps not in order".to_string(),
+                }
+                .with_variable("SST", metadata[i].setsum())
+                .with_variable("smallest_timestamp", metadata[i].smallest_timestamp)
+                .with_variable("biggest_timestamp", metadata[i].biggest_timestamp);
+                return Err(err);
+            }
+            for j in i + 1..metadata.len() {
+                if !key_range_overlap(&metadata[i], &metadata[j]) {
+                    continue;
+                }
+                // NOTE(rescrv):  This will establish a link in the adjacency list between every
+                // SST that has an overlap in the keyspace.  We use this fact elsewhere.
+                if metadata[i].biggest_timestamp < metadata[j].smallest_timestamp {
+                    forward_adj_list.insert((j, i));
+                    reverse_adj_list.insert((i, j));
+                } else if metadata[j].biggest_timestamp < metadata[i].smallest_timestamp {
+                    forward_adj_list.insert((i, j));
+                    reverse_adj_list.insert((j, i));
+                } else {
+                    forward_adj_list.insert((i, j));
+                    forward_adj_list.insert((j, i));
+                    reverse_adj_list.insert((i, j));
+                    reverse_adj_list.insert((j, i));
+                }
+            }
+        }
+        Ok((forward_adj_list, reverse_adj_list))
     }
 }
 
@@ -253,7 +292,7 @@ fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
     }
 }
 
-impl<'a> Graph<'a> {
+impl Graph {
     pub fn compactions(&mut self) -> Vec<Compaction> {
         if self.colors.len() <= 1 {
             let mut compaction = Compaction {

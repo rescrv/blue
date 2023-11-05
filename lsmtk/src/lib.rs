@@ -445,7 +445,7 @@ impl DB {
             COMPACTION_METADATA.click();
             sst_metadata.push(sst.metadata()?);
         }
-        let mut graph = Graph::new(self.options.clone(), &sst_metadata)?;
+        let mut graph = Graph::new(self.options.clone(), sst_metadata)?;
         let mut compactions = graph.compactions();
         compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
         compactions.reverse();
