@@ -75,7 +75,7 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
 #[macro_export]
 macro_rules! generate_id {
     ($what:ident, $prefix:literal) => {
-        #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
+        #[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
         pub struct $what {
             pub id: [u8; $crate::BYTES],
         }
@@ -123,6 +123,12 @@ macro_rules! generate_id {
         impl Default for $what {
             fn default() -> $what {
                 $what::BOTTOM
+            }
+        }
+
+        impl std::fmt::Debug for $what {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "{}{}", $prefix, $crate::encode(&self.id))
             }
         }
 
