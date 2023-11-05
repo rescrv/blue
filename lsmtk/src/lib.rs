@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fs::{create_dir, hard_link, remove_dir, remove_file, rename};
 use std::path::{Path, PathBuf};
@@ -6,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use arrrg_derive::CommandLine;
 
-use biometrics::{Collector, Counter};
+use biometrics::{Collector, Counter, Moments};
 
 use mani::{Edit, Manifest, ManifestOptions};
 
@@ -38,6 +39,8 @@ static COMPACTION_REMOVE: Counter = Counter::new("lsmtk.compaction.remove");
 static COMPACTION_COUNT: Counter = Counter::new("lsmtk.compaction.count");
 static COMPACTION_METADATA: Counter = Counter::new("lsmtk.compaction.metadata");
 static COMPACTION_KEYS_WRITTEN: Counter = Counter::new("lsmtk.compaction.keys_written");
+static COMPACTION_GRAPH_EDIT_TO_REMOVE: Moments = Moments::new("lsmtk.compaction.edit.to_remove");
+static COMPACTION_GRAPH_EDIT_TO_ADD: Moments = Moments::new("lsmtk.compaction.edit.to_add");
 
 static INGEST_LINK: Counter = Counter::new("lsmtk.ingest.link");
 
@@ -46,6 +49,7 @@ static COMPACTION_BYTES_WRITTEN: Counter = Counter::new("lsmtk.compaction.bytes_
 
 static BACKGROUND_THREAD_ACTIVE: Counter = Counter::new("lsmtk.background.active");
 static BACKGROUND_THREAD_PASSIVE: Counter = Counter::new("lsmtk.background.passive");
+static BACKGROUND_THREAD_NO_COMPACTION: Counter = Counter::new("lsmtk.background.no_compaction");
 
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&OPEN_DB);
@@ -57,11 +61,14 @@ pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&COMPACTION_COUNT);
     collector.register_counter(&COMPACTION_METADATA);
     collector.register_counter(&COMPACTION_KEYS_WRITTEN);
+    collector.register_moments(&COMPACTION_GRAPH_EDIT_TO_REMOVE);
+    collector.register_moments(&COMPACTION_GRAPH_EDIT_TO_ADD);
     collector.register_counter(&INGEST_LINK);
     collector.register_counter(&BYTES_INGESTED);
     collector.register_counter(&COMPACTION_BYTES_WRITTEN);
     collector.register_counter(&BACKGROUND_THREAD_ACTIVE);
     collector.register_counter(&BACKGROUND_THREAD_PASSIVE);
+    collector.register_counter(&BACKGROUND_THREAD_NO_COMPACTION);
     graph::register_biometrics(collector);
 }
 
@@ -334,10 +341,13 @@ impl LsmOptions {
                 .with_variable("ingest", INGEST_ROOT(&root))?;
         }
         let file_manager = Arc::new(FileManager::new(self.max_open_files));
+        let graph = DB::construct_graph(&self, &mani, &file_manager)?;
         let db = DB {
             root,
             mani,
             options: self,
+            graph: Mutex::new(Arc::new(graph)),
+            edit_mutex: Mutex::default(),
             file_manager,
             in_flight: CompactionsInFlight::default(),
             mtx: Mutex::default(),
@@ -380,6 +390,8 @@ impl CompactionInputs {
         COMPACTION_PERFORM.click();
         let mut mani_edit = Edit::default();
         let mut to_remove = Vec::new();
+        let mut graph_edit_to_remove: HashSet<[u8; 32]> = HashSet::new();
+        let mut graph_edit_to_add: Vec<SstMetadata> = Vec::new();
         let mut cursors: Vec<Box<dyn Cursor + 'static>> = Vec::new();
         let mut acc_setsum = Setsum::default();
         // Create the cursors.
@@ -389,6 +401,7 @@ impl CompactionInputs {
             let path_sst = SST_FILE(&self.options.path, sst_setsum.hexdigest());
             let path_rm = RM_FILE(&self.options.path, sst_setsum.hexdigest());
             to_remove.push((path_sst.clone(), path_rm));
+            graph_edit_to_remove.insert(sst_metadata.setsum);
             let file = db.file_manager.open(path_sst)?;
             mani_edit.rm(&sst_setsum.hexdigest())?;
             let sst = Sst::from_file_handle(file)?;
@@ -424,14 +437,16 @@ impl CompactionInputs {
         for path in paths.iter() {
             let file = db.file_manager.open(path.clone())?;
             let sst = Sst::from_file_handle(file)?;
+            let meta = sst.metadata()?;
             let sst_setsum = sst.setsum().hexdigest();
             COMPACTION_BYTES_WRITTEN.count(sst.metadata()?.file_size);
             mani_edit.add(&sst_setsum)?;
             let new_path = SST_FILE(&self.options.path, sst_setsum);
             COMPACTION_LINK.click();
             hard_link(path, new_path)?;
+            graph_edit_to_add.push(meta);
         }
-        db.mani.write().unwrap().apply(mani_edit)?;
+        db.apply_manifest_edit(mani_edit, graph_edit_to_remove, graph_edit_to_add)?;
         for (path, trash) in to_remove.into_iter() {
             COMPACTION_RENAME.click();
             rename(path, trash)?;
@@ -461,6 +476,8 @@ pub struct DB {
     root: PathBuf,
     options: LsmOptions,
     mani: RwLock<Manifest>,
+    graph: Mutex<Arc<Graph>>,
+    edit_mutex: Mutex<()>,
     file_manager: Arc<FileManager>,
     in_flight: CompactionsInFlight,
     mtx: Mutex<usize>,
@@ -472,10 +489,13 @@ impl DB {
         // For each SST, hardlink it into the ingest root.
         let mut edit = Edit::default();
         let mut acc = Setsum::default();
+        let graph_edit_to_remove: HashSet<[u8; 32]> = HashSet::new();
+        let mut graph_edit_to_add: Vec<SstMetadata> = Vec::new();
         for sst_path in sst_paths {
             let file = self.file_manager.open(sst_path.clone())?;
             let sst = Sst::from_file_handle(file)?;
-            BYTES_INGESTED.count(sst.metadata()?.file_size);
+            let metadata = sst.metadata()?;
+            BYTES_INGESTED.count(metadata.file_size);
             // Update the setsum for the ingest.
             let setsum = sst.setsum();
             acc = acc + Setsum::from_digest(setsum.digest());
@@ -490,28 +510,17 @@ impl DB {
             INGEST_LINK.click();
             hard_link(sst_path, target).as_z()?;
             edit.add(&setsum.hexdigest())?;
+            graph_edit_to_add.push(metadata);
         }
-        self.mani.write().unwrap().apply(edit)?;
+        self.apply_manifest_edit(edit, graph_edit_to_remove, graph_edit_to_add)?;
         *self.mtx.lock().unwrap() += 1;
         self.cnd.notify_one();
         Ok(())
     }
 
-    pub fn compactions(&self) -> Result<Vec<Compaction>, Error> {
-        let setsums: Vec<String> = self.mani.read().unwrap().strs().cloned().collect();
-        let mut sst_metadata = Vec::new();
-        for sst_setsum in setsums.iter() {
-            let file = self
-                .file_manager
-                .open(SST_FILE(&self.options.path, sst_setsum.clone()))?;
-            let sst = Sst::from_file_handle(file)?;
-            COMPACTION_METADATA.click();
-            sst_metadata.push(sst.metadata()?);
-        }
-        let mut graph = Graph::new(self.options.clone(), sst_metadata)?;
-        let mut compactions = graph.compactions();
-        compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
-        compactions.reverse();
+    pub fn compactions(&self) -> Result<Vec<(CompactionInputs, CompactionStats)>, Error> {
+        let graph: Arc<Graph> = Arc::clone(&self.graph.lock().unwrap());
+        let compactions = graph.compactions();
         COMPACTION_COUNT.count(compactions.len() as u64);
         Ok(compactions)
     }
@@ -557,11 +566,45 @@ impl DB {
                     if !compactions.is_empty() {
                         compactions[0].0.perform(self)?;
                     } else {
+                        BACKGROUND_THREAD_NO_COMPACTION.click();
                         break;
                     }
                 }
                 BACKGROUND_THREAD_PASSIVE.click();
             }
         }
+    }
+
+    fn construct_graph(
+        options: &LsmOptions,
+        mani: &RwLock<Manifest>,
+        file_manager: &Arc<FileManager>,
+    ) -> Result<Graph, Error> {
+        let setsums: Vec<String> = mani.read().unwrap().strs().cloned().collect();
+        let mut sst_metadata = Vec::new();
+        for sst_setsum in setsums.iter() {
+            let file = file_manager
+                .open(SST_FILE(&options.path, sst_setsum.clone()))?;
+            let sst = Sst::from_file_handle(file)?;
+            COMPACTION_METADATA.click();
+            sst_metadata.push(sst.metadata()?);
+        }
+        Graph::new(options.clone(), sst_metadata)
+    }
+
+    fn apply_manifest_edit(
+        &self,
+        mani_edit: Edit,
+        graph_edit_to_remove: HashSet<[u8; 32]>,
+        graph_edit_to_add: Vec<SstMetadata>,
+    ) -> Result<(), Error> {
+        let _only_editor = self.edit_mutex.lock().unwrap();
+        self.mani.write().unwrap().apply(mani_edit)?;
+        COMPACTION_GRAPH_EDIT_TO_REMOVE.add(graph_edit_to_remove.len() as f64);
+        COMPACTION_GRAPH_EDIT_TO_ADD.add(graph_edit_to_add.len() as f64);
+        let graph = Arc::clone(&self.graph.lock().unwrap());
+        let new_graph = Arc::new(graph.edit(graph_edit_to_remove, graph_edit_to_add)?);
+        *self.graph.lock().unwrap() = new_graph;
+        Ok(())
     }
 }

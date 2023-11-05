@@ -92,21 +92,22 @@ impl Graph {
         Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
     }
 
-    pub fn edit(self, to_remove: HashSet<String>, to_add: Vec<SstMetadata>) -> Result<Self, Error> {
+    pub fn edit(&self, to_remove: HashSet<[u8; 32]>, to_add: Vec<SstMetadata>) -> Result<Self, Error> {
         let Self {
             options,
-            mut metadata,
+            metadata,
             forward_adj_list,
             reverse_adj_list,
             ..
         } = self;
+        let mut metadata = metadata.clone();
         let mut removes: HashSet<usize> = HashSet::new();
         let mut renames: HashMap<usize, usize> = HashMap::new();
         let mut additions = Vec::new();
         let mut to_add_idx = 0;
         let mut metadata_idx = 0;
         while metadata_idx < metadata.len() {
-            if to_remove.contains(&metadata[metadata_idx].setsum()) {
+            if to_remove.contains(&metadata[metadata_idx].setsum) {
                 removes.insert(metadata_idx);
                 if to_add_idx >= to_add.len() {
                     if metadata_idx + 1 == metadata.len() {
@@ -129,6 +130,7 @@ impl Graph {
             additions.push(metadata.len());
             // Order:  Always push to additions first.
             metadata.push(to_add[to_add_idx].clone());
+            to_add_idx += 1;
         }
         let map = |(src, dst)| {
             if removes.contains(&src) {
@@ -164,7 +166,7 @@ impl Graph {
             &mut forward_adj_list,
             &mut reverse_adj_list,
         )?;
-        Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
+        Self::from_adj_lists(options.clone(), metadata, forward_adj_list, reverse_adj_list)
     }
 
     fn from_adj_lists(
