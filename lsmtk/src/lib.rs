@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
-use std::fs::{create_dir, hard_link, rename, remove_dir, remove_file};
+use std::fs::{create_dir, hard_link, remove_dir, remove_file, rename};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
@@ -193,13 +193,19 @@ pub enum Error {
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
-        Error::SystemError { core: ErrorCore::default(), what: what.to_string() }
+        Error::SystemError {
+            core: ErrorCore::default(),
+            what: what.to_string(),
+        }
     }
 }
 
 impl From<mani::Error> for Error {
     fn from(what: mani::Error) -> Error {
-        Error::ManifestError { core: ErrorCore::default(), what }
+        Error::ManifestError {
+            core: ErrorCore::default(),
+            what,
+        }
     }
 }
 
@@ -207,13 +213,67 @@ impl From<sst::Error> for Error {
     fn from(what: sst::Error) -> Error {
         match what {
             sst::Error::Success { core } => Error::Success { core },
-            sst::Error::KeyTooLarge { core, length, limit } => Error::KeyTooLarge { core, length, limit },
-            sst::Error::ValueTooLarge { core, length, limit } => Error::ValueTooLarge { core, length, limit },
-            sst::Error::SortOrder { core, last_key, last_timestamp, new_key, new_timestamp } => Error::SortOrder { core, last_key, last_timestamp, new_key, new_timestamp },
+            sst::Error::KeyTooLarge {
+                core,
+                length,
+                limit,
+            } => Error::KeyTooLarge {
+                core,
+                length,
+                limit,
+            },
+            sst::Error::ValueTooLarge {
+                core,
+                length,
+                limit,
+            } => Error::ValueTooLarge {
+                core,
+                length,
+                limit,
+            },
+            sst::Error::SortOrder {
+                core,
+                last_key,
+                last_timestamp,
+                new_key,
+                new_timestamp,
+            } => Error::SortOrder {
+                core,
+                last_key,
+                last_timestamp,
+                new_key,
+                new_timestamp,
+            },
             sst::Error::TableFull { core, size, limit } => Error::TableFull { core, size, limit },
-            sst::Error::BlockTooSmall { core, length, required } => Error::BlockTooSmall { core, length, required },
-            sst::Error::UnpackError { core, error, context } => Error::UnpackError { core, error, context },
-            sst::Error::Crc32cFailure { core, start, limit, crc32c } => Error::Crc32cFailure { core, start, limit, crc32c },
+            sst::Error::BlockTooSmall {
+                core,
+                length,
+                required,
+            } => Error::BlockTooSmall {
+                core,
+                length,
+                required,
+            },
+            sst::Error::UnpackError {
+                core,
+                error,
+                context,
+            } => Error::UnpackError {
+                core,
+                error,
+                context,
+            },
+            sst::Error::Crc32cFailure {
+                core,
+                start,
+                limit,
+                crc32c,
+            } => Error::Crc32cFailure {
+                core,
+                start,
+                limit,
+                crc32c,
+            },
             sst::Error::Corruption { core, context } => Error::Corruption { core, context },
             sst::Error::LogicError { core, context } => Error::LogicError { core, context },
             sst::Error::SystemError { core, what } => Error::SystemError { core, what },
@@ -222,7 +282,7 @@ impl From<sst::Error> for Error {
     }
 }
 
-iotoz!{Error}
+iotoz! {Error}
 
 //////////////////////////////////////////// LsmOptions ////////////////////////////////////////////
 
@@ -345,18 +405,24 @@ impl Compaction {
         // Setup the compaction outputs
         let prefix = COMPACTION_DIR(&self.options.path, acc_setsum.hexdigest());
         create_dir(prefix.clone())?;
-        let mut sstmb = SstMultiBuilder::new(prefix.clone(), ".sst".to_string(), self.options.sst.clone());
-        'looping:
-        loop {
+        let mut sstmb =
+            SstMultiBuilder::new(prefix.clone(), ".sst".to_string(), self.options.sst.clone());
+        'looping: loop {
             cursor.next()?;
             let kvr = match cursor.value() {
-                Some(v) => { v },
-                None => { break 'looping; },
+                Some(v) => v,
+                None => {
+                    break 'looping;
+                }
             };
             COMPACTION_KEYS_WRITTEN.click();
             match kvr.value {
-                Some(v) => { sstmb.put(kvr.key, kvr.timestamp, v)?; }
-                None => { sstmb.del(kvr.key, kvr.timestamp)?; }
+                Some(v) => {
+                    sstmb.put(kvr.key, kvr.timestamp, v)?;
+                }
+                None => {
+                    sstmb.del(kvr.key, kvr.timestamp)?;
+                }
             }
         }
         let paths = sstmb.seal()?;
@@ -440,7 +506,9 @@ impl DB {
         let setsums: Vec<String> = self.mani.read().unwrap().strs().cloned().collect();
         let mut sst_metadata = Vec::new();
         for sst_setsum in setsums.iter() {
-            let file = self.file_manager.open(SST_FILE(&self.options.path, sst_setsum.clone()))?;
+            let file = self
+                .file_manager
+                .open(SST_FILE(&self.options.path, sst_setsum.clone()))?;
             let sst = Sst::from_file_handle(file)?;
             COMPACTION_METADATA.click();
             sst_metadata.push(sst.metadata()?);
@@ -462,7 +530,9 @@ impl DB {
         };
         let mut in_flight = self.in_flight.start();
         for sst_setsum in ssts {
-            let file = self.file_manager.open(SST_FILE(self.options.path.clone(), sst_setsum.to_string()))?;
+            let file = self
+                .file_manager
+                .open(SST_FILE(self.options.path.clone(), sst_setsum.to_string()))?;
             let sst = Sst::from_file_handle(file)?;
             let meta = sst.metadata()?;
             if !in_flight.add(meta.setsum) {

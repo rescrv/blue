@@ -32,11 +32,9 @@ fn main() {
     let root = PathBuf::from(options.path());
     let db = Arc::new(options.open().as_z().pretty_unwrap());
     let db_p = Arc::clone(&db);
-    let _compactor = std::thread::spawn(move || {
-        loop {
-            if let Err(err) = db_p.compaction_background_thread() {
-                eprintln!("{}", err.long_form());
-            }
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = db_p.compaction_background_thread() {
+            eprintln!("{}", err.long_form());
         }
     });
     loop {
