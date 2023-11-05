@@ -497,6 +497,113 @@ impl Edit {
     }
 }
 
+///////////////////////////////////////// ManifestIterator /////////////////////////////////////////
+
+pub struct ManifestIterator {
+    file: Option<BufReader<File>>,
+    poison: Option<Error>,
+}
+
+impl ManifestIterator {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        if path.as_ref().is_dir() {
+            return Err(Error::Corruption {
+                core: ErrorCore::default(),
+                what: "MANIFEST file is a directory".to_owned(),
+            });
+        }
+        if !path.as_ref().is_file() {
+            return Ok(Self {
+                file: None,
+                poison: None,
+            });
+        }
+        let file = Some(BufReader::new(File::open(path)?));
+        Ok(Self {
+            file,
+            poison: None,
+        })
+    }
+
+    fn poison<E: Into<Error>>(&mut self, err: E) -> Option<Result<Edit, Error>> {
+        let err = err.into();
+        self.poison = Some(err.clone());
+        self.file = None;
+        Some(Err(err))
+    }
+}
+
+impl Iterator for ManifestIterator {
+    type Item = Result<Edit, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let file = match &mut self.file {
+            Some(file) => file,
+            None => { return None; },
+        };
+        let mut edit = Edit::default();
+        for (idx, line) in file.lines().enumerate() {
+            let line = match line {
+                Ok(line) => line,
+                Err(err) => {
+                    return self.poison(err);
+                },
+            };
+            if !line.is_ascii() {
+                return Some(Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    what: format!("line {} is not ascii", idx),
+                }));
+            }
+            if line == TX_SEPARATOR {
+                return Some(Ok(edit));
+            } else if line.len() > 9 {
+                let crc32c_expected = match u32::from_str_radix(&line[..8], 16) {
+                    Ok(crc32c_expected) => crc32c_expected,
+                    Err(err) => {
+                        return self.poison(Error::Corruption {
+                            core: ErrorCore::default(),
+                            what: format!("crc32c is not hex on line {}: {}", idx, err),
+                        });
+                    }
+                };
+                if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
+                    return self.poison(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: format!("crc32c failure on line {}", idx),
+                    });
+                }
+                let action = line.as_bytes()[8] as char;
+                if action == '+' {
+                    if let Err(err) = edit.add(&line[9..]) {
+                        return self.poison(err);
+                    }
+                } else if action == '-' {
+                    if let Err(err) = edit.rm(&line[9..]) {
+                        return self.poison(err);
+                    }
+                } else if action == '\n' {
+                    return self.poison(Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: "operation \\n is not supported".to_owned(),
+                    });
+                } else {
+                    if let Err(err) = edit.info(action, &line[9..]) {
+                        return self.poison(err);
+                    }
+                }
+            } else {
+                return self.poison(Error::Corruption {
+                    core: ErrorCore::default(),
+                    what: format!("unhandled case on line {}", idx),
+                });
+            }
+        }
+        self.file = None;
+        None
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -635,5 +742,51 @@ a2281ab8Csome-client-identifier
 79810703Te0785f2a185aaf6fe0a099bc98ce1e70
 --------
 ", read_to_string(root.join("MANIFEST")).unwrap());
+    }
+
+    #[test]
+    fn iterator() {
+        let root = test_root(module_path!(), line!());
+        let opts = ManifestOptions::default();
+        let mut mani = Manifest::open(opts.clone(), &root).unwrap();
+        let mut edit = Edit::default();
+        edit.add("thing one").unwrap();
+        edit.info('1', "thing one metadata").unwrap();
+        mani.apply(edit).unwrap();
+        let mut edit = Edit::default();
+        edit.add("thing two").unwrap();
+        edit.info('2', "thing two metadata").unwrap();
+        mani.apply(edit).unwrap();
+        assert_eq!("dcab9d28+thing one
+a4e79c62+thing two
+05a03b0d1thing one metadata
+bc9dae362thing two metadata
+--------
+", read_to_string(root.join("MANIFEST")).unwrap());
+        assert_eq!("dcab9d28+thing one
+05a03b0d1thing one metadata
+--------
+a4e79c62+thing two
+bc9dae362thing two metadata
+--------
+", read_to_string(root.join("MANIFEST.1")).unwrap());
+        // Now iterate that we know the logs are good.
+        let mut iter = ManifestIterator::open(root.join("MANIFEST.1")).unwrap();
+        // first record
+        let edit = iter.next().unwrap().unwrap();
+        assert_eq!(1, edit.add_strs.len());
+        assert!(edit.add_strs.contains("thing one"));
+        assert_eq!(0, edit.rm_strs.len());
+        assert_eq!(1, edit.info.len());
+        assert_eq!(Some("thing one metadata"), edit.info.get(&'1').map(|s| s.as_str()));
+        // second record
+        let edit = iter.next().unwrap().unwrap();
+        assert_eq!(1, edit.add_strs.len());
+        assert!(edit.add_strs.contains("thing two"));
+        assert_eq!(0, edit.rm_strs.len());
+        assert_eq!(1, edit.info.len());
+        assert_eq!(Some("thing two metadata"), edit.info.get(&'2').map(|s| s.as_str()));
+        // no record
+        assert!(iter.next().is_none());
     }
 }
