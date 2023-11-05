@@ -93,14 +93,14 @@ pub enum Error {
         what: String,
     },
     #[prototk(376836, message)]
-    DbExists {
+    ManifestExists {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, string)]
         path: PathBuf,
     },
     #[prototk(376837, message)]
-    DbNotExist {
+    ManifestNotExist {
         #[prototk(1, message)]
         core: ErrorCore,
         #[prototk(2, string)]
@@ -179,10 +179,10 @@ impl Manifest {
     pub fn open<P: AsRef<Path>>(options: ManifestOptions, root: P) -> Result<Self, Error> {
         let root = root.as_ref().to_path_buf();
         if root.is_dir() && options.fail_if_exists {
-            return Err(Error::DbExists { core: ErrorCore::default(), path: root });
+            return Err(Error::ManifestExists { core: ErrorCore::default(), path: root });
         }
         if !root.is_dir() && options.fail_if_not_exist {
-            return Err(Error::DbNotExist { core: ErrorCore::default(), path: root });
+            return Err(Error::ManifestNotExist { core: ErrorCore::default(), path: root });
         } else if !root.is_dir() {
             create_dir(&root)
                 .as_z()
@@ -435,7 +435,7 @@ mod tests {
         let root = test_root(module_path!(), line!());
         let mut opts = ManifestOptions::default();
         opts.fail_if_not_exist = true;
-        if let Err(Error::DbNotExist { .. }) = Manifest::open(opts, &root) {
+        if let Err(Error::ManifestNotExist { .. }) = Manifest::open(opts, &root) {
         } else {
             panic!("bad case");
         }
@@ -447,7 +447,7 @@ mod tests {
         let mut opts = ManifestOptions::default();
         let mut _mani = Manifest::open(opts.clone(), &root);
         opts.fail_if_exists = true;
-        if let Err(Error::DbExists { .. }) = Manifest::open(opts, &root) {
+        if let Err(Error::ManifestExists { .. }) = Manifest::open(opts, &root) {
         } else {
             panic!("bad case");
         }
