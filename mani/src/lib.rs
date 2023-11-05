@@ -203,8 +203,7 @@ impl Manifest {
         match lockfile {
             Some(_lockfile) => {
                 LOCK_OBTAINED.click();
-                let strs = Self::read_strs(MANIFEST(&root))?;
-                let info = Self::read_info(MANIFEST(&root))?;
+                let (strs, info) = Self::read_mani(MANIFEST(&root))?;
                 let last_rollover = Self::next_manifest_identifier(&root)?;
                 Ok(Self {
                     options,
@@ -318,118 +317,23 @@ impl Manifest {
         }
     }
 
-    fn read_strs(path: PathBuf) -> Result<BTreeSet<String>, Error> {
-        if path.is_dir() {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "MANIFEST file is a directory".to_owned(),
-            });
-        }
-        if !path.is_file() {
-            return Ok(BTreeSet::new());
-        }
-        let file = File::open(&path).as_z().with_variable("path", path.to_string_lossy())?;
-        let file = BufReader::new(file);
-        let mut paths = BTreeSet::new();
-        for (idx, line) in file.lines().enumerate() {
-            let line = line?;
-            if !line.is_ascii() {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("line {} is not ascii", idx),
-                });
-            }
-            if line == TX_SEPARATOR {
-            } else if line.len() > 9 {
-                let crc32c_expected = u32::from_str_radix(&line[..8], 16)
-                    .map_err(|err| {
-                        Error::Corruption {
-                            core: ErrorCore::default(),
-                            what: format!("crc32c is not hex on line {}: {}", idx, err),
-                        }
-                    })?;
-                if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("crc32c failure on line {}", idx),
-                    });
-                }
-                let action = line.as_bytes()[8] as char;
-                if action == '+' {
-                    paths.insert(String::from(&line[9..]));
-                } else if action == '-' {
-                    paths.remove(&String::from(&line[9..]));
-                } else if action == '\n' {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: "operation \\n is not supported".to_owned(),
-                    });
-                }
-            } else {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("unhandled case on line {}", idx),
-                });
-            }
-        }
-        Ok(paths)
-    }
-
-    fn read_info(path: PathBuf) -> Result<BTreeMap<char, String>, Error> {
-        if path.is_dir() {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "MANIFEST file is a directory".to_owned(),
-            });
-        }
-        if !path.is_file() {
-            return Ok(BTreeMap::new());
-        }
-        let file = File::open(&path).as_z().with_variable("path", path.to_string_lossy())?;
-        let file = BufReader::new(file);
+    fn read_mani(path: PathBuf) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
+        let mut strs = BTreeSet::new();
         let mut info = BTreeMap::new();
-        for (idx, line) in file.lines().enumerate() {
-            let line = line?;
-            if !line.is_ascii() {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("line {} is not ascii", idx),
-                });
+        let iter = ManifestIterator::open(path)?;
+        for edit in iter {
+            let edit = edit?;
+            for s in edit.rm_strs.iter() {
+                strs.remove(s);
             }
-            if line == TX_SEPARATOR {
-            } else if line.len() > 9 {
-                let crc32c_expected = u32::from_str_radix(&line[..8], 16)
-                    .map_err(|err| {
-                        Error::Corruption {
-                            core: ErrorCore::default(),
-                            what: format!("crc32c is not hex on line {}: {}", idx, err),
-                        }
-                    })?;
-                if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("crc32c failure on line {}", idx),
-                    });
-                }
-                let action = line.as_bytes()[8] as char;
-                if action == '+' || action == '-' {
-                    // pass
-                } else if action == '\n' {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: "operation \\n is not supported".to_owned(),
-                    });
-                } else {
-                    info.insert(action, String::from(&line[9..]));
-                }
-            } else {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("unhandled case on line {}", idx),
-                });
+            for s in edit.add_strs.iter() {
+                strs.insert(s.clone());
+            }
+            for (c, s) in edit.info.iter() {
+                info.insert(*c, s.clone());
             }
         }
-        Ok(info)
+        Ok((strs, info))
     }
 
     fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, Error> {
