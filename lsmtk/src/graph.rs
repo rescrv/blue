@@ -394,24 +394,24 @@ fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
 }
 
 impl Graph {
-    pub fn compactions(&mut self) -> Vec<Compaction> {
+    pub fn compactions(&self) -> Vec<(CompactionInputs, CompactionStats)> {
         if self.colors.len() <= 1 {
-            let mut compaction = Compaction {
+            let mut compaction = CompactionInputs {
                 options: self.options.clone(),
                 inputs: Vec::new(),
-                stats: CompactionStats {
-                    lower_level: 0,
-                    upper_level: 0,
-                    bytes_input: 0,
-                    ratio: 0.0,
-                },
+            };
+            let mut stats = CompactionStats {
+                lower_level: 0,
+                upper_level: 0,
+                bytes_input: 0,
+                ratio: 0.0,
             };
             for idx in 0..self.vertices.len() {
-                compaction.stats.bytes_input += self.metadata[idx].file_size as usize;
+                stats.bytes_input += self.metadata[idx].file_size as usize;
                 compaction.inputs.push(self.metadata[idx].clone());
             }
             return if compaction.inputs.len() > 2 {
-                vec![compaction]
+                vec![(compaction, stats)]
             } else {
                 Vec::new()
             };
@@ -486,33 +486,33 @@ impl Graph {
                         colors.insert(v);
                     }
                 }
-                let mut compaction = Compaction {
+                let mut compaction = CompactionInputs {
                     options: self.options.clone(),
                     inputs: Vec::new(),
-                    stats: CompactionStats {
-                        lower_level: self.vertices[color].level,
-                        upper_level,
-                        bytes_input: 0,
-                        ratio: prev_ratio,
-                    },
+                };
+                let mut stats = CompactionStats {
+                    lower_level: self.vertices[color].level,
+                    upper_level,
+                    bytes_input: 0,
+                    ratio: prev_ratio,
                 };
                 for idx in 0..self.vertices.len() {
                     if colors.contains(&self.vertices[idx].color) {
-                        compaction.stats.bytes_input += self.metadata[idx].file_size as usize;
+                        stats.bytes_input += self.metadata[idx].file_size as usize;
                         compaction.inputs.push(self.metadata[idx].clone());
                     }
                 }
                 if compaction.inputs.len() > 2 {
-                    compactions.push(compaction);
+                    compactions.push((compaction, stats));
                 }
             }
         }
-        compactions.sort_by_key(|x| (x.stats().ratio * 1_000_000.0) as u64);
+        compactions.sort_by_key(|(_, s)| (s.ratio * 1_000_000.0) as u64);
         compactions.reverse();
         NUM_CANDIDATES.add(compactions.len() as f64);
         let mut selected = Vec::with_capacity(compactions.len());
         let mut locked = HashSet::new();
-        for compaction in compactions.into_iter() {
+        for (compaction, stats) in compactions.into_iter() {
             let mut skip = false;
             for input in compaction.inputs.iter() {
                 if locked.contains(&input.setsum) {
@@ -526,7 +526,7 @@ impl Graph {
             for input in compaction.inputs.iter() {
                 locked.insert(input.setsum);
             }
-            selected.push(compaction);
+            selected.push((compaction, stats));
         }
         selected
     }

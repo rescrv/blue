@@ -367,20 +367,15 @@ fn key_range_overlap(lhs: &SstMetadata, rhs: &SstMetadata) -> bool {
         && compare_bytes(&rhs.first_key, &lhs.last_key) != Ordering::Greater
 }
 
-//////////////////////////////////////////// Compaction ////////////////////////////////////////////
+///////////////////////////////////////// CompactionInputs /////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
-pub struct Compaction {
+pub struct CompactionInputs {
     pub options: LsmOptions,
     pub inputs: Vec<SstMetadata>,
-    stats: CompactionStats,
 }
 
-impl Compaction {
-    pub fn stats(&self) -> CompactionStats {
-        self.stats.clone()
-    }
-
+impl CompactionInputs {
     pub fn perform(&self, db: &DB) -> Result<(), Error> {
         COMPACTION_PERFORM.click();
         let mut mani_edit = Edit::default();
@@ -522,11 +517,9 @@ impl DB {
     }
 
     pub fn compact(&self, ssts: &[String]) -> Result<(), Error> {
-        let mut compaction = Compaction {
+        let mut compaction = CompactionInputs {
             options: self.options.clone(),
             inputs: Vec::new(),
-            // NOTE(rescrv): this is ugly but we won't call stats from within perform.
-            stats: CompactionStats::default(),
         };
         let mut in_flight = self.in_flight.start();
         for sst_setsum in ssts {
@@ -562,7 +555,7 @@ impl DB {
                 loop {
                     let compactions = self.compactions()?;
                     if !compactions.is_empty() {
-                        compactions[0].perform(self)?;
+                        compactions[0].0.perform(self)?;
                     } else {
                         break;
                     }
