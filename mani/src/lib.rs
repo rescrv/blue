@@ -219,9 +219,10 @@ impl Manifest {
         match lockfile {
             Some(_lockfile) => {
                 LOCK_OBTAINED.click();
-                let (strs, info) = Self::read_mani(MANIFEST(&root))?;
+                let manifest = MANIFEST(&root);
+                let (strs, info) = Self::read_mani(&manifest)?;
                 let last_rollover = Self::next_manifest_identifier(&root)?;
-                Ok(Self {
+                let mut this = Self {
                     options,
                     _lockfile,
                     root,
@@ -229,7 +230,11 @@ impl Manifest {
                     info,
                     last_rollover,
                     poison: None,
-                })
+                };
+                if manifest.is_file() {
+                    this.rollover()?;
+                }
+                Ok(this)
             },
             None => {
                 LOCK_NOT_OBTAINED.click();
