@@ -245,13 +245,7 @@ impl Manifest {
 
     /// Rollover the log.
     pub fn rollover(&mut self) -> Result<(), Error> {
-        let mut edit = Edit::default();
-        for s in self.strs.iter() {
-            edit.add(&s).expect("previously added string should always add");
-        }
-        for (c, s) in self.info.iter() {
-            edit.info(*c, &s).expect("previously added info should always add");
-        }
+        let edit = self.to_edit();
         let next_id = self.last_rollover;
         self.last_rollover += 1;
         let back = BACKUP(&self.root, next_id);
@@ -263,6 +257,17 @@ impl Manifest {
         self._apply(&tmp, edit, false)?;
         self.poison(rename(&tmp, MANIFEST(&self.root)))?;
         Ok(())
+    }
+
+    fn to_edit(&self) -> Edit {
+        let mut edit = Edit::default();
+        for s in self.strs.iter() {
+            edit.add(&s).expect("previously added string should always add");
+        }
+        for (c, s) in self.info.iter() {
+            edit.info(*c, &s).expect("previously added info should always add");
+        }
+        edit
     }
 
     fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), Error> {
