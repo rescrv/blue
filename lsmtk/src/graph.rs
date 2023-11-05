@@ -1,8 +1,7 @@
 use std::cmp::{max, min};
-use std::collections::btree_set::BTreeSet;
-use std::collections::hash_set::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
-use std::ops::{Bound, Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut, Range};
 
 use sst::SstMetadata;
 
@@ -66,6 +65,12 @@ impl DerefMut for AdjacencyList {
     }
 }
 
+impl From<BTreeSet<(usize, usize)>> for AdjacencyList {
+    fn from(adj_list: BTreeSet<(usize, usize)>) -> Self {
+        Self(adj_list)
+    }
+}
+
 /////////////////////////////////////////////// Graph //////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -80,12 +85,85 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn new(
-        options: LsmOptions,
-        metadata: Vec<SstMetadata>,
-    ) -> Result<Self, Error> {
+    pub fn new(options: LsmOptions, metadata: Vec<SstMetadata>) -> Result<Self, Error> {
         // Create the adjacency lists.
-        let (forward_adj_list, reverse_adj_list) = Self::construct_adj_lists(&metadata)?;
+        let (forward_adj_list, reverse_adj_list) =
+            Self::construct_adj_lists(&metadata, 0..metadata.len())?;
+        Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
+    }
+
+    pub fn edit(self, to_remove: HashSet<String>, to_add: Vec<SstMetadata>) -> Result<Self, Error> {
+        let Self {
+            options,
+            mut metadata,
+            forward_adj_list,
+            reverse_adj_list,
+            ..
+        } = self;
+        let mut removes: HashSet<usize> = HashSet::new();
+        let mut renames: HashMap<usize, usize> = HashMap::new();
+        let mut additions = Vec::new();
+        let mut to_add_idx = 0;
+        let mut metadata_idx = 0;
+        while metadata_idx < metadata.len() {
+            if to_remove.contains(&metadata[metadata_idx].setsum()) {
+                removes.insert(metadata_idx);
+                if to_add_idx >= to_add.len() {
+                    if metadata_idx + 1 == metadata.len() {
+                        metadata.pop();
+                    } else {
+                        renames.insert(metadata.len() - 1, metadata_idx);
+                        metadata.swap_remove(metadata_idx);
+                    }
+                } else {
+                    additions.push(metadata_idx);
+                    metadata[metadata_idx] = to_add[to_add_idx].clone();
+                    metadata_idx += 1;
+                    to_add_idx += 1;
+                }
+            } else {
+                metadata_idx += 1;
+            }
+        }
+        while to_add_idx < to_add.len() {
+            additions.push(metadata.len());
+            // Order:  Always push to additions first.
+            metadata.push(to_add[to_add_idx].clone());
+        }
+        let map = |(src, dst)| {
+            if removes.contains(&src) {
+                None
+            } else if removes.contains(&dst) {
+                None
+            } else {
+                let src = *renames.get(&src).unwrap_or(&src);
+                let dst = *renames.get(&dst).unwrap_or(&dst);
+                Some((src, dst))
+            }
+        };
+        let mut forward_adj_list = AdjacencyList(
+            forward_adj_list
+                .iter()
+                .copied()
+                .filter_map(map)
+                .collect::<BTreeSet<(usize, usize)>>(),
+        );
+        let mut reverse_adj_list = AdjacencyList(
+            reverse_adj_list
+                .iter()
+                .copied()
+                .filter_map(map)
+                .collect::<BTreeSet<(usize, usize)>>(),
+        );
+        let metadata_len = metadata.len();
+        let inner = &|_| 0..metadata_len;
+        Self::expand_adj_lists(
+            &metadata,
+            additions.into_iter(),
+            inner,
+            &mut forward_adj_list,
+            &mut reverse_adj_list,
+        )?;
         Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
     }
 
@@ -150,7 +228,8 @@ impl Graph {
             let upper = Bound::Included((color, usize::max_value()));
             for (u, v) in color_forward_adj_list.range((lower, upper)).copied() {
                 assert_eq!(color, u);
-                if vertices[v].level == vertices.len() || vertices[v].level <= vertices[color].level {
+                if vertices[v].level == vertices.len() || vertices[v].level <= vertices[color].level
+                {
                     vertices[v].level = vertices[color].level + 1;
                     colors_stack.push(v);
                 }
@@ -173,11 +252,33 @@ impl Graph {
         })
     }
 
-    fn construct_adj_lists(metadata: &[SstMetadata]) -> Result<(AdjacencyList, AdjacencyList), Error> {
+    fn construct_adj_lists(
+        metadata: &[SstMetadata],
+        outer: impl Iterator<Item = usize>,
+    ) -> Result<(AdjacencyList, AdjacencyList), Error> {
         // Create the adjacency lists.
         let mut forward_adj_list = AdjacencyList::default();
         let mut reverse_adj_list = AdjacencyList::default();
-        for i in 0..metadata.len() {
+        let metadata_len = metadata.len();
+        let inner = &|x| (x + 1)..metadata_len;
+        Self::expand_adj_lists(
+            metadata,
+            outer,
+            inner,
+            &mut forward_adj_list,
+            &mut reverse_adj_list,
+        )?;
+        Ok((forward_adj_list, reverse_adj_list))
+    }
+
+    fn expand_adj_lists(
+        metadata: &[SstMetadata],
+        outer: impl Iterator<Item = usize>,
+        inner: &dyn Fn(usize) -> Range<usize>,
+        forward_adj_list: &mut AdjacencyList,
+        reverse_adj_list: &mut AdjacencyList,
+    ) -> Result<(), Error> {
+        for i in outer {
             if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
                 let err = Error::Corruption {
                     core: ErrorCore::default(),
@@ -188,7 +289,7 @@ impl Graph {
                 .with_variable("biggest_timestamp", metadata[i].biggest_timestamp);
                 return Err(err);
             }
-            for j in i + 1..metadata.len() {
+            for j in inner(i) {
                 if !key_range_overlap(&metadata[i], &metadata[j]) {
                     continue;
                 }
@@ -208,7 +309,7 @@ impl Graph {
                 }
             }
         }
-        Ok((forward_adj_list, reverse_adj_list))
+        Ok(())
     }
 }
 
@@ -313,7 +414,7 @@ impl Graph {
                 vec![compaction]
             } else {
                 Vec::new()
-            }
+            };
         }
         let mut max_level = 0;
         for idx in 0..self.vertices.len() {
@@ -355,8 +456,12 @@ impl Graph {
                 }
                 let waste = overlap[to_consider];
                 let ratio = acc as f64 / acc.saturating_add(waste) as f64;
-                let to_n_minus_one: u64 = overlap[self.vertices[color].level..to_consider].iter().sum();
-                let to_n: u64 = overlap[self.vertices[color].level..to_consider + 1].iter().sum();
+                let to_n_minus_one: u64 = overlap[self.vertices[color].level..to_consider]
+                    .iter()
+                    .sum();
+                let to_n: u64 = overlap[self.vertices[color].level..to_consider + 1]
+                    .iter()
+                    .sum();
                 if to_n >= self.options.max_compaction_bytes as u64 {
                     EXCEEDS_MAX_BYTES.click();
                     break;
