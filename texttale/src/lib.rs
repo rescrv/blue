@@ -118,6 +118,9 @@ impl TextTale for ExpectTextTale {
                 }
                 expected_output += &self.input_lines.remove(0);
             } else {
+                if !expected_output.is_empty() {
+                    panic!("expected output truncated: are you ending with a prompt?");
+                }
                 return None;
             }
         }
