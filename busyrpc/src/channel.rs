@@ -83,6 +83,7 @@ impl Channel {
     /// Returns true if the message was buffered.
     ///
     /// Used for heartbeats.
+    #[allow(dead_code)]
     pub fn try_send(&mut self, msg: &[u8]) -> Result<bool, rpc_pb::Error> {
         assert!(msg.len() <= rpc_pb::MAX_REQUEST_SIZE);
         assert!(msg.len() <= rpc_pb::MAX_RESPONSE_SIZE);

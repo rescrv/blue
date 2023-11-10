@@ -283,11 +283,19 @@ macro_rules! service {
             )*
         }
 
-        pub struct $client<C: $crate::Client> {
-            client: C,
+        pub struct $client {
+            client: std::sync::Arc<dyn $crate::Client>,
         }
 
-        impl<C: $crate::Client> $service for $client<C> where {
+        impl $client where {
+            pub fn new(client: std::sync::Arc<dyn $crate::Client>) -> Self {
+                Self {
+                    client,
+                }
+            }
+        }
+
+        impl $service for $client where {
             $(
                 $crate::client_method! { $service, $method, $req, $resp, $error }
             )*

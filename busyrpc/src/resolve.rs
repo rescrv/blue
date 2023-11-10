@@ -13,7 +13,11 @@ pub struct StringResolver {
 }
 
 impl StringResolver {
-    fn new(connect_str: &str) -> Result<Self, rpc_pb::Error> {
+    pub fn must(connect_str: &str) -> Self {
+        Self::new(connect_str).expect("that the StringResolver always resolve")
+    }
+
+    pub fn new(connect_str: &str) -> Result<Self, rpc_pb::Error> {
         let mut hosts = Vec::new();
         for host in connect_str.split(',') {
             hosts.push(host.parse::<Host>()?);

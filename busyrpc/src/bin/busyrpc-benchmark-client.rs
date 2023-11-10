@@ -7,10 +7,10 @@ use arrrg_derive::CommandLine;
 
 use biometrics::{Collector, PlainTextEmitter};
 
-use rpc_pb::Client as ClientTrait;
+use rpc_pb::Client;
 use rpc_pb::{Context, IoToZ};
 
-use busyrpc::{Client, ClientOptions, Resolver, StringResolver};
+use busyrpc::{new_client, ClientOptions, StringResolver};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct BenchmarkOptions {
@@ -24,7 +24,7 @@ struct BenchmarkOptions {
     client: ClientOptions,
 }
 
-fn worker<R: Resolver>(client: Arc<Client<R>>, counter: Arc<AtomicU64>, rpcs: u64) {
+fn worker(client: Arc<dyn Client>, counter: Arc<AtomicU64>, rpcs: u64) {
     while counter.fetch_add(1, Ordering::Relaxed) < rpcs {
         let context = Context::default();
         client.call(&context, "__builtins__", "nop", &[]).as_z().pretty_unwrap().unwrap();
@@ -49,8 +49,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let client = Client::new(options.client, options.connect.clone());
-    let client = Arc::new(client);
+    let client = new_client(options.client, options.connect.clone());
     let request_counter = Arc::new(AtomicU64::default());
     let mut threads = Vec::new();
     for _ in 0..options.threads {

@@ -25,6 +25,7 @@ impl SendBuffer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn free(&self) -> usize {
         self.buffer.len() - self.upper + self.lower
     }

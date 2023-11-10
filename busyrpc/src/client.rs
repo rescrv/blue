@@ -67,11 +67,11 @@ pub fn register_biometrics(collector: &mut Collector) {
 #[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
 pub struct ClientOptions {
     #[arrrg(optional, "Number of channels to establish.")]
-    channels: usize,
+    pub channels: usize,
     #[arrrg(flag, "Do not verify SSL certificates.")]
-    ssl_verify_none: bool,
+    pub ssl_verify_none: bool,
     #[arrrg(optional, "Userspace send buffer size.")]
-    user_send_buffer_size: usize,
+    pub user_send_buffer_size: usize,
 }
 
 impl Default for ClientOptions {
@@ -367,6 +367,12 @@ impl<'a, 'b> sync42::state_hash_table::Value for EstablishmentState<'a, 'b> {
     }
 }
 
+//////////////////////////////////////// ChannelHandleTrait ////////////////////////////////////////
+
+trait ChannelHandleTrait {
+    fn kill(&self);
+}
+
 /////////////////////////////////////////// ChannelHandle //////////////////////////////////////////
 
 struct ChannelHandle<'a, 'b, 'c, R: Resolver> {
@@ -384,6 +390,19 @@ impl<'a, 'b, 'c, R: Resolver> ChannelHandle<'a, 'b, 'c, R> {
             }
         }
     }
+}
+
+/////////////////////////////////////// ChannelManangerTrait ///////////////////////////////////////
+
+trait ChannelManagerTrait<R: Resolver> {
+    type ChannelHandle<'c> where Self: 'c;
+    type MonitoredChannel;
+
+    fn new(options: ClientOptions, resolver: R) -> Self;
+    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error>;
+    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
+    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
+    fn register_channel(&self, host: &Host, chan: Arc<Self::MonitoredChannel>);
 }
 
 ////////////////////////////////////////// ChannelManager //////////////////////////////////////////
@@ -453,7 +472,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
             establish.wait.notify_all();
             return Ok(channel);
         }
-        // NOTE(rescrv): This unwrap should never fail because we set it above prior to the
+        // SAFETY(rescrv): This unwrap should never fail because we set it above prior to the
         // notify_all().
         let ptr = Arc::clone(establish.value.lock().unwrap().as_ref().unwrap());
         Ok(ptr)
@@ -501,21 +520,53 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
     }
 }
 
+impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
+    type ChannelHandle<'c> = ChannelHandle<'a, 'b, 'c, R> where Self: 'c;
+    type MonitoredChannel = MonitoredChannel<'a, 'b>;
+
+    fn new(options: ClientOptions, resolver: R) -> Self {
+        Self::new(options, resolver)
+    }
+
+    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error> {
+        Self::get_channel(self)
+    }
+
+    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
+        Self::establish_channel(self, host)
+    }
+
+    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
+        Self::new_channel(self, host)
+    }
+
+    fn register_channel(&self, host: &Host, chan: Arc<Self::MonitoredChannel>) {
+        Self::register_channel(self, host, chan)
+    }
+}
+
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
-pub struct Client<'a: 'b, 'b, R: Resolver> {
+pub struct Client<'a: 'b, 'b, R: Resolver + Send + Sync> {
     sequencer: AtomicU64,
     concurrent_ops: StateHashTable<u64, ShtState>,
     channels: ChannelManager<'a, 'b, R>,
 }
 
-impl<'a, 'b, R: Resolver> Client<'a, 'b, R> {
-    pub fn new(options: ClientOptions, resolver: R) -> Self {
-        Self {
+impl<'a, 'b, R: Resolver + Send + Sync + 'static> Client<'a, 'b, R>
+where
+    'a: 'b
+{
+    // NOTE(rescrv): allow new_ret_no_self because we want to return something that hides the
+    // lifetimes on the client, making for beautiful code elsewhere.  Threading around two
+    // lifetimes proved to be too much, even for me.
+    #[allow(clippy::new_ret_no_self)]
+    fn new(options: ClientOptions, resolver: R) -> Arc<dyn rpc_pb::Client + Send + Sync + 'b> {
+        Arc::new(Self {
             sequencer: AtomicU64::new(1),
             concurrent_ops: StateHashTable::new(),
             channels: ChannelManager::new(options, resolver),
-        }
+        })
     }
 
     fn get_any_channel(&self) -> Result<ChannelHandle<'a, 'b ,'_, R>, rpc_pb::Error> {
@@ -523,7 +574,7 @@ impl<'a, 'b, R: Resolver> Client<'a, 'b, R> {
     }
 }
 
-impl<R: Resolver> rpc_pb::Client for Client<'_, '_, R> {
+impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
     fn call(
         &self,
         ctx: &rpc_pb::Context,
@@ -599,4 +650,8 @@ impl<R: Resolver> rpc_pb::Client for Client<'_, '_, R> {
         };
         status
     }
+}
+
+pub fn new_client<R: Resolver + Send + Sync + 'static>(options: ClientOptions, resolver: R) -> Arc<dyn rpc_pb::Client + Send + Sync> {
+    Client::new(options, resolver)
 }
