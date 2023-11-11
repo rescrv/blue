@@ -65,27 +65,27 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 /////////////////////////////////////////// ServerOptions //////////////////////////////////////////
 
-#[derive(CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
 pub struct ServerOptions {
     // SSL/TLS preferences.
     #[arrrg(required, "Path to the CA certificate.")]
-    ca_file: String,
+    pub ca_file: String,
     #[arrrg(required, "Path to the private key file.")]
-    private_key_file: String,
+    pub private_key_file: String,
     #[arrrg(required, "Path to the certificate file.")]
-    certificate_file: String,
+    pub certificate_file: String,
     #[arrrg(flag, "Do not verify SSL certificates.")]
-    verify_none: bool,
+    pub verify_none: bool,
     // Server preferences.
     #[arrrg(required, "Hostname to bind to.")]
-    bind_to_host: String,
+    pub bind_to_host: String,
     #[arrrg(required, "Port to bind to.")]
-    bind_to_port: u16,
+    pub bind_to_port: u16,
     #[arrrg(required, "Number of threads to spawn.")]
-    thread_pool_size: u16,
+    pub thread_pool_size: u16,
     // Buffering preferences.
     #[arrrg(optional, "Userspace send buffer size.")]
-    user_send_buffer_size: usize,
+    pub user_send_buffer_size: usize,
 }
 
 impl ServerOptions {
@@ -147,7 +147,7 @@ impl ServerOptions {
         self
     }
 
-    pub fn with_user_send_buffer(mut self, user_send_buffer_size: usize) -> Self {
+    pub fn with_user_send_buffer_size(mut self, user_send_buffer_size: usize) -> Self {
         self.user_send_buffer_size = user_send_buffer_size;
         self
     }
