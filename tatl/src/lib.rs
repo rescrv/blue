@@ -130,7 +130,7 @@ impl<M: Monitor + 'static> State<M> {
         } = &condition
         {
             if self.sticky.is_none() {
-                let firing = FiringID::generate().unwrap_or(FiringID::default());
+                let firing = FiringID::generate().unwrap_or_default();
                 self.sticky = Some(StickyCondition {
                     firing,
                     sticky: condition.clone(),
