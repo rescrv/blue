@@ -6,17 +6,17 @@ edition = "2021"
 description = "Mani provides an in-memory manifest of related files."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = ["arrrg", "arrrg_derive", "getopts"]
+
 [dependencies]
-getopts = "0.2"
 crc32c = "0.6"
 rand = "0.7"
 
-armnod = { path = "../armnod", version = "0.4" }
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
-guacamole = { path = "../guacamole", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.4" }
 tatl = { path = "../tatl", version = "0.3" }
@@ -24,3 +24,41 @@ utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
 zerror_derive = { path = "../zerror_derive", version = "0.1" }
+
+getopts = { version = "0.2", optional = true }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+
+[dev-dependencies]
+armnod = { path = "../armnod", version = "0.4" }
+guacamole = { path = "../guacamole", version = "0.3" }
+
+[[bin]]
+name = "mani-append"
+path = "src/bin/mani-append.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "mani-cat"
+path = "src/bin/mani-cat.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "mani-dump"
+path = "src/bin/mani-dump.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "mani-remove"
+path = "src/bin/mani-remove.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "mani-rollover"
+path = "src/bin/mani-rollover.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "mani-verify"
+path = "src/bin/mani-verify.rs"
+required-features=["binaries"]

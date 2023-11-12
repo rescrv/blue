@@ -6,8 +6,6 @@ use std::fs::{create_dir, hard_link, metadata, read_dir, remove_file, rename, Fi
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use arrrg_derive::CommandLine;
-
 use biometrics::{Collector, Counter};
 
 use prototk_derive::Message;
@@ -156,15 +154,16 @@ impl From<std::str::Utf8Error> for Error {
 ////////////////////////////////////////// ManifestOptions /////////////////////////////////////////
 
 /// [ManifestOptions] provides the options for commandline programs.
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ManifestOptions {
-    #[arrrg(flag, "Fail if the manifest directory exists.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest directory exists."))]
     fail_if_exists: bool,
-    #[arrrg(flag, "Fail if the manifest directory does not exist.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest directory does not exist."))]
     fail_if_not_exist: bool,
-    #[arrrg(flag, "Fail if the manifest is locked.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest is locked."))]
     fail_if_locked: bool,
-    #[arrrg(optional, "Ratio of (bytes in the log):(bytes in memory) at which log will rollover.")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Ratio of (bytes in the log):(bytes in memory) at which log will rollover."))]
     log_rollover_ratio: u64,
 }
 
