@@ -5,8 +5,6 @@ use std::sync::{Arc, Mutex};
 
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 
-use arrrg_derive::CommandLine;
-
 use biometrics::{Collector, Counter};
 
 use buffertk::{stack_pack, Unpackable};
@@ -65,26 +63,27 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 /////////////////////////////////////////// ServerOptions //////////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ServerOptions {
     // SSL/TLS preferences.
-    #[arrrg(required, "Path to the CA certificate.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
     pub ca_file: String,
-    #[arrrg(required, "Path to the private key file.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
     pub private_key_file: String,
-    #[arrrg(required, "Path to the certificate file.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
     pub certificate_file: String,
-    #[arrrg(flag, "Do not verify SSL certificates.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
     pub verify_none: bool,
     // Server preferences.
-    #[arrrg(required, "Hostname to bind to.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to bind to."))]
     pub bind_to_host: String,
-    #[arrrg(required, "Port to bind to.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Port to bind to."))]
     pub bind_to_port: u16,
-    #[arrrg(required, "Number of threads to spawn.")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Number of threads to spawn."))]
     pub thread_pool_size: u16,
     // Buffering preferences.
-    #[arrrg(optional, "Userspace send buffer size.")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
 }
 

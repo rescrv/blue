@@ -152,7 +152,7 @@ impl Channel {
         let mut local_buffer = [0u8; 4096];
         loop {
             match self.stream.ssl_read(&mut local_buffer) {
-                Ok(sz) if sz == 0 => {
+                Ok(0) => {
                     return Err(rpc_pb::Error::TransportFailure {
                         core: ErrorCore::default(),
                         what: "socket closed".to_string(),

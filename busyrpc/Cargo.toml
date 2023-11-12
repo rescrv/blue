@@ -6,17 +6,18 @@ edition = "2021"
 description = "busyrpc provides synchronous/thread-pool implementations of rpc_pb."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = ["arrrg", "arrrg_derive", "getopts", "guacamole"]
+
 [dependencies]
 libc = "0.2"
-getopts = "0.2"
 boring = "2.1.0"
 crc32c = "0.6"
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
-guacamole = { path = "../guacamole", version = "0.3" }
 indicio = { path = "../indicio", version = "0.1" }
 one_two_eight = { path = "../one_two_eight", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }
@@ -27,3 +28,18 @@ tatl = { path = "../tatl", version = "0.3" }
 utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
+
+getopts = { version = "0.2", optional = true }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+guacamole = { path = "../guacamole", version = "0.3", optional = true }
+
+[[example]]
+name = "busyrpc-benchmark-client"
+path = "examples/busyrpc-benchmark-client.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "busyrpc-benchmark-server"
+path = "examples/busyrpc-benchmark-server.rs"
+required-features=["binaries"]

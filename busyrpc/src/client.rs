@@ -7,8 +7,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use boring::ssl::{SslConnector, SslMethod};
 
-use arrrg_derive::CommandLine;
-
 use biometrics::{Collector, Counter};
 
 use buffertk::{stack_pack, Unpacker};
@@ -64,13 +62,14 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 /////////////////////////////////////////// ClientOptions //////////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ClientOptions {
-    #[arrrg(optional, "Number of channels to establish.")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Number of channels to establish."))]
     pub channels: usize,
-    #[arrrg(flag, "Do not verify SSL certificates.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
     pub ssl_verify_none: bool,
-    #[arrrg(optional, "Userspace send buffer size.")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
 }
 
@@ -410,6 +409,8 @@ trait ChannelManagerTrait<R: Resolver> {
 struct ChannelManager<'a, 'b, R: Resolver> {
     options: ClientOptions,
     resolver: Mutex<R>,
+    // NOTE(rescrv): I like seeing the type, not hiding it.
+    #[allow(clippy::type_complexity)]
     channels: Mutex<Vec<Option<(HostID, Arc<MonitoredChannel<'a, 'b>>)>>>,
     connecting: StateHashTable<HostKey, EstablishmentState<'a, 'b>>,
 }
