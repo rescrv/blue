@@ -1,0 +1,23 @@
+#!/usr/bin/env zsh
+
+set -e
+set -x
+
+pushd meta
+cargo build
+popd
+
+for package in `target/debug/publish`
+do
+    pushd "$package"
+    cargo fmt -- --check
+    cargo hack --feature-powerset check
+    cargo test --lib
+    cargo hack --feature-powerset test
+    cargo hack --feature-powerset build --all-targets
+    cargo doc --no-deps
+    cargo clippy
+    popd
+done
+
+echo SUCCESS: this concludes our successful CI adventure
