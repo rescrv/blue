@@ -97,6 +97,9 @@ This library provides the Abelian group and inverse operators and a sugar over S
 Warts
 =====
 
+- setsum-merge tool is missing
+- setsum-diff tool is missing
+
 Documentation
 =============
 
