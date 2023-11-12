@@ -134,8 +134,8 @@ impl<W: Write> LogBuilder<W> {
         if new_offset > nb {
             self.append_split(buffer)
         } else {
-            let header_buf = header_pa.to_buffer();
-            self.write(header_buf.as_bytes())?;
+            let header_buf = header_pa.to_vec();
+            self.write(&header_buf)?;
             self.write(buffer)?;
             assert!(self.bytes_written <= nb);
             Ok(())

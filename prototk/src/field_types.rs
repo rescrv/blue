@@ -15,7 +15,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
-use buffertk::{stack_pack, Buffer, Unpackable, Unpacker};
+use buffertk::{stack_pack, Unpackable, Unpacker};
 
 use super::*;
 
@@ -942,30 +942,6 @@ impl<'a> From<bytes<'a>> for Vec<u8> {
     }
 }
 
-impl<'a> FieldPackHelper<'a, bytes<'a>> for Buffer {
-    fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let b: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(bytes(b)).pack_sz()
-    }
-
-    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let b: &[u8] = self.as_bytes();
-        stack_pack(tag).pack(bytes(b)).into_slice(out);
-    }
-}
-
-impl<'a> FieldUnpackHelper<'a, bytes<'a>> for Buffer {
-    fn merge_field(&mut self, proto: bytes<'a>) {
-        *self = proto.into();
-    }
-}
-
-impl<'a> From<bytes<'a>> for Buffer {
-    fn from(f: bytes<'a>) -> Buffer {
-        Buffer::from(f.0)
-    }
-}
-
 impl<'a> FieldPackHelper<'a, bytes<'a>> for PathBuf {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         let field: &[u8] = self.as_os_str().as_bytes();
@@ -1704,13 +1680,6 @@ mod tests {
     fn bytes() {
         helper_test::<bytes, &[u8]>(&[0xff, 0x00], &[0x2, 0xff, 0x00]);
         helper_test::<bytes, Vec<u8>>(vec![0xff, 0x00], &[0x2, 0xff, 0x00]);
-    }
-
-    #[test]
-    fn buffer() {
-        let buf: &[u8] = &[0u8, 1, 2, 3, 4, 5, 6, 7];
-        let buf: Buffer = Buffer::from(buf);
-        helper_test::<bytes, Buffer>(buf, &[8, 0, 1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]

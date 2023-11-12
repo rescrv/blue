@@ -206,8 +206,8 @@ mod tests {
         assert_eq!(1, TEST_COUNTER1.read());
         error_core.internals.backtrace = "SOME-BACKTRACE\n".to_owned();
         assert_eq!("backtrace:\nSOME-BACKTRACE\n", error_core.long_form());
-        let buf = stack_pack(&error_core).to_buffer();
-        let got: ErrorCore = Unpackable::unpack(buf.as_bytes()).unwrap().0;
+        let buf = stack_pack(&error_core).to_vec();
+        let got: ErrorCore = Unpackable::unpack(&buf).unwrap().0;
         assert_eq!(&error_core.internals, &got.internals);
     }
 
@@ -229,8 +229,8 @@ VAR = 42
 backtrace:
 SOME-BACKTRACE
 ", error_core.long_form());
-        let buf = stack_pack(&error_core).to_buffer();
-        let got: ErrorCore = Unpackable::unpack(buf.as_bytes()).unwrap().0;
+        let buf = stack_pack(&error_core).to_vec();
+        let got: ErrorCore = Unpackable::unpack(&buf).unwrap().0;
         assert_eq!(&error_core.internals, &got.internals);
     }
 }

@@ -423,9 +423,9 @@ impl Macaroon {
     fn add_caveat(&mut self, caveat: Caveat) {
         match &caveat {
             Caveat::ExactString { .. } | Caveat::Expires { .. } => {
-                let buf = stack_pack(&caveat).to_buffer();
+                let buf = stack_pack(&caveat).to_vec();
                 self.caveats.push(caveat);
-                crypto::chained_hmac_1(&mut self.signature, buf.as_bytes());
+                crypto::chained_hmac_1(&mut self.signature, &buf);
             }
             Caveat::ThirdParty {
                 location: _,
@@ -615,8 +615,8 @@ impl Verifier {
     fn verify_1st(&self, secret: &mut Secret, caveat: &Caveat) -> bool {
         assert!(caveat.is_first_party());
         let mut found = false;
-        let buf = stack_pack(caveat).to_buffer();
-        crypto::chained_hmac_1(secret, buf.as_bytes());
+        let buf = stack_pack(caveat).to_vec();
+        crypto::chained_hmac_1(secret, &buf);
         match caveat {
             Caveat::ExactString { what } => {
                 for context in &self.contexts {

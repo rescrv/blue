@@ -4,8 +4,6 @@ use rand::{Rng, RngCore};
 
 use guacamole::Guacamole;
 
-use buffertk::Buffer;
-
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
 use sst::{Builder, Cursor, SstBuilder, SstCursor, Sst};
@@ -22,9 +20,9 @@ impl BufferGuacamole {
         Self { sz }
     }
 
-    fn guacamole(&self, guac: &mut Guacamole) -> Buffer {
-        let mut buf = Buffer::new(self.sz);
-        guac.fill_bytes(buf.as_bytes_mut());
+    fn guacamole(&self, guac: &mut Guacamole) -> Vec<u8> {
+        let mut buf = vec![0u8; self.sz];
+        guac.fill_bytes(&mut buf);
         buf
     }
 }
@@ -44,9 +42,9 @@ impl TimestampGuacamole {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct KeyValuePut {
-    pub key: Buffer,
+    pub key: Vec<u8>,
     pub timestamp: u64,
-    pub value: Buffer,
+    pub value: Vec<u8>,
 }
 
 /////////////////////////////////////// KeyValuePutGuacamole ///////////////////////////////////////
@@ -71,7 +69,7 @@ impl KeyValuePutGuacamole {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct KeyValueDel {
-    pub key: Buffer,
+    pub key: Vec<u8>,
     pub timestamp: u64,
 }
 
@@ -220,11 +218,11 @@ where
         match kvo {
             KeyValueOperation::Put(x) => {
                 builder
-                    .put(x.key.as_bytes(), x.timestamp, x.value.as_bytes())
+                    .put(&x.key, x.timestamp, &x.value)
                     .unwrap();
             }
             KeyValueOperation::Del(x) => {
-                builder.del(x.key.as_bytes(), x.timestamp).unwrap();
+                builder.del(&x.key, x.timestamp).unwrap();
             }
         }
     }
@@ -252,10 +250,10 @@ where
     // Now seek randomly and compare the key-value store and the builder.
     let key_gen = BufferGuacamole::new(config.key_bytes);
     for _ in 0..config.num_seeks {
-        let key: Buffer = key_gen.guacamole(&mut guac);
-        ref_cursor.seek(key.as_bytes()).unwrap();
+        let key: Vec<u8> = key_gen.guacamole(&mut guac);
+        ref_cursor.seek(&key).unwrap();
         let mut cursor = table.cursor();
-        cursor.seek(key.as_bytes()).unwrap();
+        cursor.seek(&key).unwrap();
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
             let (exp, got) = if will_do_prev {

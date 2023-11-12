@@ -166,17 +166,15 @@ impl OldBitVector for ReferenceOldBitVector {
 
 #[cfg(test)]
 pub mod tests {
-    use buffertk::Buffer;
-
     use super::super::bit_array::BitArray;
     use super::{BitVector, ReferenceBitVector};
 
     trait TestBitVector<'a>: BitVector<'a> {
-        fn construct(case: &[bool]) -> Buffer;
+        fn construct(case: &[bool]) -> Vec<u8>;
     }
 
     impl<'a> TestBitVector<'a> for ReferenceBitVector {
-        fn construct(case: &[bool]) -> Buffer {
+        fn construct(case: &[bool]) -> Vec<u8> {
             BitArray::construct(case.iter().copied())
         }
     }
@@ -284,14 +282,14 @@ pub mod tests {
                 use super::$BV;
 
                 mod evens {
-                    use buffertk::{Buffer, Unpackable};
+                    use buffertk::Unpackable;
                     use super::{BitVector, TestBitVector};
                     use super::$BV;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::evens::EVENS;
-                        let buf: Buffer = <$BV as TestBitVector>::construct(case);
-                        let bytes: &[u8] = buf.as_bytes();
+                        let buf: Vec<u8> = <$BV as TestBitVector>::construct(case);
+                        let bytes: &[u8] = &buf;
                         <$BV as Unpackable>::unpack(bytes).unwrap().0
                     }
 
@@ -312,14 +310,14 @@ pub mod tests {
                 }
 
                 mod odds {
-                    use buffertk::{Buffer, Unpackable};
+                    use buffertk::Unpackable;
                     use super::{BitVector, TestBitVector};
                     use super::$BV;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::odds::ODDS;
-                        let buf: Buffer = <$BV as TestBitVector>::construct(case);
-                        let bytes: &[u8] = buf.as_bytes();
+                        let buf: Vec<u8> = <$BV as TestBitVector>::construct(case);
+                        let bytes: &[u8] = &buf;
                         <$BV as Unpackable>::unpack(bytes).unwrap().0
                     }
 
@@ -340,14 +338,14 @@ pub mod tests {
                 }
 
                 mod half_empty {
-                    use buffertk::{Buffer, Unpackable};
+                    use buffertk::Unpackable;
                     use super::{BitVector, TestBitVector};
                     use super::$BV;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::half_empty::HALF_EMPTY;
-                        let buf: Buffer = <$BV as TestBitVector>::construct(case);
-                        let bytes: &[u8] = buf.as_bytes();
+                        let buf: Vec<u8> = <$BV as TestBitVector>::construct(case);
+                        let bytes: &[u8] = &buf;
                         <$BV as Unpackable>::unpack(bytes).unwrap().0
                     }
 

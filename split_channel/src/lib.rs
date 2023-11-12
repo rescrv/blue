@@ -16,7 +16,7 @@ use arrrg_derive::CommandLine;
 
 use biometrics::{Collector, Counter, Moments};
 
-use buffertk::{stack_pack, Buffer, Packable, Unpackable};
+use buffertk::{stack_pack, Packable, Unpackable};
 
 use utilz::stopwatch::Stopwatch;
 
@@ -101,7 +101,7 @@ enum WorkDone {
 /////////////////////////////////////////// ProcessEvents //////////////////////////////////////////
 
 pub trait ProcessEvents {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error>;
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error>;
 }
 
 //////////////////////////////////////////// RecvChannel ///////////////////////////////////////////
@@ -114,7 +114,7 @@ pub struct RecvChannel {
 }
 
 impl RecvChannel {
-    pub fn recv(&mut self) -> Result<Buffer, Error> {
+    pub fn recv(&mut self) -> Result<Vec<u8>, Error> {
         loop {
             let mut events = POLLIN;
             if let Some(buf) = self.process_events(&mut events)? {
@@ -180,7 +180,7 @@ impl RecvChannel {
 }
 
 impl ProcessEvents for RecvChannel {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error> {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error> {
         if self.recv_idx == 0 {
             match self.work_recv(1, events) {
                 WorkDone::ReadRequisiteAmount => {},
@@ -220,8 +220,8 @@ impl ProcessEvents for RecvChannel {
                 }
             }
         }
-        let buf = Buffer::from(&self.recv_buf[start..limit]);
-        if crc32c::crc32c(buf.as_bytes()) != frame.crc32c {
+        let buf = Vec::<u8>::from(&self.recv_buf[start..limit]);
+        if crc32c::crc32c(&buf) != frame.crc32c {
             RECV_ERRORS.click();
             return Err(Error::TransportFailure {
                 core: ErrorCore::default(),
@@ -349,7 +349,7 @@ impl SendChannel {
 }
 
 impl ProcessEvents for SendChannel {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Buffer>, Error> {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error> {
         self.flush(events)?;
         Ok(None)
     }
