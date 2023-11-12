@@ -162,6 +162,7 @@ macro_rules! generate_id {
 }
 
 /// Implement protocol buffers for the id.
+#[cfg(feature = "generate_id_prototk")]
 #[macro_export]
 macro_rules! generate_id_prototk {
     ($what:ident) => {

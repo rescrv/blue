@@ -6,6 +6,10 @@ edition = "2021"
 description = "one_two_eight provides typed 128-bit identifiers."
 license = "Apache-2.0"
 
+[features]
+default = ["generate_id_prototk"]
+generate_id_prototk = ["buffertk", "prototk"]
+
 [dependencies]
-buffertk = { path = "../buffertk", version = "0.4" }
-prototk = { path = "../prototk", version = "0.4" }
+buffertk = { path = "../buffertk", version = "0.4", optional = true }
+prototk = { path = "../prototk", version = "0.4", optional = true }
