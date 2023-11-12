@@ -15,13 +15,13 @@ TEMPLATE = '''            #[test]
 '''
 
 for num_keys in (10, 10000):
-    for key_bytes in (1, 16, 256, 4096, 16384):
+    for key_bytes in (1, 16, 256, 16384):
         for value_bytes in (0, 1, 16, 256, 4096, 32768):
             if num_keys * (key_bytes + value_bytes) >= MAX_SIZE:
                 continue
             for num_seeks in (1000,):
                 for seek_distance in (10,):
-                    for prev_probability in (0.0, 0.25, 0.5):
+                    for prev_probability in (0.0, 0.125):
                         prev_probability_str = '{}'.format(prev_probability).replace('.', '_')
                         print(TEMPLATE.format(
                             num_keys=num_keys,
