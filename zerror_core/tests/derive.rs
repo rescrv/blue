@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 use zerror_derive::ZerrorCore;
