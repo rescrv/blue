@@ -1,8 +1,8 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use guacamole::Zipf;
 use guacamole::Guacamole;
+use guacamole::Zipf;
 
 #[derive(CommandLine, PartialEq)]
 struct ZipfOptions {

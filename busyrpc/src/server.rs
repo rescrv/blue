@@ -18,8 +18,8 @@ use zerror_core::ErrorCore;
 use rpc_pb::{Context, Error, Request, Response, Status};
 
 use super::builtins;
-use super::poll::{default_pollster, Pollster, POLLIN, POLLOUT, POLLERR, POLLHUP};
 use super::channel::Channel;
+use super::poll::{default_pollster, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -185,8 +185,7 @@ impl Internals {
     }
 
     fn serve_rpc_thread(self: Arc<Internals>) {
-        'serving:
-        loop {
+        'serving: loop {
             let (fd, mut events) = match self.pollster.poll(10_000) {
                 Ok(Some((fd, ev))) => (fd, ev),
                 Ok(None) => {
@@ -198,7 +197,7 @@ impl Internals {
                         .with_value::<message<Error>, 1>(err)
                         .finish();
                     continue 'serving;
-                },
+                }
             };
             POLL_SUCCESS.click();
             let chan = match self.get_channel(fd) {
@@ -231,7 +230,7 @@ impl Internals {
                 }
             }
             events |= POLLIN;
-            if events & (POLLERR|POLLHUP) != 0 {
+            if events & (POLLERR | POLLHUP) != 0 {
                 SAW_POLLERRHUP.click();
                 let fd = chan_guard.as_raw_fd();
                 drop(chan_guard);
@@ -282,19 +281,17 @@ impl Internals {
     fn do_recv_work(&self, chan: &mut Channel) -> bool {
         let mut buffers: Vec<Vec<u8>> = Vec::new();
         let buffers_mut = &mut buffers;
-        let f = |buf| {
-            buffers_mut.push(buf)
-        };
+        let f = |buf| buffers_mut.push(buf);
         let mut error = false;
         match chan.do_recv_work(f) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(err) => {
                 RECV_FAILED.click();
                 Trace::new("busyrpc.recv.error")
                     .with_value::<message<Error>, 1>(err)
                     .finish();
                 error = true;
-            },
+            }
         };
         for buffer in buffers.into_iter() {
             if let Err(err) = self.handle_rpc(chan, buffer) {
@@ -321,7 +318,7 @@ impl Internals {
                     name: req.service.to_string(),
                 };
                 return self.handle_error(chan, req, err);
-            },
+            }
         };
         let resp: Status = server.call(&ctx, req.method, req.body);
         self.handle_status(chan, req, resp)
@@ -338,16 +335,16 @@ impl Internals {
             Ok(Ok(body)) => {
                 let body: &[u8] = body;
                 (Some(body), None, None)
-            },
+            }
             Ok(Err(err)) => {
                 let err: &[u8] = err;
                 (None, Some(err), None)
-            },
+            }
             Err(err) => {
                 err_buf = stack_pack(err).to_vec();
                 let err_buf: &[u8] = &err_buf;
                 (None, None, Some(err_buf))
-            },
+            }
         };
         let resp = Response {
             seq_no: req.seq_no,
@@ -377,7 +374,11 @@ impl ServiceRegistry {
         services
     }
 
-    pub fn register<S: rpc_pb::Server + Send + Sync + 'static>(&mut self, service: &'static str, server: S) {
+    pub fn register<S: rpc_pb::Server + Send + Sync + 'static>(
+        &mut self,
+        service: &'static str,
+        server: S,
+    ) {
         if self.services.contains_key(service) {
             panic!("cannot add the same service twice");
         }
@@ -409,10 +410,7 @@ impl Server {
     pub fn new(options: ServerOptions, services: ServiceRegistry) -> Result<Self, rpc_pb::Error> {
         let pollster = options.pollster()?;
         let internals = Internals::new(pollster, services);
-        Ok(Self {
-            options,
-            internals,
-        })
+        Ok(Self { options, internals })
     }
 
     pub fn serve(&self) -> Result<(), Error> {
@@ -436,8 +434,7 @@ impl Server {
                 core: ErrorCore::default(),
                 what: err.to_string(),
             })?;
-        'listening:
-        for stream in listener.incoming() {
+        'listening: for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
                     let acceptor = acceptor.clone();
@@ -452,24 +449,24 @@ impl Server {
                                 .with_value::<message<Error>, 1>(err)
                                 .finish();
                             continue 'listening;
-                        },
+                        }
                     };
                     DO_ACCEPT.click();
                     match self.add_channel(stream) {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(err) => {
                             Trace::new("busyrpc.add_channel.error")
                                 .with_value::<message<Error>, 1>(err)
                                 .finish();
                             continue 'listening;
-                        },
+                        }
                     };
-                },
+                }
                 Err(err) => {
                     Trace::new("busyrpc.listen.error")
                         .with_value::<message<Error>, 1>(err.into())
                         .finish();
-                },
+                }
             }
         }
         for thread in threads.into_iter() {

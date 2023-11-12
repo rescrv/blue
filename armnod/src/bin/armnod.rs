@@ -4,7 +4,7 @@ use arrrg::CommandLine;
 
 use guacamole::Guacamole;
 
-use armnod::{LengthChooser, SeedChooser, Armnod, ArmnodOptions};
+use armnod::{Armnod, ArmnodOptions, LengthChooser, SeedChooser};
 
 fn random_chooser() -> Box<dyn SeedChooser> {
     Box::<armnod::RandomStringChooser>::default()
@@ -44,7 +44,10 @@ fn main() {
         let set_once_begin = cmdline.set_once_begin.unwrap_or(0);
         let set_once_end = cmdline.set_once_end.unwrap_or(cardinality);
         if set_once_begin > set_once_end {
-            panic!("--set-once-begin must be <= --set-once-end: {} > {}", set_once_begin, set_once_end);
+            panic!(
+                "--set-once-begin must be <= --set-once-end: {} > {}",
+                set_once_begin, set_once_end
+            );
         }
         if cmdline.number > set_once_end - set_once_begin {
             cmdline.number = set_once_end - set_once_begin;
@@ -66,7 +69,10 @@ fn main() {
         let string_min_length: u32 = cmdline.string_min_length.unwrap_or(8);
         let string_max_length: u32 = cmdline.string_max_length.unwrap_or(string_min_length + 8);
         if string_min_length > string_max_length {
-            panic!("--string-min-length must be <= --string-max-length: {} > {}", string_min_length, string_max_length);
+            panic!(
+                "--string-min-length must be <= --string-max-length: {} > {}",
+                string_min_length, string_max_length
+            );
         }
         uniform_length_chooser(string_min_length, string_max_length)
     } else {

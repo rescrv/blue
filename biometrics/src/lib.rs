@@ -160,9 +160,15 @@ impl Collector {
     }
 
     /// Output the sensors registered to this emitter.
-    pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(&self, emitter: &mut EM) -> Result<(), ERR> {
+    pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(
+        &self,
+        emitter: &mut EM,
+    ) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, &Self::now_ms));
+        let result = result.and(
+            self.counters
+                .emit(emitter, &EM::emit_counter, &Self::now_ms),
+        );
         let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now_ms));
         result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms))
     }
@@ -185,11 +191,19 @@ pub trait Emitter {
     type Error;
 
     /// Read the provided [Counter].
-    fn emit_counter(&mut self, counter: &'static Counter, now_millis: u64) -> Result<(), Self::Error>;
+    fn emit_counter(
+        &mut self,
+        counter: &'static Counter,
+        now_millis: u64,
+    ) -> Result<(), Self::Error>;
     /// Read the provided [Gauge].
     fn emit_gauge(&mut self, gauge: &'static Gauge, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
-    fn emit_moments(&mut self, moments: &'static Moments, now_millis: u64) -> Result<(), Self::Error>;
+    fn emit_moments(
+        &mut self,
+        moments: &'static Moments,
+        now_millis: u64,
+    ) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -201,9 +215,7 @@ pub struct PlainTextEmitter {
 
 impl PlainTextEmitter {
     pub fn new(output: File) -> Self {
-        Self {
-            output,
-        }
+        Self { output }
     }
 }
 
@@ -229,13 +241,7 @@ impl Emitter for PlainTextEmitter {
         let moments = moments.read();
         self.output.write_fmt(format_args!(
             "{} {} {} {} {} {} {}\n",
-            label,
-            now,
-            moments.n,
-            moments.m1,
-            moments.m2,
-            moments.m3,
-            moments.m4,
+            label, now, moments.n, moments.m1, moments.m2, moments.m3, moments.m4,
         ))
     }
 }

@@ -583,8 +583,7 @@ impl DB {
         let setsums: Vec<String> = mani.read().unwrap().strs().cloned().collect();
         let mut sst_metadata = Vec::new();
         for sst_setsum in setsums.iter() {
-            let file = file_manager
-                .open(SST_FILE(&options.path, sst_setsum.clone()))?;
+            let file = file_manager.open(SST_FILE(&options.path, sst_setsum.clone()))?;
             let sst = Sst::from_file_handle(file)?;
             COMPACTION_METADATA.click();
             sst_metadata.push(sst.metadata()?);

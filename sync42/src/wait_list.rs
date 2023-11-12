@@ -79,7 +79,9 @@ impl<T: Clone> Waiter<T> {
 
     fn swap<'a, M>(&self, guard: MutexGuard<'a, M>, t: &mut T) -> MutexGuard<'a, M> {
         let mut value = self.value.lock().unwrap();
-        let x: &mut T = value.as_mut().expect("should always be some when initialized");
+        let x: &mut T = value
+            .as_mut()
+            .expect("should always be some when initialized");
         std::mem::swap(x, t);
         guard
     }
@@ -139,7 +141,7 @@ impl<T: Clone> WaitList<T> {
         }
     }
 
-    pub fn link<>(&self, t: T) -> WaitGuard<T> {
+    pub fn link(&self, t: T) -> WaitGuard<T> {
         let mut state = self.state.lock().unwrap();
         while state.head + (self.waiters.len() as u64) <= state.tail {
             state = self.assert_invariants(state);
@@ -174,7 +176,12 @@ impl<T: Clone> WaitList<T> {
             let waiter = self.index_waitlist(index);
             assert!(waiter.linked.load(Ordering::Relaxed));
             waiter.linked.store(false, Ordering::SeqCst);
-            while state.head < state.tail && !self.index_waitlist(state.head).linked.load(Ordering::SeqCst) {
+            while state.head < state.tail
+                && !self
+                    .index_waitlist(state.head)
+                    .linked
+                    .load(Ordering::SeqCst)
+            {
                 state = self.index_waitlist(state.head).deinitialize(state);
                 state.head += 1;
             }
@@ -207,8 +214,17 @@ impl<T: Clone> WaitList<T> {
     }
 
     // Call with the lock held.
-    fn assert_invariants<'a>(&self, state: MutexGuard<'a, WaitListState>) -> MutexGuard<'a, WaitListState> {
-        assert!(state.head == state.tail || self.index_waitlist(state.head).linked.load(Ordering::Relaxed));
+    fn assert_invariants<'a>(
+        &self,
+        state: MutexGuard<'a, WaitListState>,
+    ) -> MutexGuard<'a, WaitListState> {
+        assert!(
+            state.head == state.tail
+                || self
+                    .index_waitlist(state.head)
+                    .linked
+                    .load(Ordering::Relaxed)
+        );
         state
     }
 }
@@ -234,10 +250,7 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
     /// Iterate the list from our position forward.
     pub fn iter<'b: 'a>(&'b self) -> WaitIterator<'b, T> {
         let index = self.index;
-        WaitIterator {
-            guard: self,
-            index,
-        }
+        WaitIterator { guard: self, index }
     }
 
     /// Return our index into the list.
@@ -282,7 +295,14 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
     /// owner called unlink on the index.
     pub fn get_waiter<'c, 'b: 'c>(&'b mut self, index: u64) -> Option<WaitGuard<'c, T>> {
         let state = self.list.state.lock().unwrap();
-        if index < self.index || index >= state.tail || !self.list.index_waitlist(index).linked.load(Ordering::Relaxed) {
+        if index < self.index
+            || index >= state.tail
+            || !self
+                .list
+                .index_waitlist(index)
+                .linked
+                .load(Ordering::Relaxed)
+        {
             return None;
         }
         Some(WaitGuard {
@@ -322,14 +342,12 @@ impl<'a, T: Clone + 'a> Drop for WaitGuard<'a, T> {
 /// [WaitIterator] iteratres from the position of the provided guard forward.  At each step the
 /// iterator will give a guard that lives at least as long as the [WaitIterator]'s lifetime.
 #[derive(Debug)]
-pub struct WaitIterator<'a, T: Clone + 'a>
-{
+pub struct WaitIterator<'a, T: Clone + 'a> {
     guard: &'a WaitGuard<'a, T>,
     index: u64,
 }
 
-impl<'a, T: Clone + 'a> WaitIterator<'a, T> {
-}
+impl<'a, T: Clone + 'a> WaitIterator<'a, T> {}
 
 impl<'a, T: Clone + 'a> Iterator for WaitIterator<'a, T> {
     type Item = WaitGuard<'a, T>;
@@ -380,73 +398,73 @@ mod tests {
         assert_eq!(7, waiter7.index);
 
         {
-        // 0
-        let mut iter = waiter0.iter();
-        assert_eq!(0, iter.next().unwrap().index);
-        assert_eq!(1, iter.next().unwrap().index);
-        assert_eq!(2, iter.next().unwrap().index);
-        assert_eq!(3, iter.next().unwrap().index);
-        assert_eq!(4, iter.next().unwrap().index);
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 0
+            let mut iter = waiter0.iter();
+            assert_eq!(0, iter.next().unwrap().index);
+            assert_eq!(1, iter.next().unwrap().index);
+            assert_eq!(2, iter.next().unwrap().index);
+            assert_eq!(3, iter.next().unwrap().index);
+            assert_eq!(4, iter.next().unwrap().index);
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 1
-        let mut iter = waiter1.iter();
-        assert_eq!(1, iter.next().unwrap().index);
-        assert_eq!(2, iter.next().unwrap().index);
-        assert_eq!(3, iter.next().unwrap().index);
-        assert_eq!(4, iter.next().unwrap().index);
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 1
+            let mut iter = waiter1.iter();
+            assert_eq!(1, iter.next().unwrap().index);
+            assert_eq!(2, iter.next().unwrap().index);
+            assert_eq!(3, iter.next().unwrap().index);
+            assert_eq!(4, iter.next().unwrap().index);
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 2
-        let mut iter = waiter2.iter();
-        assert_eq!(2, iter.next().unwrap().index);
-        assert_eq!(3, iter.next().unwrap().index);
-        assert_eq!(4, iter.next().unwrap().index);
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 2
+            let mut iter = waiter2.iter();
+            assert_eq!(2, iter.next().unwrap().index);
+            assert_eq!(3, iter.next().unwrap().index);
+            assert_eq!(4, iter.next().unwrap().index);
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 3
-        let mut iter = waiter3.iter();
-        assert_eq!(3, iter.next().unwrap().index);
-        assert_eq!(4, iter.next().unwrap().index);
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 3
+            let mut iter = waiter3.iter();
+            assert_eq!(3, iter.next().unwrap().index);
+            assert_eq!(4, iter.next().unwrap().index);
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 4
-        let mut iter = waiter4.iter();
-        assert_eq!(4, iter.next().unwrap().index);
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 4
+            let mut iter = waiter4.iter();
+            assert_eq!(4, iter.next().unwrap().index);
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 5
-        let mut iter = waiter5.iter();
-        assert_eq!(5, iter.next().unwrap().index);
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 5
+            let mut iter = waiter5.iter();
+            assert_eq!(5, iter.next().unwrap().index);
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 6
-        let mut iter = waiter6.iter();
-        assert_eq!(6, iter.next().unwrap().index);
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 6
+            let mut iter = waiter6.iter();
+            assert_eq!(6, iter.next().unwrap().index);
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
 
-        // 7
-        let mut iter = waiter7.iter();
-        assert_eq!(7, iter.next().unwrap().index);
-        assert!(iter.next().is_none());
+            // 7
+            let mut iter = waiter7.iter();
+            assert_eq!(7, iter.next().unwrap().index);
+            assert!(iter.next().is_none());
         }
 
         wait_list.unlink(waiter0);

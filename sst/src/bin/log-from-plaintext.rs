@@ -27,7 +27,9 @@ impl Default for LogFromPlaintextOptions {
 }
 
 fn main() {
-    let (cmdline, _) = LogFromPlaintextOptions::from_command_line("Usage: log-from-plaintext --plaintext <FILE> --log <FILE>");
+    let (cmdline, _) = LogFromPlaintextOptions::from_command_line(
+        "Usage: log-from-plaintext --plaintext <FILE> --log <FILE>",
+    );
     // setup fin
     let plaintext = File::open(cmdline.plaintext).expect("could not open plaintext");
     let plaintext = BufReader::new(plaintext);

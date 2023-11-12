@@ -6,9 +6,9 @@ use prototk_derive::Message;
 
 ///////////////////////////////////////////// SensorID /////////////////////////////////////////////
 
-generate_id!{SensorID, "sensor:"}
-generate_id_prototk!{SensorID}
-generate_id_tuple_element!{SensorID}
+generate_id! {SensorID, "sensor:"}
+generate_id_prototk! {SensorID}
+generate_id_tuple_element! {SensorID}
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
@@ -20,9 +20,7 @@ pub struct CounterPb {
 
 impl From<u64> for CounterPb {
     fn from(count: u64) -> Self {
-        Self {
-            count,
-        }
+        Self { count }
     }
 }
 
@@ -36,9 +34,7 @@ pub struct GaugePb {
 
 impl From<f64> for GaugePb {
     fn from(value: f64) -> Self {
-        Self {
-            value,
-        }
+        Self { value }
     }
 }
 

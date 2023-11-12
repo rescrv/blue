@@ -65,7 +65,10 @@ pub fn register_biometrics(collector: &mut Collector) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ClientOptions {
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Number of channels to establish."))]
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(optional, "Number of channels to establish.")
+    )]
     pub channels: usize,
     #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
     pub ssl_verify_none: bool,
@@ -194,7 +197,10 @@ struct ChannelCoordination {
 }
 
 impl Coordination<MonitorState<'_>> for ChannelCoordination {
-    fn acquire<'a: 'b, 'b>(mut mtx: MutexGuard<'a, Self>, ms: &'b mut MonitorState<'_>) -> (bool, MutexGuard<'a, Self>) {
+    fn acquire<'a: 'b, 'b>(
+        mut mtx: MutexGuard<'a, Self>,
+        ms: &'b mut MonitorState<'_>,
+    ) -> (bool, MutexGuard<'a, Self>) {
         mtx.enqueued_requests.append(&mut ms.requests);
         while mtx.has_sender && !ms.sht.is_set() {
             mtx.senders_waiting += 1;
@@ -213,7 +219,10 @@ impl Coordination<MonitorState<'_>> for ChannelCoordination {
         }
     }
 
-    fn release<'a: 'b, 'b>(mut mtx: MutexGuard<'a, Self>, ms: &'b mut MonitorState<'_>) -> MutexGuard<'a, Self> {
+    fn release<'a: 'b, 'b>(
+        mut mtx: MutexGuard<'a, Self>,
+        ms: &'b mut MonitorState<'_>,
+    ) -> MutexGuard<'a, Self> {
         mtx.has_sender = false;
         if mtx.senders_waiting > 0 {
             ms.cv.notify_one();
@@ -234,25 +243,22 @@ impl ChannelCriticalSection {
         DO_READ.click();
         let mut buffers: Vec<Vec<u8>> = Vec::new();
         let buffers_mut = &mut buffers;
-        let f = |buf| {
-            buffers_mut.push(buf)
-        };
+        let f = |buf| buffers_mut.push(buf);
         let would_block = match self.channel.do_recv_work(f) {
             Ok(would_block) => would_block,
             Err(err) => {
                 ms.sht.set_error(err);
                 return false;
-            },
+            }
         };
-        'buffersing:
-        for buffer in buffers.into_iter() {
+        'buffersing: for buffer in buffers.into_iter() {
             let mut up = Unpacker::new(&buffer);
             let resp: rpc_pb::Response = match up.unpack() {
                 Ok(resp) => resp,
                 Err(err) => {
                     ms.sht.set_error(err.into());
                     continue 'buffersing;
-                },
+                }
             };
             if let Some(handle) = ms.table.get_state(resp.seq_no) {
                 handle.set_response(buffer);
@@ -264,7 +270,7 @@ impl ChannelCriticalSection {
     fn do_write<'a: 'b, 'b>(&'a mut self, ms: &'b mut MonitorState<'_>) -> bool {
         DO_WRITE.click();
         match self.channel.do_send_work() {
-            Ok(write) => { write },
+            Ok(write) => write,
             Err(err) => {
                 ms.sht.set_error(err);
                 true
@@ -290,7 +296,7 @@ impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
             });
             return;
         }
-        let mut events = libc::POLLIN|libc::POLLOUT|libc::POLLERR|libc::POLLHUP;
+        let mut events = libc::POLLIN | libc::POLLOUT | libc::POLLERR | libc::POLLHUP;
         while !ms.sht.is_set() {
             let mut pfd = libc::pollfd {
                 fd: self.channel.as_raw_fd(),
@@ -313,7 +319,7 @@ impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
             if pfd.revents & libc::POLLOUT != 0 && !self.do_write(ms) {
                 events &= !libc::POLLOUT;
             }
-            if pfd.revents & (libc::POLLERR|libc::POLLHUP) != 0 {
+            if pfd.revents & (libc::POLLERR | libc::POLLHUP) != 0 {
                 self.close = true;
             }
         }
@@ -337,9 +343,7 @@ struct HostKey {
 
 impl From<HostID> for HostKey {
     fn from(host_id: HostID) -> Self {
-        Self {
-            host_id,
-        }
+        Self { host_id }
     }
 }
 
@@ -394,7 +398,9 @@ impl<'a, 'b, 'c, R: Resolver> ChannelHandle<'a, 'b, 'c, R> {
 /////////////////////////////////////// ChannelManangerTrait ///////////////////////////////////////
 
 trait ChannelManagerTrait<R: Resolver> {
-    type ChannelHandle<'c> where Self: 'c;
+    type ChannelHandle<'c>
+    where
+        Self: 'c;
     type MonitoredChannel;
 
     fn new(options: ClientOptions, resolver: R) -> Self;
@@ -426,9 +432,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
     }
 
     fn get_channel(&self) -> Result<ChannelHandle<'a, 'b, '_, R>, rpc_pb::Error> {
-        let resolved = {
-            self.resolver.lock().unwrap().resolve()?
-        };
+        let resolved = { self.resolver.lock().unwrap().resolve()? };
         loop {
             {
                 let channels = self.channels.lock().unwrap();
@@ -449,8 +453,13 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         }
     }
 
-    fn establish_channel(&self, host: &Host) -> Result<Arc<MonitoredChannel<'a, 'b>>, rpc_pb::Error> {
-        let establish = self.connecting.get_or_create_state(HostKey::from(host.host_id()));
+    fn establish_channel(
+        &self,
+        host: &Host,
+    ) -> Result<Arc<MonitoredChannel<'a, 'b>>, rpc_pb::Error> {
+        let establish = self
+            .connecting
+            .get_or_create_state(HostKey::from(host.host_id()));
         let mut done = establish.done.lock().unwrap();
         while done.0 && !done.1 {
             GET_CHANNEL_WAIT.click();
@@ -465,7 +474,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
                     done.0 = false;
                     establish.wait.notify_one();
                     return Err(err);
-                },
+                }
             };
             *establish.value.lock().unwrap() = Some(Arc::clone(&channel));
             self.register_channel(host, Arc::clone(&channel));
@@ -480,28 +489,32 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
     }
 
     fn new_channel(&self, host: &Host) -> Result<Arc<MonitoredChannel<'a, 'b>>, rpc_pb::Error> {
-        let mut builder =
-            SslConnector::builder(SslMethod::tls()).map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
+        let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|err| {
+            rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("could not build connector builder: {}", err),
-            })?;
+            }
+        })?;
         if self.options.ssl_verify_none {
             builder.set_verify(boring::ssl::SslVerifyMode::NONE);
         }
         let connector = builder.build();
         let stream = TcpStream::connect(host.connect())?;
-        let stream = connector
-            .connect(host.connect(), stream)
-            .map_err(|err| rpc_pb::Error::TransportFailure {
+        let stream = connector.connect(host.connect(), stream).map_err(|err| {
+            rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: format!("{}", err),
-            })?;
+            }
+        })?;
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let monitored_channel = MonitoredChannel {
-            monitor: Monitor::new(ChannelCoordination::default(), ChannelCriticalSection {
-                channel,
-                close: false,
-            }),
+            monitor: Monitor::new(
+                ChannelCoordination::default(),
+                ChannelCriticalSection {
+                    channel,
+                    close: false,
+                },
+            ),
             available: Condvar::new(),
             _a: std::marker::PhantomData,
         };
@@ -556,7 +569,7 @@ pub struct Client<'a: 'b, 'b, R: Resolver + Send + Sync> {
 
 impl<'a, 'b, R: Resolver + Send + Sync + 'static> Client<'a, 'b, R>
 where
-    'a: 'b
+    'a: 'b,
 {
     // NOTE(rescrv): allow new_ret_no_self because we want to return something that hides the
     // lifetimes on the client, making for beautiful code elsewhere.  Threading around two
@@ -570,7 +583,7 @@ where
         })
     }
 
-    fn get_any_channel(&self) -> Result<ChannelHandle<'a, 'b ,'_, R>, rpc_pb::Error> {
+    fn get_any_channel(&self) -> Result<ChannelHandle<'a, 'b, '_, R>, rpc_pb::Error> {
         self.channels.get_channel()
     }
 }
@@ -622,7 +635,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
                 Err(err) => {
                     chandle.kill();
                     return Err(err.into());
-                },
+                }
             };
             if let Some(rpc_error) = resp.rpc_error {
                 let mut up = Unpacker::new(rpc_error);
@@ -639,7 +652,8 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
                 chandle.kill();
                 Err(rpc_pb::Error::LogicError {
                     core: ErrorCore::default(),
-                    what: "missing rpc_error, service_error, and body; at least one should be set".to_owned(),
+                    what: "missing rpc_error, service_error, and body; at least one should be set"
+                        .to_owned(),
                 })
             }
         } else {
@@ -653,6 +667,9 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
     }
 }
 
-pub fn new_client<R: Resolver + Send + Sync + 'static>(options: ClientOptions, resolver: R) -> Arc<dyn rpc_pb::Client + Send + Sync> {
+pub fn new_client<R: Resolver + Send + Sync + 'static>(
+    options: ClientOptions,
+    resolver: R,
+) -> Arc<dyn rpc_pb::Client + Send + Sync> {
     Client::new(options, resolver)
 }

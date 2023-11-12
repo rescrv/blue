@@ -9,9 +9,7 @@ use super::{Cursor, Error, KeyRef, KeyValueRef, Sst, SstCursor};
 enum Position {
     First,
     Last,
-    Instantiated {
-        cursor: SstCursor,
-    },
+    Instantiated { cursor: SstCursor },
 }
 
 //////////////////////////////////////////// LazyCursor ////////////////////////////////////////////
@@ -63,15 +61,9 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
 
     fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         let cursor = match &mut self.position {
-            Position::First => {
-                self.establish_cursor()?
-            },
-            Position::Last => {
-                self.establish_cursor()?
-            },
-            Position::Instantiated { cursor } => {
-                cursor
-            },
+            Position::First => self.establish_cursor()?,
+            Position::Last => self.establish_cursor()?,
+            Position::Instantiated { cursor } => cursor,
         };
         cursor.seek(key)?;
         if cursor.key().is_none() {
@@ -82,7 +74,7 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
 
     fn prev(&mut self) -> Result<(), Error> {
         match &mut self.position {
-            Position::First => {},
+            Position::First => {}
             Position::Last => {
                 let cursor = self.establish_cursor()?;
                 cursor.seek_to_last()?;
@@ -90,13 +82,13 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
                 if cursor.key().is_none() {
                     self.position = Position::First;
                 }
-            },
-            Position::Instantiated { cursor }  => {
+            }
+            Position::Instantiated { cursor } => {
                 cursor.prev()?;
                 if cursor.key().is_none() {
                     self.position = Position::First;
                 }
-            },
+            }
         }
         Ok(())
     }
@@ -110,15 +102,14 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
                 if cursor.key().is_none() {
                     self.position = Position::Last;
                 }
-            },
-            Position::Last => {
-            },
-            Position::Instantiated { cursor }  => {
+            }
+            Position::Last => {}
+            Position::Instantiated { cursor } => {
                 cursor.prev()?;
                 if cursor.key().is_none() {
                     self.position = Position::Last;
                 }
-            },
+            }
         }
         Ok(())
     }

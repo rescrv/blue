@@ -37,7 +37,7 @@ pub enum Error {
     MissingLoader {
         #[prototk(1, string)]
         what: String,
-    }
+    },
 }
 
 ////////////////////////////////////////////// Caveat //////////////////////////////////////////////
@@ -493,7 +493,11 @@ impl RequestBuilder {
     }
 
     /// Prepare a request with the location and identifier provided.
-    pub fn prepare_request(&self, location: &str, identifier: &str) -> Result<(Macaroon, Vec<Macaroon>), Error> {
+    pub fn prepare_request(
+        &self,
+        location: &str,
+        identifier: &str,
+    ) -> Result<(Macaroon, Vec<Macaroon>), Error> {
         let root = self.get_loader_for(location)?.lookup(identifier)?;
         let mut discharges = Vec::new();
         let mut queue = VecDeque::new();
@@ -514,9 +518,19 @@ impl RequestBuilder {
         }
     }
 
-    fn enqueue_discharges(&self, macaroon: &Macaroon, discharges: &mut Vec<Macaroon>, queue: &mut VecDeque<usize>) -> Result<(), Error> {
+    fn enqueue_discharges(
+        &self,
+        macaroon: &Macaroon,
+        discharges: &mut Vec<Macaroon>,
+        queue: &mut VecDeque<usize>,
+    ) -> Result<(), Error> {
         for caveat in macaroon.caveats.iter() {
-            if let Caveat::ThirdParty { location, identifier, secret: _ } = caveat {
+            if let Caveat::ThirdParty {
+                location,
+                identifier,
+                secret: _,
+            } = caveat
+            {
                 let discharge = self.get_loader_for(location)?.lookup(identifier)?;
                 queue.push_back(discharges.len());
                 discharges.push(discharge);
@@ -940,7 +954,11 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 "bob@example.net".to_owned(),
                 tps,
             );
-            let mut discharge = Macaroon::new("http://example.net/auth".to_owned(), "bob@example.net".to_owned(), SECRET2);
+            let mut discharge = Macaroon::new(
+                "http://example.net/auth".to_owned(),
+                "bob@example.net".to_owned(),
+                SECRET2,
+            );
             macaroon.bind_discharge(&mut discharge);
             let verifier = Verifier::default();
             assert!(verifier.verify(&macaroon, &SECRET, &[]).is_err());

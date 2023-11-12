@@ -1,5 +1,5 @@
-pub use setsum::SETSUM_BYTES;
 use setsum::Setsum as RawSetsum;
+pub use setsum::SETSUM_BYTES;
 
 ////////////////////////////////////////////// Setsum //////////////////////////////////////////////
 
@@ -15,9 +15,7 @@ impl Setsum {
 
     pub fn from_digest(digest: [u8; SETSUM_BYTES]) -> Setsum {
         let setsum = RawSetsum::from_digest(digest);
-        Self {
-            setsum,
-        }
+        Self { setsum }
     }
 
     pub fn hexdigest(&self) -> String {
@@ -26,17 +24,17 @@ impl Setsum {
 
     pub fn from_hexdigest(digest: &str) -> Option<Setsum> {
         let setsum = RawSetsum::from_hexdigest(digest)?;
-        Some(Setsum {
-            setsum,
-        })
+        Some(Setsum { setsum })
     }
 
     pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
-        self.setsum.insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
+        self.setsum
+            .insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
     }
 
     pub fn del(&mut self, key: &[u8], timestamp: u64) {
-        self.setsum.insert_vectored(&[&[9], key, &timestamp.to_le_bytes()]);
+        self.setsum
+            .insert_vectored(&[&[9], key, &timestamp.to_le_bytes()]);
     }
 }
 

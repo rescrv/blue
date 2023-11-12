@@ -18,8 +18,12 @@ fn slow_setsum(opts: SstOptions, sst: &str) -> String {
         cursor.next().expect("next");
         if let Some(kvr) = cursor.value() {
             match kvr.value {
-                Some(v) => { setsum.put(kvr.key, kvr.timestamp, v); },
-                None => { setsum.del(kvr.key, kvr.timestamp); },
+                Some(v) => {
+                    setsum.put(kvr.key, kvr.timestamp, v);
+                }
+                None => {
+                    setsum.del(kvr.key, kvr.timestamp);
+                }
             }
         } else {
             break;
@@ -37,7 +41,8 @@ struct SstChecksumOptions {
 }
 
 fn main() {
-    let (cmdline, args) = SstChecksumOptions::from_command_line("Usage: sst-checksum [OPTIONS] [SSTs]");
+    let (cmdline, args) =
+        SstChecksumOptions::from_command_line("Usage: sst-checksum [OPTIONS] [SSTs]");
     for sst in args {
         if cmdline.fast {
             println!("{} {}", fast_setsum(cmdline.sst.clone(), &sst), sst);

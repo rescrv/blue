@@ -10,7 +10,9 @@ pub trait BitVector<'a>: Unpackable<'a> {
     /// The length of this [BitVector].  Always one more than the highest bit.
     fn len(&self) -> usize;
     /// A [BitVector] `is_empty` when it has zero bits.
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Computes `access[x]`, the value of the x'th bit.
     fn access(&self, x: usize) -> bool;
@@ -50,11 +52,14 @@ impl<'a> Unpackable<'a> for ReferenceBitVector {
             }
         }
         ranks.push(rank);
-        Ok((Self {
-            bits,
-            ranks,
-            selects,
-        }, &[]))
+        Ok((
+            Self {
+                bits,
+                ranks,
+                selects,
+            },
+            &[],
+        ))
     }
 }
 
@@ -91,7 +96,9 @@ pub trait OldBitVector {
 
     /// The length of this [BitVector].  Always one more than the highest bit.
     fn len(&self) -> usize;
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Computes `access[x]`, the value of the x'th bit.
     fn access(&self, x: usize) -> bool;
@@ -278,13 +285,13 @@ pub mod tests {
     macro_rules! test_BitVector {
         ($name:ident, $BV:ident) => {
             mod $name {
-                use super::{BitVector, TestBitVector};
                 use super::$BV;
+                use super::{BitVector, TestBitVector};
 
                 mod evens {
-                    use buffertk::Unpackable;
-                    use super::{BitVector, TestBitVector};
                     use super::$BV;
+                    use super::{BitVector, TestBitVector};
+                    use buffertk::Unpackable;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::evens::EVENS;
@@ -310,9 +317,9 @@ pub mod tests {
                 }
 
                 mod odds {
-                    use buffertk::Unpackable;
-                    use super::{BitVector, TestBitVector};
                     use super::$BV;
+                    use super::{BitVector, TestBitVector};
+                    use buffertk::Unpackable;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::odds::ODDS;
@@ -338,9 +345,9 @@ pub mod tests {
                 }
 
                 mod half_empty {
-                    use buffertk::Unpackable;
-                    use super::{BitVector, TestBitVector};
                     use super::$BV;
+                    use super::{BitVector, TestBitVector};
+                    use buffertk::Unpackable;
 
                     fn bitvector() -> $BV {
                         let case = $crate::bit_vector::tests::half_empty::HALF_EMPTY;

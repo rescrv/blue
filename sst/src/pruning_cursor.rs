@@ -26,10 +26,10 @@ impl<C: Cursor> PruningCursor<C> {
         match self.key() {
             Some(v) => {
                 self.skip_key = Some(v.key.to_vec());
-            },
+            }
             None => {
                 self.skip_key = None;
-            },
+            }
         }
     }
 }
@@ -68,7 +68,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                     None => {
                         self.skip_key = None;
                         return Ok(());
-                    },
+                    }
                 };
                 if compare_bytes(self.skip_key.as_ref().unwrap(), kr.key) != Ordering::Equal {
                     self.skip_key = None;
@@ -83,7 +83,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                 None => {
                     self.skip_key = None;
                     return Ok(());
-                },
+                }
             };
             let target_key = kr.key.to_vec();
             // Loop until we overrun and then reverse by one.
@@ -115,7 +115,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                         context: "should be positioned at some key with a value".to_string(),
                     };
                     return Err(err);
-                },
+                }
             };
             assert!(kvr.timestamp <= self.timestamp);
             assert!(compare_bytes(kvr.key, &target_key) == Ordering::Equal);
@@ -137,13 +137,14 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
                 Some(kvr) => kvr,
                 None => {
                     return Ok(());
-                },
+                }
             };
             if kvr.timestamp < self.timestamp && kvr.value.is_none() {
                 self.set_skip_key();
             } else if kvr.timestamp < self.timestamp
                 && (self.skip_key.is_none()
-                    || compare_bytes(self.skip_key.as_ref().unwrap(), kvr.key) != Ordering::Equal) {
+                    || compare_bytes(self.skip_key.as_ref().unwrap(), kvr.key) != Ordering::Equal)
+            {
                 self.set_skip_key();
                 return Ok(());
             }

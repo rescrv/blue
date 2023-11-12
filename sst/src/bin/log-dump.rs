@@ -10,14 +10,31 @@ fn main() {
         while let Some(kvr) = log.next().unwrap() {
             match kvr.value {
                 Some(v) => {
-                    let key = String::from_utf8(kvr.key.iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap();
-                    let value = String::from_utf8(v.iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap();
+                    let key = String::from_utf8(
+                        kvr.key
+                            .iter()
+                            .flat_map(|b| std::ascii::escape_default(*b))
+                            .collect::<Vec<u8>>(),
+                    )
+                    .unwrap();
+                    let value = String::from_utf8(
+                        v.iter()
+                            .flat_map(|b| std::ascii::escape_default(*b))
+                            .collect::<Vec<u8>>(),
+                    )
+                    .unwrap();
                     println!("\"{}\" @ {} -> \"{}\"", key, kvr.timestamp, value);
-                },
+                }
                 None => {
-                    let key = String::from_utf8(kvr.key.iter().flat_map(|b| std::ascii::escape_default(*b)).collect::<Vec<u8>>()).unwrap();
+                    let key = String::from_utf8(
+                        kvr.key
+                            .iter()
+                            .flat_map(|b| std::ascii::escape_default(*b))
+                            .collect::<Vec<u8>>(),
+                    )
+                    .unwrap();
                     println!("\"{}\" @ {} -> <TOMBSTONE>", key, kvr.timestamp);
-                },
+                }
             }
         }
     }

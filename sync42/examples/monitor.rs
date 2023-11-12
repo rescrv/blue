@@ -34,7 +34,10 @@ struct CoalesceWrites {
 }
 
 impl Coordination<WriteState<'_>> for CoalesceWrites {
-    fn acquire<'a: 'b, 'b>(mut guard: MutexGuard<'a, Self>, ws: &'b mut WriteState<'_>) -> (bool, MutexGuard<'a, Self>) {
+    fn acquire<'a: 'b, 'b>(
+        mut guard: MutexGuard<'a, Self>,
+        ws: &'b mut WriteState<'_>,
+    ) -> (bool, MutexGuard<'a, Self>) {
         loop {
             if !guard.writer_has_it {
                 WRITER_TAKES_IT.click();
@@ -55,7 +58,10 @@ impl Coordination<WriteState<'_>> for CoalesceWrites {
         }
     }
 
-    fn release<'a: 'b, 'b>(mut guard: MutexGuard<'a, Self>, ws: &'b mut WriteState<'_>) -> MutexGuard<'a, Self> {
+    fn release<'a: 'b, 'b>(
+        mut guard: MutexGuard<'a, Self>,
+        ws: &'b mut WriteState<'_>,
+    ) -> MutexGuard<'a, Self> {
         guard.writer_has_it = false;
         if guard.writer_waiting {
             RELEASE_NOTIFIES.click();
@@ -65,8 +71,7 @@ impl Coordination<WriteState<'_>> for CoalesceWrites {
     }
 }
 
-struct WriteWithMutualExclusion {
-}
+struct WriteWithMutualExclusion {}
 
 impl WriteWithMutualExclusion {
     fn do_write(&mut self, write: String) {

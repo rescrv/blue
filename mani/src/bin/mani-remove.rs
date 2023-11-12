@@ -3,7 +3,8 @@ use arrrg::CommandLine;
 use mani::{Edit, Manifest, ManifestOptions};
 
 fn main() {
-    let (options, roots) = ManifestOptions::from_command_line("USAGE: mani-remove [OPTIONS] <root>");
+    let (options, roots) =
+        ManifestOptions::from_command_line("USAGE: mani-remove [OPTIONS] <root>");
     if roots.len() != 1 {
         eprintln!("must provide exactly one manifest root");
         std::process::exit(1);

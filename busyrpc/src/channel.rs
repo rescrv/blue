@@ -48,7 +48,10 @@ pub struct Channel {
 
 impl Channel {
     /// Create a new Channel from an established SSL-wrapped TcpStream.
-    pub fn new(stream: SslStream<TcpStream>, mut send_buf_sz: usize) -> Result<Self, rpc_pb::Error> {
+    pub fn new(
+        stream: SslStream<TcpStream>,
+        mut send_buf_sz: usize,
+    ) -> Result<Self, rpc_pb::Error> {
         NEW_CHANNEL.click();
         if send_buf_sz < 64 {
             send_buf_sz = 64;
@@ -117,18 +120,16 @@ impl Channel {
             }
             let amt = match self.stream.ssl_write(self.send_buf.bytes()) {
                 Ok(amt) => amt,
-                Err(err) => {
-                    match err.code() {
-                        ErrorCode::WANT_WRITE => {
-                            WANT_SEND.click();
-                            return Ok(true);
-                        },
-                        _ => {
-                            return Err(rpc_pb::Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            });
-                        },
+                Err(err) => match err.code() {
+                    ErrorCode::WANT_WRITE => {
+                        WANT_SEND.click();
+                        return Ok(true);
+                    }
+                    _ => {
+                        return Err(rpc_pb::Error::TransportFailure {
+                            core: ErrorCore::default(),
+                            what: err.to_string(),
+                        });
                     }
                 },
             };
@@ -157,27 +158,25 @@ impl Channel {
                         core: ErrorCore::default(),
                         what: "socket closed".to_string(),
                     });
-                },
+                }
                 Ok(sz) => {
                     READ_SIZE.add(sz as f64);
                     if self.recv_buf.read_bytes(&local_buffer[..sz], &mut f)? > 0 {
                         return Ok(false);
                     }
-                },
+                }
                 Err(err) => {
                     return match err.code() {
                         ErrorCode::WANT_READ => {
                             WANT_RECV.click();
                             Ok(true)
-                        },
-                        _ => {
-                            Err(rpc_pb::Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            })
-                        },
+                        }
+                        _ => Err(rpc_pb::Error::TransportFailure {
+                            core: ErrorCore::default(),
+                            what: err.to_string(),
+                        }),
                     };
-                },
+                }
             };
         }
     }

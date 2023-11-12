@@ -150,12 +150,8 @@ impl<M: Monitor + 'static> State<M> {
                 self.sticky = None;
                 true
             }
-            Some(_) => {
-                false
-            }
-            None => {
-                false
-            }
+            Some(_) => false,
+            None => false,
         }
     }
 }
@@ -449,8 +445,7 @@ impl Monitor for BelowThreshold {
         self.label
     }
 
-    fn witness(&self) -> Self::State {
-    }
+    fn witness(&self) -> Self::State {}
 
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();
@@ -489,8 +484,7 @@ impl Monitor for AboveThreshold {
         self.label
     }
 
-    fn witness(&self) -> Self::State {
-    }
+    fn witness(&self) -> Self::State {}
 
     fn evaluate(&self, _: &Self::State) -> Condition {
         let current: f64 = self.gauge.read();

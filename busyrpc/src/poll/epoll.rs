@@ -4,7 +4,7 @@ use std::os::fd::RawFd;
 
 use biometrics::{Collector, Counter};
 
-use super::{Events, Pollster, POLLIN, POLLOUT, POLLERR, POLLHUP};
+use super::{Events, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -68,18 +68,13 @@ impl Epollster {
         if ret < 1 {
             return Err(std::io::Error::last_os_error().into());
         }
-        Ok(Self {
-            epoll_inst: ret,
-        })
+        Ok(Self { epoll_inst: ret })
     }
 }
 
 impl Pollster for Epollster {
     fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::Error> {
-        let mut ep_event = libc::epoll_event {
-            events: 0,
-            u64: 0,
-        };
+        let mut ep_event = libc::epoll_event { events: 0, u64: 0 };
         let ret = unsafe { libc::epoll_wait(self.epoll_inst, &mut ep_event, 1, millis) };
         if ret < 0 && unsafe { *libc::__errno_location() } == libc::EINTR {
             Ok(None)
@@ -88,12 +83,15 @@ impl Pollster for Epollster {
         } else if ret == 0 {
             Ok(None)
         } else {
-            Ok(Some((ep_event.u64 as RawFd, map_ep_to_events(ep_event.events))))
+            Ok(Some((
+                ep_event.u64 as RawFd,
+                map_ep_to_events(ep_event.events),
+            )))
         }
     }
 
     fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::Error> {
-        let mut ev = POLLIN|POLLERR|POLLHUP;
+        let mut ev = POLLIN | POLLERR | POLLHUP;
         if send {
             ev |= POLLOUT;
         }
@@ -102,7 +100,8 @@ impl Pollster for Epollster {
             u64: fd as u64,
         };
         POLL_MOD.click();
-        let ret = unsafe { libc::epoll_ctl(self.epoll_inst, libc::EPOLL_CTL_MOD, fd, &mut ep_event) };
+        let ret =
+            unsafe { libc::epoll_ctl(self.epoll_inst, libc::EPOLL_CTL_MOD, fd, &mut ep_event) };
         let ret = if ret < 0 && unsafe { *libc::__errno_location() } == libc::ENOENT {
             POLL_ADD.click();
             unsafe { libc::epoll_ctl(self.epoll_inst, libc::EPOLL_CTL_ADD, fd, &mut ep_event) }

@@ -43,11 +43,13 @@ pub trait CommandLine: Sized + Default + Eq + PartialEq {
         let mut free_p = free.clone();
         reconstructed_args.append(&mut free_p);
         if args != reconstructed_args {
-            panic!("non-canonical commandline specified:
+            panic!(
+                "non-canonical commandline specified:
 provided: {:?}
 expected: {:?}
 check argument order amongst other differences",
-                   &args, reconstructed_args);
+                &args, reconstructed_args
+            );
         }
         (command_line, free)
     }
@@ -63,15 +65,15 @@ check argument order amongst other differences",
         command_line.add_opts(None, &mut opts);
 
         let matches = match opts.parse(args) {
-            Ok(matches) => { matches },
+            Ok(matches) => matches,
             Err(Fail::OptionMissing(which)) => {
                 eprintln!("missing argument: --{}", which);
                 command_line.usage(opts, usage);
-            },
+            }
             Err(err) => {
                 eprintln!("could not parse command line: {}", err);
                 std::process::exit(64);
-            },
+            }
         };
         if matches.opt_present("h") {
             command_line.usage(opts, usage);
@@ -94,8 +96,10 @@ check argument order amongst other differences",
 #[doc(hidden)]
 pub fn getopt_str(prefix: Option<&str>, field_arg: &str) -> String {
     match prefix {
-        Some(prefix) => { format!("{}-{}", prefix, field_arg) },
-        None => { field_arg.to_string() },
+        Some(prefix) => {
+            format!("{}-{}", prefix, field_arg)
+        }
+        None => field_arg.to_string(),
     }
 }
 
@@ -114,6 +118,6 @@ where
         Ok(t) => t,
         Err(err) => {
             panic!("field --{} is unparseable: {}", arg_str, err);
-        },
+        }
     }
 }

@@ -4,36 +4,43 @@ use zerror_derive::ZerrorCore;
 
 #[derive(ZerrorCore)]
 pub enum SampleError {
-    Success {
-        core: ErrorCore,
-    },
-    Failure {
-        core: ErrorCore,
-    },
-    FailureWithString {
-        core: ErrorCore,
-        what: String,
-    },
+    Success { core: ErrorCore },
+    Failure { core: ErrorCore },
+    FailureWithString { core: ErrorCore, what: String },
 }
 
-iotoz!{SampleError}
+iotoz! {SampleError}
 
 #[test]
 fn core() {
-    let err = SampleError::Success { core: ErrorCore::default() };
+    let err = SampleError::Success {
+        core: ErrorCore::default(),
+    };
     let _core = err.core();
-    let err = SampleError::Failure { core: ErrorCore::default() };
+    let err = SampleError::Failure {
+        core: ErrorCore::default(),
+    };
     let _core = err.core();
-    let err = SampleError::FailureWithString { core: ErrorCore::default(), what: "Some string".to_owned() };
+    let err = SampleError::FailureWithString {
+        core: ErrorCore::default(),
+        what: "Some string".to_owned(),
+    };
     let _core = err.core();
 }
 
 #[test]
 fn core_mut() {
-    let mut err = SampleError::Success { core: ErrorCore::default() };
+    let mut err = SampleError::Success {
+        core: ErrorCore::default(),
+    };
     let _core = err.core_mut();
-    let mut err = SampleError::Failure { core: ErrorCore::default() };
+    let mut err = SampleError::Failure {
+        core: ErrorCore::default(),
+    };
     let _core = err.core_mut();
-    let mut err = SampleError::FailureWithString { core: ErrorCore::default(), what: "Some string".to_owned() };
+    let mut err = SampleError::FailureWithString {
+        core: ErrorCore::default(),
+        what: "Some string".to_owned(),
+    };
     let _core = err.core_mut();
 }

@@ -4,7 +4,7 @@ use arrrg::CommandLine;
 
 use biometrics::{Collector, PlainTextEmitter};
 
-use split_channel::{SplitChannelOptions, RecvChannel, SendChannel};
+use split_channel::{RecvChannel, SendChannel, SplitChannelOptions};
 
 fn main() {
     std::thread::spawn(|| {
@@ -20,17 +20,17 @@ fn main() {
         }
     });
 
-    let (options, free) = SplitChannelOptions::from_command_line_relaxed("Usage: split_channel-benchmark-server [OPTIONS]");
+    let (options, free) = SplitChannelOptions::from_command_line_relaxed(
+        "Usage: split_channel-benchmark-server [OPTIONS]",
+    );
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }
     let listener = options.bind_to().expect("bind-to");
 
-    let handle_client = |mut recv_chan: RecvChannel, mut send_chan: SendChannel| {
-        loop {
-            let buf = recv_chan.recv().expect("recv");
-            send_chan.send(&buf).expect("send");
-        }
+    let handle_client = |mut recv_chan: RecvChannel, mut send_chan: SendChannel| loop {
+        let buf = recv_chan.recv().expect("recv");
+        send_chan.send(&buf).expect("send");
     };
     let mut threads = Vec::new();
     for stream in listener {
@@ -40,7 +40,9 @@ fn main() {
                     handle_client(recv_chan, send_chan);
                 }));
             }
-            Err(e) => { eprintln!("failure: {}", e); }
+            Err(e) => {
+                eprintln!("failure: {}", e);
+            }
         }
     }
     for thread in threads.into_iter() {

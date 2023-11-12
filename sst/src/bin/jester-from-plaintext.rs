@@ -14,7 +14,8 @@ struct JesterFromPlaintextOptions {
 }
 
 fn main() {
-    let (opts, inputs) = JesterFromPlaintextOptions::from_command_line("Usage: jester-from-plaintext [OPTIONS]");
+    let (opts, inputs) =
+        JesterFromPlaintextOptions::from_command_line("Usage: jester-from-plaintext [OPTIONS]");
     let mut jester = Jester::new(opts.ingest.clone());
     for input in inputs.into_iter() {
         let plaintext = File::open(input).expect("could not open plaintext");
@@ -25,7 +26,8 @@ fn main() {
             if split.len() != 2 {
                 panic!("Invalid line: {}", line);
             }
-            jester.put(split[0].as_bytes(), idx as u64, split[1].as_bytes())
+            jester
+                .put(split[0].as_bytes(), idx as u64, split[1].as_bytes())
                 .expect("could not put key-value pair");
         }
     }

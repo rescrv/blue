@@ -11,8 +11,7 @@ struct Garbage {
     cleanup: Box<dyn FnOnce() + Send + Sync>,
 }
 
-impl Eq for Garbage {
-}
+impl Eq for Garbage {}
 
 impl PartialEq for Garbage {
     fn eq(&self, garbage: &Garbage) -> bool {
@@ -81,7 +80,8 @@ impl<'a> ThreadState<'a> {
 
             // Find the timestamp of the last transition.  We will check this at the end and break
             // out of the loop if it remains unchanged.
-            let last_online_timestamp = self.collector.last_online_timestamp.load(Ordering::Acquire);
+            let last_online_timestamp =
+                self.collector.last_online_timestamp.load(Ordering::Acquire);
 
             for (idx, node) in self.collector.nodes.iter().enumerate() {
                 if idx != self.index {
@@ -102,7 +102,8 @@ impl<'a> ThreadState<'a> {
             // timestamps will show up.
             self.collector.read_timestamp();
 
-            if last_online_timestamp == self.collector.last_online_timestamp.load(Ordering::Acquire) {
+            if last_online_timestamp == self.collector.last_online_timestamp.load(Ordering::Acquire)
+            {
                 break (timestamp, min_timestamp);
             }
         };
@@ -111,7 +112,9 @@ impl<'a> ThreadState<'a> {
         // No need to force quiescent_timestamp to be visible with a call to read_timestamp()
         // because it's strictly increasing, and seeing a lower value only delays garbage
         // collection, but cannot hurt safety.
-        self.node().quiescent_timestamp.store(timestamp, Ordering::Release);
+        self.node()
+            .quiescent_timestamp
+            .store(timestamp, Ordering::Release);
         self.node().purge(min_timestamp);
     }
 
@@ -122,8 +125,12 @@ impl<'a> ThreadState<'a> {
         assert!(self.node().offline_timestamp.load(Ordering::Relaxed) < timestamp);
         // NOTE(rescrv): Store offline timestamp first so that any acquire read of quiescent
         // timestamp will pick it up.  We will read in reverse order elsewhere.
-        self.node().offline_timestamp.store(timestamp, Ordering::Release);
-        self.node().quiescent_timestamp.store(timestamp, Ordering::Release);
+        self.node()
+            .offline_timestamp
+            .store(timestamp, Ordering::Release);
+        self.node()
+            .quiescent_timestamp
+            .store(timestamp, Ordering::Release);
         self.collector.read_timestamp();
     }
 
@@ -132,9 +139,22 @@ impl<'a> ThreadState<'a> {
         let timestamp = self.collector.read_timestamp();
         assert!(self.node().quiescent_timestamp.load(Ordering::Relaxed) < timestamp);
         assert!(self.node().offline_timestamp.load(Ordering::Relaxed) < timestamp);
-        self.node().quiescent_timestamp.store(timestamp, Ordering::Release);
-        let mut last_online_timestamp = self.collector.last_online_timestamp.load(Ordering::Relaxed);
-        while self.collector.last_online_timestamp.compare_exchange(last_online_timestamp, timestamp, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+        self.node()
+            .quiescent_timestamp
+            .store(timestamp, Ordering::Release);
+        let mut last_online_timestamp =
+            self.collector.last_online_timestamp.load(Ordering::Relaxed);
+        while self
+            .collector
+            .last_online_timestamp
+            .compare_exchange(
+                last_online_timestamp,
+                timestamp,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
             last_online_timestamp = self.collector.last_online_timestamp.load(Ordering::Relaxed);
         }
         self.collector.read_timestamp();
@@ -144,10 +164,11 @@ impl<'a> ThreadState<'a> {
     pub fn collect<F: FnOnce() + Send + Sync + 'static>(&mut self, cleanup: F) {
         let timestamp = self.collector.read_timestamp();
         let cleanup = Box::new(cleanup);
-        self.node().collected.lock().unwrap().push(Garbage {
-            timestamp,
-            cleanup,
-        });
+        self.node()
+            .collected
+            .lock()
+            .unwrap()
+            .push(Garbage { timestamp, cleanup });
     }
 
     fn node(&self) -> &ThreadStateNode {
@@ -157,7 +178,9 @@ impl<'a> ThreadState<'a> {
 
 impl<'a> Drop for ThreadState<'a> {
     fn drop(&mut self) {
-        self.collector.nodes[self.index].in_use.store(false, Ordering::Release);
+        self.collector.nodes[self.index]
+            .in_use
+            .store(false, Ordering::Release);
         self.collector.free.lock().unwrap().push_back(self.index);
     }
 }
@@ -170,7 +193,7 @@ pub struct Collector {
     watermark_timestamp: AtomicU64,
     last_online_timestamp: AtomicU64,
     nodes: Vec<ThreadStateNode>,
-    free: Mutex<VecDeque<usize>>, 
+    free: Mutex<VecDeque<usize>>,
 }
 
 impl Collector {
@@ -211,7 +234,11 @@ impl Collector {
 
     fn update_watermark(&self, timestamp: u64) {
         let mut value = self.watermark_timestamp.load(Ordering::Relaxed);
-        while self.watermark_timestamp.compare_exchange(value, timestamp, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+        while self
+            .watermark_timestamp
+            .compare_exchange(value, timestamp, Ordering::AcqRel, Ordering::Relaxed)
+            .is_err()
+        {
             value = self.watermark_timestamp.load(Ordering::Relaxed);
         }
     }

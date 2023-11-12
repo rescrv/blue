@@ -10,8 +10,8 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    LOGIC_ERROR, CORRUPTION, check_key_len, check_table_size, check_value_len, compare_bytes, compare_key,
-    Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef,
+    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Builder, Cursor,
+    Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef, CORRUPTION, LOGIC_ERROR,
 };
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
@@ -566,7 +566,7 @@ impl Cursor for BlockCursor {
             }
             .with_variable("left", left)
             .with_variable("right", right);
-            return Err(err)
+            return Err(err);
         }
 
         // We position at the left restart point

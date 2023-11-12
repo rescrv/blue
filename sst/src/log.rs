@@ -12,8 +12,11 @@ use prototk_derive::Message;
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{check_key_len, check_value_len, check_table_size, compare_key, Builder, Error, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE};
 use super::setsum::Setsum;
+use super::{
+    check_key_len, check_table_size, check_value_len, compare_key, Builder, Error, KeyValueDel,
+    KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE,
+};
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -76,7 +79,7 @@ impl Default for LogOptions {
         Self {
             write_buffer: BUFFER_SIZE as usize,
             read_buffer: BUFFER_SIZE as usize,
-            rollover_size: 1<<22,
+            rollover_size: 1 << 22,
         }
     }
 }
@@ -92,7 +95,11 @@ pub struct LogBuilder<W: Write> {
 
 impl LogBuilder<File> {
     pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
-        let file: File = OpenOptions::new().create_new(true).read(true).write(true).open(file_name)?;
+        let file: File = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(file_name)?;
         Self::from_write(options, file)
     }
 
@@ -250,7 +257,10 @@ pub struct LogIterator<R: Read + Seek> {
 
 impl LogIterator<File> {
     pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
-        let file: File = OpenOptions::new().create(false).read(true).open(file_name)?;
+        let file: File = OpenOptions::new()
+            .create(false)
+            .read(true)
+            .open(file_name)?;
         Self::from_reader(options, file)
     }
 }
@@ -271,7 +281,7 @@ impl<R: Read + Seek> LogIterator<R> {
             Some(header) => header,
             None => {
                 return Ok(None);
-            },
+            }
         };
         if header.discriminant == HEADER_WHOLE {
             // pass
@@ -285,7 +295,7 @@ impl<R: Read + Seek> LogIterator<R> {
                         context: "truncation: no second header".to_owned(),
                     }
                     .with_variable("header1", header));
-                },
+                }
             };
             if header2.discriminant != HEADER_SECOND {
                 return Err(Error::Corruption {
@@ -315,7 +325,7 @@ impl<R: Read + Seek> LogIterator<R> {
             Some(header) => header,
             None => {
                 return Ok(None);
-            },
+            }
         };
         let buffer_start_sz = self.buffer.len();
         let buffer_new_sz = buffer_start_sz + header.size as usize;
@@ -335,8 +345,7 @@ impl<R: Read + Seek> LogIterator<R> {
     }
 
     fn next_header(&mut self) -> Result<Option<Header>, Error> {
-        'looping:
-        loop {
+        'looping: loop {
             let header_sz: &mut [u8] = &mut [0; 1];
             let header: &mut [u8] = &mut [0; HEADER_MAX_SIZE as usize];
             match self.input.read_exact(header_sz) {
@@ -347,7 +356,7 @@ impl<R: Read + Seek> LogIterator<R> {
                     } else {
                         return Err(err.into());
                     }
-                },
+                }
             };
             let header_sz: usize = header_sz[0] as usize;
             if header_sz == 0 {
@@ -371,7 +380,7 @@ impl<R: Read + Seek> LogIterator<R> {
                 }
                 .with_variable("size", header.size));
             }
-            return Ok(Some(header))
+            return Ok(Some(header));
         }
     }
 
@@ -391,7 +400,11 @@ impl<R: Read + Seek> LogIterator<R> {
     }
 }
 
-pub fn log_to_builder<P: AsRef<Path>, B: Builder>(log_options: LogOptions, log_path: P, mut builder: B) -> Result<B::Sealed, Error> {
+pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
+    log_options: LogOptions,
+    log_path: P,
+    mut builder: B,
+) -> Result<B::Sealed, Error> {
     let mut log_iter = LogIterator::new(log_options, log_path)?;
     let mut kvrs = Vec::new();
     while let Some(kvr) = log_iter.next().unwrap() {
@@ -403,8 +416,12 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(log_options: LogOptions, log_p
     kvrs.sort_by(sort_key);
     for kvr in kvrs.into_iter() {
         match kvr.value {
-            Some(v) => { builder.put(&kvr.key, kvr.timestamp, &v)?; },
-            None => { builder.del(&kvr.key, kvr.timestamp)?; },
+            Some(v) => {
+                builder.put(&kvr.key, kvr.timestamp, &v)?;
+            }
+            None => {
+                builder.del(&kvr.key, kvr.timestamp)?;
+            }
         }
     }
     builder.seal()
@@ -449,7 +466,8 @@ mod builder {
     #[test]
     fn empty() {
         let mut write = Vec::new();
-        let log = LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
+        let log =
+            LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
         drop(log);
         let exp: &[u8] = &[];
         let got: &[u8] = &write;
@@ -477,11 +495,7 @@ mod builder {
     fn crc32c_one() {
         let buf: &[u8] = &[
             66, 19, // tag, length of KeyValueEntry::Put
-
-            8, 0,
-            18, 3, 101, 102, 103,
-            24, 42,
-            34, 8, 1, 2, 3, 4, 5, 6, 7, 8
+            8, 0, 18, 3, 101, 102, 103, 24, 42, 34, 8, 1, 2, 3, 4, 5, 6, 7, 8,
         ];
         assert_eq!(0x5acc2712, crc32c::crc32c(buf));
     }
@@ -489,8 +503,10 @@ mod builder {
     #[test]
     fn insert_one() {
         let mut write = Vec::new();
-        let mut log = LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
-        log.put(&[101, 102, 103], 42, &[1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        let mut log =
+            LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
+        log.put(&[101, 102, 103], 42, &[1, 2, 3, 4, 5, 6, 7, 8])
+            .unwrap();
         log.flush().unwrap();
         drop(log);
         let exp: &[u8] = &[
@@ -498,13 +514,11 @@ mod builder {
             80, 21, // size: uint64
             88, 1, // discriminant: uint32,
             101, 18, 39, 204, 90, // crc32c: fixed32
-
             66, 19, // tag, length of KeyValueEntry::Put
-
             8, 0, // shared
             18, 3, 101, 102, 103, // key_frag
             24, 42, // timestamp
-            34, 8, 1, 2, 3, 4, 5, 6, 7, 8 // value
+            34, 8, 1, 2, 3, 4, 5, 6, 7, 8, // value
         ];
         let got: &[u8] = &write;
         assert_eq!(exp, got);
@@ -513,7 +527,8 @@ mod builder {
     #[test]
     fn insert_across_boundary() {
         let mut write = Vec::new();
-        let mut log = LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
+        let mut log =
+            LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
         let key1 = vec!['A' as u8; 64];
         let value1 = vec!['B' as u8; 32768];
         let key2 = vec!['C' as u8; 64];
@@ -533,7 +548,7 @@ mod builder {
         let exp: &[u8] = &[
             66, 202, 128, 2, // tag, length of KeyValueEntry::Put
             8, 0, // shared
-            18, 64,  // key1_frag tag + sz
+            18, 64, // key1_frag tag + sz
         ];
         assert_eq!(exp, &write[12..20]);
         assert_eq!(&key1, &write[20..84]);
@@ -554,7 +569,7 @@ mod builder {
         let exp: &[u8] = &[
             66, 202, 128, 2, // tag, length of KeyValueEntry::Put
             8, 0, // shared
-            18, 64 // key2_frag tag + sz
+            18, 64, // key2_frag tag + sz
         ];
         assert_eq!(exp, &write[32870..32878]);
         assert_eq!(key2, &write[32878..32942]);

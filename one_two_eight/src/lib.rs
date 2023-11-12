@@ -211,17 +211,23 @@ macro_rules! generate_id_prototk {
             fn field_pack_sz(&self, tag: &::prototk::Tag) -> usize {
                 use buffertk::{stack_pack, Packable};
                 use prototk::{FieldPackHelper, FieldType, Message};
-                stack_pack(tag).pack(stack_pack(self).length_prefixed()).pack_sz()
+                stack_pack(tag)
+                    .pack(stack_pack(self).length_prefixed())
+                    .pack_sz()
             }
 
             fn field_pack(&self, tag: &::prototk::Tag, out: &mut [u8]) {
                 use buffertk::{stack_pack, Packable};
                 use prototk::{FieldPackHelper, FieldType, Message};
-                stack_pack(tag).pack(stack_pack(self).length_prefixed()).into_slice(out);
+                stack_pack(tag)
+                    .pack(stack_pack(self).length_prefixed())
+                    .into_slice(out);
             }
         }
 
-        impl<'a> ::prototk::FieldUnpackHelper<'a, ::prototk::field_types::message<$what>> for $what {
+        impl<'a> ::prototk::FieldUnpackHelper<'a, ::prototk::field_types::message<$what>>
+            for $what
+        {
             fn merge_field(&mut self, proto: ::prototk::field_types::message<$what>) {
                 *self = proto.unwrap_message();
             }
@@ -306,11 +312,30 @@ mod tests {
     #[test]
     fn next() {
         assert_eq!(FooID::BOTTOM, FooID::TOP.next());
-        let id = FooID { id: [0x55u8; BYTES] };
-        assert_eq!("foo:55555555-5555-5555-5555-555555555555", id.human_readable());
-        assert_eq!("foo:55555555-5555-5555-5555-555555555556", id.next().human_readable());
-        let id = FooID { id: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe] };
-        assert_eq!("foo:ffffffff-ffff-ffff-ffff-fffffffffffe", id.human_readable());
-        assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.next().human_readable());
+        let id = FooID {
+            id: [0x55u8; BYTES],
+        };
+        assert_eq!(
+            "foo:55555555-5555-5555-5555-555555555555",
+            id.human_readable()
+        );
+        assert_eq!(
+            "foo:55555555-5555-5555-5555-555555555556",
+            id.next().human_readable()
+        );
+        let id = FooID {
+            id: [
+                0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                0xff, 0xfe,
+            ],
+        };
+        assert_eq!(
+            "foo:ffffffff-ffff-ffff-ffff-fffffffffffe",
+            id.human_readable()
+        );
+        assert_eq!(
+            "foo:ffffffff-ffff-ffff-ffff-ffffffffffff",
+            id.next().human_readable()
+        );
     }
 }

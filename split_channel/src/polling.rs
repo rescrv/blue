@@ -125,10 +125,7 @@ impl OsPoll for Epoll {
             (index + 1).ilog2() as usize
         };
         NEW_THREAD.click();
-        ThreadState {
-            ratio,
-            offset: 0,
-        }
+        ThreadState { ratio, offset: 0 }
     }
 
     fn insert(&self, fd: RawFd) -> Result<(), Error> {
@@ -200,7 +197,7 @@ impl<P: OsPoll> OsPoll for ConservingWrapper<P> {
                     RETURN_CONSERVED_POLLOUT.click();
                 }
                 ts.offset += 1;
-                return Ok(Some((fd, events)))
+                return Ok(Some((fd, events)));
             }
         } else {
             ts.offset = 0;

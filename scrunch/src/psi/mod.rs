@@ -86,11 +86,11 @@ impl Psi for ReferencePsi {
 
 #[cfg(test)]
 pub mod tests {
-    use super::super::psi::wavelet_tree::WaveletTreePsi;
-    use super::super::dictionary::ReferenceDictionary;
     use super::super::bit_vector::ReferenceOldBitVector;
-    use super::super::wavelet_tree::ReferenceWaveletTree;
+    use super::super::dictionary::ReferenceDictionary;
+    use super::super::psi::wavelet_tree::WaveletTreePsi;
     use super::super::psi::ReferencePsi;
+    use super::super::wavelet_tree::ReferenceWaveletTree;
     use super::*;
 
     // this is the isa for mississippi

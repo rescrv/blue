@@ -149,27 +149,25 @@ impl RecvChannel {
                     if self.recv_idx >= require {
                         return WorkDone::ReadRequisiteAmount;
                     }
-                },
-                Err(err) => {
-                    match err.code() {
-                        ErrorCode::WANT_READ => {
-                            RECV_WANT_READ.click();
-                            *events &= !POLLIN;
-                            return WorkDone::EncounteredEagain;
-                        },
-                        ErrorCode::WANT_WRITE => {
-                            RECV_WANT_WRITE.click();
-                            return WorkDone::EncounteredEagain;
-                        },
-                        _ => {
-                            RECV_ERROR_LATENCY.add(sw.since());
-                            RECV_ERRORS.click();
-                            let err = Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            };
-                            return WorkDone::Error(err);
-                        },
+                }
+                Err(err) => match err.code() {
+                    ErrorCode::WANT_READ => {
+                        RECV_WANT_READ.click();
+                        *events &= !POLLIN;
+                        return WorkDone::EncounteredEagain;
+                    }
+                    ErrorCode::WANT_WRITE => {
+                        RECV_WANT_WRITE.click();
+                        return WorkDone::EncounteredEagain;
+                    }
+                    _ => {
+                        RECV_ERROR_LATENCY.add(sw.since());
+                        RECV_ERRORS.click();
+                        let err = Error::TransportFailure {
+                            core: ErrorCore::default(),
+                            what: err.to_string(),
+                        };
+                        return WorkDone::Error(err);
                     }
                 },
             }
@@ -181,10 +179,10 @@ impl ProcessEvents for RecvChannel {
     fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error> {
         if self.recv_idx == 0 {
             match self.work_recv(1, events) {
-                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::ReadRequisiteAmount => {}
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
-                },
+                }
                 WorkDone::Error(err) => {
                     return Err(err);
                 }
@@ -195,10 +193,10 @@ impl ProcessEvents for RecvChannel {
         let frame_sz = self.recv_buf[0] as usize;
         if frame_sz + 1 > self.recv_idx {
             match self.work_recv(frame_sz + 1, events) {
-                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::ReadRequisiteAmount => {}
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
-                },
+                }
                 WorkDone::Error(err) => {
                     return Err(err);
                 }
@@ -209,10 +207,10 @@ impl ProcessEvents for RecvChannel {
         let limit = start + frame.size as usize;
         if self.recv_idx < limit {
             match self.work_recv(limit, events) {
-                WorkDone::ReadRequisiteAmount => {},
+                WorkDone::ReadRequisiteAmount => {}
                 WorkDone::EncounteredEagain => {
                     return Ok(None);
-                },
+                }
                 WorkDone::Error(err) => {
                     return Err(err);
                 }
@@ -280,7 +278,7 @@ impl SendChannel {
                 Ok(sz) => {
                     SEND_CALL_LATENCY.add(sw.since());
                     self.send_idx += sz;
-                },
+                }
                 Err(err) => {
                     SEND_ERROR_LATENCY.add(sw.since());
                     match err.code() {
@@ -288,21 +286,21 @@ impl SendChannel {
                             SEND_WANT_READ.click();
                             *events |= POLLIN;
                             return Ok(());
-                        },
+                        }
                         ErrorCode::WANT_WRITE => {
                             SEND_WANT_WRITE.click();
                             *events &= !POLLOUT;
                             return Ok(());
-                        },
+                        }
                         _ => {
                             SEND_ERRORS.click();
                             return Err(Error::TransportFailure {
                                 core: ErrorCore::default(),
                                 what: err.to_string(),
                             });
-                        },
+                        }
                     }
-                },
+                }
             };
         }
         *events &= !POLLOUT;
@@ -312,8 +310,7 @@ impl SendChannel {
     }
 
     pub fn blocking_drain(&mut self) -> Result<(), Error> {
-        'draining:
-        while self.send_idx < self.send_buf.len() {
+        'draining: while self.send_idx < self.send_buf.len() {
             let mut events = POLLOUT;
             self.process_events(&mut events)?;
             if self.send_idx >= self.send_buf.len() {
@@ -368,7 +365,7 @@ impl Iterator for Listener {
             Ok((stream, addr)) => (stream, addr),
             Err(err) => {
                 return Some(Err(err.into()));
-            },
+            }
         };
         // TODO(rescrv): Log to indicio with the accepted addr.
         _ = addr;
@@ -379,7 +376,7 @@ impl Iterator for Listener {
                     core: ErrorCore::default(),
                     what: err.to_string(),
                 }));
-            },
+            }
         };
         let (recv_chan, send_chan) = from_stream(stream).expect("channel from stream");
         Some(Ok((recv_chan, send_chan)))
@@ -401,7 +398,13 @@ pub struct SplitChannelOptions {
     private_key_file: Option<String>,
     #[cfg_attr(feature = "binaries", arrrg(optional, "Set certificate file.", "PEM"))]
     certificate_file: Option<String>,
-    #[cfg_attr(feature = "binaries", arrrg(flag, "Set SSL verify mode to None.  Useful when certificates don't match."))]
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(
+            flag,
+            "Set SSL verify mode to None.  Useful when certificates don't match."
+        )
+    )]
     verify_none: bool,
 }
 
@@ -417,10 +420,14 @@ impl SplitChannelOptions {
             builder.set_ca_file(ca_file).expect("set_ca_file");
         }
         if let Some(private_key_file) = &self.private_key_file {
-            builder.set_private_key_file(private_key_file, SslFiletype::PEM).expect("private_key_file");
+            builder
+                .set_private_key_file(private_key_file, SslFiletype::PEM)
+                .expect("private_key_file");
         }
         if let Some(certificate_file) = &self.certificate_file {
-            builder.set_certificate_file(certificate_file, SslFiletype::PEM).expect("private_key_file");
+            builder
+                .set_certificate_file(certificate_file, SslFiletype::PEM)
+                .expect("private_key_file");
         }
         if self.private_key_file.is_some() && self.certificate_file.is_some() {
             builder.check_private_key().expect("invalid private key");
@@ -447,10 +454,14 @@ impl SplitChannelOptions {
             acceptor.set_ca_file(ca_file).expect("set_ca_file");
         }
         if let Some(private_key_file) = &self.private_key_file {
-            acceptor.set_private_key_file(private_key_file, SslFiletype::PEM).expect("private_key_file");
+            acceptor
+                .set_private_key_file(private_key_file, SslFiletype::PEM)
+                .expect("private_key_file");
         }
         if let Some(certificate_file) = &self.certificate_file {
-            acceptor.set_certificate_file(certificate_file, SslFiletype::PEM).expect("private_key_file");
+            acceptor
+                .set_certificate_file(certificate_file, SslFiletype::PEM)
+                .expect("private_key_file");
         }
         if self.private_key_file.is_some() && self.certificate_file.is_some() {
             acceptor.check_private_key().expect("invalid private key");
@@ -461,10 +472,7 @@ impl SplitChannelOptions {
         let acceptor = Arc::new(acceptor.build());
         // Establish a listener.
         let listener = TcpListener::bind(format!("{}:{}", self.host, self.port))?;
-        Ok(Listener {
-            acceptor,
-            listener,
-        })
+        Ok(Listener { acceptor, listener })
     }
 }
 

@@ -9,8 +9,12 @@ fn setsum(opts: LogOptions, log: &str) -> String {
     let mut setsum = Setsum::default();
     while let Some(kvr) = log.next().unwrap() {
         match kvr.value {
-            Some(v) => { setsum.put(kvr.key, kvr.timestamp, v); },
-            None => { setsum.del(kvr.key, kvr.timestamp); },
+            Some(v) => {
+                setsum.put(kvr.key, kvr.timestamp, v);
+            }
+            None => {
+                setsum.del(kvr.key, kvr.timestamp);
+            }
         }
     }
     setsum.hexdigest()
@@ -25,7 +29,8 @@ struct LogChecksumOptions {
 }
 
 fn main() {
-    let (cmdline, args) = LogChecksumOptions::from_command_line("Usage: log-checksum [OPTIONS] [SSTs]");
+    let (cmdline, args) =
+        LogChecksumOptions::from_command_line("Usage: log-checksum [OPTIONS] [SSTs]");
     for log in args {
         println!("{} {}", setsum(cmdline.log.clone(), &log), log);
     }

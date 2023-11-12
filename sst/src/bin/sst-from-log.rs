@@ -28,7 +28,9 @@ impl Default for SstFromLogOptions {
 }
 
 fn main() {
-    let (cmdline, _) = SstFromLogOptions::from_command_line("Usage: sst-from-plaintext --plaintext <FILE> --sst <FILE>");
+    let (cmdline, _) = SstFromLogOptions::from_command_line(
+        "Usage: sst-from-plaintext --plaintext <FILE> --sst <FILE>",
+    );
     let sst = SstBuilder::new(cmdline.sst, cmdline.output).expect("could not open sst");
     log_to_builder(cmdline.log, cmdline.input, sst).expect("could not translate log to sst");
 }

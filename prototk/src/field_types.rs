@@ -1327,7 +1327,9 @@ impl<'a> FieldPackHelper<'a, string<'a>> for PathBuf {
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag).pack(self.as_os_str().as_bytes()).into_slice(out);
+        stack_pack(tag)
+            .pack(self.as_os_str().as_bytes())
+            .into_slice(out);
     }
 }
 
@@ -1416,7 +1418,6 @@ impl<M: Packable> Packable for message<M> {
         self.0.pack(buf)
     }
 }
-
 
 impl<'a, M> Unpackable<'a> for message<M>
 where

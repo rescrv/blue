@@ -50,44 +50,65 @@ fn test_helper(exp: &[&str], prefix: Option<&str>, example: ExampleCommandLine) 
 #[test]
 #[should_panic]
 fn empty() {
-    test_helper(&[], None, ExampleCommandLine {
-        top_flag: false,
-        top_string: String::new(),
-        top_u64: None,
-        sno: StringNumberOptions {
-            some_flag: false,
-            some_string: String::new(),
-            some_u64: None,
+    test_helper(
+        &[],
+        None,
+        ExampleCommandLine {
+            top_flag: false,
+            top_string: String::new(),
+            top_u64: None,
+            sno: StringNumberOptions {
+                some_flag: false,
+                some_string: String::new(),
+                some_u64: None,
+            },
         },
-    })
+    )
 }
 
 #[test]
 fn req_args() {
-    test_helper(&["--top-string", "xyz", "--sno-some-string", "abc"], None, ExampleCommandLine {
-        top_flag: false,
-        top_string: "xyz".to_owned(),
-        top_u64: None,
-        sno: StringNumberOptions {
-            some_flag: false,
-            some_string: "abc".to_owned(),
-            some_u64: None,
+    test_helper(
+        &["--top-string", "xyz", "--sno-some-string", "abc"],
+        None,
+        ExampleCommandLine {
+            top_flag: false,
+            top_string: "xyz".to_owned(),
+            top_u64: None,
+            sno: StringNumberOptions {
+                some_flag: false,
+                some_string: "abc".to_owned(),
+                some_u64: None,
+            },
         },
-    })
+    )
 }
 
 #[test]
 fn all_args() {
-    test_helper(&["--top-flag", "--top-string", "xyz", "--top-u64", "456",
-                "--sno-some-flag", "--sno-some-string", "abc", "--sno-some-u64", "123"],
-                None, ExampleCommandLine {
-        top_flag: true,
-        top_string: "xyz".to_owned(),
-        top_u64: Some(456),
-        sno: StringNumberOptions {
-            some_flag: true,
-            some_string: "abc".to_owned(),
-            some_u64: Some(123),
+    test_helper(
+        &[
+            "--top-flag",
+            "--top-string",
+            "xyz",
+            "--top-u64",
+            "456",
+            "--sno-some-flag",
+            "--sno-some-string",
+            "abc",
+            "--sno-some-u64",
+            "123",
+        ],
+        None,
+        ExampleCommandLine {
+            top_flag: true,
+            top_string: "xyz".to_owned(),
+            top_u64: Some(456),
+            sno: StringNumberOptions {
+                some_flag: true,
+                some_string: "abc".to_owned(),
+                some_u64: Some(123),
+            },
         },
-    })
+    )
 }

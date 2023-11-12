@@ -19,9 +19,7 @@ pub struct CacheLoad<'a> {
 
 impl<'a> Default for CacheLoad<'a> {
     fn default() -> Self {
-        Self {
-            key: &[],
-        }
+        Self { key: &[] }
     }
 }
 
@@ -41,16 +39,12 @@ pub struct CacheStore<'a> {
 
 impl<'a> Default for CacheStore<'a> {
     fn default() -> Self {
-        Self {
-            key: &[],
-            val: &[],
-        }
+        Self { key: &[], val: &[] }
     }
 }
 
 #[derive(Debug, Default, Message)]
-pub struct CacheEmpty {
-}
+pub struct CacheEmpty {}
 
 service! {
     name = Cache; // No magic.  The name of the trait for this service.
@@ -68,11 +62,7 @@ struct CachedRegister {
 }
 
 impl Cache for CachedRegister {
-    fn load(
-        &self,
-        _: &Context,
-        req: CacheLoad,
-    ) -> Result<CacheResponse, Error> {
+    fn load(&self, _: &Context, req: CacheLoad) -> Result<CacheResponse, Error> {
         let guard = self.value.lock().unwrap();
         let (key, value) = guard.deref();
         if key == req.key {
@@ -83,11 +73,7 @@ impl Cache for CachedRegister {
         }
     }
 
-    fn store(
-        &self,
-        _: &Context,
-        req: CacheStore,
-    ) -> Result<CacheEmpty, Error> {
+    fn store(&self, _: &Context, req: CacheStore) -> Result<CacheEmpty, Error> {
         let key = req.key.to_vec();
         let val = req.val.to_vec();
         *self.value.lock().unwrap() = (key, val);

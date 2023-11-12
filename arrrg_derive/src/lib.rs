@@ -67,8 +67,7 @@ fn type_is_option(ty: &syn::Type) -> bool {
     false
 }
 
-struct CommandLineVisitor {
-}
+struct CommandLineVisitor {}
 
 impl StructVisitor for CommandLineVisitor {
     type Output = (TokenStream, TokenStream, TokenStream);
@@ -82,8 +81,7 @@ impl StructVisitor for CommandLineVisitor {
         let mut add_opts = TokenStream::default();
         let mut matches = TokenStream::default();
         let mut canonical_command_line = TokenStream::default();
-        'iterating_fields:
-        for field in fields.named.iter() {
+        'iterating_fields: for field in fields.named.iter() {
             if let Some(field_ident) = &field.ident {
                 let field_arg = field_ident.to_string().replace('_', "-");
                 let field_meta = match parse_meta(&field.attrs) {
@@ -102,24 +100,24 @@ impl StructVisitor for CommandLineVisitor {
                         quote! {
                             opts.optflag("", &arg_str, #help_string);
                         }
-                    },
+                    }
                     FieldType::Optional => {
                         quote! {
                             opts.optopt("", &arg_str, #help_string, #hint_text);
                         }
-                    },
+                    }
                     FieldType::Required => {
                         quote! {
                             opts.reqopt("", &arg_str, #help_string, #hint_text);
                         }
-                    },
+                    }
                     FieldType::Nested => {
                         quote! {
                             self.#field_ident.add_opts(Some(&arg_str), opts);
                         }
-                    },
+                    }
                 };
-                add_opts = quote !{
+                add_opts = quote! {
                     #add_opts
                     let arg_str = arrrg::getopt_str(prefix, #field_arg);
                     #optopt
@@ -138,7 +136,7 @@ impl StructVisitor for CommandLineVisitor {
                                 self.#field_ident = true;
                             }
                         };
-                    },
+                    }
                     FieldType::Optional => {
                         if type_is_option(&field.ty) {
                             matches = quote! {
@@ -161,7 +159,7 @@ impl StructVisitor for CommandLineVisitor {
                                 };
                             };
                         }
-                    },
+                    }
                     FieldType::Required => {
                         matches = quote! {
                             #matches
@@ -174,13 +172,13 @@ impl StructVisitor for CommandLineVisitor {
                                 },
                             };
                         };
-                    },
+                    }
                     FieldType::Nested => {
                         matches = quote! {
                             #matches
                             self.#field_ident.matches(Some(&arg_str), matches);
                         };
-                    },
+                    }
                 };
 
                 // Construct canonical command lines.
@@ -197,7 +195,7 @@ impl StructVisitor for CommandLineVisitor {
                                 result.push(flag_str);
                             }
                         };
-                    },
+                    }
                     FieldType::Optional => {
                         if type_is_option(&field.ty) {
                             canonical_command_line = quote! {
@@ -216,20 +214,20 @@ impl StructVisitor for CommandLineVisitor {
                                 }
                             }
                         }
-                    },
+                    }
                     FieldType::Required => {
                         canonical_command_line = quote! {
                             #canonical_command_line
                             result.push(flag_str);
                             result.push(self.#field_ident.to_string());
                         };
-                    },
+                    }
                     FieldType::Nested => {
                         canonical_command_line = quote! {
                             #canonical_command_line
                             result.append(&mut self.#field_ident.canonical_command_line(Some(&arg_str)));
                         };
-                    },
+                    }
                 };
             }
         }
@@ -274,12 +272,10 @@ fn parse_meta_one(attr: &syn::Attribute) -> Option<FlagMeta> {
         panic!("meta list length: {}", USAGE);
     }
     let field_type = match &meta_list.nested[0] {
-        syn::NestedMeta::Meta(field_type) => {
-            field_type.into_token_stream().to_string()
-        },
+        syn::NestedMeta::Meta(field_type) => field_type.into_token_stream().to_string(),
         syn::NestedMeta::Lit(_) => {
             panic!("{}", USAGE);
-        },
+        }
     };
     let field_type: &str = &field_type;
     let field_type = match field_type {

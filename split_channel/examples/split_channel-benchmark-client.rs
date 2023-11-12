@@ -19,7 +19,9 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let (options, free) = SplitChannelOptions::from_command_line_relaxed("Usage: split_channel-benchmark-client [OPTIONS]");
+    let (options, free) = SplitChannelOptions::from_command_line_relaxed(
+        "Usage: split_channel-benchmark-client [OPTIONS]",
+    );
     if !free.is_empty() {
         eprintln!("command ignores positional arguments");
     }

@@ -7,7 +7,7 @@ pub struct BitArray<'a> {
 }
 
 impl<'a> BitArray<'a> {
-    pub fn construct<I: Iterator<Item=bool>>(iter: I) -> Vec<u8> {
+    pub fn construct<I: Iterator<Item = bool>>(iter: I) -> Vec<u8> {
         let mut bit = 0usize;
         let mut byte = 0u8;
         let mut bytes = Vec::new();
@@ -29,9 +29,7 @@ impl<'a> BitArray<'a> {
     }
 
     pub fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-        }
+        Self { bytes }
     }
 
     pub fn load(&self, index: usize, mut bits: usize) -> u64 {
@@ -80,7 +78,6 @@ mod tests {
         assert_eq!(0x00u64, ba.load(5, 0));
         assert_eq!(0x00u64, ba.load(6, 0));
         assert_eq!(0x00u64, ba.load(7, 0));
-
     }
 
     #[test]
@@ -165,7 +162,9 @@ mod tests {
 
     #[test]
     fn construct() {
-        let fib = [true, true, false, true, false, false, true, false, false, false, false, true];
+        let fib = [
+            true, true, false, true, false, false, true, false, false, false, false, true,
+        ];
         let exp: &[u8] = &[75u8, 8];
         let buf = BitArray::construct(fib.iter().copied());
         assert_eq!(exp, &buf);

@@ -135,12 +135,8 @@ pub struct Handle<'a, K: Key, V: Value> {
 }
 
 impl<'a, K: Key, V: Value> Handle<'a, K, V> {
-    fn new(table: &'a StateHashTable<K, V>, key: K, value: Arc<V>) -> Self  {
-        Self {
-            table,
-            key,
-            value,
-        }
+    fn new(table: &'a StateHashTable<K, V>, key: K, value: Arc<V>) -> Self {
+        Self { table, key, value }
     }
 
     pub fn is_same(lhs: &Self, rhs: &Self) -> bool {
@@ -211,12 +207,11 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
 
     pub fn get_state<'a: 'b, 'b>(&'a self, key: K) -> Option<Handle<'b, K, V>> {
         let entries = self.entries.lock().unwrap();
-        entries.get(&key).map(|value|
-            Handle {
-                table: self,
-                key,
-                value: Arc::clone(value),
-            })
+        entries.get(&key).map(|value| Handle {
+            table: self,
+            key,
+            value: Arc::clone(value),
+        })
     }
 
     pub fn get_or_create_state<'a: 'b, 'b>(&'a self, key: K) -> Handle<'b, K, V>
@@ -235,14 +230,14 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
             match (state, &value) {
                 (None, None) => {
                     make_value = true;
-                },
+                }
                 (None, Some(value)) => {
                     let value1 = Arc::clone(value);
                     let value2 = Arc::clone(value);
                     ENTRY_INSERTED.click();
                     entries.insert(key.clone(), value1);
                     return Handle::new(self, key, value2);
-                },
+                }
                 (Some(state), _) => {
                     let value = Arc::clone(state);
                     return Handle::new(self, key, value);

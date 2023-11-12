@@ -124,8 +124,8 @@ pub mod tests {
     macro_rules! test_WaveletTree {
         ($name:ident, $WT:path) => {
             mod $name {
-                use $crate::wavelet_tree::WaveletTree;
                 use $crate::reference::*;
+                use $crate::wavelet_tree::WaveletTree;
 
                 #[test]
                 fn simple_evens() {

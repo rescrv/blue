@@ -70,7 +70,7 @@ impl SendBuffer {
     fn shift_down(&mut self) {
         if self.lower > 0 {
             let bytes: &mut [u8] = self.buffer.as_mut();
-            for (i, j) in std::iter::zip(0..self.upper,self.lower..self.upper) {
+            for (i, j) in std::iter::zip(0..self.upper, self.lower..self.upper) {
                 bytes[i] = bytes[j];
             }
             self.upper -= self.lower;
@@ -111,10 +111,13 @@ impl RecvBuffer {
         }
     }
 
-    pub fn read_bytes<F: FnMut(Vec<u8>)>(&mut self, mut bytes: &[u8], mut receiver: F) -> Result<usize, rpc_pb::Error> {
+    pub fn read_bytes<F: FnMut(Vec<u8>)>(
+        &mut self,
+        mut bytes: &[u8],
+        mut receiver: F,
+    ) -> Result<usize, rpc_pb::Error> {
         let mut returned = 0;
-        'reading_bytes:
-        while !bytes.is_empty() {
+        'reading_bytes: while !bytes.is_empty() {
             match self {
                 RecvBuffer::Frame { hdr, idx } => {
                     if *idx < 1 {
@@ -145,7 +148,7 @@ impl RecvBuffer {
                     if *idx > hdr[0] as usize {
                         let hdr_sz = hdr[0] as usize;
                         assert_eq!(*idx, hdr_sz + 1);
-                        let mut up = Unpacker::new(&hdr[1..1+hdr_sz]);
+                        let mut up = Unpacker::new(&hdr[1..1 + hdr_sz]);
                         let frame: rpc_pb::Frame = up.unpack()?;
                         if frame.size > rpc_pb::MAX_BODY_SIZE as u64 {
                             return Err(rpc_pb::Error::RequestTooLarge {
@@ -160,7 +163,7 @@ impl RecvBuffer {
                             idx: 0,
                         }
                     }
-                },
+                }
                 RecvBuffer::Body { crc: _, buf, idx } => {
                     let buf = buf.as_mut().unwrap();
                     let amt = std::cmp::min(buf.len() - *idx, bytes.len());
@@ -175,7 +178,12 @@ impl RecvBuffer {
                             idx: 0,
                         };
                         std::mem::swap(self, &mut next);
-                        if let RecvBuffer::Body { crc, mut buf, idx: _ } = next {
+                        if let RecvBuffer::Body {
+                            crc,
+                            mut buf,
+                            idx: _,
+                        } = next
+                        {
                             let buf = buf.take().unwrap();
                             if crc32c::crc32c(buf.as_ref()) != crc {
                                 return Err(rpc_pb::Error::TransportFailure {
@@ -189,7 +197,7 @@ impl RecvBuffer {
                             panic!("swap failed");
                         }
                     }
-                },
+                }
             };
         }
         Ok(returned)
@@ -283,12 +291,16 @@ mod recv_buffer {
         let frame: rpc_pb::Frame = rpc_pb::Frame::from_buffer(bytes_body.as_ref());
         let frame_sz: v64 = frame.pack_sz().into();
         let mut bytes_hdr = Vec::new();
-        stack_pack(frame_sz).pack(frame).append_to_vec(&mut bytes_hdr);
+        stack_pack(frame_sz)
+            .pack(frame)
+            .append_to_vec(&mut bytes_hdr);
         let received = &mut Vec::new();
         let mut receiver = |buf| {
             received.push(buf);
         };
-        recv_buf.read_bytes(bytes_hdr.as_ref(), &mut receiver).unwrap();
+        recv_buf
+            .read_bytes(bytes_hdr.as_ref(), &mut receiver)
+            .unwrap();
         if let RecvBuffer::Body { crc, buf, idx } = &recv_buf {
             assert_eq!(3653830891, *crc);
             let buf: &[u8] = &buf.as_ref().unwrap();
@@ -297,7 +309,9 @@ mod recv_buffer {
         } else {
             panic!("test failed");
         }
-        recv_buf.read_bytes(bytes_body.as_ref(), &mut receiver).unwrap();
+        recv_buf
+            .read_bytes(bytes_body.as_ref(), &mut receiver)
+            .unwrap();
         if let RecvBuffer::Frame { hdr, idx } = &recv_buf {
             assert_eq!([0u8; HEADER_MAX_SIZE], *hdr);
             assert_eq!(0, *idx);

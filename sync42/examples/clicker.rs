@@ -109,7 +109,7 @@ impl<'a> Clicker<'a> {
                         break 'conditions;
                     }
                 }
-                if state.outstanding_calls < self.concurrent_count_calls && !state.head_passback{
+                if state.outstanding_calls < self.concurrent_count_calls && !state.head_passback {
                     HEAD_PASSBACK_INITIATED.click();
                     state.head_passback = true;
                     INCREMENT_OUTSTANDING_CALLS.click();

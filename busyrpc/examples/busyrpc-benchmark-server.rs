@@ -16,7 +16,8 @@ struct BenchmarkOptions {
 }
 
 fn main() {
-    let (options, free) = BenchmarkOptions::from_command_line("Usage: busyrpc-benchmark-server [OPTIONS]");
+    let (options, free) =
+        BenchmarkOptions::from_command_line("Usage: busyrpc-benchmark-server [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command takes no arguments");
         std::process::exit(1);

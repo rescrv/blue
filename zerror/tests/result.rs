@@ -43,7 +43,8 @@ iotoz!(SampleError);
 #[test]
 fn sample_error() {
     let success: Result<(), std::io::Error> = Ok(());
-    let failure: Result<(), std::io::Error> = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "message"));
+    let failure: Result<(), std::io::Error> =
+        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "message"));
 
     let success: Result<(), SampleError> = success.as_z();
     let failure: Result<(), SampleError> = failure.as_z();

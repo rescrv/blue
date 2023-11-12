@@ -92,7 +92,11 @@ impl Graph {
         Self::from_adj_lists(options, metadata, forward_adj_list, reverse_adj_list)
     }
 
-    pub fn edit(&self, to_remove: HashSet<[u8; 32]>, to_add: Vec<SstMetadata>) -> Result<Self, Error> {
+    pub fn edit(
+        &self,
+        to_remove: HashSet<[u8; 32]>,
+        to_add: Vec<SstMetadata>,
+    ) -> Result<Self, Error> {
         let Self {
             options,
             metadata,
@@ -164,7 +168,12 @@ impl Graph {
             &mut forward_adj_list,
             &mut reverse_adj_list,
         )?;
-        Self::from_adj_lists(options.clone(), metadata, forward_adj_list, reverse_adj_list)
+        Self::from_adj_lists(
+            options.clone(),
+            metadata,
+            forward_adj_list,
+            reverse_adj_list,
+        )
     }
 
     fn from_adj_lists(

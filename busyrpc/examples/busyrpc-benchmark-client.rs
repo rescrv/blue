@@ -14,7 +14,10 @@ use busyrpc::{new_client, ClientOptions, StringResolver};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct BenchmarkOptions {
-    #[arrrg(required, "Host connection string in host:ID;host:port,host:ID;host:port format")]
+    #[arrrg(
+        required,
+        "Host connection string in host:ID;host:port,host:ID;host:port format"
+    )]
     connect: StringResolver,
     #[arrrg(optional, "Threads to run.")]
     threads: usize,
@@ -27,12 +30,17 @@ struct BenchmarkOptions {
 fn worker(client: Arc<dyn Client>, counter: Arc<AtomicU64>, rpcs: u64) {
     while counter.fetch_add(1, Ordering::Relaxed) < rpcs {
         let context = Context::default();
-        client.call(&context, "__builtins__", "nop", &[]).as_z().pretty_unwrap().unwrap();
+        client
+            .call(&context, "__builtins__", "nop", &[])
+            .as_z()
+            .pretty_unwrap()
+            .unwrap();
     }
 }
 
 fn main() {
-    let (options, free) = BenchmarkOptions::from_command_line("Usage: busyrpc-benchmark-client [OPTIONS]");
+    let (options, free) =
+        BenchmarkOptions::from_command_line("Usage: busyrpc-benchmark-client [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command takes no arguments");
         std::process::exit(1);

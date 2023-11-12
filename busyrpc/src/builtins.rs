@@ -15,13 +15,11 @@ rpc_pb::service! {
 }
 
 #[derive(Debug, Default)]
-pub struct BuiltinService {
-}
+pub struct BuiltinService {}
 
 impl BuiltinService {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 

@@ -16,12 +16,12 @@ use indicio::Trace;
 
 use one_two_eight::{generate_id, generate_id_tuple_element};
 
-use prototk::Message;
 use prototk::field_types::*;
+use prototk::Message;
 use prototk_derive::Message;
 
-use sst::Builder;
 use sst::ingest::{IngestOptions, Jester};
+use sst::Builder;
 
 use sync42::background::BackgroundThread;
 
@@ -38,20 +38,28 @@ const WINDOW_SIZE_MS: u64 = 3600 * 1000;
 
 static SENSOR_ID_GENERATE_FAILURE: Counter =
     Counter::new("biometrics.tuple_db.sensor_id_generate_failure");
-static SENSOR_ID_GENERATE_FAILURE_MONITOR: Stationary =
-    Stationary::new("biometrics.tuple_db.sensor_id_generate_failure", &SENSOR_ID_GENERATE_FAILURE);
+static SENSOR_ID_GENERATE_FAILURE_MONITOR: Stationary = Stationary::new(
+    "biometrics.tuple_db.sensor_id_generate_failure",
+    &SENSOR_ID_GENERATE_FAILURE,
+);
 
 static EMIT_ROOT_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_root_failure");
-static EMIT_ROOT_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_root_failure", &EMIT_ROOT_FAILURE);
+static EMIT_ROOT_FAILURE_MONITOR: Stationary =
+    Stationary::new("biometrics.tuple_db.emit_root_failure", &EMIT_ROOT_FAILURE);
 
 static EMIT_MAX_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_max_failure");
-static EMIT_MAX_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_max_failure", &EMIT_MAX_FAILURE);
+static EMIT_MAX_FAILURE_MONITOR: Stationary =
+    Stationary::new("biometrics.tuple_db.emit_max_failure", &EMIT_MAX_FAILURE);
 
 static EMIT_READING_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit_reading_failure");
-static EMIT_READING_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit_reading_failure", &EMIT_READING_FAILURE);
+static EMIT_READING_FAILURE_MONITOR: Stationary = Stationary::new(
+    "biometrics.tuple_db.emit_reading_failure",
+    &EMIT_READING_FAILURE,
+);
 
 static EMIT_FAILURE: Counter = Counter::new("biometrics.tuple_db.emit.failure");
-static EMIT_FAILURE_MONITOR: Stationary = Stationary::new("biometrics.tuple_db.emit.failure", &EMIT_FAILURE);
+static EMIT_FAILURE_MONITOR: Stationary =
+    Stationary::new("biometrics.tuple_db.emit.failure", &EMIT_FAILURE);
 
 /// Register all biometrics for the crate.
 pub fn register_biometrics(collector: &biometrics::Collector) {
@@ -266,7 +274,13 @@ struct SensorsByLabel {
 }
 
 impl SensorsByLabel {
-    fn get<ROOT: SensorRoot + TypedTupleKey>(&mut self, table: BiometricsTableID, label: &'static str, now_millis: u64, writer: &mut Writer) -> Option<SensorID> {
+    fn get<ROOT: SensorRoot + TypedTupleKey>(
+        &mut self,
+        table: BiometricsTableID,
+        label: &'static str,
+        now_millis: u64,
+        writer: &mut Writer,
+    ) -> Option<SensorID> {
         match self.sensors.entry(label) {
             Entry::Occupied(occupied) => Some(*occupied.get()),
             Entry::Vacant(vacant) => {
@@ -274,8 +288,7 @@ impl SensorsByLabel {
                     Some(sensor_id) => sensor_id,
                     None => {
                         SENSOR_ID_GENERATE_FAILURE.click();
-                        Trace::new("biometrics.tuple_db.generate_sensor_id_failure")
-                            .finish();
+                        Trace::new("biometrics.tuple_db.generate_sensor_id_failure").finish();
                         return None;
                     }
                 };
@@ -304,7 +317,14 @@ struct SensorLastSeen {
 }
 
 impl SensorLastSeen {
-    fn update<MAX: SensorMax + TypedTupleKey>(&mut self, table: BiometricsTableID, label: &'static str, sensor_id: SensorID, now_millis: u64, writer: &mut Writer) {
+    fn update<MAX: SensorMax + TypedTupleKey>(
+        &mut self,
+        table: BiometricsTableID,
+        label: &'static str,
+        sensor_id: SensorID,
+        now_millis: u64,
+        writer: &mut Writer,
+    ) {
         let last_seen = self.last_seen.entry(sensor_id).or_insert(0);
         if *last_seen < now_millis {
             let valid_through = now_millis + WINDOW_SIZE_MS;
@@ -390,7 +410,7 @@ impl Emitter {
         value: V,
     ) {
         match self.writer.emit_message(key, timestamp, value) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(err) => {
                 EMIT_READING_FAILURE.click();
                 Trace::new("biometrics.tuple_db.counter.emit_error")
@@ -404,14 +424,29 @@ impl Emitter {
 impl EmitterTrait for Emitter {
     type Error = sst::Error;
 
-    fn emit_counter(&mut self, counter: &'static Counter, now_millis: u64) -> Result<(), Self::Error> {
-        let sensor_id = match self.counters.get::<CounterRoot>(self.table, counter.label(), now_millis, &mut self.writer) {
+    fn emit_counter(
+        &mut self,
+        counter: &'static Counter,
+        now_millis: u64,
+    ) -> Result<(), Self::Error> {
+        let sensor_id = match self.counters.get::<CounterRoot>(
+            self.table,
+            counter.label(),
+            now_millis,
+            &mut self.writer,
+        ) {
             Some(sensor_id) => sensor_id,
             None => {
                 return Ok(());
-            },
+            }
         };
-        self.counter_last_seen.update::<CounterMax>(self.table, counter.label(), sensor_id, now_millis, &mut self.writer);
+        self.counter_last_seen.update::<CounterMax>(
+            self.table,
+            counter.label(),
+            sensor_id,
+            now_millis,
+            &mut self.writer,
+        );
         let reading_key = CounterReading {
             table: self.table,
             sensor_id,
@@ -423,13 +458,24 @@ impl EmitterTrait for Emitter {
     }
 
     fn emit_gauge(&mut self, gauge: &'static Gauge, now_millis: u64) -> Result<(), Self::Error> {
-        let sensor_id = match self.gauges.get::<GaugeRoot>(self.table, gauge.label(), now_millis, &mut self.writer) {
+        let sensor_id = match self.gauges.get::<GaugeRoot>(
+            self.table,
+            gauge.label(),
+            now_millis,
+            &mut self.writer,
+        ) {
             Some(sensor_id) => sensor_id,
             None => {
                 return Ok(());
-            },
+            }
         };
-        self.gauge_last_seen.update::<GaugeMax>(self.table, gauge.label(), sensor_id, now_millis, &mut self.writer);
+        self.gauge_last_seen.update::<GaugeMax>(
+            self.table,
+            gauge.label(),
+            sensor_id,
+            now_millis,
+            &mut self.writer,
+        );
         let reading_key = GaugeReading {
             table: self.table,
             sensor_id,
@@ -440,14 +486,29 @@ impl EmitterTrait for Emitter {
         Ok(())
     }
 
-    fn emit_moments(&mut self, moments: &'static Moments, now_millis: u64) -> Result<(), Self::Error> {
-        let sensor_id = match self.moments.get::<MomentsRoot>(self.table, moments.label(), now_millis, &mut self.writer) {
+    fn emit_moments(
+        &mut self,
+        moments: &'static Moments,
+        now_millis: u64,
+    ) -> Result<(), Self::Error> {
+        let sensor_id = match self.moments.get::<MomentsRoot>(
+            self.table,
+            moments.label(),
+            now_millis,
+            &mut self.writer,
+        ) {
             Some(sensor_id) => sensor_id,
             None => {
                 return Ok(());
-            },
+            }
         };
-        self.moments_last_seen.update::<MomentsMax>(self.table, moments.label(), sensor_id, now_millis, &mut self.writer);
+        self.moments_last_seen.update::<MomentsMax>(
+            self.table,
+            moments.label(),
+            sensor_id,
+            now_millis,
+            &mut self.writer,
+        );
         let reading_key = MomentsReading {
             table: self.table,
             sensor_id,
@@ -461,8 +522,8 @@ impl EmitterTrait for Emitter {
 
 ////////////////////////////////////////////// TableID /////////////////////////////////////////////
 
-generate_id!{BiometricsTableID, "biometrics:"}
-generate_id_tuple_element!{BiometricsTableID}
+generate_id! {BiometricsTableID, "biometrics:"}
+generate_id_tuple_element! {BiometricsTableID}
 
 ///////////////////////////////////////// BiometricsOptions ////////////////////////////////////////
 
@@ -488,7 +549,9 @@ pub fn spawn(options: BiometricsOptions, collector: Collector) -> BackgroundThre
                     .with_value::<message<sst::Error>, 1>(err)
                     .finish();
             }
-            std::thread::sleep(std::time::Duration::from_millis(options.emit_interval_millis));
+            std::thread::sleep(std::time::Duration::from_millis(
+                options.emit_interval_millis,
+            ));
         }
     })
 }

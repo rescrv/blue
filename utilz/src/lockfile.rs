@@ -71,10 +71,10 @@ impl Lockfile {
                     match raw {
                         libc::EAGAIN => {
                             return Ok(None);
-                        },
+                        }
                         libc::EINTR => {
                             continue;
-                        },
+                        }
                         _ => {}
                     }
                 }

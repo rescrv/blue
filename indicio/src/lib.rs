@@ -80,10 +80,7 @@ impl Trace {
         }
     }
 
-    pub fn with_value<'a, F: FieldType<'a>, const N: u32>(
-        mut self,
-        field_value: F::Native,
-    ) -> Self
+    pub fn with_value<'a, F: FieldType<'a>, const N: u32>(mut self, field_value: F::Native) -> Self
     where
         F: FieldType<'a> + 'a,
         F::Native: Clone + Display + FieldPackHelper<'a, F> + 'a,
@@ -92,7 +89,8 @@ impl Trace {
             return self;
         }
         TRACE_WITH_VALUE.click();
-        stack_pack(F::field_packer(FieldNumber::must(N), &field_value)).append_to_vec(&mut self.value);
+        stack_pack(F::field_packer(FieldNumber::must(N), &field_value))
+            .append_to_vec(&mut self.value);
         self
     }
 

@@ -37,7 +37,9 @@ fn TEMPORARY<P: AsRef<Path>>(root: P) -> PathBuf {
 
 #[allow(non_snake_case)]
 fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
-    root.as_ref().to_path_buf().join(format!("MANIFEST.{}", idx))
+    root.as_ref()
+        .to_path_buf()
+        .join(format!("MANIFEST.{}", idx))
 }
 
 const TX_SEPARATOR: &str = "--------";
@@ -46,7 +48,9 @@ fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
     let path = path.as_ref().as_os_str().to_str();
     let path = match path {
         Some(path) => path,
-        None => { return None; },
+        None => {
+            return None;
+        }
     };
     if let Some(path) = path.strip_prefix("MANIFEST.") {
         match path.parse::<u64>() {
@@ -137,17 +141,23 @@ impl Default for Error {
     }
 }
 
-iotoz!{Error}
+iotoz! {Error}
 
 impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
-        Error::SystemError { core: ErrorCore::default(), what: what.to_string() }
+        Error::SystemError {
+            core: ErrorCore::default(),
+            what: what.to_string(),
+        }
     }
 }
 
 impl From<std::str::Utf8Error> for Error {
     fn from(what: std::str::Utf8Error) -> Error {
-        Error::Corruption { core: ErrorCore::default(), what: "utf8 error:".to_owned() + &what.to_string() }
+        Error::Corruption {
+            core: ErrorCore::default(),
+            what: "utf8 error:".to_owned() + &what.to_string(),
+        }
     }
 }
 
@@ -157,13 +167,25 @@ impl From<std::str::Utf8Error> for Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ManifestOptions {
-    #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest directory exists."))]
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(flag, "Fail if the manifest directory exists.")
+    )]
     fail_if_exists: bool,
-    #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest directory does not exist."))]
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(flag, "Fail if the manifest directory does not exist.")
+    )]
     fail_if_not_exist: bool,
     #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest is locked."))]
     fail_if_locked: bool,
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Ratio of (bytes in the log):(bytes in memory) at which log will rollover."))]
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(
+            optional,
+            "Ratio of (bytes in the log):(bytes in memory) at which log will rollover."
+        )
+    )]
     log_rollover_ratio: u64,
 }
 
@@ -196,10 +218,16 @@ impl Manifest {
     pub fn open<P: AsRef<Path>>(options: ManifestOptions, root: P) -> Result<Self, Error> {
         let root = root.as_ref().to_path_buf();
         if root.is_dir() && options.fail_if_exists {
-            return Err(Error::ManifestExists { core: ErrorCore::default(), path: root });
+            return Err(Error::ManifestExists {
+                core: ErrorCore::default(),
+                path: root,
+            });
         }
         if !root.is_dir() && options.fail_if_not_exist {
-            return Err(Error::ManifestNotExist { core: ErrorCore::default(), path: root });
+            return Err(Error::ManifestNotExist {
+                core: ErrorCore::default(),
+                path: root,
+            });
         } else if !root.is_dir() {
             create_dir(&root)
                 .as_z()
@@ -234,7 +262,7 @@ impl Manifest {
                     this.rollover()?;
                 }
                 Ok(this)
-            },
+            }
             None => {
                 LOCK_NOT_OBTAINED.click();
                 let err = Error::LockNotObtained {
@@ -242,12 +270,12 @@ impl Manifest {
                     path: LOCKFILE(root),
                 };
                 Err(err)
-            },
+            }
         }
     }
 
     /// Iterate over the log's contents (in-memory).
-    pub fn strs(&self) -> impl Iterator<Item=&String> {
+    pub fn strs(&self) -> impl Iterator<Item = &String> {
         self.strs.iter()
     }
 
@@ -280,7 +308,10 @@ impl Manifest {
     }
 
     /// Verify all known invariants of the manifest.
-    pub fn verify<P: AsRef<Path>>(_options: ManifestOptions, root: P) -> impl Iterator<Item=Error> {
+    pub fn verify<P: AsRef<Path>>(
+        _options: ManifestOptions,
+        root: P,
+    ) -> impl Iterator<Item = Error> {
         let mut errs = Vec::new();
         let mut ids = Vec::new();
         let rd = match read_dir(&root) {
@@ -288,7 +319,7 @@ impl Manifest {
             Err(err) => {
                 errs.push(err.into());
                 return errs.into_iter();
-            },
+            }
         };
         for dir in rd {
             let dir = match dir {
@@ -296,7 +327,7 @@ impl Manifest {
                 Err(err) => {
                     errs.push(err.into());
                     continue;
-                },
+                }
             };
             let path = dir.path();
             if let Some(id) = extract_backup(path) {
@@ -311,7 +342,7 @@ impl Manifest {
         if paths.is_empty() {
             paths.push((0, MANIFEST(&root)));
         } else {
-            paths.push((paths[paths.len() -1].0 + 1, MANIFEST(&root)));
+            paths.push((paths[paths.len() - 1].0 + 1, MANIFEST(&root)));
         }
         let mut prev = None;
         for (id, path) in paths.into_iter() {
@@ -320,7 +351,7 @@ impl Manifest {
                 Err(err) => {
                     errs.push(err);
                     continue;
-                },
+                }
             };
             let edit = Self::to_edit(&strs, &info);
             if let Some((prev_id, prev_edit)) = prev {
@@ -339,12 +370,15 @@ impl Manifest {
                             errs.push(err);
                             prev = None;
                             continue;
-                        },
+                        }
                     };
                     if Some(prev_edit) != first {
                         errs.push(Error::Corruption {
                             core: ErrorCore::default(),
-                            what: format!("MANIFEST rollover to {} does not match rollup of {}", id, prev_id),
+                            what: format!(
+                                "MANIFEST rollover to {} does not match rollup of {}",
+                                id, prev_id
+                            ),
                         });
                     } else {
                         println!("{} rolled over properly", path.to_string_lossy());
@@ -371,10 +405,12 @@ impl Manifest {
     fn to_edit(strs: &BTreeSet<String>, info: &BTreeMap<char, String>) -> Edit {
         let mut edit = Edit::default();
         for s in strs.iter() {
-            edit.add(s).expect("previously added string should always add");
+            edit.add(s)
+                .expect("previously added string should always add");
         }
         for (c, s) in info.iter() {
-            edit.info(*c, s).expect("previously added info should always add");
+            edit.info(*c, s)
+                .expect("previously added info should always add");
         }
         edit
     }
@@ -423,11 +459,13 @@ impl Manifest {
                     self.poison = Some(e.into());
                 }
                 Err(self.poison.as_ref().unwrap().clone())
-            },
+            }
         }
     }
 
-    fn read_mani<P: AsRef<Path>>(path: P) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
+    fn read_mani<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
         let mut strs = BTreeSet::new();
         let mut info = BTreeMap::new();
         let iter = ManifestIterator::open(path)?;
@@ -524,10 +562,7 @@ impl ManifestIterator {
             });
         }
         let file = Some(BufReader::new(File::open(path)?));
-        Ok(Self {
-            file,
-            poison: None,
-        })
+        Ok(Self { file, poison: None })
     }
 
     fn poison<E: Into<Error>>(&mut self, err: E) -> Option<Result<Edit, Error>> {
@@ -544,7 +579,9 @@ impl Iterator for ManifestIterator {
     fn next(&mut self) -> Option<Self::Item> {
         let file = match &mut self.file {
             Some(file) => file,
-            None => { return None; },
+            None => {
+                return None;
+            }
         };
         let mut edit = Edit::default();
         for (idx, line) in file.lines().enumerate() {
@@ -552,7 +589,7 @@ impl Iterator for ManifestIterator {
                 Ok(line) => line,
                 Err(err) => {
                     return self.poison(err);
-                },
+                }
             };
             if !line.is_ascii() {
                 return Some(Err(Error::Corruption {
@@ -620,7 +657,10 @@ mod tests {
     use super::*;
 
     fn test_root(root: &str, line: u32) -> PathBuf {
-        let root: String = root.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        let root: String = root
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
         let path = PathBuf::from(format!("{}_{}", root, line));
         if path.exists() {
             remove_dir_all(&path).expect("could not prepare for test");
@@ -681,10 +721,13 @@ mod tests {
         edit.add("thing one").unwrap();
         edit.add("thing two").unwrap();
         mani.apply(edit).unwrap();
-        assert_eq!("dcab9d28+thing one
+        assert_eq!(
+            "dcab9d28+thing one
 a4e79c62+thing two
 --------
-", read_to_string(root.join("MANIFEST")).unwrap());
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
     }
 
     #[test]
@@ -696,24 +739,33 @@ a4e79c62+thing two
         edit.add("thing one").unwrap();
         edit.add("thing two").unwrap();
         mani.apply(edit).unwrap();
-        assert_eq!("dcab9d28+thing one
+        assert_eq!(
+            "dcab9d28+thing one
 a4e79c62+thing two
 --------
-", read_to_string(root.join("MANIFEST")).unwrap());
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
         let mut edit = Edit::default();
         edit.rm("thing one").unwrap();
         mani.apply(edit).unwrap();
-        assert_eq!("a4e79c62+thing two
+        assert_eq!(
+            "a4e79c62+thing two
 --------
-", read_to_string(root.join("MANIFEST")).unwrap());
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
         assert!(root.join("MANIFEST").exists());
         assert!(root.join("MANIFEST.1").exists());
-        assert_eq!("dcab9d28+thing one
+        assert_eq!(
+            "dcab9d28+thing one
 a4e79c62+thing two
 --------
 6c866914-thing one
 --------
-", read_to_string(root.join("MANIFEST.1")).unwrap());
+",
+            read_to_string(root.join("MANIFEST.1")).unwrap()
+        );
     }
 
     #[test]
@@ -740,7 +792,8 @@ a4e79c62+thing two
         edit.info('T', "e0785f2a185aaf6fe0a099bc98ce1e70").unwrap();
         edit.info('S', "9ba1e4d7aa7a39a91b00d90c36436414").unwrap();
         mani.apply(edit).unwrap();
-        assert_eq!("dcab9d28+thing one
+        assert_eq!(
+            "dcab9d28+thing one
 a4e79c62+thing two
 4d82ac08A71332261daaa6dc30ad627b09349c6af
 a2281ab8Csome-client-identifier
@@ -748,7 +801,9 @@ a2281ab8Csome-client-identifier
 1736a268S9ba1e4d7aa7a39a91b00d90c36436414
 79810703Te0785f2a185aaf6fe0a099bc98ce1e70
 --------
-", read_to_string(root.join("MANIFEST")).unwrap());
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
     }
 
     #[test]
@@ -764,19 +819,25 @@ a2281ab8Csome-client-identifier
         edit.add("thing two").unwrap();
         edit.info('2', "thing two metadata").unwrap();
         mani.apply(edit).unwrap();
-        assert_eq!("dcab9d28+thing one
+        assert_eq!(
+            "dcab9d28+thing one
 a4e79c62+thing two
 05a03b0d1thing one metadata
 bc9dae362thing two metadata
 --------
-", read_to_string(root.join("MANIFEST")).unwrap());
-        assert_eq!("dcab9d28+thing one
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
+        assert_eq!(
+            "dcab9d28+thing one
 05a03b0d1thing one metadata
 --------
 a4e79c62+thing two
 bc9dae362thing two metadata
 --------
-", read_to_string(root.join("MANIFEST.1")).unwrap());
+",
+            read_to_string(root.join("MANIFEST.1")).unwrap()
+        );
         // Now iterate that we know the logs are good.
         let mut iter = ManifestIterator::open(root.join("MANIFEST.1")).unwrap();
         // first record
@@ -785,14 +846,20 @@ bc9dae362thing two metadata
         assert!(edit.add_strs.contains("thing one"));
         assert_eq!(0, edit.rm_strs.len());
         assert_eq!(1, edit.info.len());
-        assert_eq!(Some("thing one metadata"), edit.info.get(&'1').map(|s| s.as_str()));
+        assert_eq!(
+            Some("thing one metadata"),
+            edit.info.get(&'1').map(|s| s.as_str())
+        );
         // second record
         let edit = iter.next().unwrap().unwrap();
         assert_eq!(1, edit.add_strs.len());
         assert!(edit.add_strs.contains("thing two"));
         assert_eq!(0, edit.rm_strs.len());
         assert_eq!(1, edit.info.len());
-        assert_eq!(Some("thing two metadata"), edit.info.get(&'2').map(|s| s.as_str()));
+        assert_eq!(
+            Some("thing two metadata"),
+            edit.info.get(&'2').map(|s| s.as_str())
+        );
         // no record
         assert!(iter.next().is_none());
     }
@@ -811,34 +878,38 @@ bc9dae362thing two metadata
 
     fn build_string(params: &GuacamoleParameters, seed: usize) -> String {
         let mut guac2 = Guacamole::new((seed % params.num_strs) as u64);
-        format!("string:{}_{}_{}",
+        format!(
+            "string:{}_{}_{}",
             guac2.gen::<u64>(),
             guac2.gen::<u64>(),
-            guac2.gen::<u64>())
+            guac2.gen::<u64>()
+        )
     }
 
     fn build_info(params: &GuacamoleParameters, guac: &mut Guacamole) -> (char, String) {
         let info_set_idx = guac.gen::<usize>() % params.info_set.len();
         assert!(info_set_idx < params.info_set.len());
-        (params.info_set[info_set_idx],
-         format!("info:{}_{}_{}",
-            guac.gen::<u64>(),
-            guac.gen::<u64>(),
-            guac.gen::<u64>()))
-
+        (
+            params.info_set[info_set_idx],
+            format!(
+                "info:{}_{}_{}",
+                guac.gen::<u64>(),
+                guac.gen::<u64>(),
+                guac.gen::<u64>()
+            ),
+        )
     }
 
     fn build_edit_randomly(
         params: &GuacamoleParameters,
         mani: &Manifest,
-        guac: &mut Guacamole
+        guac: &mut Guacamole,
     ) -> Edit {
         let mut edit = Edit::default();
         let num_to_add = guac.gen::<u64>() % params.num_to_add;
         let num_to_rm = guac.gen::<u64>() % params.num_to_rm;
         let num_info = guac.gen::<u64>() % params.num_info;
-        'to_add:
-        for _ in 0..num_to_add {
+        'to_add: for _ in 0..num_to_add {
             let mut retries = 0;
             let s = loop {
                 let s = build_string(params, guac.gen::<usize>());
@@ -852,8 +923,7 @@ bc9dae362thing two metadata
             };
             edit.add(&s).unwrap();
         }
-        'to_rm:
-        for _ in 0..num_to_rm {
+        'to_rm: for _ in 0..num_to_rm {
             let mut retries = 0;
             let s = loop {
                 let s = build_string(params, guac.gen::<usize>());
@@ -879,7 +949,8 @@ bc9dae362thing two metadata
         let mut guac = Guacamole::new(params.seed);
         for _ in 0..params.iterations {
             let edit = build_edit_randomly(&params, &mani, &mut guac);
-            mani.apply(edit).expect("that the manifest will apply cleanly");
+            mani.apply(edit)
+                .expect("that the manifest will apply cleanly");
         }
         let mut found = false;
         for err in Manifest::verify(params.options.clone(), &root) {

@@ -14,12 +14,13 @@ use tatl::{HeyListen, Stationary};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{LOGIC_ERROR, Error, IoToZ};
+use super::{Error, IoToZ, LOGIC_ERROR};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static TOO_MANY_OPEN_FILES: Counter = Counter::new("sst.file_manager.too_many_open_files");
-static TOO_MANY_OPEN_FILES_MONITOR: Stationary = Stationary::new("sst.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
+static TOO_MANY_OPEN_FILES_MONITOR: Stationary =
+    Stationary::new("sst.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&TOO_MANY_OPEN_FILES_MONITOR);
@@ -51,7 +52,9 @@ impl FileHandle {
     }
 
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
-        self.file.read_exact_at(buf, offset).as_z()
+        self.file
+            .read_exact_at(buf, offset)
+            .as_z()
             .with_variable("fd", self.file.as_raw_fd())
             .with_variable("offset", offset)
             .with_variable("amount", buf.len())
@@ -99,7 +102,7 @@ impl State {
             panic!("file.as_raw_fd() != fd");
         }
         match self.names.remove(&path) {
-            Some(_) => {},
+            Some(_) => {}
             None => {
                 panic!("path missing from names map");
             }

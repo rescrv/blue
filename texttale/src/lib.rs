@@ -27,10 +27,7 @@ pub struct ShellTextTale {
 
 impl ShellTextTale {
     pub fn new(rl: Editor<(), MemHistory>, prompt: &'static str) -> Self {
-        Self {
-            rl,
-            prompt,
-        }
+        Self { rl, prompt }
     }
 }
 
@@ -48,18 +45,14 @@ impl TextTale for ShellTextTale {
     fn next_command(&mut self) -> Option<String> {
         let line = self.rl.readline(self.prompt);
         match line {
-            Ok(line) => {
-                Some(line.trim().to_owned())
-            },
+            Ok(line) => Some(line.trim().to_owned()),
             Err(ReadlineError::Interrupted) => {
                 std::process::exit(1);
-            },
-            Err(ReadlineError::Eof) => {
-                None
-            },
+            }
+            Err(ReadlineError::Eof) => None,
             Err(err) => {
                 panic!("could not read line: {}", err);
-            },
+            }
         }
     }
 }

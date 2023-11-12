@@ -152,15 +152,20 @@ impl ServiceDiscovery {
         }
     }
 
-    fn get_deployment(&self, deployment: String) -> Result<Arc<Mutex<BTreeMap<HostID, Host>>>, Error> {
+    fn get_deployment(
+        &self,
+        deployment: String,
+    ) -> Result<Arc<Mutex<BTreeMap<HostID, Host>>>, Error> {
         let mut by_deployment = self.by_deployment.lock().unwrap();
         if !by_deployment.contains_key(&deployment) {
             by_deployment.insert(deployment.clone(), Arc::new(Mutex::new(BTreeMap::new())));
         }
-        Ok(Arc::clone(by_deployment.get(&deployment).ok_or(Error::NotFound {
-            core: ErrorCore::default(),
-            what: "deployment".to_owned(),
-        })?))
+        Ok(Arc::clone(by_deployment.get(&deployment).ok_or(
+            Error::NotFound {
+                core: ErrorCore::default(),
+                what: "deployment".to_owned(),
+            },
+        )?))
     }
 }
 
@@ -180,7 +185,11 @@ impl ServiceDiscoveryService for ServiceDiscovery {
         let to_take = std::cmp::min(req.count, 5) as usize;
         let first = deployment.range((Bound::Included(req.consistent_hash), Bound::Unbounded));
         let second = deployment.range((Bound::Unbounded, Bound::Included(req.consistent_hash)));
-        let hosts: Vec<Host> = first.chain(second).take(to_take).map(|x| x.1.clone()).collect();
+        let hosts: Vec<Host> = first
+            .chain(second)
+            .take(to_take)
+            .map(|x| x.1.clone())
+            .collect();
         Ok(ResolveResponse { hosts })
     }
 }
@@ -204,25 +213,40 @@ mod tests {
         for i in 0..16 {
             let host_id = HostID::generate().unwrap();
             hosts.push(host_id);
-            assert_eq!(RegisterResponse {
-            }, sd.register(&Context::default(), RegisterRequest {
-                env_id,
-                deployment: "some-deployment".to_owned(),
-                host_id,
-                host: Host {
-                    host_id,
-                    connect: format!("127.0.0.1:{}", 2049 + i),
-                },
-            }).unwrap());
+            assert_eq!(
+                RegisterResponse {},
+                sd.register(
+                    &Context::default(),
+                    RegisterRequest {
+                        env_id,
+                        deployment: "some-deployment".to_owned(),
+                        host_id,
+                        host: Host {
+                            host_id,
+                            connect: format!("127.0.0.1:{}", 2049 + i),
+                        },
+                    }
+                )
+                .unwrap()
+            );
         }
         hosts.sort();
         for idx in 0..hosts.len() {
-            let host_ids: Vec<HostID> = sd.resolve(&Context::default(), ResolveRequest {
-                env_id,
-                deployment: "some-deployment".to_owned(),
-                consistent_hash: hosts[idx],
-                count: 3,
-            }).unwrap().hosts.iter().map(|h| h.host_id).collect();
+            let host_ids: Vec<HostID> = sd
+                .resolve(
+                    &Context::default(),
+                    ResolveRequest {
+                        env_id,
+                        deployment: "some-deployment".to_owned(),
+                        consistent_hash: hosts[idx],
+                        count: 3,
+                    },
+                )
+                .unwrap()
+                .hosts
+                .iter()
+                .map(|h| h.host_id)
+                .collect();
             for i in 0..3 {
                 assert_eq!(hosts[(idx + i) % hosts.len()], host_ids[i]);
             }

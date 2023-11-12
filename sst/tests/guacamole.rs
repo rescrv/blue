@@ -6,7 +6,7 @@ use guacamole::Guacamole;
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Cursor, SstBuilder, SstCursor, Sst};
+use sst::{Builder, Cursor, Sst, SstBuilder, SstCursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 
@@ -217,9 +217,7 @@ where
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
         match kvo {
             KeyValueOperation::Put(x) => {
-                builder
-                    .put(&x.key, x.timestamp, &x.value)
-                    .unwrap();
+                builder.put(&x.key, x.timestamp, &x.value).unwrap();
             }
             KeyValueOperation::Del(x) => {
                 builder.del(&x.key, x.timestamp).unwrap();

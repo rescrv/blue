@@ -26,24 +26,36 @@ fn test_helper(exp: &[&str], prefix: Option<&str>, example: DifferentKindsOfOpti
 
 #[test]
 fn empty() {
-    test_helper(&[], None, DifferentKindsOfOptions {
-        option_u64: None,
-        just_u64: 0,
-    });
+    test_helper(
+        &[],
+        None,
+        DifferentKindsOfOptions {
+            option_u64: None,
+            just_u64: 0,
+        },
+    );
 }
 
 #[test]
 fn option_u64() {
-    test_helper(&["--option-u64", "42"], None, DifferentKindsOfOptions {
-        option_u64: Some(42),
-        just_u64: 0,
-    });
+    test_helper(
+        &["--option-u64", "42"],
+        None,
+        DifferentKindsOfOptions {
+            option_u64: Some(42),
+            just_u64: 0,
+        },
+    );
 }
 
 #[test]
 fn just_u64() {
-    test_helper(&["--just-u64", "42"], None, DifferentKindsOfOptions {
-        option_u64: None,
-        just_u64: 42,
-    });
+    test_helper(
+        &["--just-u64", "42"],
+        None,
+        DifferentKindsOfOptions {
+            option_u64: None,
+            just_u64: 42,
+        },
+    );
 }

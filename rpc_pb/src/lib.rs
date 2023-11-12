@@ -157,7 +157,7 @@ pub enum Error {
         core: ErrorCore,
         #[prototk(2, string)]
         what: String,
-    }
+    },
 }
 
 impl Default for Error {
@@ -405,7 +405,7 @@ mod tests {
             "Success",
             Error::Success {
                 core: ErrorCore::default(),
-            }
+            },
         );
     }
 
@@ -417,7 +417,7 @@ mod tests {
                 core: ErrorCore::default(),
                 context: "Some context".to_owned(),
                 err: prototk::Error::Success,
-            }
+            },
         );
     }
 
@@ -428,7 +428,7 @@ mod tests {
             Error::UnknownServerName {
                 core: ErrorCore::default(),
                 name: "hostname".to_owned(),
-            }
+            },
         );
     }
 
@@ -439,7 +439,7 @@ mod tests {
             Error::UnknownMethodName {
                 core: ErrorCore::default(),
                 name: "method".to_owned(),
-            }
+            },
         );
     }
 
@@ -450,7 +450,7 @@ mod tests {
             Error::RequestTooLarge {
                 core: ErrorCore::default(),
                 size: 10,
-            }
+            },
         );
     }
 
@@ -461,7 +461,7 @@ mod tests {
             Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: "socket closed".to_owned(),
-            }
+            },
         );
     }
 
@@ -472,7 +472,7 @@ mod tests {
             Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: "ssl misconfig".to_owned(),
-            }
+            },
         );
     }
 
@@ -483,7 +483,7 @@ mod tests {
             Error::UlimitParseError {
                 core: ErrorCore::default(),
                 what: "could not read".to_owned(),
-            }
+            },
         );
     }
 
@@ -494,7 +494,7 @@ mod tests {
             Error::OsError {
                 core: ErrorCore::default(),
                 what: "some I/O error".to_owned(),
-            }
+            },
         );
     }
 
@@ -505,7 +505,7 @@ mod tests {
             Error::LogicError {
                 core: ErrorCore::default(),
                 what: "some logic error".to_owned(),
-            }
+            },
         );
     }
 
@@ -516,7 +516,7 @@ mod tests {
             Error::NotFound {
                 core: ErrorCore::default(),
                 what: "deployment".to_owned(),
-            }
+            },
         );
     }
 }

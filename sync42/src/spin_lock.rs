@@ -32,10 +32,7 @@ impl<T> SpinLock<T> {
         while index > self.releases.load(Ordering::Acquire) {
             std::hint::spin_loop();
         }
-        SpinLockGuard {
-            lock: self,
-            index,
-        }
+        SpinLockGuard { lock: self, index }
     }
 
     /// Consume the spinlock and return its data.
@@ -72,16 +69,12 @@ impl<'a, T> Deref for SpinLockGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            &*self.lock.data.get()
-        }
+        unsafe { &*self.lock.data.get() }
     }
 }
 
 impl<'a, T> DerefMut for SpinLockGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            &mut *self.lock.data.get()
-        }
+        unsafe { &mut *self.lock.data.get() }
     }
 }

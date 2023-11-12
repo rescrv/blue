@@ -20,17 +20,15 @@ pub trait Z {
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
 }
 
-impl<T, E: Z<Error=E>> Z for Result<T, E> {
+impl<T, E: Z<Error = E>> Z for Result<T, E> {
     type Error = Result<T, E>;
 
     fn long_form(&self) -> String {
         match self {
             Ok(_) => {
                 panic!("called long_form() on Ok Result");
-            },
-            Err(e) => {
-                e.long_form()
-            },
+            }
+            Err(e) => e.long_form(),
         }
     }
 
@@ -69,8 +67,7 @@ macro_rules! iotoz {
             fn pretty_unwrap(self) -> T;
         }
 
-        impl<T, E: Into<$error>> IoToZ<T> for Result<T, E>
-        {
+        impl<T, E: Into<$error>> IoToZ<T> for Result<T, E> {
             fn as_z(self) -> Result<T, $error> {
                 match self {
                     Ok(t) => Ok(t),
@@ -84,7 +81,7 @@ macro_rules! iotoz {
                     Err(err) => {
                         let err: $error = err.into();
                         panic!("{}", err.long_form());
-                    },
+                    }
                 }
             }
         }

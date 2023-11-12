@@ -591,10 +591,11 @@ impl Merge for TupleSchema {
                     core: ErrorCore::default(),
                     what: "tuple key exhausted".to_owned(),
                 })?;
-                let tk_key = parse_as_prototk(tk_key, next_field.ty()).map_err(|err| Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: err.to_string(),
-                })?;
+                let tk_key =
+                    parse_as_prototk(tk_key, next_field.ty()).map_err(|err| Error::Corruption {
+                        core: ErrorCore::default(),
+                        what: err.to_string(),
+                    })?;
                 current_type.push_field(next_field.clone(), value_ty);
                 match (next_field.ty(), value_ty) {
                     (DataType::unit, DataType::message) => {

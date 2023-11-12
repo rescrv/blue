@@ -3,8 +3,7 @@
 fn fnmatch(pattern: &str, text: &str) -> bool {
     let mut pat = pattern.chars();
     let mut txt = text.chars();
-    'processing:
-    loop {
+    'processing: loop {
         match (pat.next(), txt.next()) {
             (Some(p), Some(t)) => {
                 if p == '*' {
@@ -19,10 +18,8 @@ fn fnmatch(pattern: &str, text: &str) -> bool {
                 } else {
                     return false;
                 }
-            },
-            (Some(p), None) => {
-                p == '*' && pat.all(|c| c == '*')
-            },
+            }
+            (Some(p), None) => p == '*' && pat.all(|c| c == '*'),
             (None, Some(_)) => {
                 return false;
             }
@@ -56,9 +53,7 @@ impl Pattern {
 
     pub fn new(pattern: String) -> Option<Self> {
         if Pattern::is_valid(&pattern) {
-            Some(Self {
-                pattern,
-            })
+            Some(Self { pattern })
         } else {
             None
         }

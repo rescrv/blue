@@ -7,20 +7,30 @@ use arrrg_derive::CommandLine;
 
 #[derive(CommandLine, Debug, Default, PartialEq)]
 struct Parameters {
-    #[arrrg(optional, "Expected number of elements to insert into the bloom filter.", "N")]
+    #[arrrg(
+        optional,
+        "Expected number of elements to insert into the bloom filter.",
+        "N"
+    )]
     card: Option<f64>,
     #[arrrg(optional, "Expected probability of a false positive.", "P")]
     prob: Option<f64>,
     #[arrrg(optional, "Number of bits in use in the bloom filter.", "M")]
     bits: Option<f64>,
-    #[arrrg(optional, "Number of hash functions/keys to set in the bloom filter.", "K")]
+    #[arrrg(
+        optional,
+        "Number of hash functions/keys to set in the bloom filter.",
+        "K"
+    )]
     keys: Option<f64>,
 }
 
 impl Eq for Parameters {}
 
 fn main() {
-    let (params, free) = Parameters::from_command_line_relaxed("Usage: bloom-calculator [--n N] [--p P] [--m M] [--k K]");
+    let (params, free) = Parameters::from_command_line_relaxed(
+        "Usage: bloom-calculator [--n N] [--p P] [--m M] [--k K]",
+    );
     if !free.is_empty() {
         panic!("free arguments are not accepted");
     }

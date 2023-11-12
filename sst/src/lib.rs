@@ -1,4 +1,3 @@
-
 extern crate arrrg_derive;
 
 extern crate prototk;
@@ -7,8 +6,8 @@ extern crate prototk_derive;
 
 use std::cmp;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display, Formatter};
 use std::fmt::Write as FmtWrite;
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -38,7 +37,7 @@ pub mod setsum;
 
 pub use log::{LogBuilder, LogIterator, LogOptions};
 
-use block::{Block, BlockCursor, BlockBuilder, BlockBuilderOptions};
+use block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use file_manager::{open_without_manager, FileHandle};
 use reference::KeyValuePair;
 use setsum::Setsum;
@@ -52,10 +51,12 @@ static CORRUPTION: Counter = Counter::new("sst.corruption");
 static CORRUPTION_MONITOR: Stationary = Stationary::new("sst.corruption", &CORRUPTION);
 
 static KEY_TOO_LARGE: Counter = Counter::new("sst.error.key_too_large");
-static KEY_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.key_too_large", &KEY_TOO_LARGE);
+static KEY_TOO_LARGE_MONITOR: Stationary =
+    Stationary::new("sst.error.key_too_large", &KEY_TOO_LARGE);
 
 static VALUE_TOO_LARGE: Counter = Counter::new("sst.error.value_too_large");
-static VALUE_TOO_LARGE_MONITOR: Stationary = Stationary::new("sst.error.value_too_large", &VALUE_TOO_LARGE);
+static VALUE_TOO_LARGE_MONITOR: Stationary =
+    Stationary::new("sst.error.value_too_large", &VALUE_TOO_LARGE);
 
 static TABLE_FULL: Counter = Counter::new("sst.error.table_full");
 static TABLE_FULL_MONITOR: Stationary = Stationary::new("sst.error.table_full", &TABLE_FULL);
@@ -89,29 +90,29 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&KEY_TOO_LARGE);
     collector.register_counter(&VALUE_TOO_LARGE);
     collector.register_counter(&TABLE_FULL);
-	collector.register_counter(&SST_OPEN);
-	collector.register_counter(&SST_CURSOR_NEW);
-	collector.register_counter(&SST_SETSUM);
-	collector.register_counter(&SST_METADATA);
-	collector.register_counter(&SST_LOAD_BLOCK);
-	collector.register_counter(&BUILDER_NEW);
-	collector.register_counter(&BUILDER_COMPARE_KEY);
-	collector.register_counter(&BUILDER_ASSIGN_LAST_KEY);
-	collector.register_counter(&BUILDER_START_NEW_BLOCK);
-	collector.register_counter(&BUILDER_FLUSH_BLOCK);
-	collector.register_counter(&BUILDER_APPROX_SIZE);
-	collector.register_counter(&BUILDER_PUT);
-	collector.register_counter(&BUILDER_DEL);
-	collector.register_counter(&BUILDER_SEAL);
-	collector.register_counter(&SST_CURSOR_META_PREV);
-	collector.register_counter(&SST_CURSOR_META_NEXT);
-	collector.register_counter(&SST_CURSOR_RESET);
-	collector.register_counter(&SST_CURSOR_SEEK_TO_FIRST);
-	collector.register_counter(&SST_CURSOR_SEEK_TO_LAST);
-	collector.register_counter(&SST_CURSOR_SEEK);
-	collector.register_counter(&SST_CURSOR_PREV);
-	collector.register_counter(&SST_CURSOR_NEXT);
-	collector.register_counter(&SST_CURSOR_NEW);
+    collector.register_counter(&SST_OPEN);
+    collector.register_counter(&SST_CURSOR_NEW);
+    collector.register_counter(&SST_SETSUM);
+    collector.register_counter(&SST_METADATA);
+    collector.register_counter(&SST_LOAD_BLOCK);
+    collector.register_counter(&BUILDER_NEW);
+    collector.register_counter(&BUILDER_COMPARE_KEY);
+    collector.register_counter(&BUILDER_ASSIGN_LAST_KEY);
+    collector.register_counter(&BUILDER_START_NEW_BLOCK);
+    collector.register_counter(&BUILDER_FLUSH_BLOCK);
+    collector.register_counter(&BUILDER_APPROX_SIZE);
+    collector.register_counter(&BUILDER_PUT);
+    collector.register_counter(&BUILDER_DEL);
+    collector.register_counter(&BUILDER_SEAL);
+    collector.register_counter(&SST_CURSOR_META_PREV);
+    collector.register_counter(&SST_CURSOR_META_NEXT);
+    collector.register_counter(&SST_CURSOR_RESET);
+    collector.register_counter(&SST_CURSOR_SEEK_TO_FIRST);
+    collector.register_counter(&SST_CURSOR_SEEK_TO_LAST);
+    collector.register_counter(&SST_CURSOR_SEEK);
+    collector.register_counter(&SST_CURSOR_PREV);
+    collector.register_counter(&SST_CURSOR_NEXT);
+    collector.register_counter(&SST_CURSOR_NEW);
 }
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
@@ -327,7 +328,7 @@ impl From<std::convert::Infallible> for Error {
     }
 }
 
-iotoz!{Error}
+iotoz! {Error}
 
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
@@ -438,7 +439,7 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
             Some(value) => {
                 let value: &'a [u8] = value;
                 Some(value)
-            },
+            }
             None => None,
         };
         Self {
@@ -830,10 +831,7 @@ impl Sst {
         })
     }
 
-    fn load_block(
-        file: &FileHandle,
-        block_metadata: &BlockMetadata,
-    ) -> Result<Block, Error> {
+    fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
         SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -884,7 +882,7 @@ impl BlockCompression {
             BlockCompression::NoCompression => {
                 scratch.clear();
                 SstEntry::PlainBlock(bytes)
-            },
+            }
         }
     }
 }
@@ -951,8 +949,8 @@ impl Default for SstOptions {
             block: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
-            target_file_size: 1<<22,
-            write_buffer_size: 1<<22,
+            target_file_size: 1 << 22,
+            write_buffer_size: 1 << 22,
         }
     }
 }
@@ -1088,11 +1086,7 @@ impl SstBuilder {
             .put(&dividing_key, dividing_timestamp, &value)
     }
 
-    fn get_block(
-        &mut self,
-        key: &[u8],
-        timestamp: u64,
-    ) -> Result<&mut BlockBuilder, Error> {
+    fn get_block(&mut self, key: &[u8], timestamp: u64) -> Result<&mut BlockBuilder, Error> {
         if self.block_builder.is_none() {
             self.start_new_block()?;
         } else {
@@ -1223,7 +1217,9 @@ impl SstMultiBuilder {
             }
             return Ok(self.builder.as_mut().unwrap());
         }
-        let path = self.prefix.join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
+        let path = self
+            .prefix
+            .join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
         self.paths.push(path.clone());
         self.counter += 1;
         self.builder = Some(SstBuilder::new(self.options.clone(), path)?);

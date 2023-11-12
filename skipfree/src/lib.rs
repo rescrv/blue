@@ -45,7 +45,12 @@ impl<K, V> Node<K, V> {
 
     fn cas_next(&self, level: usize, old_node: *mut Node<K, V>, new_node: *mut Node<K, V>) -> bool {
         assert!(level < self.pointers.len());
-        self.pointers[level].compare_exchange(old_node, new_node, Ordering::SeqCst, Ordering::SeqCst) == Ok(old_node)
+        self.pointers[level].compare_exchange(
+            old_node,
+            new_node,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) == Ok(old_node)
     }
 }
 
@@ -56,23 +61,28 @@ mod node_ptr {
         unsafe { &*ptr }
     }
 
-    pub (crate) fn key<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a K {
+    pub(crate) fn key<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a K {
         &deref(ptr).key
     }
 
-    pub (crate) fn value<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a V {
+    pub(crate) fn value<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a V {
         &deref(ptr).value
     }
 
-    pub (crate) fn set_next<K, V>(ptr: *mut Node<K, V>, level: usize, next: *mut Node<K, V>) {
+    pub(crate) fn set_next<K, V>(ptr: *mut Node<K, V>, level: usize, next: *mut Node<K, V>) {
         deref(ptr).set_next(level, next);
     }
 
-    pub (crate) fn get_next<K, V>(ptr: *mut Node<K, V>, level: usize) -> *mut Node<K, V> {
+    pub(crate) fn get_next<K, V>(ptr: *mut Node<K, V>, level: usize) -> *mut Node<K, V> {
         deref(ptr).get_next(level)
     }
 
-    pub (crate) fn cas_next<K, V>(ptr: *mut Node<K, V>, level: usize, old_node: *mut Node<K, V>, new_node: *mut Node<K, V>) -> bool {
+    pub(crate) fn cas_next<K, V>(
+        ptr: *mut Node<K, V>,
+        level: usize,
+        old_node: *mut Node<K, V>,
+        new_node: *mut Node<K, V>,
+    ) -> bool {
         deref(ptr).cas_next(level, old_node, new_node)
     }
 }
@@ -90,14 +100,12 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         let height = self.random_height();
         let x = Self::new_node(key, value, height);
         for idx in 0..height {
-            'lockfree_looping:
-            loop {
+            'lockfree_looping: loop {
                 node_ptr::set_next(x, idx, obs[idx]);
                 if node_ptr::cas_next(prev[idx], idx, obs[idx], x) {
                     break 'lockfree_looping;
                 }
-                'advancing:
-                loop {
+                'advancing: loop {
                     let next = node_ptr::get_next(prev[idx], idx);
                     if Self::key_is_after_node(node_ptr::key(x), next) {
                         prev[idx] = next;
@@ -161,7 +169,10 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
 
     // NOTE(rescrv):  I don't want a simpler type.  I want a 3-tuple that I can destructure.
     #[allow(clippy::type_complexity)]
-    fn find_greater_or_equal_and_pointers(&self, key: &K) -> (*mut Node<K, V>, Vec<*mut Node<K, V>>, Vec<*mut Node<K, V>>) {
+    fn find_greater_or_equal_and_pointers(
+        &self,
+        key: &K,
+    ) -> (*mut Node<K, V>, Vec<*mut Node<K, V>>, Vec<*mut Node<K, V>>) {
         let mut x = self.head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         let mut prev = Vec::with_capacity(MAX_HEIGHT);
@@ -178,9 +189,9 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
                 prev[level] = x;
                 obs[level] = next;
                 if level == 0 {
-                  break next;
+                    break next;
                 } else {
-                  level -= 1;
+                    level -= 1;
                 }
             }
         };
@@ -230,9 +241,7 @@ impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
             node_ptr::set_next(head, idx, std::ptr::null_mut());
         }
         let head = AtomicPtr::new(head);
-        Self {
-            head,
-        }
+        Self { head }
     }
 }
 
@@ -404,9 +413,7 @@ mod tests {
         for _ in 0..readers {
             let s = Arc::clone(&shutdown_signal);
             let sl = Arc::clone(&skiplist);
-            reader_threads.push(std::thread::spawn(move || {
-                guacamole_reader(sl, s)
-            }));
+            reader_threads.push(std::thread::spawn(move || guacamole_reader(sl, s)));
         }
         let mut writer_threads = Vec::with_capacity(writers as usize);
         for _ in 0..writers {

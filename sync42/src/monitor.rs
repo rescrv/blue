@@ -14,7 +14,10 @@ use std::sync::{Mutex, MutexGuard};
 pub trait Coordination<T> {
     /// Acquire the monitor.  Returns true if and only if the monitor can enter the critical
     /// section.
-    fn acquire<'a: 'b, 'b>(guard: MutexGuard<'a, Self>, t: &'b mut T) -> (bool, MutexGuard<'a, Self>);
+    fn acquire<'a: 'b, 'b>(
+        guard: MutexGuard<'a, Self>,
+        t: &'b mut T,
+    ) -> (bool, MutexGuard<'a, Self>);
     /// Release the monitor.  In a proper monitor [`Coordination::release`] will always follow a call to
     /// acquire on the same thread.  Release is responsible for waking threads blocked in acquire.
     fn release<'a: 'b, 'b>(guard: MutexGuard<'a, Self>, t: &'b mut T) -> MutexGuard<'a, Self>;
@@ -32,7 +35,7 @@ pub struct Monitor<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> {
     coordination: Mutex<COORD>,
     synchronization: AtomicBool,
     critical_section: UnsafeCell<CRIT>,
-    _t: std::marker::PhantomData::<T>,
+    _t: std::marker::PhantomData<T>,
 }
 
 impl<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> Monitor<T, COORD, CRIT> {

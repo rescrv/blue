@@ -30,15 +30,13 @@ pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::Tok
     };
 
     let fields: Vec<syn::Field> = match &ds.fields {
-        syn::Fields::Named(fields) => {
-            fields.named.iter().cloned().collect()
-        },
+        syn::Fields::Named(fields) => fields.named.iter().cloned().collect(),
         syn::Fields::Unnamed(_) => {
             panic!("unnamed structs are not supported");
-        },
+        }
         syn::Fields::Unit => {
             panic!("unit structs are not supported");
-        },
+        }
     };
 
     let try_from_snippet = generate_try_from(&ty_name, &fields);
@@ -75,7 +73,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
             Some(num) => num,
             None => {
                 continue;
-            },
+            }
         };
         let field_name = &field.ident.as_ref().unwrap();
         let field_type = &field.ty;
@@ -134,7 +132,7 @@ fn generate_into(fields: &[syn::Field]) -> TokenStream {
             Some(num) => num,
             None => {
                 continue;
-            },
+            }
         };
         let field_name = &field.ident.as_ref().unwrap();
         let line = if field.ty.to_token_stream().to_string() == "()" {

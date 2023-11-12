@@ -7,8 +7,8 @@ extern crate syn;
 
 use proc_macro2::{Span, TokenStream};
 use quote::ToTokens;
-use syn::{parse_macro_input, DeriveInput};
 use syn::spanned::Spanned;
+use syn::{parse_macro_input, DeriveInput};
 
 use derive_util::EnumVisitor;
 
@@ -39,21 +39,21 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let gen = quote! {
         impl ::zerror::Z for #ty_name {
             type Error = Self;
-        
+
             fn long_form(&self) -> String {
                 format!("{}\n", self) + &self.core().long_form()
             }
-        
+
             fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
                 self.core_mut().set_token(identifier, value);
                 self
             }
-        
+
             fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
                 self.core_mut().set_url(identifier, url);
                 self
             }
-        
+
             fn with_variable<X: ::std::fmt::Debug>(mut self, variable: &str, x: X) -> Self::Error
             where
                 X: ::std::fmt::Debug,
@@ -78,8 +78,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
 
 //////////////////////////////////////// CommandLineVisitor ////////////////////////////////////////
 
-struct CoreMethodsVisitor {
-}
+struct CoreMethodsVisitor {}
 
 impl EnumVisitor for CoreMethodsVisitor {
     type Output = TokenStream;
@@ -134,8 +133,7 @@ impl EnumVisitor for CoreMethodsVisitor {
 
 /////////////////////////////////////// DisplayMethodVisitor ///////////////////////////////////////
 
-struct DisplayMethodVisitor {
-}
+struct DisplayMethodVisitor {}
 
 impl EnumVisitor for DisplayMethodVisitor {
     type Output = TokenStream;
@@ -179,15 +177,15 @@ impl EnumVisitor for DisplayMethodVisitor {
         let mut first_field = true;
         for field in fields.named.iter() {
             if field.ident == Some(syn::Ident::new("core", field.span())) {
-                continue
+                continue;
             }
             let field_ident = &field.ident;
             if first_field {
-                fields_list_quote = quote ! {
+                fields_list_quote = quote! {
                     #field_ident
                 };
             } else {
-                fields_list_quote = quote ! {
+                fields_list_quote = quote! {
                     #fields_list_quote, #field_ident
                 };
             }
@@ -212,8 +210,7 @@ impl EnumVisitor for DisplayMethodVisitor {
 
 ////////////////////////////////////// PartialEqMethodVisitor //////////////////////////////////////
 
-struct PartialEqMethodVisitor {
-}
+struct PartialEqMethodVisitor {}
 
 impl EnumVisitor for PartialEqMethodVisitor {
     type Output = TokenStream;
@@ -261,26 +258,28 @@ impl EnumVisitor for PartialEqMethodVisitor {
         let mut num_fields = 0;
         for field in fields.named.iter() {
             if field.ident == Some(syn::Ident::new("core", field.span())) {
-                continue
+                continue;
             }
             let field_ident = &field.ident;
-            let field_lhs = syn::Ident::new(&format!("zerror_{}_lhs", num_fields), Span::call_site());
-            let field_rhs = syn::Ident::new(&format!("zerror_{}_rhs", num_fields), Span::call_site());
+            let field_lhs =
+                syn::Ident::new(&format!("zerror_{}_lhs", num_fields), Span::call_site());
+            let field_rhs =
+                syn::Ident::new(&format!("zerror_{}_rhs", num_fields), Span::call_site());
             if num_fields == 0 {
-                fields_list_lhs = quote ! {
+                fields_list_lhs = quote! {
                     #field_ident: #field_lhs
                 };
-                fields_list_rhs = quote ! {
+                fields_list_rhs = quote! {
                     #field_ident: #field_rhs
                 };
                 fields_compare = quote! {
                     #field_lhs == #field_rhs
                 }
             } else {
-                fields_list_lhs = quote ! {
+                fields_list_lhs = quote! {
                     #fields_list_lhs, #field_ident: #field_lhs
                 };
-                fields_list_rhs = quote ! {
+                fields_list_rhs = quote! {
                     #fields_list_rhs, #field_ident: #field_rhs
                 };
                 fields_compare = quote! {

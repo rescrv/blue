@@ -21,9 +21,7 @@ pub enum Error {
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
     TagTooLarge { tag: u64 },
     /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant {
-        discriminant: u32,
-    },
+    UnknownDiscriminant { discriminant: u32 },
 }
 
 impl std::fmt::Display for Error {
@@ -46,10 +44,9 @@ impl std::fmt::Display for Error {
                 .debug_struct("SignedOverflow")
                 .field("value", value)
                 .finish(),
-            Error::TagTooLarge { tag } => fmt
-                .debug_struct("TagTooLarge")
-                .field("tag", tag)
-                .finish(),
+            Error::TagTooLarge { tag } => {
+                fmt.debug_struct("TagTooLarge").field("tag", tag).finish()
+            }
             Error::UnknownDiscriminant { discriminant } => fmt
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
@@ -542,23 +539,31 @@ impl_pack_unpack_tuple! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
 impl<T: Packable, E: Packable> Packable for Result<T, E> {
     fn pack_sz(&self) -> usize {
         match self {
-            Ok(x) => {
-                stack_pack(v64::from(10)).pack(v64::from(x.pack_sz())).pack(x).pack_sz()
-            },
-            Err(e) => {
-                stack_pack(v64::from(18)).pack(v64::from(e.pack_sz())).pack(e).pack_sz()
-            },
+            Ok(x) => stack_pack(v64::from(10))
+                .pack(v64::from(x.pack_sz()))
+                .pack(x)
+                .pack_sz(),
+            Err(e) => stack_pack(v64::from(18))
+                .pack(v64::from(e.pack_sz()))
+                .pack(e)
+                .pack_sz(),
         }
     }
 
     fn pack(&self, out: &mut [u8]) {
         match self {
             Ok(x) => {
-                stack_pack(v64::from(10)).pack(v64::from(x.pack_sz())).pack(x).into_slice(out);
-            },
+                stack_pack(v64::from(10))
+                    .pack(v64::from(x.pack_sz()))
+                    .pack(x)
+                    .into_slice(out);
+            }
             Err(e) => {
-                stack_pack(v64::from(18)).pack(v64::from(e.pack_sz())).pack(e).into_slice(out);
-            },
+                stack_pack(v64::from(18))
+                    .pack(v64::from(e.pack_sz()))
+                    .pack(e)
+                    .into_slice(out);
+            }
         }
     }
 }
@@ -566,7 +571,10 @@ impl<T: Packable, E: Packable> Packable for Result<T, E> {
 impl<'a, T, E> Unpackable<'a> for Result<T, E>
 where
     T: Unpackable<'a>,
-    E: Unpackable<'a> + From<Error> + From<<T as Unpackable<'a>>::Error> + From<<E as Unpackable<'a>>::Error>,
+    E: Unpackable<'a>
+        + From<Error>
+        + From<<T as Unpackable<'a>>::Error>
+        + From<<E as Unpackable<'a>>::Error>,
 {
     type Error = E;
 
@@ -577,7 +585,7 @@ where
         let mut up = Unpacker::new(buf);
         let tag: v64 = up.unpack()?;
         if <v64 as Into<u64>>::into(tag) > u32::max_value() as u64 {
-            return Err(Error::TagTooLarge { tag: tag.into() }.into())
+            return Err(Error::TagTooLarge { tag: tag.into() }.into());
         }
         let tag: u32 = tag.try_into().unwrap();
         match tag {
@@ -587,14 +595,14 @@ where
                 up.advance(x.into());
                 let (t, _): (T, _) = <T as Unpackable>::unpack(buf)?;
                 Ok((Ok(t), up.remain()))
-            },
+            }
             18 => {
                 let x: v64 = up.unpack()?;
                 let buf: &[u8] = &up.remain()[..x.into()];
                 up.advance(x.into());
                 let (e, _): (E, _) = <E as Unpackable>::unpack(buf)?;
                 Ok((Err(e), up.remain()))
-            },
+            }
             _ => Err(Error::UnknownDiscriminant { discriminant: tag }.into()),
         }
     }

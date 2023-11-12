@@ -14,10 +14,7 @@ impl BackgroundThread {
         let done = Arc::new(AtomicBool::new(false));
         let done_p = Arc::clone(&done);
         let thread = Some(std::thread::spawn(move || f(done_p)));
-        Self {
-            done,
-            thread,
-        }
+        Self { done, thread }
     }
 
     pub fn join(self) {

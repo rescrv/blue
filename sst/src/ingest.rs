@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use arrrg_derive::CommandLine;
 
-use super::{Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE};
 use super::log::log_to_builder;
 use super::setsum::Setsum;
+use super::{Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE};
 
 /////////////////////////////////////////// IngestOptions //////////////////////////////////////////
 
@@ -38,7 +38,7 @@ pub struct Jester {
     options: IngestOptions,
     counter: u64,
     builder: Option<LogBuilder<File>>,
-    recent: Option<PathBuf>
+    recent: Option<PathBuf>,
 }
 
 impl Jester {
@@ -65,7 +65,8 @@ impl Jester {
             return Ok(self.builder.as_mut().unwrap());
         } else {
             loop {
-                let path = PathBuf::from(&self.options.log_dir).join(format!("{}.log", self.counter));
+                let path =
+                    PathBuf::from(&self.options.log_dir).join(format!("{}.log", self.counter));
                 self.counter += 1;
                 if !path.exists() {
                     self.builder = Some(LogBuilder::new(self.options.log.clone(), &path)?);
@@ -87,10 +88,12 @@ impl Jester {
     }
 
     fn convert_builder(&mut self, input: PathBuf, setsum: Setsum) -> Result<(), Error> {
-        let output = PathBuf::from(&self.options.sst_dir).join(format!("{}.tmp", setsum.hexdigest()));
+        let output =
+            PathBuf::from(&self.options.sst_dir).join(format!("{}.tmp", setsum.hexdigest()));
         let builder = SstBuilder::new(self.options.sst.clone(), &output)?;
         log_to_builder(self.options.log.clone(), &input, builder)?;
-        let final_file = PathBuf::from(&self.options.sst_dir).join(format!("{}.sst", setsum.hexdigest()));
+        let final_file =
+            PathBuf::from(&self.options.sst_dir).join(format!("{}.sst", setsum.hexdigest()));
         rename(output, final_file)?;
         remove_file(input)?;
         Ok(())
@@ -114,7 +117,7 @@ impl Builder for Jester {
             Err(Error::TableFull { .. }) => {
                 self.rollover_builder()?;
                 self.put(key, timestamp, value)
-            },
+            }
             Err(err) => Err(err),
         }
     }
@@ -125,7 +128,7 @@ impl Builder for Jester {
             Err(Error::TableFull { .. }) => {
                 self.rollover_builder()?;
                 self.del(key, timestamp)
-            },
+            }
             Err(err) => Err(err),
         }
     }

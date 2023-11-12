@@ -9,14 +9,15 @@ use buffertk::{Packable, Unpackable};
 
 use tatl::{HeyListen, Stationary};
 
-use prototk::{FieldPackHelper, FieldUnpackHelper, Message, Tag};
 use prototk::field_types::*;
+use prototk::{FieldPackHelper, FieldUnpackHelper, Message, Tag};
 use prototk_derive::Message;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static DEFAULT_ERROR_CORE: Counter = Counter::new("zerror_core.default");
-static DEFAULT_ERROR_CORE_MONITOR: Stationary = Stationary::new("zerror_core.default", &DEFAULT_ERROR_CORE);
+static DEFAULT_ERROR_CORE_MONITOR: Stationary =
+    Stationary::new("zerror_core.default", &DEFAULT_ERROR_CORE);
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&DEFAULT_ERROR_CORE_MONITOR);
@@ -155,9 +156,12 @@ impl<'a> Unpackable<'a> for ErrorCore {
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
         let (internals, buf) = <Internals as Unpackable<'a>>::unpack(buf)?;
-        Ok((Self {
-            internals: Box::new(internals),
-        }, buf))
+        Ok((
+            Self {
+                internals: Box::new(internals),
+            },
+            buf,
+        ))
     }
 }
 
@@ -177,8 +181,7 @@ impl<'a> FieldUnpackHelper<'a, message<ErrorCore>> for ErrorCore {
     }
 }
 
-impl<'a> Message<'a> for ErrorCore {
-}
+impl<'a> Message<'a> for ErrorCore {}
 
 impl From<message<ErrorCore>> for ErrorCore {
     fn from(proto: message<Self>) -> Self {
@@ -220,7 +223,8 @@ mod tests {
         error_core.set_token("PATH", "/bin:/usr/bin");
         error_core.set_url("URL", "http://example.org");
         error_core.set_variable("VAR", 42);
-        assert_eq!("PATH: /bin:/usr/bin
+        assert_eq!(
+            "PATH: /bin:/usr/bin
 
 URL: http://example.org
 
@@ -228,7 +232,9 @@ VAR = 42
 
 backtrace:
 SOME-BACKTRACE
-", error_core.long_form());
+",
+            error_core.long_form()
+        );
         let buf = stack_pack(&error_core).to_vec();
         let got: ErrorCore = Unpackable::unpack(&buf).unwrap().0;
         assert_eq!(&error_core.internals, &got.internals);
