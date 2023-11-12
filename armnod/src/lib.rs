@@ -5,8 +5,6 @@ use rand::RngCore;
 use guacamole::Guacamole;
 use guacamole::Zipf;
 
-use arrrg_derive::CommandLine;
-
 //////////////////////////////////////////// SeedChoice ////////////////////////////////////////////
 
 /// [SeedChoice] chooses the string to be generated from one of three possibilities.  The first
@@ -293,30 +291,31 @@ impl Armnod {
 
 /////////////////////////////////////////// Command Line ///////////////////////////////////////////
 
-#[derive(CommandLine, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct ArmnodOptions {
-    #[arrrg(required, "Number of strings to generate.", "N")]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Number of strings to generate.", "N"))]
     pub number: u64,
-    #[arrrg(required, "Method of choosing strings.", "METHOD")]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Method of choosing strings.", "METHOD"))]
     pub chooser_mode: String,
-    #[arrrg(optional, "Cardinality for set-based modes.", "N")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Cardinality for set-based modes.", "N"))]
     pub cardinality: Option<u64>,
-    #[arrrg(optional, "First set element to load in set-once mode.", "ELEM")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "First set element to load in set-once mode.", "ELEM"))]
     pub set_once_begin: Option<u64>,
-    #[arrrg(optional, "Last set element to load in set-once mode.", "ELEM")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Last set element to load in set-once mode.", "ELEM"))]
     pub set_once_end: Option<u64>,
     // TODO(rescrv):  Embed something from guacamole::zipf.
-    #[arrrg(optional, "Theta value for the zipf distribution.", "THETA")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Theta value for the zipf distribution.", "THETA"))]
     pub zipf_theta: Option<f64>,
-    #[arrrg(optional, "Method of choosing length.", "LENGTH")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Method of choosing length.", "LENGTH"))]
     pub length_mode: Option<String>,
-    #[arrrg(optional, "Generate strings of this constant length.", "LENGTH")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Generate strings of this constant length.", "LENGTH"))]
     pub string_length: Option<u32>,
-    #[arrrg(optional, "Generate strings at least this length for varied length modes.", "MIN")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Generate strings at least this length for varied length modes.", "MIN"))]
     pub string_min_length: Option<u32>,
-    #[arrrg(optional, "Generate strings at most this length for varied length modes.", "MAX")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Generate strings at most this length for varied length modes.", "MAX"))]
     pub string_max_length: Option<u32>,
-    #[arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET"))]
     pub charset: Option<String>,
 }
 

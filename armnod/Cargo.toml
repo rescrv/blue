@@ -6,10 +6,22 @@ edition = "2021"
 description = "Armnod provides a random string generator."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["arrrg", "arrrg_derive", "getopts"]
+
 [dependencies]
-getopts = "0.2"
 rand = "0.7"
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 guacamole = { path = "../guacamole", version = "0.3" }
+
+getopts = { version = "0.2", optional = true }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+
+[[bin]]
+name = "armnod"
+path = "src/bin/armnod.rs"
+required-features=["binaries"]
