@@ -16,6 +16,7 @@ const EXCLUDE_DIRS: &[&str] = &[
     "biometrics_tuple_db",
     "napkins",
     // TODO(rescrv): Stuff to integrate eventually.
+    "scrunch",
     "statslicer",
 ];
 
