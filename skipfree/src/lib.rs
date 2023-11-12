@@ -84,17 +84,6 @@ pub struct SkipList<K, V> {
 }
 
 impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
-    pub fn new() -> Self {
-        let head = Self::new_node(K::default(), V::default(), MAX_HEIGHT);
-        for idx in 0..MAX_HEIGHT {
-            node_ptr::set_next(head, idx, std::ptr::null_mut());
-        }
-        let head = AtomicPtr::new(head);
-        Self {
-            head,
-        }
-    }
-
     pub fn insert(&self, key: K, value: V) {
         let (existing, mut prev, mut obs) = self.find_greater_or_equal_and_pointers(&key);
         assert!(existing.is_null() || node_ptr::key(existing) != &key);
@@ -162,16 +151,16 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
             let next = node_ptr::get_next(x, level);
             if Self::key_is_after_node(key, next) {
                 x = next;
+            } else if level == 0 {
+                return next;
             } else {
-                if level == 0 {
-                  return next;
-                } else {
-                  level -= 1;
-                }
+                level -= 1;
             }
         }
     }
 
+    // NOTE(rescrv):  I don't want a simpler type.  I want a 3-tuple that I can destructure.
+    #[allow(clippy::type_complexity)]
     fn find_greater_or_equal_and_pointers(&self, key: &K) -> (*mut Node<K, V>, Vec<*mut Node<K, V>>, Vec<*mut Node<K, V>>) {
         let mut x = self.head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
@@ -230,6 +219,19 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
             } else {
                 x = next;
             }
+        }
+    }
+}
+
+impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
+    fn default() -> Self {
+        let head = Self::new_node(K::default(), V::default(), MAX_HEIGHT);
+        for idx in 0..MAX_HEIGHT {
+            node_ptr::set_next(head, idx, std::ptr::null_mut());
+        }
+        let head = AtomicPtr::new(head);
+        Self {
+            head,
         }
     }
 }
@@ -310,14 +312,14 @@ mod tests {
 
     #[test]
     fn empty() {
-        let sl = SkipList::<u64, u64>::new();
+        let sl = SkipList::<u64, u64>::default();
         let iter = sl.iter();
         assert!(!iter.is_valid());
     }
 
     #[test]
     fn one_two_three() {
-        let sl = SkipList::<u64, u64>::new();
+        let sl = SkipList::<u64, u64>::default();
         sl.insert(1, 42);
         sl.insert(2, 84);
         sl.insert(3, 126);
@@ -341,7 +343,7 @@ mod tests {
 
     #[test]
     fn late_insert() {
-        let sl = SkipList::<u64, u64>::new();
+        let sl = SkipList::<u64, u64>::default();
         sl.insert(1, 42);
         sl.insert(2, 84);
         sl.insert(3, 126);
@@ -393,7 +395,7 @@ mod tests {
     }
 
     fn guacamole(seed: u64) {
-        let skiplist = Arc::new(SkipList::new());
+        let skiplist = Arc::new(SkipList::default());
         let mut guac = Guacamole::new(seed);
         let readers = guac.gen::<u8>() % 16;
         let writers = guac.gen::<u8>() % 4;
