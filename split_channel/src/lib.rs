@@ -3,7 +3,7 @@
 //!
 //! The key idea here is that an `&mut RecvChannel` and `&mut SendChannel` exist for the same
 //! `SslStream<TcpStream>`, allowing parallel sending and processing of messages.  The general
-//! pattern is to lock the send channel, send data, and then use [sync42::wait_list::WaitList] to
+//! pattern is to lock the send channel, send data, and then use `sync42::wait_list::WaitList` to
 //! synchronize receivers.
 
 use std::net::{TcpListener, TcpStream};
@@ -11,8 +11,6 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex};
 
 use boring::ssl::{ErrorCode, SslAcceptor, SslConnector, SslFiletype, SslMethod, SslStream};
-
-use arrrg_derive::CommandLine;
 
 use biometrics::{Collector, Counter, Moments};
 
@@ -390,19 +388,20 @@ impl Iterator for Listener {
 
 //////////////////////////////////////// SplitChannelOptions ///////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct SplitChannelOptions {
-    #[arrrg(required, "Hostname to use.", "HOST")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to use.", "HOST"))]
     host: String,
-    #[arrrg(required, "Port to use.", "PORT")]
+    #[cfg_attr(feature = "binaries", arrrg(required, "Port to use.", "PORT"))]
     port: u16,
-    #[arrrg(optional, "Set CA file.", "PEM")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Set CA file.", "PEM"))]
     ca_file: Option<String>,
-    #[arrrg(optional, "Set private-key file.", "PEM")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Set private-key file.", "PEM"))]
     private_key_file: Option<String>,
-    #[arrrg(optional, "Set certificate file.", "PEM")]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Set certificate file.", "PEM"))]
     certificate_file: Option<String>,
-    #[arrrg(flag, "Set SSL verify mode to None.  Useful when certificates don't match.")]
+    #[cfg_attr(feature = "binaries", arrrg(flag, "Set SSL verify mode to None.  Useful when certificates don't match."))]
     verify_none: bool,
 }
 

@@ -29,7 +29,7 @@ fn main() {
     let handle_client = |mut recv_chan: RecvChannel, mut send_chan: SendChannel| {
         loop {
             let buf = recv_chan.recv().expect("recv");
-            send_chan.send(buf.as_bytes()).expect("send");
+            send_chan.send(&buf).expect("send");
         }
     };
     let mut threads = Vec::new();

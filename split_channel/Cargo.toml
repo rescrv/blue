@@ -6,14 +6,16 @@ edition = "2021"
 description = "split_channel provides a stream-of-messages abstraction with split send/recv channels."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = ["arrrg", "arrrg_derive", "getopts"]
+
 [dependencies]
 libc = "0.2"
-getopts = "0.2"
 boring = "2.1.0"
 crc32c = "0.6"
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 prototk = { path = "../prototk", version = "0.4" }
@@ -22,3 +24,17 @@ rpc_pb = { path = "../rpc_pb", version = "0.3" }
 utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
+
+getopts = { version = "0.2", optional = true }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+
+[[example]]
+name = "split_channel-benchmark-client"
+path = "examples/split_channel-benchmark-client.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "split_channel-benchmark-server"
+path = "examples/split_channel-benchmark-server.rs"
+required-features=["binaries"]
