@@ -6,5 +6,15 @@ edition = "2021"
 description = "utilz provides miscellaneous utilities too small for their own crates."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 libc = "0.2"
+
+[[bin]]
+name = "with-lock"
+path = "src/bin/with-lock.rs"
+required-features=["binaries"]
