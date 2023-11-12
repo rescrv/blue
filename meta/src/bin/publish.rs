@@ -4,22 +4,23 @@ use std::path::PathBuf;
 use toml::Table;
 
 const EXCLUDE_MEMBERS: &[&str] = &[
+    "libpaxos",
     "meta",
     "scrunch",
+    "tuple_db",
 ];
 
 const EXCLUDE_DIRS: &[&str] = &[
     ".git",
     "target",
     "biometrics_tuple_db",
-    "busyrpc",
     "napkins",
     // TODO(rescrv): Stuff to integrate eventually.
     "statslicer",
 ];
 
 fn workspace_members() -> Vec<String> {
-    let workspace_text = read_to_string("../Cargo.toml").expect("reading workspace toml");
+    let workspace_text = read_to_string("Cargo.toml").expect("reading workspace toml");
     let workspace_toml = workspace_text.parse::<Table>().expect("parsing workspace toml");
     assert!(workspace_toml.contains_key("workspace"));
     let workspace_table = workspace_toml["workspace"].as_table().expect("parsing workspace table");
@@ -31,7 +32,7 @@ fn workspace_members() -> Vec<String> {
             members.push(member.to_string());
         }
     }
-    for path in read_dir("..").unwrap() {
+    for path in read_dir(".").unwrap() {
         let path = path.unwrap();
         let name = path.file_name();
         if !members.iter().any(|x| x == &name.to_string_lossy())
@@ -46,7 +47,7 @@ fn workspace_members() -> Vec<String> {
 }
 
 fn dependencies(member: &str) -> Vec<String> {
-    let cargo_text = read_to_string(PathBuf::from("..").join(member).join("Cargo.toml")).expect("reading cargo toml");
+    let cargo_text = read_to_string(PathBuf::from(".").join(member).join("Cargo.toml")).expect("reading cargo toml");
     let cargo_toml = cargo_text.parse::<Table>().expect("parsing cargo toml");
     assert!(cargo_toml.contains_key("dependencies"));
     let dependencies_table = cargo_toml["dependencies"].as_table().expect("parsing dependencies");
@@ -62,7 +63,7 @@ fn graph() -> (Vec<String>, Vec<(String, String)>) {
     let mut edges = Vec::new();
     for member in vertices.iter() {
         for dependency in dependencies(member).into_iter() {
-            if PathBuf::from("..").join(&dependency).is_dir() {
+            if PathBuf::from(".").join(&dependency).is_dir() {
                 edges.push((dependency, member.clone()));
             }
         }
@@ -92,7 +93,6 @@ fn candidate_order() -> Vec<String> {
 
 fn main() {
     let candidates = candidate_order();
-    println!("publication order:");
     for candidate in candidates.iter() {
         println!("{}", candidate);
     }
