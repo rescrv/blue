@@ -118,6 +118,16 @@ macro_rules! generate_id {
             pub fn new(id: [u8; $crate::BYTES]) -> Self {
                 Self { id }
             }
+
+            pub fn next(mut self) -> Self {
+                for byte_index in (0..$crate::BYTES).rev() {
+                    self.id[byte_index] = self.id[byte_index].wrapping_add(1);
+                    if self.id[byte_index] != 0 {
+                        break;
+                    }
+                }
+                self
+            }
         }
 
         impl Default for $what {
@@ -290,5 +300,16 @@ mod tests {
         );
         assert_eq!([0x00u8; BYTES], FooID::BOTTOM.id);
         assert_eq!([0xffu8; BYTES], FooID::TOP.id);
+    }
+
+    #[test]
+    fn next() {
+        assert_eq!(FooID::BOTTOM, FooID::TOP.next());
+        let id = FooID { id: [0x55u8; BYTES] };
+        assert_eq!("foo:55555555-5555-5555-5555-555555555555", id.human_readable());
+        assert_eq!("foo:55555555-5555-5555-5555-555555555556", id.next().human_readable());
+        let id = FooID { id: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe] };
+        assert_eq!("foo:ffffffff-ffff-ffff-ffff-fffffffffffe", id.human_readable());
+        assert_eq!("foo:ffffffff-ffff-ffff-ffff-ffffffffffff", id.next().human_readable());
     }
 }
