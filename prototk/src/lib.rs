@@ -925,12 +925,12 @@ where
     F: FieldPackHelper<'a, T>,
 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
-        let f: &F = &*self;
+        let f: &F = self;
         f.field_pack_sz(tag)
     }
 
     fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        let f: &F = &*self;
+        let f: &F = self;
         f.field_pack(tag, out)
     }
 }
