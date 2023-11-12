@@ -6,9 +6,22 @@ edition = "2021"
 description = "Guacamole provides a linearly-seekable random number generator."
 license = "Apache-2.0"
 
+[features]
+binaries = ["arrrg", "arrrg_derive", "getopts"]
+
 [dependencies]
-getopts = "0.2"
 rand = "0.7"
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
+getopts = { version = "0.2", optional = true }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+
+[[bin]]
+name = "guacamole"
+path = "src/bin/guacamole.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "zipf"
+path = "src/bin/zipf.rs"
+required-features=["binaries"]
