@@ -7,6 +7,8 @@ description = "Guacamole provides a linearly-seekable random number generator."
 license = "Apache-2.0"
 
 [features]
+default = ["binaries"]
+
 binaries = ["arrrg", "arrrg_derive", "getopts"]
 
 [dependencies]
