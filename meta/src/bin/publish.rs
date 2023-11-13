@@ -3,13 +3,14 @@ use std::path::PathBuf;
 
 use toml::Table;
 
-const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "scrunch", "tuple_db"];
+const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb", "scrunch", "tuple_db"];
 
 const EXCLUDE_DIRS: &[&str] = &[
     ".git",
     "target",
     "biometrics_tuple_db",
     "napkins",
+    "paxos_pb",
     // TODO(rescrv): Stuff to integrate eventually.
     "scrunch",
     "statslicer",
