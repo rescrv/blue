@@ -31,7 +31,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
 
 [dev-dependencies]
 armnod = { path = "../armnod", version = "0.4" }
-guacamole = { path = "../guacamole", version = "0.3" }
+guacamole = { path = "../guacamole", version = "0.4" }
 
 [[bin]]
 name = "mani-append"
