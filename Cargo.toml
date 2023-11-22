@@ -13,6 +13,7 @@ members = [
     "derive_util",
     "guacamole",
     "indicio",
+    "keyvalint",
     "lsmtk",
     "macarunes",
     "mani",
