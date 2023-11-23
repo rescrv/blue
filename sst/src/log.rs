@@ -79,7 +79,23 @@ impl Default for LogOptions {
         Self {
             write_buffer: BUFFER_SIZE as usize,
             read_buffer: BUFFER_SIZE as usize,
-            rollover_size: 1 << 22,
+            rollover_size: 1 << 30,
+        }
+    }
+}
+
+/////////////////////////////////////////////// Batch //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Message)]
+struct Batch<'a> {
+    #[prototk(13, message)]
+    writes: Vec<KeyValueEntry<'a>>,
+}
+
+impl<'a> From<KeyValueEntry<'a>> for Batch<'a> {
+    fn from(entry: KeyValueEntry<'a>) -> Self {
+        Self {
+            writes: vec![entry],
         }
     }
 }
@@ -117,6 +133,11 @@ impl<W: Write> LogBuilder<W> {
             bytes_written: 0,
             setsum: Setsum::default(),
         })
+    }
+
+    pub fn flush(&mut self) -> Result<(), Error> {
+        self.output.flush()?;
+        Ok(())
     }
 
     fn append(&mut self, buffer: &[u8]) -> Result<(), Error> {
@@ -195,11 +216,6 @@ impl<W: Write> LogBuilder<W> {
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), Error> {
-        self.output.flush()?;
-        Ok(())
-    }
-
     fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
         self.output.write_all(buffer)?;
         self.bytes_written += buffer.len() as u64;
@@ -224,7 +240,7 @@ impl<W: Write> Builder for LogBuilder<W> {
             timestamp,
             value,
         };
-        let buf = stack_pack(KeyValueEntry::Put(put)).to_vec();
+        let buf = stack_pack(Batch::from(KeyValueEntry::Put(put))).to_vec();
         self.append(&buf)?;
         Ok(())
     }
@@ -237,7 +253,7 @@ impl<W: Write> Builder for LogBuilder<W> {
             key_frag: key,
             timestamp,
         };
-        let buf = stack_pack(KeyValueEntry::Del(del)).to_vec();
+        let buf = stack_pack(Batch::from(KeyValueEntry::Del(del))).to_vec();
         self.append(&buf)?;
         Ok(())
     }
@@ -253,6 +269,7 @@ impl<W: Write> Builder for LogBuilder<W> {
 pub struct LogIterator<R: Read + Seek> {
     input: BufReader<R>,
     buffer: Vec<u8>,
+    buffer_idx: usize,
 }
 
 impl LogIterator<File> {
@@ -271,11 +288,16 @@ impl<R: Read + Seek> LogIterator<R> {
         Ok(Self {
             input,
             buffer: Vec::new(),
+            buffer_idx: 0,
         })
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<KeyValueRef>, Error> {
+        if self.buffer_idx < self.buffer.len() {
+            return self.next_from_batch();
+        }
+        self.buffer_idx = 0;
         self.buffer.clear();
         let header = match self.next_frame()? {
             Some(header) => header,
@@ -311,13 +333,23 @@ impl<R: Read + Seek> LogIterator<R> {
             }
             .with_variable("discriminant", header.discriminant));
         }
-        let kve: KeyValueEntry = <KeyValueEntry as Unpackable>::unpack(&self.buffer)?.0;
-        let kvr = KeyValueRef {
-            key: kve.key_frag(),
-            timestamp: kve.timestamp(),
-            value: kve.value(),
-        };
-        Ok(Some(kvr))
+        self.next_from_batch()
+    }
+
+    fn next_from_batch(&mut self) -> Result<Option<KeyValueRef>, Error> {
+        let (batch, rem) = <Batch as Unpackable>::unpack(&self.buffer[self.buffer_idx..])?;
+        self.buffer_idx = self.buffer.len() - rem.len();
+        if !batch.writes.is_empty() {
+            let kve = &batch.writes[0];
+            let kvr = KeyValueRef {
+                key: kve.key_frag(),
+                timestamp: kve.timestamp(),
+                value: kve.value(),
+            };
+            Ok(Some(kvr))
+        } else {
+            Ok(None)
+        }
     }
 
     fn next_frame(&mut self) -> Result<Option<Header>, Error> {
@@ -511,9 +543,10 @@ mod builder {
         drop(log);
         let exp: &[u8] = &[
             9, // There are nine bytes in the header.
-            80, 21, // size: uint64
+            80, 23, // size: uint64
             88, 1, // discriminant: uint32,
-            101, 18, 39, 204, 90, // crc32c: fixed32
+            101, 38, 157, 69, 252, // crc32c: fixed32
+            106, 21, // tag, length of Batch
             66, 19, // tag, length of KeyValueEntry::Put
             8, 0, // shared
             18, 3, 101, 102, 103, // key_frag
@@ -540,57 +573,59 @@ mod builder {
         // The first put.
         let exp: &[u8] = &[
             11, // There are 11 bytes in this header.
-            80, 206, 128, 2, // size: uint64
+            80, 210, 128, 2, // size: uint64
             88, 1, // discriminant: uint32
-            101, 151, 232, 6, 121, // crc32c: fixed32
+            101, 236, 12, 151, 200, // crc32c: fixed32
         ];
         assert_eq!(exp, &write[..12]);
         let exp: &[u8] = &[
+            106, 206, 128, 2, // tag, length of Batch
             66, 202, 128, 2, // tag, length of KeyValueEntry::Put
             8, 0, // shared
             18, 64, // key1_frag tag + sz
         ];
-        assert_eq!(exp, &write[12..20]);
-        assert_eq!(&key1, &write[20..84]);
+        assert_eq!(exp, &write[12..24]);
+        assert_eq!(&key1, &write[24..88]);
         let exp: &[u8] = &[
             24, 42, // timestamp
             34, 128, 128, 2, // tag + size of value1
         ];
-        assert_eq!(exp, &write[84..90]);
-        assert_eq!(&value1, &write[90..32858]);
+        assert_eq!(exp, &write[88..94]);
+        assert_eq!(&value1, &write[94..32862]);
         // The first half of the second put.
         let exp: &[u8] = &[
             11, // size of header
-            80, 147, 255, 1, // size: uint64
+            80, 143, 255, 1, // size: uint64
             88, 2, // discriminant: uint32
-            101, 237, 98, 210, 156, // crc3c: fixed32
+            101, 190, 119, 160, 68, // crc3c: fixed32
         ];
-        assert_eq!(exp, &write[32858..32870]);
+        assert_eq!(exp, &write[32862..32874]);
         let exp: &[u8] = &[
+            106, 206, 128, 2, // tag, length of Batch
             66, 202, 128, 2, // tag, length of KeyValueEntry::Put
             8, 0, // shared
             18, 64, // key2_frag tag + sz
         ];
-        assert_eq!(exp, &write[32870..32878]);
-        assert_eq!(key2, &write[32878..32942]);
+        assert_eq!(exp, &write[32874..32886]);
+        assert_eq!(key2, &write[32886..32950]);
         let exp: &[u8] = &[
             24, 99, // timestamp
             34, 128, 128, 2, // tag + size of value2
         ];
-        assert_eq!(exp, &write[32942..32948]);
-        assert_eq!(&value2[..32581], &write[32948..65529]);
+        assert_eq!(exp, &write[32950..32956]);
+        assert_eq!(&value2[..32573], &write[32956..65529]);
         let exp: &[u8] = &[0, 0, 0, 0, 0, 0, 0]; // true up
         assert_eq!(exp, &write[65529..65536]);
         // The second half of the second put.
         let exp: &[u8] = &[
             10, // size of header
-            80, 187, 1, // size: uint64
+            80, 195, 1, // size: uint64
             88, 3, // discriminant: uint32
-            101, 61, 120, 150, 79, // crc3c: fixed32
+            101, 248, 141, 15, 100, // crc3c: fixed32
         ];
         assert_eq!(exp, &write[65536..65547]);
-        assert_eq!(&value2[32581..], &write[65547..65734]);
+        assert_eq!(&value2[32573..], &write[65547..65742]);
         let exp: &[u8] = &[];
-        assert_eq!(exp, &write[65734..]);
+        assert_eq!(exp, &write[65742..]);
     }
 }

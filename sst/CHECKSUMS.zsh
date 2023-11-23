@@ -1,5 +1,7 @@
 #!/usr/bin/env zsh
 
+set -ex
+
 N=10000000
 
 BINDIR=../target/release
@@ -24,10 +26,12 @@ do
     # Must convert logs after sorting as plaintext timestamp is line number.
     $BINDIR/log-from-plaintext --plaintext ${table} --output ${table:r}.log
     $BINDIR/sst-from-plaintext --plaintext ${table} --output ${table:r}.sst
+    $BINDIR/sst-from-log --input ${table:r}.log --output ${table:r}.log.sst
+    set +x
     $BINDIR/log-checksum ${table:r}.log
     $BINDIR/sst-checksum ${table:r}.sst
-    $BINDIR/sst-from-log --input ${table:r}.log --output ${table:r}.log.sst
     $BINDIR/sst-checksum ${table:r}.log.sst
+    set -x
 done
 
 sha256sum table* >! CHECKSUMS
