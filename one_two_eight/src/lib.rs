@@ -241,26 +241,6 @@ macro_rules! generate_id_prototk {
     };
 }
 
-/// Implement TupleKey support for a type.
-#[macro_export]
-macro_rules! generate_id_tuple_element {
-    ($what:ident) => {
-        impl ::tuple_key::Element for $what {
-            const DATA_TYPE: ::tuple_key::DataType = ::tuple_key::DataType::bytes16;
-
-            fn append_to(&self, key: &mut ::tuple_key::TupleKey) {
-                self.id.append_to(key);
-            }
-
-            fn parse_from(buf: &[u8]) -> Result<Self, &'static str> {
-                Ok(Self {
-                    id: <[u8; 16]>::parse_from(buf)?,
-                })
-            }
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
