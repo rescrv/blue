@@ -1,6 +1,6 @@
 //! biometrics_pb provides protocol buffers corresponding to biometric readings.
 
-use one_two_eight::{generate_id, generate_id_prototk, generate_id_tuple_element};
+use one_two_eight::{generate_id, generate_id_prototk};
 
 use prototk_derive::Message;
 
@@ -8,7 +8,6 @@ use prototk_derive::Message;
 
 generate_id! {SensorID, "sensor:"}
 generate_id_prototk! {SensorID}
-generate_id_tuple_element! {SensorID}
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 

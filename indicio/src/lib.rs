@@ -6,7 +6,7 @@ use biometrics::{Collector, Counter};
 
 use buffertk::stack_pack;
 
-use one_two_eight::{generate_id, generate_id_prototk, generate_id_tuple_element};
+use one_two_eight::{generate_id, generate_id_prototk};
 
 use prototk::field_types::*;
 use prototk::{FieldNumber, FieldPackHelper, FieldType};
@@ -48,7 +48,6 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 generate_id! {TraceID, "trace:"}
 generate_id_prototk! {TraceID}
-generate_id_tuple_element! {TraceID}
 
 /////////////////////////////////////////////// Trace //////////////////////////////////////////////
 

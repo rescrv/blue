@@ -1,5 +1,3 @@
-use buffertk::Buffer;
-
 use prototk_derive::Message;
 
 use one_two_eight::{generate_id, generate_id_prototk};
@@ -186,7 +184,7 @@ enum Command {
         #[prototk(2, string)]
         method: String,
         #[prototk(3, bytes)]
-        req: Buffer,
+        req: Vec<u8>,
     },
     #[prototk(3, message)]
     Poke {
