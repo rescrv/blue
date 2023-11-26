@@ -3,9 +3,8 @@ use std::cmp::Ordering;
 use std::ops::{Bound, RangeBounds};
 
 use super::{
-    compare_bytes,
-    Cursor as CursorTrait, KeyRef, KeyValuePair, KeyValueRef, KeyValueLoad as KeyValueLoadTrait,
-    KeyValueStore as KeyValueStoreTrait, WriteBatch as WriteBatchTrait
+    compare_bytes, Cursor as CursorTrait, KeyRef, KeyValueLoad as KeyValueLoadTrait, KeyValuePair,
+    KeyValueRef, KeyValueStore as KeyValueStoreTrait, WriteBatch as WriteBatchTrait,
 };
 
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
@@ -26,10 +25,8 @@ impl WriteBatchTrait for WriteBatch {
     }
 
     fn del(&mut self, key: &[u8], timestamp: u64) {
-        self.entries.push(KeyValuePair::from(KeyRef {
-            key,
-            timestamp,
-        }));
+        self.entries
+            .push(KeyValuePair::from(KeyRef { key, timestamp }));
     }
 }
 
@@ -44,9 +41,7 @@ impl KeyValueStore {
     pub fn into_key_value_load(self) -> KeyValueLoad {
         let mut entries = self.entries.into_inner();
         entries.sort();
-        KeyValueLoad {
-            entries,
-        }
+        KeyValueLoad { entries }
     }
 }
 
@@ -67,45 +62,46 @@ pub struct KeyValueLoad {
     entries: Vec<KeyValuePair>,
 }
 
-impl KeyValueLoad {
-}
+impl KeyValueLoad {}
 
 impl KeyValueLoadTrait for KeyValueLoad {
     type Error = String;
     type Cursor<'a> = Cursor;
 
     fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<&'_ [u8]>, Self::Error> {
-        let target = KeyRef {
-            key,
-            timestamp,
-        };
+        let target = KeyRef { key, timestamp };
         match self.entries.binary_search(&target.into()) {
             Ok(index) => Ok(self.entries[index].value.as_deref()),
-            Err(index) => if compare_bytes(&self.entries[index].key, key) == Ordering::Equal {
-                Ok(self.entries[index].value.as_deref())
-            } else {
-                Ok(None)
+            Err(index) => {
+                if compare_bytes(&self.entries[index].key, key) == Ordering::Equal {
+                    Ok(self.entries[index].value.as_deref())
+                } else {
+                    Ok(None)
+                }
             }
         }
     }
 
-    fn range_scan<R: RangeBounds<[u8]>>(&self, range: R, timestamp: u64) -> Result<Self::Cursor<'_>, Self::Error> {
+    fn range_scan<R: RangeBounds<[u8]>>(
+        &self,
+        range: R,
+        timestamp: u64,
+    ) -> Result<Self::Cursor<'_>, Self::Error> {
         fn key_bound_to_key_ref_bound(bound: Bound<&[u8]>, timestamp: u64) -> Bound<KeyRef<'_>> {
             match bound {
-                Bound::Included(key) => Bound::Included(KeyRef {
-                    key,
-                    timestamp,
-                }),
-                Bound::Excluded(key) => Bound::Excluded(KeyRef {
-                    key,
-                    timestamp,
-                }),
+                Bound::Included(key) => Bound::Included(KeyRef { key, timestamp }),
+                Bound::Excluded(key) => Bound::Excluded(KeyRef { key, timestamp }),
                 Bound::Unbounded => Bound::Unbounded,
             }
         }
         let start_bound = key_bound_to_key_ref_bound(range.start_bound(), timestamp);
         let end_bound = key_bound_to_key_ref_bound(range.start_bound(), timestamp);
-        let entries = self.entries.iter().filter(|x| (start_bound..end_bound).contains(&KeyRef::from(*x))).cloned().collect::<Vec<_>>();
+        let entries = self
+            .entries
+            .iter()
+            .filter(|x| (start_bound..end_bound).contains(&KeyRef::from(*x)))
+            .cloned()
+            .collect::<Vec<_>>();
         Ok(Cursor::from(entries))
     }
 }

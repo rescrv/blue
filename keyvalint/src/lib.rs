@@ -271,7 +271,11 @@ pub trait KeyValueLoad {
         Self: 'a;
 
     fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<&'_ [u8]>, Self::Error>;
-    fn range_scan<R: RangeBounds<[u8]>>(&self, range: R, timestamp: u64) -> Result<Self::Cursor<'_>, Self::Error>;
+    fn range_scan<R: RangeBounds<[u8]>>(
+        &self,
+        range: R,
+        timestamp: u64,
+    ) -> Result<Self::Cursor<'_>, Self::Error>;
 }
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
