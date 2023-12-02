@@ -15,7 +15,7 @@
 // limitations under the License.
 
 use std::convert::TryInto;
-use std::fmt::Write;
+use std::fmt::{Debug, Write};
 
 use sha2::{Digest, Sha256};
 
@@ -93,7 +93,7 @@ fn item_vectored_to_state(item: &[&[u8]]) -> [u32; SETSUM_COLUMNS] {
 /// Setsum provides an interactive object for maintaining set checksums.  Technically, multi-set
 /// checksums.  Two Setsum objects are equal with high probability if and only if they contain the
 /// same items.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Setsum {
     state: [u32; SETSUM_COLUMNS],
 }
@@ -184,6 +184,12 @@ impl Default for Setsum {
         Setsum {
             state: [0u32; SETSUM_COLUMNS],
         }
+    }
+}
+
+impl Debug for Setsum {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "{}", self.hexdigest())
     }
 }
 
