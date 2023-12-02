@@ -6,7 +6,7 @@ use sst::{Cursor, Sst, SstOptions};
 
 fn fast_setsum(opts: SstOptions, sst: &str) -> String {
     let sst = Sst::new(opts, sst).expect("open Sst");
-    sst.setsum().hexdigest()
+    sst.fast_setsum().hexdigest()
 }
 
 fn slow_setsum(opts: SstOptions, sst: &str) -> String {

@@ -831,6 +831,10 @@ impl Sst {
         })
     }
 
+    pub fn fast_setsum(&self) -> Setsum {
+        Setsum::from_digest(self.final_block.setsum)
+    }
+
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
         SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
