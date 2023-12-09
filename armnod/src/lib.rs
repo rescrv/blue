@@ -291,17 +291,12 @@ impl Armnod {
 
 /////////////////////////////////////////// Command Line ///////////////////////////////////////////
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct ArmnodOptions {
     #[cfg_attr(
         feature = "command_line",
-        arrrg(required, "Number of strings to generate.", "N")
-    )]
-    pub number: u64,
-    #[cfg_attr(
-        feature = "command_line",
-        arrrg(required, "Method of choosing strings.", "METHOD")
+        arrrg(required, "Method of choosing strings (random, set, set-once, set-zipf).", "METHOD")
     )]
     pub chooser_mode: String,
     #[cfg_attr(
@@ -319,7 +314,11 @@ pub struct ArmnodOptions {
         arrrg(optional, "Last set element to load in set-once mode.", "ELEM")
     )]
     pub set_once_end: Option<u64>,
-    // TODO(rescrv):  Embed something from guacamole::zipf.
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Alpha value for the zipf distribution.", "ALPHA")
+    )]
+    pub zipf_alpha: Option<f64>,
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Theta value for the zipf distribution.", "THETA")
@@ -334,7 +333,16 @@ pub struct ArmnodOptions {
         feature = "command_line",
         arrrg(optional, "Generate strings of this constant length.", "LENGTH")
     )]
-    pub string_length: Option<u32>,
+    pub length: Option<u32>,
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(
+            optional,
+            "Generate strings at this average length for varied length modes.",
+            "MIN"
+        )
+    )]
+    pub avg_length: Option<u32>,
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -343,7 +351,7 @@ pub struct ArmnodOptions {
             "MIN"
         )
     )]
-    pub string_min_length: Option<u32>,
+    pub min_length: Option<u32>,
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -352,24 +360,161 @@ pub struct ArmnodOptions {
             "MAX"
         )
     )]
-    pub string_max_length: Option<u32>,
+    pub max_length: Option<u32>,
     #[cfg_attr(feature = "command_line", arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET"))]
     pub charset: Option<String>,
+}
+
+fn random_chooser() -> Box<dyn SeedChooser> {
+    Box::<RandomStringChooser>::default()
+}
+
+fn set_chooser(cardinality: u64) -> Box<dyn SeedChooser> {
+    Box::new(SetStringChooser::new(cardinality))
+}
+
+fn set_chooser_once(begin: u64, end: u64) -> Box<dyn SeedChooser> {
+    Box::new(SetStringChooserOnce::new(begin, end))
+}
+
+fn set_chooser_zipf_theta(cardinality: u64, theta: f64) -> Box<dyn SeedChooser> {
+    Box::new(SetStringChooserZipf::from_theta(cardinality, theta))
+}
+
+fn set_chooser_zipf_alpha(cardinality: u64, alpha: f64) -> Box<dyn SeedChooser> {
+    Box::new(SetStringChooserZipf::from_alpha(cardinality, alpha))
+}
+
+fn constant_length_chooser(length: u32) -> Box<dyn LengthChooser> {
+    Box::new(ConstantLengthChooser::new(length))
+}
+
+fn uniform_length_chooser(min_length: u32, max_length: u32) -> Box<dyn LengthChooser> {
+    Box::new(UniformLengthChooser::new(min_length, max_length))
+}
+
+impl ArmnodOptions {
+    pub fn try_parse(self) -> Result<Armnod, String> {
+        self.try_parse_sharded(0, 1)
+    }
+
+    pub fn try_parse_sharded(self, index: u64, total: u64) -> Result<Armnod, String> {
+        // string chooser
+        let string_chooser = if self.chooser_mode == "random" {
+            random_chooser()
+        } else if self.chooser_mode == "set" {
+            set_chooser(self.cardinality.unwrap_or(1_000_000))
+        } else if self.chooser_mode == "set-once" {
+            let cardinality = self.cardinality.unwrap_or(1_000_000);
+            let step = if index < cardinality % total {
+                cardinality / total + 1
+            } else {
+                cardinality / total
+            };
+            println!("{} {}", index * step, index * step + step);
+            let set_once_begin = self.set_once_begin.unwrap_or(index * step);
+            let set_once_end = self.set_once_end.unwrap_or(index * step + step);
+            if set_once_begin > set_once_end {
+                return Err(format!(
+                    "--set-once-begin must be <= --set-once-end: {} > {}",
+                    set_once_begin, set_once_end
+                ));
+            }
+            set_chooser_once(set_once_begin, set_once_end)
+        } else if self.chooser_mode == "set-zipf" {
+            let cardinality = self.cardinality.unwrap_or(1_000_000);
+            if let Some(zipf_theta) = self.zipf_theta {
+                set_chooser_zipf_theta(cardinality, zipf_theta)
+            } else if let Some(zipf_alpha) = self.zipf_alpha {
+                set_chooser_zipf_alpha(cardinality, zipf_alpha)
+            } else {
+                set_chooser_zipf_theta(cardinality, 0.99)
+            }
+        } else {
+            return Err(format!("unknown chooser mode: {}", self.chooser_mode));
+        };
+        // length chooser
+        let length_mode = self.length_mode.unwrap_or("constant".to_string());
+        let length_chooser = if length_mode == "constant" {
+            if self.min_length.is_some() {
+                return Err(
+                    "--string-min-length not supported for --length-mode=constant".to_string(),
+                );
+            }
+            if self.max_length.is_some() {
+                return Err(
+                    "--string-max-length not supported for --length-mode=constant".to_string(),
+                );
+            }
+            if self.avg_length.is_some() {
+                return Err("--string-avg-length not supported for --length-mode=constant".to_string());
+            }
+            constant_length_chooser(self.length.unwrap_or(8))
+        } else if length_mode == "uniform" {
+            let min_length: u32 = self.min_length.unwrap_or(8);
+            let max_length: u32 = self.max_length.unwrap_or(min_length + 8);
+            if min_length > max_length {
+                return Err(format!(
+                    "--string-min-length must be <= --string-max-length: {} > {}",
+                    min_length, max_length
+                ));
+            }
+            if self.length.is_some() {
+                return Err("--string-length not supported for --length-mode=uniform".to_string());
+            }
+            if self.avg_length.is_some() {
+                return Err("--string-avg-length not supported for --length-mode=uniform".to_string());
+            }
+            uniform_length_chooser(min_length, max_length)
+        } else {
+            return Err(format!("unknown length mode: {}", length_mode));
+        };
+        // alphabet to use
+        let charset = self.charset.unwrap_or("default".to_string());
+        let characters = if charset == "default" {
+            CharSetChooser::new(CHAR_SET_DEFAULT)
+        } else if charset == "lower" {
+            CharSetChooser::new(CHAR_SET_LOWER)
+        } else if charset == "upper" {
+            CharSetChooser::new(CHAR_SET_UPPER)
+        } else if charset == "alpha" {
+            CharSetChooser::new(CHAR_SET_ALPHA)
+        } else if charset == "digit" {
+            CharSetChooser::new(CHAR_SET_DIGIT)
+        } else if charset == "alnum" {
+            CharSetChooser::new(CHAR_SET_ALNUM)
+        } else if charset == "punct" {
+            CharSetChooser::new(CHAR_SET_PUNCT)
+        } else if charset == "hex" {
+            CharSetChooser::new(CHAR_SET_HEX)
+        } else {
+            return Err(format!("unknown character set: {}", charset));
+        };
+        let characters: Box<dyn CharacterChooser> = Box::new(characters);
+        // generate strings
+        Ok(Armnod {
+            string: string_chooser,
+            length: length_chooser,
+            characters,
+            buffer: Vec::new(),
+        })
+    }
 }
 
 impl Default for ArmnodOptions {
     fn default() -> Self {
         Self {
-            number: 1_000,
             chooser_mode: "random".to_string(),
             cardinality: None,
             set_once_begin: None,
             set_once_end: None,
+            zipf_alpha: None,
             zipf_theta: None,
             length_mode: None,
-            string_length: None,
-            string_min_length: None,
-            string_max_length: None,
+            length: None,
+            avg_length: None,
+            min_length: None,
+            max_length: None,
             charset: None,
         }
     }
