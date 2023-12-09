@@ -256,7 +256,10 @@ where
         let protobuf = read_protobuf_file(path)?;
         for record in protobuf.records.iter() {
             let filter_matches = self.kv_filters.is_empty()
-                || self.kv_filters.iter_mut().any(|f| f.matches(&record.key, &record.value));
+                || self
+                    .kv_filters
+                    .iter_mut()
+                    .any(|f| f.matches(&record.key, &record.value));
             let time_matches = self.time_filter.contains(&record.time);
             if filter_matches && time_matches {
                 let key = if let Some(key_display) = self.key_display.as_mut() {
@@ -353,7 +356,7 @@ mod tests {
     fn protobuf_file() {
         let output = Arc::new(Mutex::new(Vec::new()));
         let emitter = ProtobufEmitter::new(OutputFile {
-            output: output.clone()
+            output: output.clone(),
         });
         TEST_LOG.register(emitter);
         clue! { TEST_LOG, TestKey {
@@ -362,7 +365,9 @@ mod tests {
                 value: "MyValue".to_string(),
             }
         };
-        let protobuf = ProtobufFile::<TestKey, TestValue>::unpack(&output.lock().unwrap()).unwrap().0;
+        let protobuf = ProtobufFile::<TestKey, TestValue>::unpack(&output.lock().unwrap())
+            .unwrap()
+            .0;
         assert_eq!(1, protobuf.records.len());
         assert_eq!("MyKey", protobuf.records[0].key.key);
         assert_eq!("MyValue", protobuf.records[0].value.value);

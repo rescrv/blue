@@ -11,10 +11,13 @@ struct SstStatOptions {
 }
 
 fn main() {
-    let (cmdline, args) =
-        SstStatOptions::from_command_line("Usage: sst-stat [OPTIONS] [SSTs]");
+    let (cmdline, args) = SstStatOptions::from_command_line("Usage: sst-stat [OPTIONS] [SSTs]");
     for path in args {
         let sst = Sst::new(cmdline.sst.clone(), &path).expect("sst should open");
-        println!("{} {:?}", path, sst.metadata().expect("metadata call should succeed"));
+        println!(
+            "{} {:?}",
+            path,
+            sst.metadata().expect("metadata call should succeed")
+        );
     }
 }
