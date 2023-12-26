@@ -62,16 +62,20 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 /////////////////////////////////////////// ClientOptions //////////////////////////////////////////
 
+/// BusyRPC client options.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ClientOptions {
+    /// The number of channels to establish.
     #[cfg_attr(
         feature = "binaries",
         arrrg(optional, "Number of channels to establish.")
     )]
     pub channels: usize,
+    /// Disable SSL verification.
     #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
     pub ssl_verify_none: bool,
+    /// The user send-buffer size.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
 }
@@ -87,6 +91,7 @@ impl Default for ClientOptions {
 }
 
 impl ClientOptions {
+    /// Set the number of channels to open in parallel.
     pub fn with_channels(mut self, mut channels: usize) -> Self {
         if channels < MIN_CHANNELS {
             channels = MIN_CHANNELS;
@@ -98,6 +103,7 @@ impl ClientOptions {
         self
     }
 
+    /// Set the user_send_buffer.
     pub fn with_user_send_buffer(mut self, mut user_send_buffer_size: usize) -> Self {
         if user_send_buffer_size < MIN_USERSPACE_SEND_BUFFER {
             user_send_buffer_size = MIN_USERSPACE_SEND_BUFFER;
@@ -680,6 +686,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
     }
 }
 
+/// Create a new client from the options and resolver.
 pub fn new_client<R: Resolver + Send + Sync + 'static>(
     options: ClientOptions,
     resolver: R,

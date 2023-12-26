@@ -59,31 +59,39 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 /////////////////////////////////////////// ServerOptions //////////////////////////////////////////
 
+/// RPC Server options.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ServerOptions {
-    // SSL/TLS preferences.
+    /// SSL/TLS ca_file.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
     pub ca_file: String,
+    /// SSL/TLS private key.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
     pub private_key_file: String,
+    /// SSL/TLS certificate.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
     pub certificate_file: String,
+    /// SSL/TLS verification disabled if true.
     #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
     pub verify_none: bool,
-    // Server preferences.
+    /// Bind-to this host.
     #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to bind to."))]
     pub bind_to_host: String,
+    /// Bind-to this port.
     #[cfg_attr(feature = "binaries", arrrg(required, "Port to bind to."))]
     pub bind_to_port: u16,
+    /// Number of threads to spawn.
     #[cfg_attr(feature = "binaries", arrrg(required, "Number of threads to spawn."))]
     pub thread_pool_size: u16,
+    /// Send-buffer size.
     // Buffering preferences.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
 }
 
 impl ServerOptions {
+    /// Build the SSL acceptor or die trying.
     pub fn must_build_acceptor(&self) -> SslAcceptor {
         // Setup our SSL preferences.
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
@@ -103,45 +111,54 @@ impl ServerOptions {
         acceptor.build()
     }
 
+    /// Get the pollster.
     pub fn pollster(&self) -> Result<Box<dyn Pollster>, rpc_pb::Error> {
         default_pollster()
     }
 
+    /// Set the ca_file.
     pub fn with_ca_file(mut self, ca_file: &str) -> Self {
         self.ca_file = ca_file.to_owned();
         self
     }
 
+    /// Set the private_key_file.
     pub fn with_private_key_file(mut self, private_key_file: &str) -> Self {
         self.private_key_file = private_key_file.to_owned();
         self
     }
 
+    /// Set the certificate_file.
     pub fn with_certificate_file(mut self, certificate_file: &str) -> Self {
         self.certificate_file = certificate_file.to_owned();
         self
     }
 
+    /// Set the bind_to_host.
     pub fn with_bind_to_host(mut self, bind_to_host: &str) -> Self {
         self.bind_to_host = bind_to_host.to_owned();
         self
     }
 
+    /// Set the bind_to_port.
     pub fn with_bind_to_port(mut self, bind_to_port: u16) -> Self {
         self.bind_to_port = bind_to_port;
         self
     }
 
+    /// Set the thread_pool_size.
     pub fn with_thread_pool_size(mut self, thread_pool_size: u16) -> Self {
         self.thread_pool_size = thread_pool_size;
         self
     }
 
+    /// Set verify_none to true.
     pub fn with_verify_none(mut self) -> Self {
         self.verify_none = true;
         self
     }
 
+    /// Set the user_send_buffer_size.
     pub fn with_user_send_buffer_size(mut self, user_send_buffer_size: usize) -> Self {
         self.user_send_buffer_size = user_send_buffer_size;
         self
@@ -356,11 +373,14 @@ impl Internals {
 
 ////////////////////////////////////////// ServiceRegistry /////////////////////////////////////////
 
+/// ServiceRegistry maps servers by name.
+// TODO(rescrv):  Dedupe with rpc_pb's similar struct.
 pub struct ServiceRegistry {
     services: HashMap<&'static str, Box<dyn rpc_pb::Server + Send + Sync + 'static>>,
 }
 
 impl ServiceRegistry {
+    /// Create a new ServiceRegistry.
     pub fn new() -> Self {
         let mut services = Self {
             services: HashMap::new(),
@@ -370,6 +390,7 @@ impl ServiceRegistry {
         services
     }
 
+    /// Register the server with this ServiceRegistry.
     pub fn register<S: rpc_pb::Server + Send + Sync + 'static>(
         &mut self,
         service: &'static str,
@@ -397,18 +418,21 @@ impl Default for ServiceRegistry {
 
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
+/// An RPC Server hosts multiple server instances so they may be called.
 pub struct Server {
     options: ServerOptions,
     internals: Arc<Internals>,
 }
 
 impl Server {
+    /// Create a new server from the options and service registry.
     pub fn new(options: ServerOptions, services: ServiceRegistry) -> Result<Self, rpc_pb::Error> {
         let pollster = options.pollster()?;
         let internals = Internals::new(pollster, services);
         Ok(Self { options, internals })
     }
 
+    /// Serve the server forever.
     pub fn serve(&self) -> Result<(), Error> {
         // Spawn threads to serve the thread pool.
         let mut threads = Vec::new();

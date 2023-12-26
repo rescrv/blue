@@ -6,6 +6,7 @@ use super::Resolver;
 
 ////////////////////////////////////////// StringResolver //////////////////////////////////////////
 
+/// A StringResolver provides round-robin resolution from a set of hosts.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StringResolver {
     hosts: Vec<Host>,
@@ -13,10 +14,7 @@ pub struct StringResolver {
 }
 
 impl StringResolver {
-    pub fn must(connect_str: &str) -> Self {
-        Self::new(connect_str).expect("that the StringResolver always resolve")
-    }
-
+    /// Create a new string resolver from the connect string.
     pub fn new(connect_str: &str) -> Result<Self, rpc_pb::Error> {
         let mut hosts = Vec::new();
         for host in connect_str.split(',') {

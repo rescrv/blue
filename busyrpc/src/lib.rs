@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use biometrics::Collector;
 
 use rpc_pb::sd::Host;
@@ -17,6 +19,7 @@ pub use server::{Server, ServerOptions, ServiceRegistry};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
+/// Register the biometrics for this crate.
 pub fn register_biometrics(collector: &mut Collector) {
     client::register_biometrics(collector);
     channel::register_biometrics(collector);
@@ -26,6 +29,9 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 ///////////////////////////////////////////// Resolver /////////////////////////////////////////////
 
+/// A trait for resolving hosts.
+// TODO(rescrv):  Dedupe with rpc_pb.
 pub trait Resolver {
+    /// Resolve one Host.
     fn resolve(&mut self) -> Result<Host, rpc_pb::Error>;
 }
