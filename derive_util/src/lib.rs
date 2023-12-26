@@ -12,6 +12,7 @@ extern crate syn;
 /// [StructVisitor::visit_struct_unnamed_fields], and [StructVisitor::visit_struct_unit] to support
 /// the three different struct types.
 pub trait StructVisitor: Sized {
+    /// Type of output this StructVisitor returns.
     type Output;
 
     /// Visit the struct and switch over the struct type.  This will call one of the other visit
@@ -67,7 +68,9 @@ pub trait StructVisitor: Sized {
 /// [EnumVisitor::visit_enum_variant_named_field], [EnumVisitor::visit_enum_variant_unnamed_field],
 /// and [EnumVisitor::visit_enum_variant_unit].
 pub trait EnumVisitor: Sized {
+    /// Type of output this EnumVisitor creates for an enum.
     type Output;
+    /// Type of output this EnumVisitor creates for each variant.
     type VariantOutput;
 
     /// Visit all variants and combine them into one output.
