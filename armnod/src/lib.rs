@@ -26,6 +26,7 @@ pub enum SeedChoice {
 
 /// A [SeedChooser] returns a [SeedChoice] using the next value drawn from `guac`.
 pub trait SeedChooser {
+    /// Uses the provided guacamole to return a seed choice.
     fn which_seed(&mut self, guac: &mut Guacamole) -> SeedChoice;
 }
 
@@ -187,13 +188,21 @@ impl LengthChooser for UniformLengthChooser {
 
 ///////////////////////////////////////// CharacterChooser /////////////////////////////////////////
 
+/// The lower character set includes lower-case ASCII alphabets.
 pub const CHAR_SET_LOWER: &str = "abcdefghijklmnopqrstuvwxyz";
+/// The upper character set includes upper-case ASCII alphabets.
 pub const CHAR_SET_UPPER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The alph character set includes lower- and upper-case ASCII alphabets.
 pub const CHAR_SET_ALPHA: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The digit character set includes ASCII digits.
 pub const CHAR_SET_DIGIT: &str = "0123456789";
+/// The alnum character set includes lower- and upper-case ASCII alphabets and the digits.
 pub const CHAR_SET_ALNUM: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+/// The punct character set includes ASCII punctuation.
 pub const CHAR_SET_PUNCT: &str = "!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
+/// The hex character set includes lower-case hexadecimal numbers.
 pub const CHAR_SET_HEX: &str = "0123456789abcdef";
+/// The default character set includes most printable ASCII.
 pub const CHAR_SET_DEFAULT: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
 
 /// Generate strings of a given alphabet using the provided randomness.
@@ -251,9 +260,13 @@ impl CharacterChooser for CharSetChooser {
 
 /// Armnod is an anagram of Random
 pub struct Armnod {
+    /// How to select the seed for each string.
     pub string: Box<dyn SeedChooser>,
+    /// How to select the length of each string.
     pub length: Box<dyn LengthChooser>,
+    /// The characters to pick for strings.
     pub characters: Box<dyn CharacterChooser>,
+    /// The buffer used for returning strings.
     pub buffer: Vec<u8>,
 }
 
@@ -291,9 +304,11 @@ impl Armnod {
 
 /////////////////////////////////////////// Command Line ///////////////////////////////////////////
 
+/// Options for constructing an Armnod instance.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct ArmnodOptions {
+    /// The method of choosing strings.
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -303,50 +318,59 @@ pub struct ArmnodOptions {
         )
     )]
     pub chooser_mode: String,
+    /// The size of the set for set-based chooser modes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Cardinality for set-based modes.", "N")
     )]
     pub cardinality: Option<u64>,
+    /// The first element to load in set-once mode.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "First set element to load in set-once mode.", "ELEM")
     )]
     pub set_once_begin: Option<u64>,
+    /// The last element to load in set-once mode.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Last set element to load in set-once mode.", "ELEM")
     )]
     pub set_once_end: Option<u64>,
+    /// The zipf alpha parameter.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Alpha value for the zipf distribution.", "ALPHA")
     )]
     pub zipf_alpha: Option<f64>,
+    /// The zipf theta parameter.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Theta value for the zipf distribution.", "THETA")
     )]
     pub zipf_theta: Option<f64>,
+    /// The method chosen for picking string length.  One of "constant", "uniform".
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Method of choosing length.", "LENGTH")
     )]
     pub length_mode: Option<String>,
+    /// The constant length of strings when using constant length modes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Generate strings of this constant length.", "LENGTH")
     )]
     pub length: Option<u32>,
+    /// The average length of strings when using varied length modes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(
             optional,
             "Generate strings at this average length for varied length modes.",
-            "MIN"
+            "AVG"
         )
     )]
     pub avg_length: Option<u32>,
+    /// The minimum length of strings when using varied length modes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -356,6 +380,7 @@ pub struct ArmnodOptions {
         )
     )]
     pub min_length: Option<u32>,
+    /// The maximum length of strings when using varied length modes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -365,6 +390,7 @@ pub struct ArmnodOptions {
         )
     )]
     pub max_length: Option<u32>,
+    /// The charset to use.
     #[cfg_attr(feature = "command_line", arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET"))]
     pub charset: Option<String>,
 }
@@ -398,10 +424,12 @@ fn uniform_length_chooser(min_length: u32, max_length: u32) -> Box<dyn LengthCho
 }
 
 impl ArmnodOptions {
+    /// Try to parse the armnod options.
     pub fn try_parse(self) -> Result<Armnod, String> {
         self.try_parse_sharded(0, 1)
     }
 
+    /// Try to parse the armnod options for shard `index` where there are `total` shards.
     pub fn try_parse_sharded(self, index: u64, total: u64) -> Result<Armnod, String> {
         // string chooser
         let string_chooser = if self.chooser_mode == "random" {

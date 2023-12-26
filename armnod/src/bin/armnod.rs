@@ -1,3 +1,5 @@
+//! Generate random ASCII strings from the provided command-line options.
+
 use std::io::{BufWriter, Write};
 
 use arrrg::CommandLine;
