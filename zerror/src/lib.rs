@@ -7,6 +7,7 @@ use std::fmt::Debug;
 /// The core type of zerror.  Implement this trait, or wrap and proxy ErrorCore, to create rich
 /// errors in the long_form.  This integrates with the error handling "monad" over Result<T, Z>.
 pub trait Z {
+    /// The type of error returned from the with_* methods.
     type Error;
 
     /// Convert an error to a string free from "="*80.
