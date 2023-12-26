@@ -6,7 +6,17 @@ edition = "2021"
 description = "TextTale provides tools for writing text-mode adventures."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 rustyline = "11.0"
 
 utilz = { path = "../utilz", version = "0.2" }
+
+[[example]]
+name = "texttale"
+path = "examples/texttale.rs"
+required-features=["binaries"]
