@@ -2,7 +2,6 @@
 /// looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
 /// working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 /// to create a cursor over an immutable data set.
-
 use std::cmp::Ordering;
 use std::fmt::Debug;
 

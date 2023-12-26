@@ -1287,7 +1287,7 @@ impl KeyValueStore {
                     rename(&log_path, TRASH_ROOT(&options.path).join(file_name))?;
                 }
                 return Ok(0);
-            },
+            }
         };
         let md = sst.metadata()?;
         let setsum = Setsum::from_digest(md.setsum);

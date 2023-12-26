@@ -760,7 +760,7 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
     }
     kvrs.sort_by(sort_key);
     if kvrs.is_empty() {
-        return Ok(None)
+        return Ok(None);
     }
     for kvr in kvrs.into_iter() {
         match kvr.value {
