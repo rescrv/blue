@@ -1,3 +1,4 @@
+/*
 #![allow(non_snake_case)]
 
 use buffertk::Unpackable;
@@ -1853,3 +1854,4 @@ mod tests {
         }
     }
 }
+*/
