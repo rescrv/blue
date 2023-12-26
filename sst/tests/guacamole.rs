@@ -3,10 +3,11 @@ extern crate sst;
 use rand::{Rng, RngCore};
 
 use guacamole::Guacamole;
+use keyvalint::{Cursor, KeyValueLoad};
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Cursor, Sst, SstBuilder, SstCursor};
+use sst::{Builder, Sst, SstBuilder, SstCursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 
@@ -192,7 +193,7 @@ impl Default for FuzzerConfig {
 
 pub fn fuzzer<T, B, F>(name: &str, config: FuzzerConfig, new_table: F)
 where
-    for<'a> T: TableTrait<'a>,
+    for<'a> T: TableTrait<'a> + KeyValueLoad,
     for<'a> B: TableBuilderTrait<'a, Table = T>,
     F: Fn(&str) -> B,
 {
@@ -216,10 +217,10 @@ where
     for _ in 0..config.num_keys {
         let kvo: KeyValueOperation = gen.guacamole(&mut guac);
         match kvo {
-            KeyValueOperation::Put(x) => {
+            KeyValueOperation::Put(ref x) => {
                 builder.put(&x.key, x.timestamp, &x.value).unwrap();
             }
-            KeyValueOperation::Del(x) => {
+            KeyValueOperation::Del(ref x) => {
                 builder.del(&x.key, x.timestamp).unwrap();
             }
         }
@@ -230,13 +231,13 @@ where
     let mut ref_cursor = kvs.cursor();
     loop {
         ref_cursor.next().unwrap();
-        let x = ref_cursor.value();
+        let x = ref_cursor.key_value();
         if x.is_none() {
             break;
         }
         let x = x.unwrap();
         match x.value {
-            Some(ref v) => {
+            Some(v) => {
                 builder.put(x.key, x.timestamp, v).unwrap();
             }
             None => {
@@ -254,20 +255,13 @@ where
         cursor.seek(&key).unwrap();
         for _ in 0..config.seek_distance {
             let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
-            let (exp, got) = if will_do_prev {
+            if will_do_prev {
                 ref_cursor.prev().unwrap();
                 cursor.prev().unwrap();
-                let exp = ref_cursor.value();
-                let got = cursor.value();
-                (exp, got)
-            } else {
-                ref_cursor.next().unwrap();
-                cursor.next().unwrap();
-                let exp = ref_cursor.value();
-                let got = cursor.value();
-                (exp, got)
-            };
-            match (exp, got) {
+            }
+            let exp = ref_cursor.key_value();
+            let got = cursor.key_value();
+            match (&exp, &got) {
                 (Some(x), Some(y)) => {
                     assert_eq!(x, y);
                 }
@@ -278,6 +272,26 @@ where
                 (Some(x), None) => {
                     panic!("found bad case (open a debugger or print out a dump of info above): exp: {:?}", x);
                 }
+            };
+            if let Some(x) = exp.as_ref() {
+                let mut is_tombstone = false;
+                let got = table.load(x.key, x.timestamp, &mut is_tombstone).unwrap();
+                match (x.value, got) {
+                    (Some(x), Some(y)) => {
+                        assert_eq!(x, y);
+                    }
+                    (None, None) => {}
+                    (None, Some(x)) => {
+                        panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
+                    }
+                    (Some(x), None) => {
+                        panic!("found bad case (open a debugger or print out a dump of info above): exp: {:?}", x);
+                    }
+                };
+            }
+            if !will_do_prev {
+                ref_cursor.next().unwrap();
+                cursor.next().unwrap();
             }
         }
     }
@@ -294,7 +308,7 @@ macro_rules! guacamole_tests {
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 0,
@@ -302,13 +316,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 0,
@@ -316,13 +330,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 1,
@@ -330,13 +344,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 1,
@@ -344,13 +358,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 16,
@@ -358,13 +372,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 16,
@@ -372,13 +386,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 256,
@@ -386,13 +400,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 256,
@@ -400,13 +414,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 4096,
@@ -414,13 +428,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 4096,
@@ -428,13 +442,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 32768,
@@ -442,13 +456,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_1_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_1_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 1,
                     value_bytes: 32768,
@@ -456,13 +470,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 0,
@@ -470,13 +484,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 0,
@@ -484,13 +498,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 1,
@@ -498,13 +512,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 1,
@@ -512,13 +526,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 16,
@@ -526,13 +540,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 16,
@@ -540,13 +554,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 256,
@@ -554,13 +568,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 256,
@@ -568,13 +582,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 4096,
@@ -582,13 +596,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 4096,
@@ -596,13 +610,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 32768,
@@ -610,13 +624,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16,
                     value_bytes: 32768,
@@ -624,13 +638,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 0,
@@ -638,13 +652,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 0,
@@ -652,13 +666,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 1,
@@ -666,13 +680,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 1,
@@ -680,13 +694,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 16,
@@ -694,13 +708,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 16,
@@ -708,13 +722,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 256,
@@ -722,13 +736,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 256,
@@ -736,13 +750,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 4096,
@@ -750,13 +764,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 4096,
@@ -764,13 +778,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 32768,
@@ -778,13 +792,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_256_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_256_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 256,
                     value_bytes: 32768,
@@ -792,13 +806,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 0,
@@ -806,13 +820,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 0,
@@ -820,13 +834,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 1,
@@ -834,13 +848,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 1,
@@ -848,13 +862,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 16,
@@ -862,13 +876,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 16,
@@ -876,13 +890,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 256,
@@ -890,13 +904,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 256,
@@ -904,13 +918,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 4096,
@@ -918,13 +932,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_4096_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 4096,
@@ -932,13 +946,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 32768,
@@ -946,13 +960,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10_key_bytes_16384_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10_key_bytes_16384_value_bytes_32768_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10,
                     key_bytes: 16384,
                     value_bytes: 32768,
@@ -960,13 +974,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 0,
@@ -974,13 +988,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 0,
@@ -988,13 +1002,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 1,
@@ -1002,13 +1016,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 1,
@@ -1016,13 +1030,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 16,
@@ -1030,13 +1044,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 16,
@@ -1044,13 +1058,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 256,
@@ -1058,13 +1072,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_1_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 1,
                     value_bytes: 256,
@@ -1072,13 +1086,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 0,
@@ -1086,13 +1100,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 0,
@@ -1100,13 +1114,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 1,
@@ -1114,13 +1128,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 1,
@@ -1128,13 +1142,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 16,
@@ -1142,13 +1156,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 16,
@@ -1156,13 +1170,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 256,
@@ -1170,13 +1184,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_16_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 16,
                     value_bytes: 256,
@@ -1184,13 +1198,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 0,
@@ -1198,13 +1212,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_0_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 0,
@@ -1212,13 +1226,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 1,
@@ -1226,13 +1240,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_1_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 1,
@@ -1240,13 +1254,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 16,
@@ -1254,13 +1268,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_16_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 16,
@@ -1268,13 +1282,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_0";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 256,
@@ -1282,13 +1296,13 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.0,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
             #[test]
             fn num_keys_10000_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125() {
                 let name = stringify!($name).to_string() + "::" + "num_keys_10000_key_bytes_256_value_bytes_256_num_seeks_1000_seek_distance_10_prev_probability_0_125";
-                let config = crate::guacamole::FuzzerConfig {
+                let config = $crate::guacamole::FuzzerConfig {
                     num_keys: 10000,
                     key_bytes: 256,
                     value_bytes: 256,
@@ -1296,7 +1310,7 @@ macro_rules! guacamole_tests {
                     seek_distance: 10,
                     prev_probability: 0.125,
                 };
-                crate::guacamole::fuzzer(&name, config, $builder);
+                $crate::guacamole::fuzzer(&name, config, $builder);
             }
 
         }

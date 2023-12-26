@@ -1,8 +1,9 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
+use keyvalint::Cursor;
 
 use sst::setsum::Setsum;
-use sst::{Cursor, Sst, SstOptions};
+use sst::{Sst, SstOptions};
 
 fn fast_setsum(opts: SstOptions, sst: &str) -> String {
     let sst = Sst::new(opts, sst).expect("open Sst");
@@ -16,7 +17,7 @@ fn slow_setsum(opts: SstOptions, sst: &str) -> String {
     let mut setsum = Setsum::default();
     loop {
         cursor.next().expect("next");
-        if let Some(kvr) = cursor.value() {
+        if let Some(kvr) = cursor.key_value() {
             match kvr.value {
                 Some(v) => {
                     setsum.put(kvr.key, kvr.timestamp, v);

@@ -1,28 +1,42 @@
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write as IoWrite};
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
+use std::sync::atomic::{self, AtomicBool};
+use std::sync::Arc;
 
-use arrrg_derive::CommandLine;
-
+use biometrics::{Collector, Counter};
 use buffertk::{stack_pack, v64, Packable, Unpackable};
-
+use keyvalint::{KeyValuePair, KeyValueRef};
 use prototk_derive::Message;
-
+use sync42::work_coalescing_queue::{WorkCoalescingCore, WorkCoalescingQueue};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::setsum::Setsum;
 use super::{
     check_key_len, check_table_size, check_value_len, compare_key, Builder, Error, KeyValueDel,
-    KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE,
+    KeyValueEntry, KeyValuePut, TABLE_FULL_SIZE,
 };
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static APPEND: Counter = Counter::new("sst.log.append");
+static FSYNC: Counter = Counter::new("sst.log.fsync");
+
+pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&APPEND);
+    collector.register_counter(&FSYNC);
+}
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
-const BLOCK_BITS: u64 = 16;
+pub const MAX_BATCH_SIZE: u64 = BLOCK_SIZE - 2 * HEADER_MAX_SIZE;
+
+const BLOCK_BITS: u64 = 20;
 const BLOCK_SIZE: u64 = 1 << BLOCK_BITS;
-const BUFFER_SIZE: u64 = BLOCK_SIZE * 64;
+const DEFAULT_BUFFER_SIZE: u64 = BLOCK_SIZE * 2;
 
 /////////////////////////////////////////////// utils //////////////////////////////////////////////
 
@@ -40,6 +54,24 @@ fn compute_true_up(offset: u64) -> u64 {
 
 fn next_boundary(offset: u64) -> u64 {
     (block_offset(offset) + 1) << BLOCK_BITS
+}
+
+fn check_batch_size(size: usize) -> Result<(), Error> {
+    if size as u64 > BLOCK_SIZE {
+        let err = Error::TableFull {
+            core: ErrorCore::default(),
+            size,
+            limit: BLOCK_SIZE as usize,
+        };
+        Err(err)
+    } else {
+        Ok(())
+    }
+}
+
+fn check_batch_size_plus<P: Packable>(buffer: &[u8], pa: P) -> Result<(), Error> {
+    let size = buffer.len() + pa.pack_sz();
+    check_batch_size(size)
 }
 
 ////////////////////////////////////////////// Header //////////////////////////////////////////////
@@ -64,39 +96,120 @@ const HEADER_SECOND: u32 = 3;
 
 //////////////////////////////////////////// LogOptions ////////////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct LogOptions {
-    #[arrrg(optional, "Size of the write buffer.")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Size of the write buffer."))]
     pub(crate) write_buffer: usize,
-    #[arrrg(optional, "Size of the read buffer.")]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Size of the read buffer."))]
     pub(crate) read_buffer: usize,
-    #[arrrg(optional, "Roll over logs that exceed this number of bytes.")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Roll over logs that exceed this number of bytes.")
+    )]
     pub(crate) rollover_size: usize,
 }
 
 impl Default for LogOptions {
     fn default() -> Self {
         Self {
-            write_buffer: BUFFER_SIZE as usize,
-            read_buffer: BUFFER_SIZE as usize,
+            write_buffer: DEFAULT_BUFFER_SIZE as usize,
+            read_buffer: DEFAULT_BUFFER_SIZE as usize,
             rollover_size: 1 << 30,
         }
     }
 }
 
-/////////////////////////////////////////////// Batch //////////////////////////////////////////////
+/////////////////////////////////////////////// Write //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Message)]
-struct Batch<'a> {
-    #[prototk(13, message)]
-    writes: Vec<KeyValueEntry<'a>>,
+pub trait Write: std::io::Write {
+    fn fsync(&mut self) -> Result<(), Error>;
 }
 
-impl<'a> From<KeyValueEntry<'a>> for Batch<'a> {
-    fn from(entry: KeyValueEntry<'a>) -> Self {
-        Self {
-            writes: vec![entry],
+impl Write for File {
+    fn fsync(&mut self) -> Result<(), Error> {
+        Ok(self.sync_data()?)
+    }
+}
+
+impl Write for &mut Vec<u8> {
+    fn fsync(&mut self) -> Result<(), Error> {
+        // pass
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for BufWriter<W> {
+    fn fsync(&mut self) -> Result<(), Error> {
+        self.get_mut().fsync()
+    }
+}
+
+//////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct WriteBatch {
+    buffer: Vec<u8>,
+    setsum: Setsum,
+}
+
+impl WriteBatch {
+    pub fn insert(&mut self, kvr: KeyValueRef<'_>) -> Result<(), Error> {
+        if let Some(value) = kvr.value {
+            self.put(kvr.key, kvr.timestamp, value)
+        } else {
+            self.del(kvr.key, kvr.timestamp)
         }
+    }
+
+    /// Merge one batch into an other.  Will only error if the resulting batch size is too large.
+    pub fn merge(&mut self, wb: &WriteBatch) -> Result<(), Error> {
+        check_batch_size(self.buffer.len() + wb.buffer.len())?;
+        self.buffer.extend_from_slice(&wb.buffer);
+        self.setsum += wb.setsum;
+        Ok(())
+    }
+}
+
+impl Builder for WriteBatch {
+    type Sealed = Self;
+
+    fn approximate_size(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        check_key_len(key)?;
+        check_value_len(value)?;
+        self.setsum.put(key, timestamp, value);
+        let put = KeyValuePut {
+            shared: 0,
+            key_frag: key,
+            timestamp,
+            value,
+        };
+        let pa = stack_pack(KeyValueEntry::Put(put));
+        check_batch_size_plus(&self.buffer, &pa)?;
+        pa.append_to_vec(&mut self.buffer);
+        Ok(())
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        check_key_len(key)?;
+        self.setsum.del(key, timestamp);
+        let del = KeyValueDel {
+            shared: 0,
+            key_frag: key,
+            timestamp,
+        };
+        let pa = stack_pack(KeyValueEntry::Del(del));
+        check_batch_size_plus(&self.buffer, &pa)?;
+        pa.append_to_vec(&mut self.buffer);
+        Ok(())
+    }
+
+    fn seal(self) -> Result<Self::Sealed, Error> {
+        Ok(self)
     }
 }
 
@@ -120,6 +233,8 @@ impl LogBuilder<File> {
     }
 
     pub fn fsync(&mut self) -> Result<(), Error> {
+        FSYNC.click();
+        self.output.flush()?;
         Ok(self.output.get_mut().sync_data()?)
     }
 }
@@ -140,7 +255,18 @@ impl<W: Write> LogBuilder<W> {
         Ok(())
     }
 
-    fn append(&mut self, buffer: &[u8]) -> Result<(), Error> {
+    pub fn append(&mut self, write_batch: &WriteBatch) -> Result<(), Error> {
+        if write_batch.buffer.is_empty() {
+            return Err(Error::EmptyBatch {
+                core: ErrorCore::default(),
+            });
+        }
+        assert_ne!(write_batch.setsum, Setsum::default());
+        self.setsum += write_batch.setsum;
+        self._append(&write_batch.buffer)
+    }
+
+    fn _append(&mut self, buffer: &[u8]) -> Result<(), Error> {
         let header = Header {
             size: buffer.len() as u64,
             crc32c: crc32c::crc32c(buffer),
@@ -175,7 +301,7 @@ impl<W: Write> LogBuilder<W> {
         let roundup = nb - self.bytes_written;
         if roundup <= HEADER_MAX_SIZE {
             self.true_up(nb)?;
-            return self.append(buffer);
+            return self._append(buffer);
         }
         let first_bytes = (roundup - HEADER_MAX_SIZE) as usize;
         let first = &buffer[..first_bytes];
@@ -231,36 +357,183 @@ impl<W: Write> Builder for LogBuilder<W> {
     }
 
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
-        check_key_len(key)?;
-        check_value_len(value)?;
-        self.setsum.put(key, timestamp, value);
-        let put = KeyValuePut {
-            shared: 0,
-            key_frag: key,
-            timestamp,
-            value,
-        };
-        let buf = stack_pack(Batch::from(KeyValueEntry::Put(put))).to_vec();
-        self.append(&buf)?;
+        let mut wb = WriteBatch::default();
+        wb.put(key, timestamp, value)?;
+        self.append(&wb)?;
         Ok(())
     }
 
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        check_key_len(key)?;
-        self.setsum.del(key, timestamp);
-        let del = KeyValueDel {
-            shared: 0,
-            key_frag: key,
-            timestamp,
-        };
-        let buf = stack_pack(Batch::from(KeyValueEntry::Del(del))).to_vec();
-        self.append(&buf)?;
+        let mut wb = WriteBatch::default();
+        wb.del(key, timestamp)?;
+        self.append(&wb)?;
         Ok(())
     }
 
     fn seal(mut self) -> Result<Self::Sealed, Error> {
         self.flush()?;
         Ok(self.setsum)
+    }
+}
+
+/////////////////////////////////////// ConcurrentLogBuilder ///////////////////////////////////////
+
+struct WriteCoalescingCore<W: Write> {
+    builder: LogBuilder<W>,
+}
+
+impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Option<Error>> for WriteCoalescingCore<W> {
+    type InputAccumulator = WriteBatch;
+    type OutputIterator<'a> = std::vec::IntoIter<Option<Error>> where W: 'a;
+
+    fn can_batch(&self, acc: &WriteBatch, other: &Arc<WriteBatch>) -> bool {
+        check_batch_size(acc.buffer.len().saturating_add(other.buffer.len())).is_ok()
+    }
+
+    fn batch(&mut self, mut acc: WriteBatch, other: Arc<WriteBatch>) -> Self::InputAccumulator {
+        acc.merge(&other)
+            .expect("can_batch should ensure this is impossible");
+        acc
+    }
+
+    fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
+        let mut ret = Vec::with_capacity(taken);
+        if let Err(err) = self.builder.append(&acc) {
+            for _ in 0..taken {
+                ret.push(Some(err.clone()))
+            }
+        } else if let Err(err) = self.builder.flush() {
+            for _ in 0..taken {
+                ret.push(Some(err.clone()))
+            }
+        } else {
+            for _ in 0..taken {
+                ret.push(None)
+            }
+        }
+        ret.into_iter()
+    }
+}
+
+struct FsyncCoalescingCore {
+    raw_builder: RawFd,
+}
+
+impl WorkCoalescingCore<(), bool> for FsyncCoalescingCore {
+    type InputAccumulator = usize;
+    type OutputIterator<'a> = std::vec::IntoIter<bool>;
+
+    fn can_batch(&self, acc: &usize, _: &()) -> bool {
+        *acc < usize::MAX
+    }
+
+    fn batch(&mut self, acc: usize, _: ()) -> Self::InputAccumulator {
+        acc + 1
+    }
+
+    fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
+        assert_eq!(taken, acc);
+        FSYNC.click();
+        // SAFETY(rescrv):  The worst thing that can happen is we fsync on a fd that's not ours.
+        let ret = unsafe { libc::fsync(self.raw_builder) } >= 0;
+        vec![ret; acc].into_iter()
+    }
+}
+
+pub struct ConcurrentLogBuilder<W: Write> {
+    write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Option<Error>, WriteCoalescingCore<W>>,
+    // TODO(rescrv): Make this return Option<Error> too.
+    fsync_cq: WorkCoalescingQueue<(), bool, FsyncCoalescingCore>,
+    poison: AtomicBool,
+    _phantom_w: std::marker::PhantomData<W>,
+}
+
+impl ConcurrentLogBuilder<File> {
+    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
+        let builder = LogBuilder::new(options, file_name)?;
+        Self::from_builder(builder)
+    }
+
+    pub fn fsync(&self) -> Result<(), Error> {
+        if !self.fsync_cq.do_work(()) {
+            Err(Error::Corruption {
+                core: ErrorCore::default(),
+                context: "log is poisoned".to_string(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
+    pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
+        let builder = LogBuilder::from_write(options, write)?;
+        Self::from_builder(builder)
+    }
+
+    pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, Error> {
+        let raw_builder = builder.output.get_ref().as_raw_fd();
+        let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore { builder });
+        let fsync_cq = WorkCoalescingQueue::new(FsyncCoalescingCore { raw_builder });
+        let poison = AtomicBool::new(false);
+        let _phantom_w = std::marker::PhantomData;
+        Ok(Self {
+            write_cq,
+            fsync_cq,
+            poison,
+            _phantom_w,
+        })
+    }
+
+    pub fn flush(&self) -> Result<(), Error> {
+        let mut write = self.write_cq.get_core();
+        write.builder.flush()
+    }
+
+    pub fn approximate_size(&self) -> usize {
+        let write = self.write_cq.get_core();
+        write.builder.approximate_size()
+    }
+
+    pub fn append(&self, write_batch: WriteBatch) -> Result<(), Error> {
+        if write_batch.buffer.is_empty() {
+            return Err(Error::EmptyBatch {
+                core: ErrorCore::default(),
+            });
+        }
+        if let Some(err) = self.write_cq.do_work(Arc::new(write_batch)) {
+            self.poison.store(true, atomic::Ordering::Relaxed);
+            return Err(err);
+        }
+        if !self.fsync_cq.do_work(()) {
+            self.poison.store(true, atomic::Ordering::Relaxed);
+            let err = Error::Corruption {
+                core: ErrorCore::default(),
+                context: "fsync failed".to_string(),
+            };
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    pub fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+        let mut wb = WriteBatch::default();
+        wb.put(key, timestamp, value)?;
+        self.append(wb)?;
+        Ok(())
+    }
+
+    pub fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+        let mut wb = WriteBatch::default();
+        wb.del(key, timestamp)?;
+        self.append(wb)?;
+        Ok(())
+    }
+
+    pub fn seal(self) -> Result<Setsum, Error> {
+        let core = self.write_cq.into_inner();
+        core.builder.seal()
     }
 }
 
@@ -287,7 +560,7 @@ impl<R: Read + Seek> LogIterator<R> {
         let input = BufReader::with_capacity(options.read_buffer, reader);
         Ok(Self {
             input,
-            buffer: Vec::new(),
+            buffer: vec![],
             buffer_idx: 0,
         })
     }
@@ -295,7 +568,7 @@ impl<R: Read + Seek> LogIterator<R> {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<KeyValueRef>, Error> {
         if self.buffer_idx < self.buffer.len() {
-            return self.next_from_batch();
+            return self.next_from_buffer();
         }
         self.buffer_idx = 0;
         self.buffer.clear();
@@ -316,7 +589,8 @@ impl<R: Read + Seek> LogIterator<R> {
                         core: ErrorCore::default(),
                         context: "truncation: no second header".to_owned(),
                     }
-                    .with_variable("header1", header));
+                    .with_variable("header1", header)
+                    .with_variable("offset", self.input.stream_position().unwrap_or(0)));
                 }
             };
             if header2.discriminant != HEADER_SECOND {
@@ -324,31 +598,64 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "invalid discriminant in second header".to_owned(),
                 }
-                .with_variable("discriminant", header2.discriminant));
+                .with_variable("discriminant", header2.discriminant)
+                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
             }
         } else {
             return Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "invalid discriminant in header".to_owned(),
             }
-            .with_variable("discriminant", header.discriminant));
+            .with_variable("discriminant", header.discriminant)
+            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
         }
-        self.next_from_batch()
+        self.next_from_buffer()
     }
 
-    fn next_from_batch(&mut self) -> Result<Option<KeyValueRef>, Error> {
-        let (batch, rem) = <Batch as Unpackable>::unpack(&self.buffer[self.buffer_idx..])?;
+    fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef>, Error> {
+        if self.buffer_idx >= self.buffer.len() {
+            return Err(Error::EmptyBatch {
+                core: ErrorCore::default(),
+            });
+        }
+        let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])?;
         self.buffer_idx = self.buffer.len() - rem.len();
-        if !batch.writes.is_empty() {
-            let kve = &batch.writes[0];
-            let kvr = KeyValueRef {
-                key: kve.key_frag(),
-                timestamp: kve.timestamp(),
-                value: kve.value(),
-            };
-            Ok(Some(kvr))
-        } else {
-            Ok(None)
+        fn check_shared(shared: u64) -> Result<(), Error> {
+            if shared != 0 {
+                Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: "shared was not 0".to_string(),
+                })
+            } else {
+                Ok(())
+            }
+        }
+        match &kve {
+            KeyValueEntry::Put(KeyValuePut {
+                shared,
+                key_frag,
+                timestamp,
+                value,
+            }) => {
+                check_shared(*shared)?;
+                Ok(Some(KeyValueRef {
+                    key: key_frag,
+                    timestamp: *timestamp,
+                    value: Some(value),
+                }))
+            }
+            KeyValueEntry::Del(KeyValueDel {
+                shared,
+                key_frag,
+                timestamp,
+            }) => {
+                check_shared(*shared)?;
+                Ok(Some(KeyValueRef {
+                    key: key_frag,
+                    timestamp: *timestamp,
+                    value: None,
+                }))
+            }
         }
     }
 
@@ -371,7 +678,8 @@ impl<R: Read + Seek> LogIterator<R> {
                 context: "crc checksum failed".to_owned(),
             }
             .with_variable("expected", header.crc32c)
-            .with_variable("returned", crc));
+            .with_variable("returned", crc)
+            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
         }
         Ok(Some(header))
     }
@@ -400,7 +708,8 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "header size exceeds HEADER_MAX_SIZE".to_owned(),
                 }
-                .with_variable("header_sz", header_sz));
+                .with_variable("header_sz", header_sz)
+                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
             }
             let header = &mut header[..header_sz];
             self.input.read_exact(header)?;
@@ -410,7 +719,8 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "entry size exceeds TABLE_FULL_SIZE".to_owned(),
                 }
-                .with_variable("size", header.size));
+                .with_variable("size", header.size)
+                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
             }
             return Ok(Some(header));
         }
@@ -425,18 +735,21 @@ impl<R: Read + Seek> LogIterator<R> {
                 context: "true-up exceeds HEADER_MAX_SIZE".to_owned(),
             }
             .with_variable("offset", offset)
-            .with_variable("trued_up", trued_up));
+            .with_variable("trued_up", trued_up)
+            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
         }
         self.input.seek(SeekFrom::Start(trued_up))?;
         Ok(())
     }
 }
 
+////////////////////////////////////////// log_to_builder //////////////////////////////////////////
+
 pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
     log_options: LogOptions,
     log_path: P,
     mut builder: B,
-) -> Result<B::Sealed, Error> {
+) -> Result<Option<B::Sealed>, Error> {
     let mut log_iter = LogIterator::new(log_options, log_path)?;
     let mut kvrs = Vec::new();
     while let Some(kvr) = log_iter.next().unwrap() {
@@ -446,6 +759,9 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
         compare_key(&lhs.key, lhs.timestamp, &rhs.key, rhs.timestamp)
     }
     kvrs.sort_by(sort_key);
+    if kvrs.is_empty() {
+        return Ok(None)
+    }
     for kvr in kvrs.into_iter() {
         match kvr.value {
             Some(v) => {
@@ -456,7 +772,49 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
             }
         }
     }
-    builder.seal()
+    builder.seal().map(Some)
+}
+
+/////////////////////////////////////////// log_to_setsum //////////////////////////////////////////
+
+pub fn log_to_setsum<P: AsRef<Path>>(
+    log_options: LogOptions,
+    log_path: P,
+) -> Result<Setsum, Error> {
+    let mut log_iter = LogIterator::new(log_options, log_path)?;
+    let mut acc = Setsum::default();
+    while let Some(kvr) = log_iter.next().unwrap() {
+        if let Some(value) = kvr.value.as_ref() {
+            acc.put(kvr.key, kvr.timestamp, value);
+        } else {
+            acc.del(kvr.key, kvr.timestamp);
+        }
+    }
+    Ok(acc)
+}
+
+/////////////////////////////////// truncate_final_partial_frame ///////////////////////////////////
+
+pub fn truncate_final_partial_frame<P: AsRef<Path>>(
+    log_options: LogOptions,
+    log_path: P,
+) -> Result<Option<u64>, Error> {
+    let mut iter = LogIterator::new(log_options, log_path)?;
+    let mut offset = 0;
+    let mut last_was_valid = true;
+    while let Some(header) = iter.next_frame()? {
+        if header.discriminant == HEADER_SECOND || header.discriminant == HEADER_WHOLE {
+            offset = iter.input.stream_position()?;
+            last_was_valid = true;
+        } else {
+            last_was_valid = false;
+        }
+    }
+    if !last_was_valid {
+        Ok(Some(offset))
+    } else {
+        Ok(None)
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -468,26 +826,26 @@ mod offsets {
     #[test]
     fn offsets() {
         assert_eq!(0, block_offset(0));
-        assert_eq!(0, block_offset(65535));
-        assert_eq!(1, block_offset(65536));
-        assert_eq!(1, block_offset(65537));
+        assert_eq!(0, block_offset(1048575));
+        assert_eq!(1, block_offset(1048576));
+        assert_eq!(1, block_offset(2097151));
     }
 
     #[test]
     fn boundaries() {
-        assert_eq!(65536, next_boundary(0));
-        assert_eq!(65536, next_boundary(65535));
-        assert_eq!(131072, next_boundary(65536));
-        assert_eq!(131072, next_boundary(65537));
+        assert_eq!(1048576, next_boundary(0));
+        assert_eq!(1048576, next_boundary(1048575));
+        assert_eq!(2097152, next_boundary(1048576));
+        assert_eq!(2097152, next_boundary(2097151));
     }
 
     #[test]
     fn true_ups() {
         assert_eq!(0, compute_true_up(0));
-        assert_eq!(65536, compute_true_up(1));
-        assert_eq!(65536, compute_true_up(65536));
-        assert_eq!(131072, compute_true_up(65537));
-        assert_eq!(131072, compute_true_up(131072));
+        assert_eq!(1048576, compute_true_up(1));
+        assert_eq!(1048576, compute_true_up(1048576));
+        assert_eq!(2097152, compute_true_up(1048577));
+        assert_eq!(2097152, compute_true_up(2097152));
     }
 }
 
@@ -500,7 +858,7 @@ mod builder {
         let mut write = Vec::new();
         let log =
             LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
-        drop(log);
+        log.seal().expect("seal should not fail");
         let exp: &[u8] = &[];
         let got: &[u8] = &write;
         assert_eq!(exp, got);
@@ -543,10 +901,9 @@ mod builder {
         drop(log);
         let exp: &[u8] = &[
             9, // There are nine bytes in the header.
-            80, 23, // size: uint64
+            80, 21, // size: uint64
             88, 1, // discriminant: uint32,
-            101, 38, 157, 69, 252, // crc32c: fixed32
-            106, 21, // tag, length of Batch
+            101, 18, 39, 204, 90, // crc32c: fixed32
             66, 19, // tag, length of KeyValueEntry::Put
             8, 0, // shared
             18, 3, 101, 102, 103, // key_frag
@@ -559,73 +916,23 @@ mod builder {
 
     #[test]
     fn insert_across_boundary() {
-        let mut write = Vec::new();
+        let mut buffer = Vec::new();
         let mut log =
-            LogBuilder::from_write(LogOptions::default(), &mut write).expect("should not fail");
-        let key1 = vec!['A' as u8; 64];
-        let value1 = vec!['B' as u8; 32768];
-        let key2 = vec!['C' as u8; 64];
-        let value2 = vec!['D' as u8; 32768];
-        log.put(&key1, 42, &value1).unwrap();
-        log.put(&key2, 99, &value2).unwrap();
+            LogBuilder::from_write(LogOptions::default(), &mut buffer).expect("should not fail");
+        let key = vec![b'A'; 64];
+        let value = vec![b'B'; 32768];
+        for _ in 0..33 {
+            log.put(&key, 42, &value).unwrap();
+        }
         log.flush().unwrap();
         drop(log);
-        // The first put.
-        let exp: &[u8] = &[
-            11, // There are 11 bytes in this header.
-            80, 210, 128, 2, // size: uint64
-            88, 1, // discriminant: uint32
-            101, 236, 12, 151, 200, // crc32c: fixed32
-        ];
-        assert_eq!(exp, &write[..12]);
-        let exp: &[u8] = &[
-            106, 206, 128, 2, // tag, length of Batch
-            66, 202, 128, 2, // tag, length of KeyValueEntry::Put
-            8, 0, // shared
-            18, 64, // key1_frag tag + sz
-        ];
-        assert_eq!(exp, &write[12..24]);
-        assert_eq!(&key1, &write[24..88]);
-        let exp: &[u8] = &[
-            24, 42, // timestamp
-            34, 128, 128, 2, // tag + size of value1
-        ];
-        assert_eq!(exp, &write[88..94]);
-        assert_eq!(&value1, &write[94..32862]);
-        // The first half of the second put.
-        let exp: &[u8] = &[
-            11, // size of header
-            80, 143, 255, 1, // size: uint64
-            88, 2, // discriminant: uint32
-            101, 190, 119, 160, 68, // crc3c: fixed32
-        ];
-        assert_eq!(exp, &write[32862..32874]);
-        let exp: &[u8] = &[
-            106, 206, 128, 2, // tag, length of Batch
-            66, 202, 128, 2, // tag, length of KeyValueEntry::Put
-            8, 0, // shared
-            18, 64, // key2_frag tag + sz
-        ];
-        assert_eq!(exp, &write[32874..32886]);
-        assert_eq!(key2, &write[32886..32950]);
-        let exp: &[u8] = &[
-            24, 99, // timestamp
-            34, 128, 128, 2, // tag + size of value2
-        ];
-        assert_eq!(exp, &write[32950..32956]);
-        assert_eq!(&value2[..32573], &write[32956..65529]);
-        let exp: &[u8] = &[0, 0, 0, 0, 0, 0, 0]; // true up
-        assert_eq!(exp, &write[65529..65536]);
-        // The second half of the second put.
-        let exp: &[u8] = &[
-            10, // size of header
-            80, 195, 1, // size: uint64
-            88, 3, // discriminant: uint32
-            101, 248, 141, 15, 100, // crc3c: fixed32
-        ];
-        assert_eq!(exp, &write[65536..65547]);
-        assert_eq!(&value2[32573..], &write[65547..65742]);
-        let exp: &[u8] = &[];
-        assert_eq!(exp, &write[65742..]);
+        let block_size = BLOCK_SIZE as usize;
+        assert_eq!(
+            &[
+                66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 66, 0, 0, 0, 0, 0, 0, 0, 10, 80,
+                199, 22, 88, 3, 101, 44, 249, 80, 107, 66, 66, 66, 66, 66, 66, 66, 66, 66
+            ],
+            &buffer[block_size - 20..block_size + 20]
+        );
     }
 }

@@ -1,4 +1,6 @@
-use super::{Cursor, Error, KeyRef, KeyValueRef, TableMetadata};
+use keyvalint::{Cursor, KeyRef};
+
+use super::{Error, TableMetadata};
 
 ////////////////////////////////////////// SequenceCursor //////////////////////////////////////////
 
@@ -12,7 +14,7 @@ where
     cursor: C,
 }
 
-impl<T: TableMetadata + Clone, C: Cursor> SequenceCursor<T, C>
+impl<T: TableMetadata + Clone, C: Cursor<Error = Error>> SequenceCursor<T, C>
 where
     C: TryFrom<T>,
     Error: From<<C as TryFrom<T>>::Error>,
@@ -33,22 +35,18 @@ where
         assert!(!self.tables.is_empty());
         if self.position != idx {
             self.position = idx;
-            self.cursor.reset()?;
             self.cursor = C::try_from(self.tables[self.position].clone())?;
         }
         Ok(())
     }
 }
 
-impl<T: TableMetadata + Clone, C: Cursor> Cursor for SequenceCursor<T, C>
+impl<T: TableMetadata + Clone, C: Cursor<Error = Error>> Cursor for SequenceCursor<T, C>
 where
     C: TryFrom<T>,
     Error: From<<C as TryFrom<T>>::Error>,
 {
-    fn reset(&mut self) -> Result<(), Error> {
-        self.position = 0;
-        self.cursor.reset()
-    }
+    type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.reposition(0)?;
@@ -114,7 +112,7 @@ where
         self.cursor.key()
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         self.cursor.value()
     }
 }

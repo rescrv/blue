@@ -2,12 +2,11 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use arrrg::CommandLine;
-use arrrg_derive::CommandLine;
 
 use sst::ingest::{IngestOptions, Jester};
 use sst::Builder;
 
-#[derive(Clone, CommandLine, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct JesterFromPlaintextOptions {
     #[arrrg(nested)]
     ingest: IngestOptions,

@@ -6,22 +6,101 @@ edition = "2021"
 description = "SST provides a sorted string table abstraction."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
 [dependencies]
-getopts = "0.2"
+getopts = { version = "0.2", optional = true }
+libc = "0.2"
 crc32c = "0.6"
-rand = "0.7"
+nom = "7.1"
+siphasher = "1.0.0"
 
 armnod = { path = "../armnod", version = "0.4" }
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 guacamole = { path = "../guacamole", version = "0.4" }
-prototk = { path = "../prototk", version = "0.4" }
+keyvalint = { path = "../keyvalint", version = "0.1" }
 prototk_derive = { path = "../prototk_derive", version = "0.4" }
+prototk = { path = "../prototk", version = "0.4" }
 setsum = { path = "../setsum", version = "0.4" }
+sync42 = { path = "../sync42", version = "0.4" }
 tatl = { path = "../tatl", version = "0.3" }
 utilz = { path = "../utilz", version = "0.2" }
-zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
 zerror_derive = { path = "../zerror_derive", version = "0.1" }
+zerror = { path = "../zerror", version = "0.2" }
+
+[dev-dependencies]
+proptest = "1.0"
+rand = "0.7"
+
+[[bin]]
+name = "jester-from-plaintext"
+path = "src/bin/jester-from-plaintext.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-stat"
+path = "src/bin/sst-stat.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-dump"
+path = "src/bin/sst-dump.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-from-log"
+path = "src/bin/sst-from-log.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "log-checksum"
+path = "src/bin/log-checksum.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "log-truncate-final-partial-frame"
+path = "src/bin/log-truncate-final-partial-frame.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-from-plaintext"
+path = "src/bin/sst-from-plaintext.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "log-options"
+path = "src/bin/log-options.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-checksum"
+path = "src/bin/sst-checksum.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-options"
+path = "src/bin/sst-options.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "sst-inspect"
+path = "src/bin/sst-inspect.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "log-dump"
+path = "src/bin/log-dump.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "log-from-plaintext"
+path = "src/bin/log-from-plaintext.rs"
+required-features = ["binaries"]

@@ -2,10 +2,11 @@ extern crate sst;
 
 use sst::pruning_cursor::PruningCursor;
 use sst::reference::{ReferenceBuilder, ReferenceCursor};
+use sst::Error;
 
 mod alphabet;
 
-fn pruning_cursor_no_pruning(_: &str) -> PruningCursor<ReferenceCursor> {
+fn pruning_cursor_no_pruning(_: &str) -> PruningCursor<ReferenceCursor, Error> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
@@ -40,7 +41,7 @@ alphabet_tests! {
     pruning_cursor_no_pruning: crate::pruning_cursor_no_pruning,
 }
 
-fn pruning_cursor_deleted_extras(_: &str) -> PruningCursor<ReferenceCursor> {
+fn pruning_cursor_deleted_extras(_: &str) -> PruningCursor<ReferenceCursor, Error> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.del("AA".as_bytes(), 1).unwrap();
@@ -127,7 +128,7 @@ alphabet_tests! {
     pruning_cursor_deleted_extras: crate::pruning_cursor_deleted_extras,
 }
 
-fn pruning_cursor_snapshot_cutoff(_: &str) -> PruningCursor<ReferenceCursor> {
+fn pruning_cursor_snapshot_cutoff(_: &str) -> PruningCursor<ReferenceCursor, Error> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 7, "a7".as_bytes()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
@@ -188,7 +189,7 @@ alphabet_tests! {
     pruning_cursor_snapshot_cutoff: crate::pruning_cursor_snapshot_cutoff,
 }
 
-fn pruning_cursor_tombstone_above_snapshot(_: &str) -> PruningCursor<ReferenceCursor> {
+fn pruning_cursor_tombstone_above_snapshot(_: &str) -> PruningCursor<ReferenceCursor, Error> {
     let mut builder = ReferenceBuilder::default();
     builder.del("A".as_bytes(), 7).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();

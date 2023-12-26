@@ -14,13 +14,25 @@ use tatl::{HeyListen, Stationary};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{Error, IoToZ, LOGIC_ERROR};
+use super::{Error, IoToZ, Sst, SstMetadata, LOGIC_ERROR};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static FILE_MANAGER_OPEN: Counter = Counter::new("sst.file_manager.open");
+static FILE_MANAGER_OPEN_WITHOUT_MANAGER: Counter =
+    Counter::new("sst.file_manager.open_without_manager");
+static FILE_MANAGER_CLOSE: Counter = Counter::new("sst.file_manager.close");
 
 static TOO_MANY_OPEN_FILES: Counter = Counter::new("sst.file_manager.too_many_open_files");
 static TOO_MANY_OPEN_FILES_MONITOR: Stationary =
     Stationary::new("sst.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
+
+pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&FILE_MANAGER_OPEN);
+    collector.register_counter(&FILE_MANAGER_OPEN_WITHOUT_MANAGER);
+    collector.register_counter(&FILE_MANAGER_CLOSE);
+    collector.register_counter(&TOO_MANY_OPEN_FILES);
+}
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&TOO_MANY_OPEN_FILES_MONITOR);
@@ -28,7 +40,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 //////////////////////////////////////////// FileHandle ////////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileHandle {
     file: Arc<File>,
     state: Arc<Mutex<State>>,
@@ -67,19 +79,17 @@ impl FileHandle {
 
 impl Drop for FileHandle {
     fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap();
         // This FileHandle and the State object.
         if Arc::strong_count(&self.file) == 2 {
-            let mut state = self.state.lock().unwrap();
-            if Arc::strong_count(&self.file) == 2 {
-                state.close_file(self.file.as_raw_fd());
-            }
+            state.close_file(self.file.as_raw_fd());
         }
     }
 }
 
 /////////////////////////////////////////////// State //////////////////////////////////////////////
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct State {
     opening: HashSet<PathBuf>,
     files: Vec<Option<(PathBuf, Arc<File>)>>,
@@ -107,7 +117,7 @@ impl State {
                 panic!("path missing from names map");
             }
         };
-        // TODO(rescrv) click!("sst.file_manager.close");
+        FILE_MANAGER_CLOSE.click();
     }
 }
 
@@ -210,6 +220,12 @@ impl FileManager {
             state: Arc::clone(&self.state),
         })
     }
+
+    pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, Error> {
+        let handle = self.open(path)?;
+        let sst = Sst::from_file_handle(handle)?;
+        sst.metadata()
+    }
 }
 
 ///////////////////////////////////////////// check_fd /////////////////////////////////////////////
@@ -232,7 +248,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
 
 fn open(path: PathBuf) -> Result<File, Error> {
     // Open the file
-    // TODO(rescrv) click!("sst.file_manager.open");
+    FILE_MANAGER_OPEN.click();
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
@@ -250,7 +266,9 @@ fn open(path: PathBuf) -> Result<File, Error> {
 
 /////////////////////////////////////// open_without_manager ///////////////////////////////////////
 
-pub fn open_without_manager(path: PathBuf) -> Result<FileHandle, Error> {
+pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error> {
+    let path = path.as_ref().to_path_buf();
+    FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();
     let file = Arc::new(open(path.clone())?);
     let fd = file.as_raw_fd() as usize;
     assert!(fd < usize::max_value());

@@ -1,8 +1,7 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use sst::setsum::Setsum;
-use sst::{Cursor, Sst, SstOptions};
+use sst::{Sst, SstOptions};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct SstStatOptions {

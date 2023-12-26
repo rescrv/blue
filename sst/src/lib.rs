@@ -1,46 +1,45 @@
-extern crate arrrg_derive;
-
 extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
 
 use std::cmp;
 use std::cmp::Ordering;
-use std::fmt::Write as FmtWrite;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
+use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
-use arrrg_derive::CommandLine;
-
-use buffertk::{stack_pack, Packable, Unpacker};
-
 use biometrics::Counter;
-
+use buffertk::{stack_pack, Packable, Unpacker};
+use keyvalint::{Cursor, KeyRef, KeyValueRef};
 use tatl::{HeyListen, Stationary};
-
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 use zerror_derive::ZerrorCore;
 
 pub mod block;
+pub mod bounds_cursor;
 pub mod file_manager;
+pub mod gc;
 pub mod ingest;
 pub mod lazy_cursor;
 pub mod log;
 pub mod merging_cursor;
 pub mod pruning_cursor;
 pub mod reference;
+pub mod sbbf;
 pub mod sequence_cursor;
 pub mod setsum;
 
 pub use log::{LogBuilder, LogIterator, LogOptions};
+pub use setsum::Setsum;
 
 use block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
+use bounds_cursor::BoundsCursor;
 use file_manager::{open_without_manager, FileHandle};
-use reference::KeyValuePair;
-use setsum::Setsum;
+use pruning_cursor::PruningCursor;
+use sbbf::Filter;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -65,6 +64,7 @@ static SST_OPEN: Counter = Counter::new("sst.table.open");
 static SST_SETSUM: Counter = Counter::new("sst.table.setsum");
 static SST_METADATA: Counter = Counter::new("sst.table.metadata");
 static SST_LOAD_BLOCK: Counter = Counter::new("sst.table.load_block");
+static SST_LOAD_FILTER: Counter = Counter::new("sst.table.load_filter");
 static BUILDER_NEW: Counter = Counter::new("sst.builder.new");
 static BUILDER_COMPARE_KEY: Counter = Counter::new("sst.builder.compare_key");
 static BUILDER_ASSIGN_LAST_KEY: Counter = Counter::new("sst.builder.assign_last_key");
@@ -74,6 +74,8 @@ static BUILDER_APPROX_SIZE: Counter = Counter::new("sst.builder.approx_size");
 static BUILDER_PUT: Counter = Counter::new("sst.builder.put");
 static BUILDER_DEL: Counter = Counter::new("sst.builder.del");
 static BUILDER_SEAL: Counter = Counter::new("sst.builder.seal");
+static SST_BLOOM_NEGATIVE: Counter = Counter::new("sst.bloom.negative");
+static SST_BLOOM_FALSE_POSITIVE: Counter = Counter::new("sst.bloom.false_positive");
 static SST_CURSOR_META_PREV: Counter = Counter::new("sst.cursor.meta_prev");
 static SST_CURSOR_META_NEXT: Counter = Counter::new("sst.cursor.meta_next");
 static SST_CURSOR_RESET: Counter = Counter::new("sst.cursor.reset");
@@ -95,6 +97,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&SST_SETSUM);
     collector.register_counter(&SST_METADATA);
     collector.register_counter(&SST_LOAD_BLOCK);
+    collector.register_counter(&SST_LOAD_FILTER);
     collector.register_counter(&BUILDER_NEW);
     collector.register_counter(&BUILDER_COMPARE_KEY);
     collector.register_counter(&BUILDER_ASSIGN_LAST_KEY);
@@ -104,6 +107,8 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&BUILDER_PUT);
     collector.register_counter(&BUILDER_DEL);
     collector.register_counter(&BUILDER_SEAL);
+    collector.register_counter(&SST_BLOOM_NEGATIVE);
+    collector.register_counter(&SST_BLOOM_FALSE_POSITIVE);
     collector.register_counter(&SST_CURSOR_META_PREV);
     collector.register_counter(&SST_CURSOR_META_NEXT);
     collector.register_counter(&SST_CURSOR_RESET);
@@ -113,6 +118,8 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&SST_CURSOR_PREV);
     collector.register_counter(&SST_CURSOR_NEXT);
     collector.register_counter(&SST_CURSOR_NEW);
+    file_manager::register_biometrics(collector);
+    log::register_biometrics(collector);
 }
 
 pub fn register_monitors(hey_listen: &mut HeyListen) {
@@ -127,16 +134,18 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
-pub const MAX_KEY_LEN: usize = 1usize << 14; /* 16KiB */
-pub const MAX_VALUE_LEN: usize = 1usize << 15; /* 32KiB */
+pub use keyvalint::MAX_BATCH_LEN;
+pub use keyvalint::MAX_KEY_LEN;
+pub use keyvalint::MAX_VALUE_LEN;
 
-// NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
-// but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
-// general pattern is that the block will exceed this size by up to one key-value pair, so subtract
-// some slop.  64MiB is overkill, but will last for awhile.
-pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
+pub use keyvalint::DEFAULT_KEY;
+pub use keyvalint::DEFAULT_TIMESTAMP;
+pub use keyvalint::MAX_KEY;
+pub use keyvalint::MIN_KEY;
 
-fn check_key_len(key: &[u8]) -> Result<(), Error> {
+pub use keyvalint::TABLE_FULL_SIZE;
+
+pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
         let err = Error::KeyTooLarge {
@@ -150,7 +159,7 @@ fn check_key_len(key: &[u8]) -> Result<(), Error> {
     }
 }
 
-fn check_value_len(value: &[u8]) -> Result<(), Error> {
+pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
         let err = Error::ValueTooLarge {
@@ -164,7 +173,7 @@ fn check_value_len(value: &[u8]) -> Result<(), Error> {
     }
 }
 
-fn check_table_size(size: usize) -> Result<(), Error> {
+pub fn check_table_size(size: usize) -> Result<(), Error> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
         let err = Error::TableFull {
@@ -284,6 +293,11 @@ pub enum Error {
         #[prototk(2, uint64)]
         limit: usize,
     },
+    #[prototk(442380, message)]
+    EmptyBatch {
+        #[prototk(1, message)]
+        core: ErrorCore,
+    },
 }
 
 impl Default for Error {
@@ -329,126 +343,6 @@ impl From<std::convert::Infallible> for Error {
 }
 
 iotoz! {Error}
-
-////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyRef<'a> {
-    pub key: &'a [u8],
-    pub timestamp: u64,
-}
-
-impl<'a> Eq for KeyRef<'a> {}
-
-impl<'a> PartialEq for KeyRef<'a> {
-    fn eq(&self, rhs: &KeyRef) -> bool {
-        self.cmp(rhs) == std::cmp::Ordering::Equal
-    }
-}
-
-impl<'a> Ord for KeyRef<'a> {
-    fn cmp(&self, rhs: &KeyRef) -> std::cmp::Ordering {
-        compare_key(self.key, self.timestamp, rhs.key, rhs.timestamp)
-    }
-}
-
-impl<'a> PartialOrd for KeyRef<'a> {
-    fn partial_cmp(&self, rhs: &KeyRef) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl<'a, 'b: 'a> From<&'a KeyValueRef<'b>> for KeyRef<'a> {
-    fn from(kvr: &'a KeyValueRef<'b>) -> KeyRef<'a> {
-        Self {
-            key: kvr.key,
-            timestamp: kvr.timestamp,
-        }
-    }
-}
-
-impl<'a> From<&'a KeyValuePair> for KeyRef<'a> {
-    fn from(kvp: &'a KeyValuePair) -> Self {
-        Self {
-            key: &kvp.key,
-            timestamp: kvp.timestamp,
-        }
-    }
-}
-
-//////////////////////////////////////////// KeyValueRef ///////////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyValueRef<'a> {
-    pub key: &'a [u8],
-    pub timestamp: u64,
-    pub value: Option<&'a [u8]>,
-}
-
-impl<'a> Display for KeyValueRef<'a> {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let key = String::from_utf8(
-            self.key
-                .iter()
-                .flat_map(|b| std::ascii::escape_default(*b))
-                .collect::<Vec<u8>>(),
-        )
-        .unwrap();
-        if let Some(value) = self.value {
-            let value = String::from_utf8(
-                value
-                    .iter()
-                    .flat_map(|b| std::ascii::escape_default(*b))
-                    .collect::<Vec<u8>>(),
-            )
-            .unwrap();
-            write!(fmt, "\"{}\" @ {} -> \"{}\"", key, self.timestamp, value)
-        } else {
-            write!(fmt, "\"{}\" @ {} -> <TOMBSTONE>", key, self.timestamp)
-        }
-    }
-}
-
-impl<'a> Eq for KeyValueRef<'a> {}
-
-impl<'a> PartialEq for KeyValueRef<'a> {
-    fn eq(&self, rhs: &KeyValueRef) -> bool {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.eq(&rhs)
-    }
-}
-
-impl<'a> Ord for KeyValueRef<'a> {
-    fn cmp(&self, rhs: &KeyValueRef) -> std::cmp::Ordering {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.cmp(&rhs)
-    }
-}
-
-impl<'a> PartialOrd for KeyValueRef<'a> {
-    fn partial_cmp(&self, rhs: &KeyValueRef) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
-    fn from(kvp: &'a KeyValuePair) -> Self {
-        let value = match &kvp.value {
-            Some(value) => {
-                let value: &'a [u8] = value;
-                Some(value)
-            }
-            None => None,
-        };
-        Self {
-            key: &kvp.key,
-            timestamp: kvp.timestamp,
-            value,
-        }
-    }
-}
 
 /////////////////////////////////////////// KeyValueEntry //////////////////////////////////////////
 
@@ -538,11 +432,14 @@ pub trait Builder {
 ///////////////////////////////////////////// SstEntry /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Message)]
+#[allow(clippy::enum_variant_names)]
 enum SstEntry<'a> {
     #[prototk(10, bytes)]
     PlainBlock(&'a [u8]),
     // #[prototk(11, bytes)]
     // ZstdBlock(&'a [u8]),
+    #[prototk(13, bytes)]
+    FilterBlock(&'a [u8]),
     #[prototk(12, bytes)]
     FinalBlock(&'a [u8]),
 }
@@ -551,6 +448,7 @@ impl<'a> SstEntry<'a> {
     fn bytes(&self) -> &[u8] {
         match self {
             SstEntry::PlainBlock(x) => x,
+            SstEntry::FilterBlock(x) => x,
             SstEntry::FinalBlock(x) => x,
         }
     }
@@ -602,8 +500,8 @@ impl BlockMetadata {
 struct FinalBlock {
     #[prototk(16, message)]
     index_block: BlockMetadata,
-    // #[prototk(17, message)]
-    // filter_block: BlockMetadata,
+    #[prototk(17, message)]
+    filter_block: BlockMetadata,
     #[prototk(19, bytes32)]
     setsum: [u8; 32],
     #[prototk(20, uint64)]
@@ -617,11 +515,12 @@ struct FinalBlock {
 }
 
 #[rustfmt::skip]
-const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ
-                                + 2 + 1 + setsum::SETSUM_BYTES
-                                + 2 + 10
-                                + 2 + 10
-                                + 2 + 8;
+const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ // index block
+                                + 2 + 10 + BLOCK_METADATA_MAX_SZ // filter block
+                                + 2 + 1 + setsum::SETSUM_BYTES // setsum
+                                + 2 + 10 // smallest timestamp
+                                + 2 + 10 // biggest timestamp
+                                + 2 + 8; // final_block_offset;
 
 /////////////////////////////////////////// TableMetadata //////////////////////////////////////////
 
@@ -649,15 +548,6 @@ pub struct SstMetadata {
 }
 
 impl SstMetadata {
-    // TODO(rescrv): dedupe with the other implementations.
-    pub fn setsum(&self) -> String {
-        let mut setsum = String::with_capacity(68);
-        for i in 0..self.setsum.len() {
-            write!(&mut setsum, "{:02x}", self.setsum[i]).expect("unable to write to string");
-        }
-        setsum
-    }
-
     pub fn first_key_escaped(&self) -> String {
         // TODO(rescrv): dedupe this with sst-dump
         String::from_utf8(
@@ -697,13 +587,13 @@ impl Default for SstMetadata {
 impl Debug for SstMetadata {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(fmt, "SstMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
-            self.setsum(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
+            Setsum::from_digest(self.setsum).hexdigest(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
     }
 }
 
 //////////////////////////////////////////////// Sst ///////////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Sst {
     // The file backing the table.
     handle: FileHandle,
@@ -711,13 +601,15 @@ pub struct Sst {
     final_block: FinalBlock,
     // Sst metadata.
     index_block: Block,
+    // Bloom filter.
+    filter: Filter,
     // Cache for metadata call.
     file_size: u64,
 }
 
 impl Sst {
     pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Self, Error> {
-        let handle = open_without_manager(path.as_ref().to_path_buf())?;
+        let handle = open_without_manager(path.as_ref())?;
         Sst::from_file_handle(handle)
     }
 
@@ -727,11 +619,15 @@ impl Sst {
         let file_size = handle.size()?;
         if file_size < 8 {
             CORRUPTION.click();
-            let err = Error::Corruption {
+            let err = Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "file has fewer than eight bytes".to_string(),
-            };
-            return Err(err);
+            })
+            .with_variable(
+                "path",
+                handle.path().unwrap_or(PathBuf::from("<not available>")),
+            );
+            return err;
         }
         let position = file_size - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
@@ -769,22 +665,36 @@ impl Sst {
             }
         })?;
         final_block.index_block.sanity_check()?;
+        final_block.filter_block.sanity_check()?;
         // Check that the final block's metadata is sane.
-        if final_block.index_block.limit > final_block_offset {
+        if final_block.index_block.limit > final_block.filter_block.start {
             CORRUPTION.click();
             let err = Error::Corruption {
                 core: ErrorCore::default(),
-                context: "index_block runs past final_block_offset".to_string(),
+                context: "index_block runs past filter_block.start".to_string(),
             }
-            .with_variable("final_block_offset", final_block_offset)
+            .with_variable("filter_block_start", final_block.filter_block.start)
             .with_variable("index_block_limit", final_block.index_block.limit);
             return Err(err);
         }
+        // Check that the final block's metadata is sane.
+        if final_block.filter_block.limit > final_block_offset {
+            CORRUPTION.click();
+            let err = Error::Corruption {
+                core: ErrorCore::default(),
+                context: "filter_block runs past final_block_offset".to_string(),
+            }
+            .with_variable("final_block_offset", final_block_offset)
+            .with_variable("filter_block_limit", final_block.filter_block.limit);
+            return Err(err);
+        }
         let index_block = Sst::load_block(&handle, &final_block.index_block)?;
+        let filter = Sst::load_filter_block(&handle, &final_block.filter_block)?;
         Ok(Self {
             handle,
             final_block,
             index_block,
+            filter,
             file_size,
         })
     }
@@ -794,31 +704,24 @@ impl Sst {
         SstCursor::new(self.clone())
     }
 
-    pub fn setsum(&self) -> Setsum {
-        SST_SETSUM.click();
-        Setsum::from_digest(self.final_block.setsum)
-    }
-
     pub fn metadata(&self) -> Result<SstMetadata, Error> {
         SST_METADATA.click();
         let mut cursor = self.cursor();
         // First key.
         cursor.seek_to_first()?;
         cursor.next()?;
-        let kvr = cursor.value();
-        let first_key = match kvr {
-            Some(kvr) => Vec::from(kvr.key),
+        let kr = cursor.key();
+        let first_key = match kr {
+            Some(kr) => Vec::from(kr.key),
             None => Vec::new(),
         };
         // Last key.
         cursor.seek_to_last()?;
         cursor.prev()?;
-        let kvr = cursor.value();
-        let last_key = match kvr {
-            Some(kvr) => Vec::from(kvr.key),
-            None => {
-                vec![0xffu8; MAX_KEY_LEN]
-            }
+        let kr = cursor.key();
+        let last_key = match kr {
+            Some(kr) => Vec::from(kr.key),
+            None => keyvalint::MAX_KEY.to_vec(),
         };
         // Metadata
         Ok(SstMetadata {
@@ -833,6 +736,33 @@ impl Sst {
 
     pub fn fast_setsum(&self) -> Setsum {
         Setsum::from_digest(self.final_block.setsum)
+    }
+
+    pub fn inspect(&self) -> Result<(), Error> {
+        let mut meta_cursor = self.index_block.cursor();
+        meta_cursor.seek_to_first()?;
+        meta_cursor.next()?;
+        while let Some(kvr) = meta_cursor.key_value() {
+            let metadata = SstCursor::metadata_from_kvr(kvr)
+                .expect("metadata should parse")
+                .unwrap();
+            println!("{:?}", metadata);
+            let block = Self::load_block(&self.handle, &metadata)?;
+            let mut block_cursor = block.cursor();
+            block_cursor.seek_to_first()?;
+            block_cursor.next()?;
+            while let Some(kvr) = block_cursor.key_value() {
+                println!(
+                    "[{}..{}] {:?}",
+                    block_cursor.offset(),
+                    block_cursor.next_offset(),
+                    kvr
+                );
+                block_cursor.next()?;
+            }
+            meta_cursor.next()?;
+        }
+        Ok(())
     }
 
     fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
@@ -861,7 +791,14 @@ impl Sst {
             return Err(err);
         }
         match table_entry {
-            SstEntry::PlainBlock(bytes) => Ok(Block::new(bytes.into())?),
+            SstEntry::PlainBlock(bytes) => Block::new(bytes.into()),
+            SstEntry::FilterBlock(_) => {
+                CORRUPTION.click();
+                Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: "tried loading filter block".to_string(),
+                })
+            }
             SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
                 Err(Error::Corruption {
@@ -870,6 +807,109 @@ impl Sst {
                 })
             }
         }
+    }
+
+    fn load_filter_block(
+        file: &FileHandle,
+        block_metadata: &BlockMetadata,
+    ) -> Result<Filter, Error> {
+        SST_LOAD_FILTER.click();
+        block_metadata.sanity_check()?;
+        let amt = (block_metadata.limit - block_metadata.start) as usize;
+        let mut buf: Vec<u8> = vec![0u8; amt];
+        file.read_exact_at(&mut buf, block_metadata.start)?;
+        let mut up = Unpacker::new(&buf);
+        let table_entry: SstEntry = up.unpack().map_err(|e| {
+            CORRUPTION.click();
+            Error::UnpackError {
+                core: ErrorCore::default(),
+                error: e,
+                context: "parsing table entry".to_string(),
+            }
+        })?;
+        if table_entry.crc32c() != block_metadata.crc32c {
+            CORRUPTION.click();
+            let err = Error::Crc32cFailure {
+                core: ErrorCore::default(),
+                start: block_metadata.start,
+                limit: block_metadata.limit,
+                crc32c: block_metadata.crc32c,
+            };
+            return Err(err);
+        }
+        match table_entry {
+            SstEntry::FilterBlock(bytes) => Filter::try_from(bytes).map_err(|err| {
+                CORRUPTION.click();
+                Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: format!("bad filter block: {err}"),
+                }
+            }),
+            SstEntry::PlainBlock(_) => {
+                CORRUPTION.click();
+                Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: "tried loading plain block".to_string(),
+                })
+            }
+            SstEntry::FinalBlock(_) => {
+                CORRUPTION.click();
+                Err(Error::Corruption {
+                    core: ErrorCore::default(),
+                    context: "tried loading final block".to_string(),
+                })
+            }
+        }
+    }
+}
+
+impl keyvalint::KeyValueLoad for Sst {
+    type Error = Error;
+    type RangeScan<'a> = BoundsCursor<PruningCursor<SstCursor, Error>, Error>;
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Self::Error> {
+        *is_tombstone = false;
+        if !self.filter.check(key) {
+            SST_BLOOM_NEGATIVE.click();
+            return Ok(None);
+        }
+        let mut cursor = self.cursor();
+        cursor.seek(key)?;
+        let target = KeyRef { key, timestamp };
+        while let Some(kr) = cursor.key() {
+            if kr >= target {
+                break;
+            } else {
+                cursor.next()?;
+            }
+        }
+        if let Some(kvr) = cursor.key_value() {
+            if compare_bytes(kvr.key, key).is_eq() {
+                *is_tombstone = kvr.value.is_none();
+                Ok(kvr.value.as_ref().map(|v| v.to_vec()))
+            } else {
+                SST_BLOOM_FALSE_POSITIVE.click();
+                Ok(None)
+            }
+        } else {
+            SST_BLOOM_FALSE_POSITIVE.click();
+            Ok(None)
+        }
+    }
+
+    fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+        timestamp: u64,
+    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+        let pruning = PruningCursor::new(self.cursor(), timestamp)?;
+        BoundsCursor::new(pruning, start_bound, end_bound)
     }
 }
 
@@ -899,18 +939,41 @@ pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 pub const CLAMP_MIN_TARGET_FILE_SIZE: u32 = 1u32 << 12;
 pub const CLAMP_MAX_TARGET_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+pub const CLAMP_MIN_MINIMUM_FILE_SIZE: u32 = 1u32 << 12;
+pub const CLAMP_MAX_MINIMUM_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct SstOptions {
-    #[arrrg(nested)]
+    #[cfg_attr(feature = "command_line", arrrg(nested))]
     block: BlockBuilderOptions,
     // TODO(rescrv): arrrg needs an enum helper.
     block_compression: BlockCompression,
-    #[arrrg(optional, "Target block size.", "BYTES")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Target block size.", "BYTES")
+    )]
     target_block_size: usize,
-    #[arrrg(optional, "Target file size.", "BYTES")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Target file size.", "BYTES")
+    )]
     target_file_size: usize,
-    #[arrrg(optional, "Write buffer size.", "BYTES")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Minimum file size.", "BYTES")
+    )]
+    minimum_file_size: usize,
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Write buffer size.", "BYTES")
+    )]
     write_buffer_size: usize,
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Bloom filter bits per key.", "BITS/KEY")
+    )]
+    bloom_filter_bits: u8,
 }
 
 impl SstOptions {
@@ -945,6 +1008,17 @@ impl SstOptions {
         self.target_file_size = target_file_size as usize;
         self
     }
+
+    pub fn minimum_file_size(mut self, mut minimum_file_size: u32) -> Self {
+        if minimum_file_size < CLAMP_MIN_MINIMUM_FILE_SIZE {
+            minimum_file_size = CLAMP_MIN_MINIMUM_FILE_SIZE;
+        }
+        if minimum_file_size > CLAMP_MAX_MINIMUM_FILE_SIZE {
+            minimum_file_size = CLAMP_MAX_MINIMUM_FILE_SIZE;
+        }
+        self.minimum_file_size = minimum_file_size as usize;
+        self
+    }
 }
 
 impl Default for SstOptions {
@@ -953,8 +1027,10 @@ impl Default for SstOptions {
             block: BlockBuilderOptions::default(),
             block_compression: BlockCompression::NoCompression,
             target_block_size: 4096,
-            target_file_size: 1 << 22,
+            target_file_size: 1 << 26,
+            minimum_file_size: 1 << 22,
             write_buffer_size: 1 << 22,
+            bloom_filter_bits: 17,
         }
     }
 }
@@ -974,6 +1050,8 @@ pub struct SstBuilder {
     // The index that trails the file.  Written on seal.
     bytes_written: usize,
     index_block: BlockBuilder,
+    // The entries to insert into the bloom filter covering the keys in this file.
+    filter: Vec<u64>,
     // The checksum of the file.
     setsum: Setsum,
     // Timestamps seen.
@@ -1003,6 +1081,7 @@ impl SstBuilder {
             block_start_offset: 0,
             bytes_written: 0,
             index_block: BlockBuilder::new(block_options),
+            filter: vec![],
             setsum: Setsum::default(),
             smallest_timestamp: u64::max_value(),
             biggest_timestamp: 0,
@@ -1128,6 +1207,7 @@ impl Builder for SstBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.put(key, timestamp, value)?;
+        self.filter.push(Filter::defer_insert(key));
         self.setsum.put(key, timestamp, value);
         self.assign_last_key(key, timestamp);
         Ok(())
@@ -1140,6 +1220,7 @@ impl Builder for SstBuilder {
         self.enforce_sort_order(key, timestamp)?;
         let block = self.get_block(key, timestamp)?;
         block.del(key, timestamp)?;
+        self.filter.push(Filter::defer_insert(key));
         self.setsum.del(key, timestamp);
         self.assign_last_key(key, timestamp);
         Ok(())
@@ -1153,15 +1234,31 @@ impl Builder for SstBuilder {
             let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
             builder.flush_block(&key, timestamp)?;
         }
-        // Flush the index block at the end.
-        let index_block = builder.index_block.seal()?;
-        let index_block_start = builder.bytes_written;
-        let bytes = index_block.as_bytes();
-        let entry = SstEntry::PlainBlock(bytes);
-        let crc32c = entry.crc32c();
-        let pa = stack_pack(entry);
-        builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
-        let index_block_limit = builder.bytes_written;
+        fn flush_block(builder: &mut SstBuilder, entry: SstEntry) -> Result<BlockMetadata, Error> {
+            let start = builder.bytes_written as u64;
+            let crc32c = entry.crc32c();
+            let pa = stack_pack(entry);
+            builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
+            let limit = builder.bytes_written as u64;
+            Ok(BlockMetadata {
+                start,
+                limit,
+                crc32c,
+            })
+        }
+        // Flush the index block after the data blocks.
+        let index_block = builder.index_block.clone().seal()?;
+        let index_bytes = index_block.as_bytes();
+        let index_block = flush_block(&mut builder, SstEntry::PlainBlock(index_bytes))?;
+        // Flush the filter block after the index block.
+        let mut filter = Filter::new(
+            (builder.filter.len() as u32).saturating_mul(builder.options.bloom_filter_bits as u32),
+        );
+        for x in builder.filter.iter() {
+            filter.deferred_insert(*x);
+        }
+        let filter_bytes = filter.to_bytes();
+        let filter_block = flush_block(&mut builder, SstEntry::FilterBlock(&filter_bytes))?;
         // Update timestamps if nothing written
         if builder.smallest_timestamp > builder.biggest_timestamp {
             builder.smallest_timestamp = 0;
@@ -1169,11 +1266,8 @@ impl Builder for SstBuilder {
         }
         // Our final_block
         let final_block = FinalBlock {
-            index_block: BlockMetadata {
-                start: index_block_start as u64,
-                limit: index_block_limit as u64,
-                crc32c,
-            },
+            index_block,
+            filter_block,
             final_block_offset: builder.bytes_written as u64,
             setsum: builder.setsum.digest(),
             smallest_timestamp: builder.smallest_timestamp,
@@ -1209,6 +1303,17 @@ impl SstMultiBuilder {
             builder: None,
             paths: Vec::new(),
         }
+    }
+
+    pub fn split_hint(&mut self) -> Result<(), Error> {
+        if self.builder.is_some() {
+            let size = self.builder.as_mut().unwrap().approximate_size();
+            if size >= TABLE_FULL_SIZE || size >= self.options.minimum_file_size {
+                let builder = self.builder.take().unwrap();
+                builder.seal()?;
+            }
+        }
+        Ok(())
     }
 
     fn get_builder(&mut self) -> Result<&mut SstBuilder, Error> {
@@ -1261,24 +1366,9 @@ impl Builder for SstMultiBuilder {
     }
 }
 
-////////////////////////////////////////////// Cursor //////////////////////////////////////////////
-
-pub trait Cursor {
-    fn reset(&mut self) -> Result<(), Error>;
-
-    fn seek_to_first(&mut self) -> Result<(), Error>;
-    fn seek_to_last(&mut self) -> Result<(), Error>;
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
-
-    fn prev(&mut self) -> Result<(), Error>;
-    fn next(&mut self) -> Result<(), Error>;
-
-    fn key(&self) -> Option<KeyRef>;
-    fn value(&self) -> Option<KeyValueRef>;
-}
-
 ///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
+#[derive(Clone, Debug)]
 pub struct SstCursor {
     table: Sst,
     // The position in the table.  When meta_cursor is at its extremes, block_cursor is None.
@@ -1301,30 +1391,40 @@ impl SstCursor {
     fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
         SST_CURSOR_META_PREV.click();
         self.meta_cursor.prev()?;
-        let kvp = match self.meta_cursor.value() {
-            Some(kvp) => kvp,
+        let kvr = match self.meta_cursor.key_value() {
+            Some(kvr) => kvr,
             None => {
                 self.seek_to_first()?;
                 return Ok(None);
             }
         };
-        SstCursor::metadata_from_kvp(kvp)
+        SstCursor::metadata_from_kvr(kvr)
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
         SST_CURSOR_META_NEXT.click();
         self.meta_cursor.next()?;
-        let kvp = match self.meta_cursor.value() {
-            Some(kvp) => kvp,
+        let kvr = match self.meta_cursor.key_value() {
+            Some(kvr) => kvr,
             None => {
                 self.seek_to_last()?;
                 return Ok(None);
             }
         };
-        SstCursor::metadata_from_kvp(kvp)
+        SstCursor::metadata_from_kvr(kvr)
     }
 
-    fn metadata_from_kvp(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_value(&mut self) -> Result<Option<BlockMetadata>, Error> {
+        let kvr = match self.meta_cursor.key_value() {
+            Some(kvr) => kvr,
+            None => {
+                return Ok(None);
+            }
+        };
+        SstCursor::metadata_from_kvr(kvr)
+    }
+
+    fn metadata_from_kvr(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
         let value = match kvr.value {
             Some(v) => v,
             None => {
@@ -1348,13 +1448,8 @@ impl SstCursor {
     }
 }
 
-impl Cursor for SstCursor {
-    fn reset(&mut self) -> Result<(), Error> {
-        SST_CURSOR_RESET.click();
-        self.meta_cursor.seek_to_first()?;
-        self.block_cursor = None;
-        Ok(())
-    }
+impl keyvalint::Cursor for SstCursor {
+    type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
         SST_CURSOR_SEEK_TO_FIRST.click();
@@ -1373,7 +1468,7 @@ impl Cursor for SstCursor {
     fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         SST_CURSOR_SEEK.click();
         self.meta_cursor.seek(key)?;
-        let metadata = match self.meta_next()? {
+        let metadata = match self.meta_value()? {
             Some(m) => m,
             None => {
                 return self.seek_to_last();
@@ -1382,7 +1477,20 @@ impl Cursor for SstCursor {
         let block = Sst::load_block(&self.table.handle, &metadata)?;
         let mut block_cursor = block.cursor();
         block_cursor.seek(key)?;
-        self.block_cursor = Some(block_cursor);
+        if block_cursor.key().is_none() {
+            let metadata = match self.meta_next()? {
+                Some(m) => m,
+                None => {
+                    return self.seek_to_last();
+                }
+            };
+            let block = Sst::load_block(&self.table.handle, &metadata)?;
+            let mut block_cursor = block.cursor();
+            block_cursor.seek(key)?;
+            self.block_cursor = Some(block_cursor);
+        } else {
+            self.block_cursor = Some(block_cursor);
+        }
         Ok(())
     }
 
@@ -1403,7 +1511,7 @@ impl Cursor for SstCursor {
         assert!(self.block_cursor.is_some());
         let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
         block_cursor.prev()?;
-        match block_cursor.value() {
+        match block_cursor.key_value() {
             Some(_) => Ok(()),
             None => {
                 self.block_cursor = None;
@@ -1429,7 +1537,7 @@ impl Cursor for SstCursor {
         assert!(self.block_cursor.is_some());
         let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
         block_cursor.next()?;
-        match block_cursor.value() {
+        match block_cursor.key_value() {
             Some(_) => Ok(()),
             None => {
                 self.block_cursor = None;
@@ -1445,7 +1553,7 @@ impl Cursor for SstCursor {
         }
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         match &self.block_cursor {
             Some(cursor) => cursor.value(),
             None => None,
@@ -1746,13 +1854,13 @@ mod tests {
             assert_eq!(0x62a8ab43, crc32c::crc32c(&buf));
 
             let mut buf: [u8; 32] = [0; 32];
-            for i in 0..32 {
-                buf[i] = i as u8;
+            for (i, b) in buf.iter_mut().enumerate() {
+                *b = i as u8;
             }
             assert_eq!(0x46dd794e, crc32c::crc32c(&buf));
 
-            for i in 0..32 {
-                buf[i] = 31 - i as u8;
+            for (i, b) in buf.iter_mut().enumerate() {
+                *b = 31 - i as u8;
             }
             assert_eq!(0x113fdb5c, crc32c::crc32c(&buf));
 

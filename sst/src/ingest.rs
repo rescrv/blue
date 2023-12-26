@@ -1,23 +1,22 @@
 use std::fs::{remove_file, rename, File};
 use std::path::PathBuf;
 
-use arrrg_derive::CommandLine;
-
 use super::log::log_to_builder;
 use super::setsum::Setsum;
 use super::{Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE};
 
 /////////////////////////////////////////// IngestOptions //////////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct IngestOptions {
-    #[arrrg(required, "Path to write logs.")]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Path to write logs."))]
     log_dir: String,
-    #[arrrg(nested)]
+    #[cfg_attr(feature = "command_line", arrrg(nested))]
     log: LogOptions,
-    #[arrrg(required, "Path to write ssts.")]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Path to write ssts."))]
     sst_dir: String,
-    #[arrrg(nested)]
+    #[cfg_attr(feature = "command_line", arrrg(nested))]
     sst: SstOptions,
 }
 

@@ -1,6 +1,7 @@
 use arrrg::CommandLine;
+use keyvalint::Cursor;
 
-use sst::{Cursor, Sst, SstOptions};
+use sst::{Sst, SstOptions};
 
 fn main() {
     let (opts, args) = SstOptions::from_command_line("Usage: sst-dump [OPTIONS] [SSTs]");
@@ -11,7 +12,7 @@ fn main() {
         cursor.seek_to_first().expect("could not seek to first");
         cursor.next().expect("cursor::next");
         while cursor.value().is_some() {
-            println!("{}", cursor.value().unwrap());
+            println!("{}", cursor.key_value().unwrap());
             cursor.next().expect("cursor::next");
         }
     }

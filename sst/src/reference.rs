@@ -1,62 +1,8 @@
 use std::rc::Rc;
 
-use super::{
-    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValueRef,
-    TableMetadata,
-};
+use keyvalint::{Cursor, KeyRef, KeyValuePair};
 
-/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyValuePair {
-    pub key: Vec<u8>,
-    pub timestamp: u64,
-    pub value: Option<Vec<u8>>,
-}
-
-impl KeyValuePair {
-    pub fn from_key_value_ref(kvr: &KeyValueRef<'_>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
-        }
-    }
-}
-
-impl Eq for KeyValuePair {}
-
-impl PartialEq for KeyValuePair {
-    fn eq(&self, rhs: &KeyValuePair) -> bool {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.eq(&rhs)
-    }
-}
-
-impl Ord for KeyValuePair {
-    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.cmp(&rhs)
-    }
-}
-
-impl PartialOrd for KeyValuePair {
-    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
-    fn from(kvr: KeyValueRef<'a>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
-        }
-    }
-}
+use super::{check_key_len, check_table_size, check_value_len, Error, TableMetadata};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
@@ -70,7 +16,6 @@ impl ReferenceTable {
         ReferenceCursor {
             entries: Rc::clone(&self.entries),
             index: -1,
-            returned: true,
         }
     }
 }
@@ -154,25 +99,18 @@ impl ReferenceBuilder {
 pub struct ReferenceCursor {
     entries: Rc<Vec<KeyValuePair>>,
     index: isize,
-    returned: bool,
 }
 
 impl Cursor for ReferenceCursor {
-    fn reset(&mut self) -> Result<(), Error> {
-        self.index = -1;
-        self.returned = true;
-        Ok(())
-    }
+    type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.index = -1;
-        self.returned = true;
         Ok(())
     }
 
     fn seek_to_last(&mut self) -> Result<(), Error> {
         self.index = self.entries.len() as isize;
-        self.returned = true;
         Ok(())
     }
 
@@ -186,7 +124,6 @@ impl Cursor for ReferenceCursor {
             Ok(index) => index,
             Err(index) => index,
         } as isize;
-        self.returned = false;
         Ok(())
     }
 
@@ -195,21 +132,15 @@ impl Cursor for ReferenceCursor {
         if self.index < 0 {
             self.seek_to_first()
         } else {
-            self.returned = true;
             Ok(())
         }
     }
 
     fn next(&mut self) -> Result<(), Error> {
-        self.index = if self.returned {
-            self.index + 1
-        } else {
-            self.index
-        };
+        self.index += 1;
         if self.index as usize >= self.entries.len() {
             self.seek_to_last()
         } else {
-            self.returned = true;
             Ok(())
         }
     }
@@ -223,12 +154,12 @@ impl Cursor for ReferenceCursor {
         }
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         if self.index < 0 || self.index as usize >= self.entries.len() {
             None
         } else {
             let kvp = &self.entries[self.index as usize];
-            Some(KeyValueRef::from(kvp))
+            kvp.value.as_deref()
         }
     }
 }
@@ -248,79 +179,8 @@ mod tables {
     #[test]
     fn empty() {
         let table = ReferenceBuilder::default().seal().unwrap();
-        let mut cursor = table.cursor();
-        cursor.next().unwrap();
-        let got = cursor.value();
+        let cursor = table.cursor();
+        let got = cursor.key_value();
         assert_eq!(None, got);
-    }
-}
-
-#[cfg(test)]
-mod guacamole {
-    use super::*;
-
-    #[test]
-    fn human_guacamole_5() {
-        let mut builder = ReferenceBuilder::default();
-        builder
-            .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
-            .unwrap();
-        builder
-            .put("A".as_bytes(), 2365635627947495809, "".as_bytes())
-            .unwrap();
-        builder
-            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
-            .unwrap();
-        builder
-            .put("I".as_bytes(), 3844377046565620216, "".as_bytes())
-            .unwrap();
-        builder
-            .put("J".as_bytes(), 14848435744026832213, "".as_bytes())
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put("g".as_bytes(), 10374159306796994843, "".as_bytes())
-            .unwrap();
-        builder
-            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
-            .unwrap();
-        builder
-            .put("t".as_bytes(), 7790837488841419319, "".as_bytes())
-            .unwrap();
-        builder
-            .put("v".as_bytes(), 2133827469768204743, "".as_bytes())
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.cursor();
-        cursor.seek("I".as_bytes()).unwrap();
-        cursor.prev().unwrap();
-        let got = cursor.value();
-        let exp = KeyValueRef {
-            key: "E".as_bytes(),
-            timestamp: 17563921251225492277,
-            value: Some("".as_bytes()),
-        };
-        assert_eq!(Some(exp), got);
-        // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.cursor();
-        cursor.seek("I".as_bytes()).unwrap();
-        cursor.next().unwrap();
-        let got = cursor.value();
-        let exp = KeyValueRef {
-            key: "I".as_bytes(),
-            timestamp: 3844377046565620216,
-            value: Some("".as_bytes()),
-        };
-        assert_eq!(Some(exp), got);
-        // Prev will move to E.
-        cursor.prev().unwrap();
-        let got = cursor.value();
-        let exp = KeyValueRef {
-            key: "E".as_bytes(),
-            timestamp: 17563921251225492277,
-            value: Some("".as_bytes()),
-        };
-        assert_eq!(Some(exp), got);
     }
 }

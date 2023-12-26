@@ -1,8 +1,8 @@
-use super::{Cursor, Error, KeyRef, KeyValueRef};
+use keyvalint::{Cursor, KeyRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
 
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 enum Comparator {
     Forward,
     Reverse,
@@ -10,7 +10,7 @@ enum Comparator {
 
 impl Comparator {
     #[allow(clippy::borrowed_box)]
-    fn is_less(&self, lhs: &Box<dyn Cursor>, rhs: &Box<dyn Cursor>) -> bool {
+    fn is_less<C: Cursor>(&self, lhs: &C, rhs: &C) -> bool {
         let lhs_key = lhs.key();
         let rhs_key = rhs.key();
         match (self, lhs_key, rhs_key) {
@@ -37,13 +37,24 @@ impl Comparator {
 
 /////////////////////////////////////////// MergingCursor //////////////////////////////////////////
 
-pub struct MergingCursor {
+pub struct MergingCursor<C: Cursor> {
     comparator: Comparator,
-    cursors: Vec<Box<dyn Cursor>>,
+    cursors: Vec<C>,
 }
 
-impl MergingCursor {
-    pub fn new(cursors: Vec<Box<dyn Cursor>>) -> Result<Self, Error> {
+impl<C: Cursor + Clone> Clone for MergingCursor<C> {
+    fn clone(&self) -> Self {
+        let comparator = self.comparator.clone();
+        let cursors = self.cursors.clone();
+        Self {
+            comparator,
+            cursors,
+        }
+    }
+}
+
+impl<C: Cursor> MergingCursor<C> {
+    pub fn new(cursors: Vec<C>) -> Result<Self, C::Error> {
         let mut cursor = Self {
             comparator: Comparator::Forward,
             cursors,
@@ -102,16 +113,10 @@ impl MergingCursor {
     }
 }
 
-impl Cursor for MergingCursor {
-    fn reset(&mut self) -> Result<(), Error> {
-        self.comparator = Comparator::Forward;
-        for cursor in self.cursors.iter_mut() {
-            cursor.reset()?;
-        }
-        Ok(())
-    }
+impl<C: Cursor> Cursor for MergingCursor<C> {
+    type Error = C::Error;
 
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_first()?;
@@ -124,7 +129,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
         self.comparator = Comparator::Reverse;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_last()?;
@@ -137,7 +142,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek(key)?;
@@ -146,7 +151,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), Self::Error> {
         if self.comparator == Comparator::Forward {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K <= C.value() && prev(C) < K
@@ -162,7 +167,7 @@ impl Cursor for MergingCursor {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), Self::Error> {
         if self.comparator == Comparator::Reverse {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K >= C.value() && next(C) > K
@@ -186,7 +191,7 @@ impl Cursor for MergingCursor {
         }
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         if !self.cursors.is_empty() {
             self.cursors[0].value()
         } else {

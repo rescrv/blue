@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use keyvalint::{Cursor, KeyRef};
+
 use super::file_manager::FileManager;
-use super::{Cursor, Error, KeyRef, KeyValueRef, Sst, SstCursor};
+use super::{Error, Sst, SstCursor};
 
 ///////////////////////////////////////////// Position /////////////////////////////////////////////
 
@@ -44,10 +46,7 @@ impl<FM: AsRef<FileManager>> LazyCursor<FM> {
 }
 
 impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
-    fn reset(&mut self) -> Result<(), Error> {
-        self.position = Position::First;
-        Ok(())
-    }
+    type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = Position::First;
@@ -105,7 +104,7 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
             }
             Position::Last => {}
             Position::Instantiated { cursor } => {
-                cursor.prev()?;
+                cursor.next()?;
                 if cursor.key().is_none() {
                     self.position = Position::Last;
                 }
@@ -122,7 +121,7 @@ impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
         }
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         if let Position::Instantiated { cursor } = &self.position {
             cursor.value()
         } else {

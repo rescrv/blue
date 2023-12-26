@@ -6,13 +6,13 @@ macro_rules! alphabet_tests {
     $(
         #[cfg(test)]
         mod $name {
-            use sst::{Cursor, KeyValueRef};
+            use keyvalint::{Cursor, KeyValueRef};
 
             #[test]
             fn step_the_alphabet_forward() {
                 let mut cursor = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_forward"));
                 cursor.seek_to_first().unwrap();
-                assert_eq!(None, cursor.value());
+                assert_eq!(None, cursor.key_value());
                 // A
                 let exp = KeyValueRef {
                     key: "A".as_bytes(),
@@ -20,7 +20,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -29,7 +29,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // C
                 let exp = KeyValueRef {
@@ -38,7 +38,7 @@ macro_rules! alphabet_tests {
                     value: Some("c".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // D-W
                 for _ in 0..20 {
@@ -51,7 +51,7 @@ macro_rules! alphabet_tests {
                     value: Some("x".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -60,7 +60,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Z
                 let exp = KeyValueRef {
@@ -69,11 +69,11 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Last
                 cursor.next().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
             }
 
@@ -81,7 +81,7 @@ macro_rules! alphabet_tests {
             fn step_the_alphabet_reverse() {
                 let mut cursor = $alphabet(&(stringify!($name).to_string() + "::step_the_alphabet_reverse"));
                 cursor.seek_to_last().unwrap();
-                assert_eq!(None, cursor.value());
+                assert_eq!(None, cursor.key_value());
                 // Z
                 let exp = KeyValueRef {
                     key: "Z".as_bytes(),
@@ -89,7 +89,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -98,7 +98,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // X
                 let exp = KeyValueRef {
@@ -107,7 +107,7 @@ macro_rules! alphabet_tests {
                     value: Some("x".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // W-D
                 for _ in 0..20 {
@@ -120,7 +120,7 @@ macro_rules! alphabet_tests {
                     value: Some("c".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -129,7 +129,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // A
                 let exp = KeyValueRef {
@@ -138,11 +138,11 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Last
                 cursor.prev().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
             }
 
@@ -150,7 +150,7 @@ macro_rules! alphabet_tests {
             fn seek_to_first() {
                 let mut cursor = $alphabet(&(stringify!($name).to_string() + "::seek_to_first"));
                 cursor.seek_to_first().unwrap();
-                assert_eq!(None, cursor.value());
+                assert_eq!(None, cursor.key_value());
                 // A
                 let exp = KeyValueRef {
                     key: "A".as_bytes(),
@@ -158,7 +158,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
             }
 
@@ -166,7 +166,7 @@ macro_rules! alphabet_tests {
             fn seek_to_last() {
                 let mut cursor = $alphabet(&(stringify!($name).to_string() + "::seek_to_last"));
                 cursor.seek_to_last().unwrap();
-                assert_eq!(None, cursor.value());
+                assert_eq!(None, cursor.key_value());
                 // Z
                 let exp = KeyValueRef {
                     key: "Z".as_bytes(),
@@ -174,7 +174,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
             }
 
@@ -188,8 +188,7 @@ macro_rules! alphabet_tests {
                     timestamp: 0,
                     value: Some("a".as_bytes()),
                 };
-                cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
             }
 
@@ -203,12 +202,11 @@ macro_rules! alphabet_tests {
                     timestamp: 0,
                     value: Some("z".as_bytes()),
                 };
-                cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Last
                 cursor.next().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
             }
 
@@ -222,7 +220,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -231,7 +229,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // A
                 let exp = KeyValueRef {
@@ -240,7 +238,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -249,7 +247,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // C
                 let exp = KeyValueRef {
@@ -258,7 +256,7 @@ macro_rules! alphabet_tests {
                     value: Some("c".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -267,7 +265,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // D-W
                 for _ in 0..21 {
@@ -282,7 +280,7 @@ macro_rules! alphabet_tests {
                     value: Some("x".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -291,7 +289,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // X
                 let exp = KeyValueRef {
@@ -300,7 +298,7 @@ macro_rules! alphabet_tests {
                     value: Some("x".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -309,7 +307,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Z
                 let exp = KeyValueRef {
@@ -318,7 +316,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -327,7 +325,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Z
                 let exp = KeyValueRef {
@@ -336,11 +334,11 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Last
                 cursor.next().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // Z
                 let exp = KeyValueRef {
@@ -349,15 +347,15 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Last
                 cursor.next().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // Last
                 cursor.next().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // Z
                 let exp = KeyValueRef {
@@ -366,7 +364,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
             }
 
@@ -381,7 +379,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -390,7 +388,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Z
                 let exp = KeyValueRef {
@@ -399,7 +397,7 @@ macro_rules! alphabet_tests {
                     value: Some("z".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -408,7 +406,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // X
                 let exp = KeyValueRef {
@@ -417,7 +415,7 @@ macro_rules! alphabet_tests {
                     value: Some("x".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // Y
                 let exp = KeyValueRef {
@@ -426,7 +424,7 @@ macro_rules! alphabet_tests {
                     value: Some("y".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // W-D
                 for _ in 0..21 {
@@ -441,7 +439,7 @@ macro_rules! alphabet_tests {
                     value: Some("c".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -450,7 +448,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // C
                 let exp = KeyValueRef {
@@ -459,7 +457,7 @@ macro_rules! alphabet_tests {
                     value: Some("c".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -468,7 +466,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // A
                 let exp = KeyValueRef {
@@ -477,7 +475,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // B
                 let exp = KeyValueRef {
@@ -486,7 +484,7 @@ macro_rules! alphabet_tests {
                     value: Some("b".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // A
                 let exp = KeyValueRef {
@@ -495,11 +493,11 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.prev().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // First
                 cursor.prev().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // A
                 let exp = KeyValueRef {
@@ -508,15 +506,15 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
                 // First
                 cursor.prev().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // First
                 cursor.prev().unwrap();
-                let got = cursor.value();
+                let got = cursor.key_value();
                 assert_eq!(None, got);
                 // A
                 let exp = KeyValueRef {
@@ -525,7 +523,7 @@ macro_rules! alphabet_tests {
                     value: Some("a".as_bytes()),
                 };
                 cursor.next().unwrap();
-                let got = cursor.value().unwrap();
+                let got = cursor.key_value().unwrap();
                 assert_eq!(exp, got);
             }
         }

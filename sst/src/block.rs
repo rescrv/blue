@@ -1,26 +1,34 @@
 use std::cmp;
 use std::cmp::Ordering;
+use std::ops::Bound;
 use std::rc::Rc;
 
-use arrrg_derive::CommandLine;
-
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
-
+use keyvalint::{Cursor, KeyRef};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Builder, Cursor,
-    Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, KeyValueRef, CORRUPTION, LOGIC_ERROR,
+    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Builder, Error,
+    KeyValueDel, KeyValueEntry, KeyValuePut, CORRUPTION, LOGIC_ERROR,
 };
+use crate::bounds_cursor::BoundsCursor;
+use crate::pruning_cursor::PruningCursor;
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
-#[derive(Clone, CommandLine, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct BlockBuilderOptions {
-    #[arrrg(optional, "Store a complete key every this many bytes.", "BYTES")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Store a complete key every this many bytes.", "BYTES")
+    )]
     bytes_restart_interval: u64,
-    #[arrrg(optional, "Store a complete key every this many keys.", "KEYS")]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Store a complete key every this many keys.", "KEYS")
+    )]
     key_value_pairs_restart_interval: u64,
 }
 
@@ -50,7 +58,7 @@ impl Default for BlockBuilderOptions {
 
 /////////////////////////////////////////////// Block //////////////////////////////////////////////
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
     bytes: Rc<Vec<u8>>,
@@ -153,9 +161,54 @@ impl Block {
     }
 }
 
+impl keyvalint::KeyValueLoad for Block {
+    type Error = Error;
+    type RangeScan<'a> = BoundsCursor<PruningCursor<BlockCursor, Error>, Error>;
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Self::Error> {
+        *is_tombstone = false;
+        let mut cursor = self.cursor();
+        cursor.seek(key)?;
+        let target = KeyRef { key, timestamp };
+        while let Some(kr) = cursor.key() {
+            if kr >= target {
+                break;
+            } else {
+                cursor.next()?;
+            }
+        }
+        if let Some(kvr) = cursor.key_value() {
+            if compare_bytes(kvr.key, key).is_eq() {
+                *is_tombstone = kvr.value.is_none();
+                Ok(kvr.value.as_ref().map(|v| v.to_vec()))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+        timestamp: u64,
+    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+        let pruning = PruningCursor::new(self.cursor(), timestamp)?;
+        BoundsCursor::new(pruning, start_bound, end_bound)
+    }
+}
+
 /////////////////////////////////////////// BlockBuilder ///////////////////////////////////////////
 
 // Build a block.
+#[derive(Clone, Debug)]
 pub struct BlockBuilder {
     options: BlockBuilderOptions,
     buffer: Vec<u8>,
@@ -348,6 +401,7 @@ impl PartialEq for CursorPosition {
 
 //////////////////////////////////////////// BlockCursor ///////////////////////////////////////////
 
+#[derive(Clone, Debug)]
 pub struct BlockCursor {
     block: Block,
     position: CursorPosition,
@@ -361,7 +415,21 @@ impl BlockCursor {
         }
     }
 
-    fn next_offset(&self) -> usize {
+    pub(crate) fn offset(&self) -> usize {
+        match &self.position {
+            CursorPosition::First => 0,
+            CursorPosition::Last => self.block.restarts_boundary,
+            CursorPosition::Positioned {
+                restart_idx: _,
+                offset,
+                next_offset: _,
+                key: _,
+                timestamp: _,
+            } => *offset,
+        }
+    }
+
+    pub(crate) fn next_offset(&self) -> usize {
         match &self.position {
             CursorPosition::First => 0,
             CursorPosition::Last => self.block.restarts_boundary,
@@ -491,10 +559,7 @@ impl BlockCursor {
 }
 
 impl Cursor for BlockCursor {
-    fn reset(&mut self) -> Result<(), Error> {
-        self.position = CursorPosition::First;
-        Ok(())
-    }
+    type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::First;
@@ -586,12 +651,6 @@ impl Cursor for BlockCursor {
             }
         };
 
-        // Check for the case where all keys are bigger.
-        if compare_bytes(key, kref.key).is_lt() {
-            self.position = CursorPosition::First;
-            return Ok(());
-        }
-
         // Scan until we find the key.
         let mut kref = Some(kref);
         while let Some(x) = kref {
@@ -600,23 +659,6 @@ impl Cursor for BlockCursor {
                 kref = self.key_ref()?;
             } else {
                 break;
-            }
-        }
-
-        // Adjust the next_offset for prev/next.  prev will operate off offset, which is positioned
-        // accordingly.  next will operate off next_offset.  Adjust it downward to offset so the
-        // next key returned will be the key we seek'ed to.
-        match &mut self.position {
-            CursorPosition::First => {}
-            CursorPosition::Last => {}
-            CursorPosition::Positioned {
-                restart_idx: _,
-                offset,
-                next_offset,
-                key: _,
-                timestamp: _,
-            } => {
-                *next_offset = *offset;
             }
         }
 
@@ -721,11 +763,7 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 ref mut key,
                 timestamp: _,
-            } => {
-                let mut ret = Vec::new();
-                std::mem::swap(&mut ret, key);
-                ret
-            }
+            } => std::mem::take(key),
         };
 
         // Setup the position correctly and return what we see.
@@ -751,7 +789,7 @@ impl Cursor for BlockCursor {
         }
     }
 
-    fn value(&self) -> Option<KeyValueRef> {
+    fn value(&self) -> Option<&[u8]> {
         match &self.position {
             CursorPosition::First => None,
             CursorPosition::Last => None,
@@ -759,8 +797,8 @@ impl Cursor for BlockCursor {
                 restart_idx: _,
                 offset,
                 next_offset: _,
-                key,
-                timestamp,
+                key: _,
+                timestamp: _,
             } => {
                 // Parse the value from the block entry.
                 let bytes = &self.block.bytes;
@@ -768,11 +806,7 @@ impl Cursor for BlockCursor {
                 let be: KeyValueEntry = up
                     .unpack()
                     .expect("already parsed this block with extract_key; corruption");
-                Some(KeyValueRef {
-                    key,
-                    timestamp: *timestamp,
-                    value: be.value(),
-                })
+                be.value()
             }
         }
     }
@@ -894,7 +928,7 @@ mod tests {
             0, 0, 0, 0, 22, 0, 0, 0, 93, /*11*/
             2, 0, 0, 0,
         ];
-        let block = Block::new(block_bytes.to_vec().try_into().unwrap()).unwrap();
+        let block = Block::new(block_bytes.to_vec()).unwrap();
         assert_eq!(2, block.num_restarts);
         assert_eq!(0, block.restart_point(0));
         assert_eq!(22, block.restart_point(1));
@@ -947,8 +981,7 @@ mod tests {
         let target = "jqCIzIbU";
         cursor.seek(target.as_bytes()).unwrap();
         let key: Vec<u8> = key.into();
-        cursor.next().unwrap();
-        let kvp = cursor.value().unwrap();
+        let kvp = cursor.key_value().unwrap();
         assert_eq!(&key, kvp.key);
         assert_eq!(timestamp, kvp.timestamp);
     }
@@ -1007,7 +1040,7 @@ mod tests {
             0, 0, 0, 0, 93, /*11*/
             1, 0, 0, 0,
         ];
-        let block = Block::new(bytes.to_vec().try_into().unwrap()).unwrap();
+        let block = Block::new(bytes.to_vec()).unwrap();
 
         let exp = CursorPosition::Positioned {
             restart_idx: 0,
@@ -1031,783 +1064,6 @@ mod tests {
 
         let exp = CursorPosition::Last;
         let got = BlockCursor::extract_key(&block, 39, Vec::new()).unwrap();
-        assert_eq!(exp, got);
-    }
-}
-
-#[cfg(test)]
-mod guacamole {
-    use super::super::KeyValueRef;
-    use super::*;
-
-    #[test]
-    fn human_guacamole_1() {
-        // --num-keys 2
-        // --key-bytes 1
-        // --value-bytes 0
-        // --num-seeks 1000
-        // --seek-distance 10
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
-            .unwrap();
-        builder
-            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
-            .unwrap();
-
-        let block = builder.seal().unwrap();
-        let exp = [
-            // record
-            66, /*8*/
-            18, /*sz*/
-            8,  /*1*/
-            0, 18, /*2*/
-            1,  /*sz*/
-            69, 24, /*3*/
-            /*varint*/ 181, 182, 235, 145, 160, 170, 229, 223, 243, 1, 34, /*4*/
-            0,  /*sz*/
-            // record
-            66, /*8*/
-            17, /*sz*/
-            8,  /*1*/
-            0, 18, /*2*/
-            1,  /*sz*/
-            107, 24, /*3*/
-            /*varint*/ 136, 136, 156, 160, 216, 213, 218, 229, 56, 34, /*4*/
-            0,  /*sz*/
-            // restarts
-            82, /*10*/
-            4,  /*sz*/
-            0, 0, 0, 0, 93, /*11*/
-            1, 0, 0, 0,
-        ];
-        let bytes: &[u8] = &block.bytes;
-        assert_eq!(exp, bytes);
-
-        let mut cursor = block.cursor();
-        match cursor.position {
-            CursorPosition::First => {}
-            _ => {
-                panic!("cursor should always init to head: {:?}", cursor.position)
-            }
-        };
-        cursor.seek("t".as_bytes()).unwrap();
-        match cursor.position {
-            CursorPosition::Last => {}
-            _ => {
-                panic!("cursor should seek to the end: {:?}", cursor.position)
-            }
-        };
-        cursor.next().unwrap();
-        let got = cursor.value();
-        assert_eq!(None, got);
-    }
-
-    #[test]
-    fn human_guacamole_2() {
-        // --num-keys 10
-        // --key-bytes 1
-        // --value-bytes 64
-        // --num-seeks 1
-        // --seek-distance 4
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put(
-                "4".as_bytes(),
-                5220327133503220768,
-                "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "A".as_bytes(),
-                2365635627947495809,
-                "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "E".as_bytes(),
-                17563921251225492277,
-                "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "I".as_bytes(),
-                3844377046565620216,
-                "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "J".as_bytes(),
-                14848435744026832213,
-                "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes(),
-            )
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put(
-                "g".as_bytes(),
-                10374159306796994843,
-                "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "k".as_bytes(),
-                4092481979873166344,
-                "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "t".as_bytes(),
-                7790837488841419319,
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "v".as_bytes(),
-                2133827469768204743,
-                "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes(),
-            )
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: Key { key: "d" }
-        let mut cursor = block.cursor();
-        cursor.seek("d".as_bytes()).unwrap();
-        // Next to g
-        cursor.next().unwrap();
-        let got = cursor.value().unwrap();
-        assert_eq!("g".as_bytes(), got.key);
-        assert_eq!(10374159306796994843, got.timestamp);
-        assert_eq!(
-            Some("SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes()),
-            got.value
-        );
-        assert_eq!(
-            CursorPosition::Positioned {
-                restart_idx: 0,
-                offset: 434,
-                next_offset: 518,
-                key: "g".into(),
-                timestamp: 10374159306796994843,
-            },
-            cursor.position
-        );
-        // Next to k
-        cursor.next().unwrap();
-        let got = cursor.value().unwrap();
-        assert_eq!("k".as_bytes(), got.key);
-        assert_eq!(4092481979873166344, got.timestamp);
-        assert_eq!(
-            CursorPosition::Positioned {
-                restart_idx: 1,
-                offset: 518,
-                next_offset: 601,
-                key: "k".into(),
-                timestamp: 4092481979873166344,
-            },
-            cursor.position
-        );
-        // Next to t
-        cursor.next().unwrap();
-        let got = cursor.value().unwrap();
-        let exp = KeyValueRef {
-            key: "t".as_bytes(),
-            timestamp: 7790837488841419319,
-            value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
-            ),
-        };
-        assert_eq!(exp, got);
-        assert_eq!("t".as_bytes(), got.key);
-        assert_eq!(7790837488841419319, got.timestamp);
-        assert_eq!(
-            Some("mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes()),
-            got.value
-        );
-        assert_eq!(
-            CursorPosition::Positioned {
-                restart_idx: 1,
-                offset: 601,
-                next_offset: 684,
-                key: "t".into(),
-                timestamp: 7790837488841419319,
-            },
-            cursor.position
-        );
-    }
-
-    #[test]
-    fn guacamole_2() {
-        // --num-keys 10
-        // --key-bytes 1
-        // --value-bytes 64
-        // --num-seeks 1
-        // --seek-distance 4
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put(
-                "4".as_bytes(),
-                5220327133503220768,
-                "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "A".as_bytes(),
-                2365635627947495809,
-                "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "E".as_bytes(),
-                17563921251225492277,
-                "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "I".as_bytes(),
-                3844377046565620216,
-                "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "J".as_bytes(),
-                14848435744026832213,
-                "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes(),
-            )
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put(
-                "g".as_bytes(),
-                10374159306796994843,
-                "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "k".as_bytes(),
-                4092481979873166344,
-                "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "t".as_bytes(),
-                7790837488841419319,
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "v".as_bytes(),
-                2133827469768204743,
-                "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes(),
-            )
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: Key { key: "d" }
-        let mut cursor = block.cursor();
-        cursor.seek("d".as_bytes()).unwrap();
-        cursor.next().unwrap();
-        cursor.next().unwrap();
-        cursor.next().unwrap();
-        let got = cursor.value().unwrap();
-        let exp = KeyValueRef {
-            key: "t".as_bytes(),
-            timestamp: 7790837488841419319,
-            value: Some(
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
-            ),
-        };
-        assert_eq!(exp, got);
-    }
-
-    #[test]
-    fn human_guacamole_3() {
-        // --num-keys 10
-        // --key-bytes 1
-        // --value-bytes 64
-        // --num-seeks 10
-        // --seek-distance 1
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put(
-                "4".as_bytes(),
-                5220327133503220768,
-                "TFJaKOq4itZUjZ6zLYRQAtaYQJ2KOABpaX5Jxr07mN9NgTFUN70JdcuwGubnsBSV".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "A".as_bytes(),
-                2365635627947495809,
-                "JMbW18opQPCC6OsP5XSbF5bs9LWzNwSjS2uQKhkDv7rATMznKwv6yA5jWq0Ya77j".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "E".as_bytes(),
-                17563921251225492277,
-                "ZVaW3VAlMCSMzUF7lOFVun1pObMORRWajFd0gvzfK1Qwtyp0L8GnEfN1TBoDgG6v".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "I".as_bytes(),
-                3844377046565620216,
-                "0lfqYezeQ1mM8HYtpTNLVB4XQi8KAb2ouxCTLHjMTzGxBFaHuVVY1Osd23MrzSA6".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "J".as_bytes(),
-                14848435744026832213,
-                "RH53KxwpLPbrUJat64bFvDMqLXVEXfxwL1LAfVBVzcbsEd5QaIzUyPfhuIOvcUiw".as_bytes(),
-            )
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put(
-                "g".as_bytes(),
-                10374159306796994843,
-                "SlJsi4yMZ6KanbWHPvrdPIFbMIl5jvGCETwcklFf2w8b0GsN4dyIdIsB1KlTPwgO".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "k".as_bytes(),
-                4092481979873166344,
-                "xdQPKOyZwQUykR8iVbMtYMhEaiW3jbrS5AKqteHkjnRs2Yfl4OOqtvVQKqojsB0a".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "t".as_bytes(),
-                7790837488841419319,
-                "mXdsaM4QhryUTwpDzkUhYqxfoQ9BWK1yjRZjQxF4ls6tV4r8K5G7Rpk1ZLNPcsFl".as_bytes(),
-            )
-            .unwrap();
-        builder
-            .put(
-                "v".as_bytes(),
-                2133827469768204743,
-                "5NV1fDTU6IBuTs5qP7mdDRrBlMCUlsVzXrk8dbMTjhrzdEaLtOSuC5sL3401yvrs".as_bytes(),
-            )
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: Key { key: "u" }
-        let mut cursor = block.cursor();
-        cursor.seek("u".as_bytes()).unwrap();
-    }
-
-    #[test]
-    fn guacamole_4() {
-        // --num-keys 100
-        // --key-bytes 1
-        // --value-bytes 0
-        // --num-seeks 1
-        // --seek-distance 4
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put("0".as_bytes(), 9697512111035884403, "".as_bytes())
-            .unwrap();
-        builder
-            .put("1".as_bytes(), 3798246989967619197, "".as_bytes())
-            .unwrap();
-        builder
-            .put("2".as_bytes(), 10342091538431028726, "".as_bytes())
-            .unwrap();
-        builder
-            .put("3".as_bytes(), 15157365073906098091, "".as_bytes())
-            .unwrap();
-        builder
-            .put("3".as_bytes(), 9466660179799601223, "".as_bytes())
-            .unwrap();
-        builder
-            .put("3".as_bytes(), 5028655377053437110, "".as_bytes())
-            .unwrap();
-        builder
-            .put("4".as_bytes(), 16805872069322243742, "".as_bytes())
-            .unwrap();
-        builder
-            .put("4".as_bytes(), 16112959034514062976, "".as_bytes())
-            .unwrap();
-        builder
-            .put("4".as_bytes(), 7876299547345770848, "".as_bytes())
-            .unwrap();
-        builder
-            .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
-            .unwrap();
-        builder
-            .put("7".as_bytes(), 14395010029865413065, "".as_bytes())
-            .unwrap();
-        builder
-            .put("8".as_bytes(), 17618669414409465042, "".as_bytes())
-            .unwrap();
-        builder
-            .put("8".as_bytes(), 13191224295862555992, "".as_bytes())
-            .unwrap();
-        builder
-            .put("8".as_bytes(), 5084626311153408505, "".as_bytes())
-            .unwrap();
-        builder
-            .put("9".as_bytes(), 12995477672441385068, "".as_bytes())
-            .unwrap();
-        builder
-            .put("A".as_bytes(), 9605838007579610207, "".as_bytes())
-            .unwrap();
-        builder
-            .put("A".as_bytes(), 2365635627947495809, "".as_bytes())
-            .unwrap();
-        builder
-            .put("A".as_bytes(), 1952263260996816483, "".as_bytes())
-            .unwrap();
-        builder
-            .put("B".as_bytes(), 10126582942351468573, "".as_bytes())
-            .unwrap();
-        builder
-            .put("C".as_bytes(), 16217491379957293402, "".as_bytes())
-            .unwrap();
-        builder
-            .put("C".as_bytes(), 1973107251517101738, "".as_bytes())
-            .unwrap();
-        builder
-            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
-            .unwrap();
-        builder
-            .put("F".as_bytes(), 7744344282933500472, "".as_bytes())
-            .unwrap();
-        builder
-            .put("F".as_bytes(), 7572175103299679188, "".as_bytes())
-            .unwrap();
-        builder
-            .put("G".as_bytes(), 3562951228830167005, "".as_bytes())
-            .unwrap();
-        builder
-            .put("H".as_bytes(), 10415469497441400582, "".as_bytes())
-            .unwrap();
-        builder
-            .put("I".as_bytes(), 3844377046565620216, "".as_bytes())
-            .unwrap();
-        builder
-            .put("J".as_bytes(), 17476236525666259675, "".as_bytes())
-            .unwrap();
-        builder
-            .put("J".as_bytes(), 14848435744026832213, "".as_bytes())
-            .unwrap();
-        builder
-            .put("K".as_bytes(), 5137225721270789888, "".as_bytes())
-            .unwrap();
-        builder
-            .put("K".as_bytes(), 4825960407565437069, "".as_bytes())
-            .unwrap();
-        builder
-            .put("L".as_bytes(), 15335622082534854763, "".as_bytes())
-            .unwrap();
-        builder
-            .put("L".as_bytes(), 7211574025721472487, "".as_bytes())
-            .unwrap();
-        builder
-            .put("M".as_bytes(), 485375931245920424, "".as_bytes())
-            .unwrap();
-        builder
-            .put("O".as_bytes(), 6226508136092163051, "".as_bytes())
-            .unwrap();
-        builder
-            .put("P".as_bytes(), 11429503906557966656, "".as_bytes())
-            .unwrap();
-        builder
-            .put("P".as_bytes(), 6890969690330950371, "".as_bytes())
-            .unwrap();
-        builder
-            .put("P".as_bytes(), 1488139426474409410, "".as_bytes())
-            .unwrap();
-        builder
-            .put("P".as_bytes(), 418483046145178590, "".as_bytes())
-            .unwrap();
-        builder
-            .put("R".as_bytes(), 13695467658803848996, "".as_bytes())
-            .unwrap();
-        builder
-            .put("R".as_bytes(), 9039056961022621355, "".as_bytes())
-            .unwrap();
-        builder
-            .put("T".as_bytes(), 17741635360323564569, "".as_bytes())
-            .unwrap();
-        builder
-            .put("T".as_bytes(), 3442885773277545517, "".as_bytes())
-            .unwrap();
-        builder
-            .put("U".as_bytes(), 16798869817908785490, "".as_bytes())
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put("V".as_bytes(), 9966687898902172033, "".as_bytes())
-            .unwrap();
-        builder
-            .put("W".as_bytes(), 13095774311180215755, "".as_bytes())
-            .unwrap();
-        builder
-            .put("W".as_bytes(), 9347164485663886373, "".as_bytes())
-            .unwrap();
-        builder
-            .put("X".as_bytes(), 14105912430424664753, "".as_bytes())
-            .unwrap();
-        builder
-            .put("X".as_bytes(), 6418138334934602254, "".as_bytes())
-            .unwrap();
-        builder
-            .put("X".as_bytes(), 55139404659432737, "".as_bytes())
-            .unwrap();
-        builder
-            .put("Y".as_bytes(), 2104644631976488051, "".as_bytes())
-            .unwrap();
-        builder
-            .put("Z".as_bytes(), 16236856772926750404, "".as_bytes())
-            .unwrap();
-        builder
-            .put("Z".as_bytes(), 5615871050668577040, "".as_bytes())
-            .unwrap();
-        builder
-            .put("a".as_bytes(), 3071821918069870007, "".as_bytes())
-            .unwrap();
-        builder
-            .put("c".as_bytes(), 15097321419089962068, "".as_bytes())
-            .unwrap();
-        builder
-            .put("c".as_bytes(), 8516680308564098410, "".as_bytes())
-            .unwrap();
-        builder
-            .put("c".as_bytes(), 1136922606904185019, "".as_bytes())
-            .unwrap();
-        builder
-            .put("d".as_bytes(), 11470523903049678620, "".as_bytes())
-            .unwrap();
-        builder
-            .put("d".as_bytes(), 7780339209940962240, "".as_bytes())
-            .unwrap();
-        builder
-            .put("e".as_bytes(), 11794849320489348897, "".as_bytes())
-            .unwrap();
-        builder
-            .put("f".as_bytes(), 14643758144615450198, "".as_bytes())
-            .unwrap();
-        builder
-            .put("g".as_bytes(), 10374159306796994843, "".as_bytes())
-            .unwrap();
-        builder
-            .put("h".as_bytes(), 15699718780789327398, "".as_bytes())
-            .unwrap();
-        builder
-            .put("k".as_bytes(), 4326521581274956632, "".as_bytes())
-            .unwrap();
-        builder
-            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
-            .unwrap();
-        builder
-            .put("l".as_bytes(), 16731700614287774313, "".as_bytes())
-            .unwrap();
-        builder
-            .put("l".as_bytes(), 589255275485757846, "".as_bytes())
-            .unwrap();
-        builder
-            .put("m".as_bytes(), 12311958346976601852, "".as_bytes())
-            .unwrap();
-        builder
-            .put("m".as_bytes(), 4965766951128923512, "".as_bytes())
-            .unwrap();
-        builder
-            .put("m".as_bytes(), 3693140343459290526, "".as_bytes())
-            .unwrap();
-        builder
-            .put("m".as_bytes(), 735770394729692338, "".as_bytes())
-            .unwrap();
-        builder
-            .put("n".as_bytes(), 12504712481410458650, "".as_bytes())
-            .unwrap();
-        builder
-            .put("n".as_bytes(), 7535384965626452878, "".as_bytes())
-            .unwrap();
-        builder
-            .put("p".as_bytes(), 11164631123798495192, "".as_bytes())
-            .unwrap();
-        builder
-            .put("p".as_bytes(), 7904065694230536285, "".as_bytes())
-            .unwrap();
-        builder
-            .put("p".as_bytes(), 2533648604198286980, "".as_bytes())
-            .unwrap();
-        builder
-            .put("q".as_bytes(), 16221674258603117598, "".as_bytes())
-            .unwrap();
-        builder
-            .put("q".as_bytes(), 15702955376497465948, "".as_bytes())
-            .unwrap();
-        builder
-            .put("q".as_bytes(), 11880355228727610904, "".as_bytes())
-            .unwrap();
-        builder
-            .put("q".as_bytes(), 3128143053549102168, "".as_bytes())
-            .unwrap();
-        builder
-            .put("r".as_bytes(), 16352360294892915532, "".as_bytes())
-            .unwrap();
-        builder
-            .put("r".as_bytes(), 5031220163138947161, "".as_bytes())
-            .unwrap();
-        builder
-            .put("s".as_bytes(), 4251152130762342499, "".as_bytes())
-            .unwrap();
-        builder
-            .put("s".as_bytes(), 383014263170880432, "".as_bytes())
-            .unwrap();
-        builder
-            .put("t".as_bytes(), 15277352805187180008, "".as_bytes())
-            .unwrap();
-        builder
-            .put("t".as_bytes(), 9106274701266412083, "".as_bytes())
-            .unwrap();
-        builder
-            .put("t".as_bytes(), 7790837488841419319, "".as_bytes())
-            .unwrap();
-        builder
-            .put("u".as_bytes(), 15023686233576793040, "".as_bytes())
-            .unwrap();
-        builder
-            .put("u".as_bytes(), 13698086237460213740, "".as_bytes())
-            .unwrap();
-        builder
-            .put("u".as_bytes(), 13011900067377589610, "".as_bytes())
-            .unwrap();
-        builder
-            .put("u".as_bytes(), 12118947660501920842, "".as_bytes())
-            .unwrap();
-        builder
-            .put("u".as_bytes(), 5277242483551738373, "".as_bytes())
-            .unwrap();
-        builder
-            .put("v".as_bytes(), 4652147366029290205, "".as_bytes())
-            .unwrap();
-        builder
-            .put("v".as_bytes(), 2133827469768204743, "".as_bytes())
-            .unwrap();
-        builder
-            .put("x".as_bytes(), 733450490007248290, "".as_bytes())
-            .unwrap();
-        builder
-            .put("y".as_bytes(), 13099064855710329456, "".as_bytes())
-            .unwrap();
-        builder
-            .put("y".as_bytes(), 10455969331245208597, "".as_bytes())
-            .unwrap();
-        builder
-            .put("y".as_bytes(), 10097328861729949124, "".as_bytes())
-            .unwrap();
-        builder
-            .put("y".as_bytes(), 6129378363940112657, "".as_bytes())
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: Key { key: "6" }
-        let mut cursor = block.cursor();
-        cursor.seek("6".as_bytes()).unwrap();
-        cursor.next().unwrap();
-        cursor.next().unwrap();
-        cursor.next().unwrap();
-        let got = cursor.value().unwrap();
-        let exp = KeyValueRef {
-            key: "8".as_bytes(),
-            timestamp: 13191224295862555992,
-            value: Some("".as_bytes()),
-        };
-        assert_eq!(exp, got);
-    }
-
-    #[test]
-    fn guacamole_5() {
-        // --num-keys 10
-        // --key-bytes 1
-        // --value-bytes 0
-        // --num-seeks 10
-        // --seek-distance 1
-        // --prev-probability 0.1
-        let builder_opts = BlockBuilderOptions {
-            bytes_restart_interval: 512,
-            key_value_pairs_restart_interval: 16,
-        };
-        let mut builder = BlockBuilder::new(builder_opts);
-        builder
-            .put("4".as_bytes(), 5220327133503220768, "".as_bytes())
-            .unwrap();
-        builder
-            .put("A".as_bytes(), 2365635627947495809, "".as_bytes())
-            .unwrap();
-        builder
-            .put("E".as_bytes(), 17563921251225492277, "".as_bytes())
-            .unwrap();
-        builder
-            .put("I".as_bytes(), 3844377046565620216, "".as_bytes())
-            .unwrap();
-        builder
-            .put("J".as_bytes(), 14848435744026832213, "".as_bytes())
-            .unwrap();
-        builder.del("U".as_bytes(), 8329339752768468916).unwrap();
-        builder
-            .put("g".as_bytes(), 10374159306796994843, "".as_bytes())
-            .unwrap();
-        builder
-            .put("k".as_bytes(), 4092481979873166344, "".as_bytes())
-            .unwrap();
-        builder
-            .put("t".as_bytes(), 7790837488841419319, "".as_bytes())
-            .unwrap();
-        builder
-            .put("v".as_bytes(), 2133827469768204743, "".as_bytes())
-            .unwrap();
-        let block = builder.seal().unwrap();
-        // Top of loop seeks to: "d"@4793296426793138773
-        let mut cursor = block.cursor();
-        cursor.seek("d".as_bytes()).unwrap();
-        let _got = cursor.next().unwrap();
-        // Top of loop seeks to: "I"@13021764449837349261
-        let mut cursor = block.cursor();
-        cursor.seek("I".as_bytes()).unwrap();
-        cursor.prev().unwrap();
-        let got = cursor.value().unwrap();
-        let exp = KeyValueRef {
-            key: "E".as_bytes(),
-            timestamp: 17563921251225492277,
-            value: Some("".as_bytes()),
-        };
         assert_eq!(exp, got);
     }
 }

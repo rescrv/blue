@@ -1,9 +1,11 @@
+use keyvalint::KeyValueRef;
 use setsum::Setsum as RawSetsum;
+
 pub use setsum::SETSUM_BYTES;
 
 ////////////////////////////////////////////// Setsum //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Setsum {
     setsum: RawSetsum,
 }
@@ -27,6 +29,14 @@ impl Setsum {
         Some(Setsum { setsum })
     }
 
+    pub fn insert(&mut self, kvr: KeyValueRef) {
+        if let Some(value) = kvr.value {
+            self.put(kvr.key, kvr.timestamp, value);
+        } else {
+            self.del(kvr.key, kvr.timestamp);
+        }
+    }
+
     pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
         self.setsum
             .insert_vectored(&[&[8], key, &timestamp.to_le_bytes(), value]);
@@ -35,6 +45,10 @@ impl Setsum {
     pub fn del(&mut self, key: &[u8], timestamp: u64) {
         self.setsum
             .insert_vectored(&[&[9], key, &timestamp.to_le_bytes()]);
+    }
+
+    pub fn into_inner(self) -> RawSetsum {
+        self.setsum
     }
 }
 
@@ -48,6 +62,12 @@ impl std::ops::Add<Setsum> for Setsum {
     }
 }
 
+impl std::ops::AddAssign<Setsum> for Setsum {
+    fn add_assign(&mut self, rhs: Setsum) {
+        self.setsum += rhs.setsum;
+    }
+}
+
 impl std::ops::Sub<Setsum> for Setsum {
     type Output = Setsum;
 
@@ -55,5 +75,11 @@ impl std::ops::Sub<Setsum> for Setsum {
         Setsum {
             setsum: self.setsum - rhs.setsum,
         }
+    }
+}
+
+impl std::ops::SubAssign<Setsum> for Setsum {
+    fn sub_assign(&mut self, rhs: Setsum) {
+        self.setsum -= rhs.setsum;
     }
 }
