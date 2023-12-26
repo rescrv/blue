@@ -1,3 +1,5 @@
+//! Generate pseudo-random, predictable bytes from a linear random number generator.
+
 use std::io::Write;
 
 use arrrg::CommandLine;
@@ -17,7 +19,6 @@ struct GuacamoleOptions {
     seed: Option<u64>,
 }
 
-/// Generate pseudo-random, predictable bytes.
 fn main() {
     let (cmdline, free) = GuacamoleOptions::from_command_line("Usage: guacamole [OPTIONS]");
     if !free.is_empty() {

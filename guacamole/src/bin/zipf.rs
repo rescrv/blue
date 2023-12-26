@@ -1,3 +1,5 @@
+//! Choose numbers [0, n) from a zipf distribution.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
@@ -29,7 +31,6 @@ impl Default for ZipfOptions {
 
 impl Eq for ZipfOptions {}
 
-/// Choose numbers [0, n) from a zipf distribution.
 fn main() {
     let (cmdline, free) =
         ZipfOptions::from_command_line("Usage: zipf [--alpha ALPHA|--theta THETA] [OPTIONS]");
