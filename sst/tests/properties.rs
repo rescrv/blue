@@ -58,7 +58,7 @@ fn still_sized_right(wbs: &Vec<(WriteBatch, Vec<KeyValuePair>)>) -> bool {
     wbs.iter()
         .map(|wb| wb.0.approximate_size() as u64)
         .fold(0, u64::saturating_add)
-        < (sst::TABLE_FULL_SIZE / 64) as u64
+        < (keyvalint::TABLE_FULL_SIZE / 64) as u64
 }
 
 proptest::proptest! {
