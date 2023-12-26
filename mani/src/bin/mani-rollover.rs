@@ -1,3 +1,5 @@
+//! Force a rollover of the manifest.
+
 use arrrg::CommandLine;
 
 use mani::{Manifest, ManifestOptions};

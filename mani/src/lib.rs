@@ -20,21 +20,25 @@ use zerror_derive::ZerrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// Given a root, return the path to LOCKFILE.
 #[allow(non_snake_case)]
 pub fn LOCKFILE<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("LOCKFILE")
 }
 
+/// Given a root, return the path to MANIFEST.
 #[allow(non_snake_case)]
 pub fn MANIFEST<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("MANIFEST")
 }
 
+/// Given a root, return the path to MANIFEST.tmp.
 #[allow(non_snake_case)]
 pub fn TEMPORARY<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("MANIFEST.tmp")
 }
 
+/// Given a root and index, return the path to MANIFEST.{index}.
 #[allow(non_snake_case)]
 pub fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
     root.as_ref()
@@ -44,6 +48,7 @@ pub fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
 
 const TX_SEPARATOR: &str = "--------";
 
+/// If path could have been produced by [BACKUP], return the index.
 pub fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
     let path = match path.as_ref().file_name() {
         Some(path) => path.to_str(),
@@ -75,11 +80,13 @@ static LOCK_NOT_OBTAINED: Counter = Counter::new("mani.lock_not_obtained");
 static LOCK_NOT_OBTAINED_MONITOR: Stationary =
     Stationary::new("mani.lock_not_obtained", &LOCK_NOT_OBTAINED);
 
+/// Register the biometrics for this crate.
 pub fn register_biometrics(collector: Collector) {
     collector.register_counter(&LOCK_OBTAINED);
     collector.register_counter(&LOCK_NOT_OBTAINED);
 }
 
+/// Register the monitors for this crate.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOCK_NOT_OBTAINED_MONITOR);
 }
@@ -89,50 +96,71 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 /// Error for the manifest.
 #[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
+    /// The default error.  Should never be constructed, but necessary for protobuf support.
     #[prototk(376832, message)]
     Success {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
     },
+    /// A std::io::Error or similar was encountered.  The error gets converted to string for
+    /// protobuf reasons.
     #[prototk(376833, message)]
     SystemError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A textual representation of the wrapped error.
         #[prototk(2, string)]
         what: String,
     },
+    /// The manifest is corrupt.  See `what` for how.
     #[prototk(376834, message)]
     Corruption {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// What we observed that indicates corruption.
         #[prototk(2, string)]
         what: String,
     },
+    /// Newlines are disallowed in manifest strings.
     #[prototk(376835, message)]
     NewlineDisallowed {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A description of what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// The manifest exists and fail_if_found was specified.
     #[prototk(376836, message)]
     ManifestExists {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The relevant path.
         #[prototk(2, string)]
         path: PathBuf,
     },
+    /// The manifest does not exist and fail_if_not_found was specified.
     #[prototk(376837, message)]
     ManifestNotExist {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The relevant path.
         #[prototk(2, string)]
         path: PathBuf,
     },
+    /// A concurrent process has the manifest open and fail_if_locked was specified.
     #[prototk(376838, message)]
     LockNotObtained {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The relevant path.
         #[prototk(2, string)]
         path: PathBuf,
     },
@@ -172,18 +200,22 @@ impl From<std::str::Utf8Error> for Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ManifestOptions {
+    /// Fail to open the manifest if it exists.
     #[cfg_attr(
         feature = "binaries",
         arrrg(flag, "Fail if the manifest directory exists.")
     )]
     fail_if_exists: bool,
+    /// Fail to open the manifest if it does not exist.
     #[cfg_attr(
         feature = "binaries",
         arrrg(flag, "Fail if the manifest directory does not exist.")
     )]
     fail_if_not_exist: bool,
+    /// Fail to open the manifest if the lock acquisition would block.
     #[cfg_attr(feature = "binaries", arrrg(flag, "Fail if the manifest is locked."))]
     fail_if_locked: bool,
+    /// Ratio of (bytes_in_log):(bytes_in_memory) at which the log will rollover.
     #[cfg_attr(
         feature = "binaries",
         arrrg(
@@ -519,26 +551,31 @@ pub struct Edit {
 }
 
 impl Edit {
+    /// Add the specified string to the edit.
     pub fn add(&mut self, s: &str) -> Result<(), Error> {
         let s = Self::check_str(s)?;
         self.add_strs.insert(s);
         Ok(())
     }
 
+    /// List the added strings in the edit.
     pub fn added(&self) -> impl Iterator<Item = &String> {
         self.add_strs.iter()
     }
 
+    /// Remove the specified string from the edit.
     pub fn rm(&mut self, s: &str) -> Result<(), Error> {
         let s = Self::check_str(s)?;
         self.rm_strs.insert(s);
         Ok(())
     }
 
+    /// List the removed strings in the edit.
     pub fn rmed(&self) -> impl Iterator<Item = &String> {
         self.rm_strs.iter()
     }
 
+    /// Set the info field `c` to `s`.
     pub fn info(&mut self, c: char, s: &str) -> Result<(), Error> {
         Self::check_str(&c.to_string())?;
         let s = Self::check_str(s)?;
@@ -546,6 +583,7 @@ impl Edit {
         Ok(())
     }
 
+    /// Get the info associated with `c`.
     pub fn get_info(&self, c: char) -> Option<&String> {
         self.info.get(&c)
     }
@@ -564,12 +602,17 @@ impl Edit {
 
 ///////////////////////////////////////// ManifestIterator /////////////////////////////////////////
 
+/// Iterate over a single file of the manifest and return the edits contained within.
+///
+/// Note that this will return the zero'th edit, which is usually, but not always, a rollover from
+/// the previous manifest.
 pub struct ManifestIterator {
     file: Option<BufReader<File>>,
     poison: Option<Error>,
 }
 
 impl ManifestIterator {
+    /// Open the iterator to read `path`.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         if path.as_ref().is_dir() {
             return Err(Error::Corruption {

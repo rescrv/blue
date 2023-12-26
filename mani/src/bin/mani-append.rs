@@ -1,3 +1,5 @@
+//! Append some lines to a manifest.
+
 use arrrg::CommandLine;
 
 use mani::{Edit, Manifest, ManifestOptions};

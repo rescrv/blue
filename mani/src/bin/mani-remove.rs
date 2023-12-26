@@ -1,3 +1,5 @@
+//! Append an edit to the manifest that removes strings from stdin.
+
 use arrrg::CommandLine;
 
 use mani::{Edit, Manifest, ManifestOptions};

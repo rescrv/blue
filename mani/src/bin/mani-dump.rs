@@ -1,3 +1,5 @@
+//! Dump the edits of a manifest.
+
 use arrrg::CommandLine;
 
 use mani::{ManifestIterator, ManifestOptions};

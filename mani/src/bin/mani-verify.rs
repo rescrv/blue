@@ -1,3 +1,5 @@
+//! Verify the manifest's properties.
+
 use arrrg::CommandLine;
 
 use mani::{Manifest, ManifestOptions};

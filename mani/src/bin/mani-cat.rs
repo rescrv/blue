@@ -1,3 +1,5 @@
+//! Cat the strings that are added and not subsequently removed.
+
 use arrrg::CommandLine;
 
 use mani::{Manifest, ManifestOptions};
