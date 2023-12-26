@@ -12,7 +12,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 use derive_util::EnumVisitor;
 
-////////////////////////////////////// #[derive(CommandLine)] ///////////////////////////////////
+/////////////////////////////////////// #[derive(ZerrorCore)] //////////////////////////////////////
 
 #[proc_macro_derive(ZerrorCore, attributes())]
 pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
