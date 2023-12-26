@@ -6,9 +6,19 @@ edition = "2021"
 description = "Indicio provides a framework for emitting clues that may be used for debugging."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
 prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.4" }
 tatl = { path = "../tatl", version = "0.3" }
+
+[[example]]
+name = "macros"
+path = "examples/macros.rs"
+required-features=["binaries"]
