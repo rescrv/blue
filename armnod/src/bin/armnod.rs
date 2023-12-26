@@ -21,16 +21,11 @@ fn main() {
             eprintln!("invalid command line: {}", err);
             eprintln!("{}", USAGE);
             std::process::exit(1);
-        },
+        }
     };
     let mut guac = Guacamole::default();
     let mut fout = BufWriter::new(std::io::stdout());
-    loop {
-        match armnod.choose(&mut guac) {
-            Some(x) => {
-                writeln!(fout, "{}", x).unwrap();
-            }
-            None => break,
-        }
+    while let Some(x) = armnod.choose(&mut guac) {
+        writeln!(fout, "{}", x).unwrap();
     }
 }

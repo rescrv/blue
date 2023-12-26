@@ -65,7 +65,7 @@ impl SeedChooser for SetStringChooser {
     fn which_seed(&mut self, guac: &mut Guacamole) -> SeedChoice {
         let seed = guac.next_u64();
         let index = seed % self.cardinality;
-        SeedChoice::Seed(index * SET_SPREADER)
+        SeedChoice::Seed(index.wrapping_mul(SET_SPREADER))
     }
 }
 
@@ -91,7 +91,7 @@ impl SeedChooser for SetStringChooserOnce {
         let index = self.start;
         if index < self.limit {
             self.start += 1;
-            SeedChoice::Seed(index * SET_SPREADER)
+            SeedChoice::Seed(index.wrapping_mul(SET_SPREADER))
         } else {
             SeedChoice::StopIterating
         }
@@ -123,7 +123,7 @@ impl SetStringChooserZipf {
 
 impl SeedChooser for SetStringChooserZipf {
     fn which_seed(&mut self, guac: &mut Guacamole) -> SeedChoice {
-        SeedChoice::Seed(self.zipf.next(guac) * SET_SPREADER)
+        SeedChoice::Seed(self.zipf.next(guac).wrapping_mul(SET_SPREADER))
     }
 }
 
@@ -296,7 +296,11 @@ impl Armnod {
 pub struct ArmnodOptions {
     #[cfg_attr(
         feature = "command_line",
-        arrrg(required, "Method of choosing strings (random, set, set-once, set-zipf).", "METHOD")
+        arrrg(
+            required,
+            "Method of choosing strings (random, set, set-once, set-zipf).",
+            "METHOD"
+        )
     )]
     pub chooser_mode: String,
     #[cfg_attr(
@@ -406,14 +410,22 @@ impl ArmnodOptions {
             set_chooser(self.cardinality.unwrap_or(1_000_000))
         } else if self.chooser_mode == "set-once" {
             let cardinality = self.cardinality.unwrap_or(1_000_000);
-            let step = if index < cardinality % total {
-                cardinality / total + 1
+            let step = cardinality / total;
+            let thresh = cardinality % total;
+            let mut begin = 0;
+            for i in 0..index {
+                begin += step;
+                if i < thresh {
+                    begin += 1;
+                }
+            }
+            let end = if index < thresh {
+                begin + step + 1
             } else {
-                cardinality / total
+                begin + step
             };
-            println!("{} {}", index * step, index * step + step);
-            let set_once_begin = self.set_once_begin.unwrap_or(index * step);
-            let set_once_end = self.set_once_end.unwrap_or(index * step + step);
+            let set_once_begin = self.set_once_begin.unwrap_or(begin);
+            let set_once_end = self.set_once_end.unwrap_or(end);
             if set_once_begin > set_once_end {
                 return Err(format!(
                     "--set-once-begin must be <= --set-once-end: {} > {}",
@@ -447,7 +459,9 @@ impl ArmnodOptions {
                 );
             }
             if self.avg_length.is_some() {
-                return Err("--string-avg-length not supported for --length-mode=constant".to_string());
+                return Err(
+                    "--string-avg-length not supported for --length-mode=constant".to_string(),
+                );
             }
             constant_length_chooser(self.length.unwrap_or(8))
         } else if length_mode == "uniform" {
@@ -463,7 +477,9 @@ impl ArmnodOptions {
                 return Err("--string-length not supported for --length-mode=uniform".to_string());
             }
             if self.avg_length.is_some() {
-                return Err("--string-avg-length not supported for --length-mode=uniform".to_string());
+                return Err(
+                    "--string-avg-length not supported for --length-mode=uniform".to_string(),
+                );
             }
             uniform_length_chooser(min_length, max_length)
         } else {

@@ -10,16 +10,15 @@ license = "Apache-2.0"
 default = ["binaries"]
 
 binaries = ["command_line"]
-command_line = ["arrrg", "arrrg_derive", "getopts"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
+getopts = { version = "0.2", optional = true }
 rand = "0.7"
 
-guacamole = { path = "../guacamole", version = "0.4" }
-
-getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.2", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+guacamole = { path = "../guacamole", version = "0.4" }
 
 [[bin]]
 name = "armnod"
