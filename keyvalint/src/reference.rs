@@ -8,6 +8,7 @@ use super::{
 
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
+/// A reference [super::WriteBatch].
 #[derive(Default)]
 pub struct WriteBatch {
     entries: Vec<KeyValuePair>,
@@ -31,6 +32,7 @@ impl WriteBatchTrait for WriteBatch {
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
+/// A reference [super::Cursor].
 #[derive(Clone, Debug)]
 pub struct Cursor {
     entries: Vec<KeyValuePair>,
@@ -124,12 +126,14 @@ impl From<Vec<KeyValuePair>> for Cursor {
 
 /////////////////////////////////////////// KeyValueStore //////////////////////////////////////////
 
+/// A reference [super::KeyValueStore]
 #[derive(Clone, Debug, Default)]
 pub struct KeyValueStore {
     entries: RefCell<Vec<KeyValuePair>>,
 }
 
 impl KeyValueStore {
+    /// Convert this reference KeyValueStore into a KeyValueLoad.
     pub fn into_key_value_load(self) -> KeyValueLoad {
         let mut entries = self.entries.into_inner();
         entries.sort();
@@ -161,6 +165,7 @@ impl KeyValueStoreTrait for KeyValueStore {
 
 /////////////////////////////////////////// KeyValueLoad ///////////////////////////////////////////
 
+/// A reference [super::KeyValueLoad].
 #[derive(Clone, Debug, Default)]
 pub struct KeyValueLoad {
     entries: Vec<KeyValuePair>,

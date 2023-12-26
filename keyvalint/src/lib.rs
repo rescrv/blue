@@ -1,35 +1,54 @@
+//! A generic KEY VALue INTerface for abstracting away key-value stores.  Used for comparing
+//! key-value stores in the keyvalint_bench crate.  Different key-value stores will have varying
+//! levels of support.
+
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Bound;
 use std::sync::Arc;
 
+/// A reference key-value store.
 #[cfg(feature = "reference")]
 pub mod reference;
+
+/// A RocksDB-backed key-value store.
 #[cfg(feature = "rocksdb")]
 pub mod rocksdb;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// The maximum length of a key.
 pub const MAX_KEY_LEN: usize = 1usize << 14; /* 16KiB */
+/// The maximum length of a value.
 pub const MAX_VALUE_LEN: usize = 1usize << 15; /* 32KiB */
+/// The maximum size of a write batch, in bytes.
 pub const MAX_BATCH_LEN: usize = (1usize << 20) - (1usize << 16); /* 1MiB - 64KiB */
 
+/// The default key is the zero key.
 pub const DEFAULT_KEY: &[u8] = &[];
+/// The default timestamp is 0.
 pub const DEFAULT_TIMESTAMP: u64 = 0;
+/// The zero key.  This is the empty byte string.
 pub const MIN_KEY: &[u8] = &[];
+/// The maximum key.  This is eleven `0xff` bytes.
 pub const MAX_KEY: &[u8] = &[0xffu8; 11];
 
-// NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
-// but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
-// general pattern is that the block will exceed this size by up to one key-value pair, so subtract
-// some slop.  64MiB is overkill, but will last for awhile.
+/// The recommended size of a table.
+///
+/// This is an approximate size.  This constant isn't intended to be a maximum size, but rather a
+/// size that, once exceeded, will cause the table to return a TableFull error.  The general
+/// pattern is that the block will exceed this size by up to one key-value pair, so subtract some
+/// slop.  64MiB is overkill, but will last for awhile.
 pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
+/// A memory-owning Key.
 #[derive(Clone, Debug)]
 pub struct Key {
+    /// The key for this Key.
     pub key: Vec<u8>,
+    /// The timestamp for this Key.
     pub timestamp: u64,
 }
 
@@ -104,9 +123,12 @@ impl From<&KeyValuePair> for Key {
 
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
+/// A shallow, easy-to-copy reference to a key.
 #[derive(Copy, Clone, Debug)]
 pub struct KeyRef<'a> {
+    /// The key of this KeyRef.
     pub key: &'a [u8],
+    /// The timestamp of this KeyRef.
     pub timestamp: u64,
 }
 
@@ -199,10 +221,14 @@ impl<'a> From<&'a KeyValuePair> for KeyRef<'a> {
 
 /////////////////////////////////////// KeyValuePair ///////////////////////////////////////
 
+/// A KeyValuePair is an owned version of a key-value pair.
 #[derive(Clone, Debug)]
 pub struct KeyValuePair {
+    /// The key of this KeyValuePair.
     pub key: Vec<u8>,
+    /// The timestamp of this KeyValuePair.
     pub timestamp: u64,
+    /// The value of this KeyValuePair.  None indicates a tombstone.
     pub value: Option<Vec<u8>>,
 }
 
@@ -252,10 +278,14 @@ impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
 
 //////////////////////////////////////////// KeyValueRef ///////////////////////////////////////////
 
+/// A KeyValueRef is an easy-to-copy version of a key-value pair.
 #[derive(Clone, Debug)]
 pub struct KeyValueRef<'a> {
+    /// The key of this KeyValueRef.
     pub key: &'a [u8],
+    /// The timestamp of this KeyValueRef.
     pub timestamp: u64,
+    /// The value of this KeyValueRef.  None indicates a tombstone.
     pub value: Option<&'a [u8]>,
 }
 
@@ -326,19 +356,29 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
 
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
+/// A write batch aggregates writes to be written together.
 pub trait WriteBatch {
+    /// Append the key-value pair to the write batch.
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]);
+    /// Append a tombstone to the write batch.
     fn del(&mut self, key: &[u8], timestamp: u64);
 }
 
 /////////////////////////////////////////// KeyValueStore //////////////////////////////////////////
 
+/// A write-oriented key-value store.  [KeyValueStore] is a pun on register store.
 pub trait KeyValueStore {
+    /// The type of error returned by this KeyValueStore.
     type Error: Debug;
+    /// The type of write batch accepted by this KeyValueStore.
     type WriteBatch<'a>: WriteBatch;
 
+    /// Put the specified key as a single, isolated write.
     fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error>;
+    /// Delete the specified key as a single, isolated write by writing a tombstone.
     fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error>;
+    /// Write the batch to the key-value store.  Whether this is atomic depends upon the key-value
+    /// store itself.
     fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Self::Error>;
 }
 
@@ -361,19 +401,36 @@ impl<K: KeyValueStore> KeyValueStore for Arc<K> {
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
+/// A Cursor allows for iterating through data.
 pub trait Cursor {
+    /// The type of error returned by this cursor.
     type Error: Debug;
 
+    /// Seek past the first valid key-value pair to a beginning-of-stream sentinel.
     fn seek_to_first(&mut self) -> Result<(), Self::Error>;
+
+    /// Seek past the last valid key-value pair to an end-of-stream sentinel.
     fn seek_to_last(&mut self) -> Result<(), Self::Error>;
+
+    /// Seek to this key.  After a call to seek, the values of [key] and [value] should return the
+    /// sought-to key or the key that's lexicographically next after key.
     fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error>;
 
+    /// Advance the cursor forward to the lexicographically-previous key.
     fn prev(&mut self) -> Result<(), Self::Error>;
+
+    /// Advance the cursor forward to the lexicographically-next key.
     fn next(&mut self) -> Result<(), Self::Error>;
 
+    /// The key where this cursor is positioned, or None if the cursor is positioned at the bounds.
     fn key(&self) -> Option<KeyRef>;
+
+    /// The value where this cursor is positioned, or None if the cursor is positioned at a
+    /// tombstone or the limits of the cursor.
     fn value(&self) -> Option<&'_ [u8]>;
 
+    /// Return a KeyValueRef corresponding to the current position of the cursor.  By default this
+    /// will stitch together the values of `key()` and `value()` to make a [KeyValueRef].
     fn key_value(&self) -> Option<KeyValueRef> {
         if let (Some(kr), value) = (self.key(), self.value()) {
             Some(KeyValueRef {
@@ -453,17 +510,25 @@ impl<E: Debug> Cursor for Box<dyn Cursor<Error = E>> {
 
 /////////////////////////////////////////// KeyValueLoad ///////////////////////////////////////////
 
+/// A read-oriented key-value store.  [KeyValueLoad] is a pun on register load.
 pub trait KeyValueLoad {
+    /// The type of error returned by this KeyValueLoad.
     type Error: Debug;
+    /// The type of cursor returned from [range_scan].
     type RangeScan<'a>: Cursor
     where
         Self: 'a;
 
+    /// Get the value associated with the key as of the specified timestamp.  By default this will
+    /// call load and discard the `is_tombstone` parameter.  This should be sufficient for every
+    /// implementation.
     fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<Vec<u8>>, Self::Error> {
         let mut is_tombstone = false;
         self.load(key, timestamp, &mut is_tombstone)
     }
 
+    /// Load the newest key no newer than the latest timestamp.  Specifies `is_tombstone` when the
+    /// None value returned is a tombstone.
     fn load(
         &self,
         key: &[u8],
@@ -471,6 +536,9 @@ pub trait KeyValueLoad {
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error>;
 
+    /// Perform a range scan between the specified bounds.  The timestamp parameter is
+    /// implementation-specific, but should be used to provide a snapshot as of the time specified
+    /// in implementations that support doing so.
     fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
@@ -506,6 +574,7 @@ impl<K: KeyValueLoad> KeyValueLoad for Arc<K> {
 
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
 
+/// Compare the bytes lexicographically.
 // Content under CC By-Sa.  I just use as is, as can you.
 // https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
 pub fn compare_bytes(a: &[u8], b: &[u8]) -> Ordering {
@@ -523,6 +592,7 @@ pub fn compare_bytes(a: &[u8], b: &[u8]) -> Ordering {
 
 //////////////////////////////////////////// compare_key ///////////////////////////////////////////
 
+/// Compare the keys lexicograhically.
 pub fn compare_key(
     key_lhs: &[u8],
     timestamp_lhs: u64,
