@@ -14,6 +14,7 @@ use derive_util::StructVisitor;
 
 ////////////////////////////////////// #[derive(CommandLine)] ///////////////////////////////////
 
+/// Derive the CommandLine trait for a given struct.
 #[proc_macro_derive(CommandLine, attributes(arrrg, help))]
 pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
