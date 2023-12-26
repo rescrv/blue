@@ -14,6 +14,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 //////////////////////////////////////// #[derive(Message)] ////////////////////////////////////////
 
+/// Derive the [prototk::Message] type.
 // NOTE(rescrv):  This was my first-ever macro.  It's deeply intertwined with the guts of the
 // prototk library.  I'd like to someday separate the two, but all I really wanted was the syntax
 // of the procedural macro for declaring the types.  I really, really hope someone comes along and
