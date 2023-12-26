@@ -6,7 +6,15 @@ edition = "2021"
 description = "Setsum provides an order-agnostic checksum."
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["binaries"]
+
+binaries = []
 
 [dependencies]
-sha2 = "0.10"
+sha3 = "0.10"
+
+[[bin]]
+name = "setsum-inverse"
+path = "src/bin/setsum-inverse.rs"
+required-features = ["binaries"]

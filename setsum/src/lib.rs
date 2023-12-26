@@ -17,7 +17,7 @@
 use std::convert::TryInto;
 use std::fmt::{Debug, Write};
 
-use sha2::{Digest, Sha256};
+use sha3::{Digest, Sha3_256};
 
 /// The number of bytes in the digest of both the hash used by setsum and the output
 /// of setsum.
@@ -81,7 +81,7 @@ fn hash_to_state(hash: &[u8; SETSUM_BYTES]) -> [u32; SETSUM_COLUMNS] {
 
 /// Translate an item comprised of multiple vectors to a setsum.
 fn item_vectored_to_state(item: &[&[u8]]) -> [u32; SETSUM_COLUMNS] {
-    let mut hasher = Sha256::default();
+    let mut hasher = Sha3_256::default();
     for piece in item {
         hasher.update(piece);
     }
@@ -93,7 +93,7 @@ fn item_vectored_to_state(item: &[&[u8]]) -> [u32; SETSUM_COLUMNS] {
 /// Setsum provides an interactive object for maintaining set checksums.  Technically, multi-set
 /// checksums.  Two Setsum objects are equal with high probability if and only if they contain the
 /// same items.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Setsum {
     state: [u32; SETSUM_COLUMNS],
 }
@@ -202,6 +202,12 @@ impl std::ops::Add<Setsum> for Setsum {
     }
 }
 
+impl std::ops::AddAssign<Setsum> for Setsum {
+    fn add_assign(&mut self, rhs: Setsum) {
+        self.state = add_state(self.state, rhs.state);
+    }
+}
+
 impl std::ops::Sub<Setsum> for Setsum {
     type Output = Setsum;
 
@@ -209,6 +215,13 @@ impl std::ops::Sub<Setsum> for Setsum {
         let rhs_state = invert_state(rhs.state);
         let state = add_state(self.state, rhs_state);
         Setsum { state }
+    }
+}
+
+impl std::ops::SubAssign<Setsum> for Setsum {
+    fn sub_assign(&mut self, rhs: Setsum) {
+        let rhs_state = invert_state(rhs.state);
+        self.state = add_state(self.state, rhs_state);
     }
 }
 
@@ -220,13 +233,6 @@ mod tests {
     fn constants() {
         // require that we're using all the bytes
         assert_eq!(SETSUM_BYTES, SETSUM_BYTES_PER_COLUMN * SETSUM_COLUMNS);
-    }
-
-    #[test]
-    fn primes_fit_u32() {
-        for &p in SETSUM_PRIMES.iter() {
-            assert!(p <= u32::MAX);
-        }
     }
 
     #[test]
@@ -269,18 +275,16 @@ mod tests {
     fn hash_to_state_visual_helper(x: u32, buf: &mut [u8]) {
         assert!(buf.len() >= 4);
         let arr = x.to_le_bytes();
-        for i in 0..4 {
-            buf[i] = arr[i];
-        }
+        buf[..4].copy_from_slice(&arr[..4]);
     }
 
     #[test]
     fn hash_to_state_visual() {
         let primes: [u32; SETSUM_COLUMNS] = [2, 3, 5, 7, 11, 13, 17, 19];
         let mut hash = [0u8; 32];
-        for i in 0..SETSUM_COLUMNS {
+        for (i, prime) in primes.iter().enumerate() {
             let idx = i * SETSUM_BYTES_PER_COLUMN;
-            hash_to_state_visual_helper(primes[i], &mut hash[idx..]);
+            hash_to_state_visual_helper(*prime, &mut hash[idx..]);
         }
         let state = hash_to_state(&hash);
         assert_eq!(primes, state);
@@ -289,8 +293,8 @@ mod tests {
     #[test]
     fn empty_item_to_state() {
         let expected: [u32; SETSUM_COLUMNS] = [
-            0x42c4b0e3, 0x141cfc98, 0xc8f4fb9a, 0x24b96f99, 0xe441ae27, 0x4c939b64, 0x1b9995a4,
-            0x55b85278,
+            0xf8c6ffa7, 0x66d71ebf, 0x5647c151, 0x62d661a0, 0x4dff80f5, 0xfa493be4, 0x4b0ad882,
+            0x4a43f880,
         ];
         let returned: [u32; SETSUM_COLUMNS] = item_vectored_to_state(&[]);
         assert_eq!(expected, returned)
@@ -299,8 +303,8 @@ mod tests {
     // This was chosen by running the _sorted variety, so the strength of that test is weakened.
     // For the remainder, it is an expected value chosen from outside of the test.
     const SEVEN_VALUES: [u8; 32] = [
-        85, 58, 172, 47, 234, 108, 94, 65, 6, 230, 28, 177, 15, 79, 24, 21, 1, 115, 73, 127, 108,
-        249, 97, 233, 249, 251, 12, 114, 255, 15, 239, 165,
+        197, 179, 253, 77, 1, 242, 184, 4, 15, 84, 171, 116, 18, 202, 83, 187, 252, 153, 14, 39,
+        42, 64, 173, 209, 196, 206, 186, 107, 47, 228, 114, 213,
     ];
 
     #[test]
@@ -427,7 +431,7 @@ mod tests {
     #[test]
     fn setsum_from_hexdigest() {
         const SEVEN_HEX_VALUES: &str =
-            "553aac2fea6c5e4106e61cb10f4f18150173497f6cf961e9f9fb0c72ff0fefa5";
+            "c5b3fd4d01f2b8040f54ab7412ca53bbfc990e272a40add1c4ceba6b2fe472d5";
         assert_eq!(
             Setsum::from_digest(SEVEN_VALUES),
             Setsum::from_hexdigest(SEVEN_HEX_VALUES).unwrap()
