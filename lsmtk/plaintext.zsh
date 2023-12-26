@@ -1,12 +1,15 @@
 #!/usr/bin/env zsh
 
-N=1000000000
+set -e
+set -x
 
-BINDIR=../target/release
+N=100000000
+
+BINDIR=/home/rescrv/src/blue/target/release
 
 # Generate keys and values separately using armnod
-$BINDIR/armnod --number $N --chooser-mode set-once --cardinality $N --length-mode uniform --string-min-length 8 --string-max-length 16 --charset alnum > keys
-$BINDIR/armnod --number $N --chooser-mode random --length-mode uniform --string-min-length 64 --string-max-length 256 > values
+$BINDIR/armnod --chooser-mode set-once --cardinality $N --length-mode uniform --min-length 8 --max-length 16 --charset alnum > keys
+$BINDIR/armnod --chooser-mode random --length-mode uniform --min-length 512 --max-length 1536 | head -$N> values
 
 # Combine the keys and values into "{} {}\n" format.
 paste keys values > key-value-pairs
@@ -20,8 +23,8 @@ rm key-value-pairs
 for table in table*.txt
 do
     LC_ALL=C sort -S 256M -o $table $table
-    rm -f ${table:r}.{log,log.sst,sst}
-    # Must convert logs after sorting as plaintext timestamp is line number.
+    rm -f ${table:r}.sst
     $BINDIR/sst-from-plaintext --plaintext ${table} --output ${table:r}.sst --timestamp
     $BINDIR/sst-checksum ${table:r}.sst
+    rm ${table}
 done

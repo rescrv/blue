@@ -3,15 +3,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrrg::CommandLine;
-
 use biometrics::{Collector, PlainTextEmitter};
-
+use indicio::ProtobufEmitter;
 use zerror::Z;
 
-use lsmtk::{IoToZ, LsmOptions};
+use lsmtk::{IoToZ, LsmTree, LsmtkOptions, LSM_TREE_LOG};
 
 fn main() {
-    let (options, free) = LsmOptions::from_command_line("USAGE: lsmtk-watch-for-ingest [OPTIONS]");
+    let (options, free) =
+        LsmtkOptions::from_command_line("USAGE: lsmtk-watch-for-ingest [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command takes no arguments");
         std::process::exit(1);
@@ -29,11 +29,56 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
+    LSM_TREE_LOG.register(ProtobufEmitter::new(
+        File::create("lsm_tree_debug.log.pb").as_z().pretty_unwrap(),
+    ));
     let root = PathBuf::from(options.path());
-    let db = Arc::new(options.open().as_z().pretty_unwrap());
-    let db_p = Arc::clone(&db);
+    let tree = Arc::new(LsmTree::open(options).as_z().pretty_unwrap());
+    let tree_p = Arc::clone(&tree);
     let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = db_p.compaction_background_thread() {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
             eprintln!("{}", err.long_form());
         }
     });
@@ -42,13 +87,16 @@ fn main() {
         let mut ingest = Vec::new();
         for entry in read_dir(root.join("ingest")).as_z().pretty_unwrap() {
             let entry = entry.as_z().pretty_unwrap();
-            ingest.push(entry.path().to_path_buf());
-            if ingest.len() > 12 {
-                break;
-            }
+            ingest.push((
+                entry.metadata().as_z().pretty_unwrap(),
+                entry.path().to_path_buf(),
+            ));
         }
-        db.ingest(&ingest).as_z().pretty_unwrap();
-        for path in ingest.into_iter() {
+        ingest.sort_by_key(|x| x.0.modified().expect("platform should provide mtime"));
+        for (_, path) in ingest.iter() {
+            tree.ingest(path).as_z().pretty_unwrap();
+        }
+        for (_, path) in ingest.into_iter() {
             remove_file(path).as_z().pretty_unwrap();
         }
     }

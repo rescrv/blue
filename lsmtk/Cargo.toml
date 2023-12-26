@@ -6,18 +6,75 @@ edition = "2021"
 description = "lsmtk provides a log-structured-merge-graph"
 license = "Apache-2.0"
 
-[dependencies]
-getopts = "0.2"
+[features]
+default = ["binaries"]
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
+[dependencies]
+getopts = { version = "0.2", optional = true }
+
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.4" }
+indicio = { path = "../indicio", version = "0.1" }
+keyvalint = { path = "../keyvalint", version = "0.1" }
 mani = { path = "../mani", version = "0.1" }
+one_two_eight = { path = "../one_two_eight", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.4" }
 setsum = { path = "../setsum", version = "0.4" }
+skipfree = { path = "../skipfree", version = "0.1" }
 sst = { path = "../sst", version = "0.4" }
+sync42 = { path = "../sync42", version = "0.4" }
+utilz = { path = "../utilz", version = "0.2" }
 zerror = { path = "../zerror", version = "0.2" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
 zerror_derive = { path = "../zerror_derive", version = "0.1" }
+
+[[bin]]
+name = "lsmtk-debugger"
+path = "src/bin/lsmtk-debugger.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-describe-compaction"
+path = "src/bin/lsmtk-describe-compaction.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-init"
+path = "src/bin/lsmtk-init.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-options"
+path = "src/bin/lsmtk-options.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-search-for-known-compaction-bugs"
+path = "src/bin/lsmtk-search-for-known-compaction-bugs.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-sst-ingest"
+path = "src/bin/lsmtk-sst-ingest.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-verify-manifest"
+path = "src/bin/lsmtk-verify-manifest.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-verify-and-unlink"
+path = "src/bin/lsmtk-verify-and-unlink.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "lsmtk-watch-for-ingest"
+path = "src/bin/lsmtk-watch-for-ingest.rs"
+required-features = ["binaries"]
