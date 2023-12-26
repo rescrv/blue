@@ -10,13 +10,13 @@ cargo build
 popd
 
 cargo fmt -- --check
-cargo hack check
 
 for package in `target/debug/publish`
 do
     pushd $package
-    cargo hack --feature-powerset build --all-targets
-    cargo hack --feature-powerset test
+    cargo check
+    cargo hack $HACK_FLAGS --feature-powerset build --all-targets
+    cargo hack $HACK_FLAGS --feature-powerset test
     cargo doc --no-deps
     cargo clippy --no-deps --all-targets
     ../target/debug/binaries
