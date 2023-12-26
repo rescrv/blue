@@ -1,5 +1,7 @@
 //! Deal with the here and now.
 
+/// This module allows for calling `now::millis()` and `now::micros()`.
+// TODO(rescrv):  Make this type safe and monotonic.
 pub mod now {
     use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -1,3 +1,5 @@
+//! Call the child command specified while holding a lock on the specified file.
+
 use std::env::args;
 use std::process::Command;
 

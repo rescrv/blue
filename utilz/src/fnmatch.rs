@@ -39,10 +39,19 @@ pub struct Pattern {
 }
 
 impl Pattern {
+    /// True if and only if the pattern is valid.
+    ///
+    /// Currently just checks that the pattern is less than 64 characters long.  An arbitrary
+    /// restriction because recursion.
     pub fn is_valid(pattern: &str) -> bool {
         pattern.len() < 64
     }
 
+    /// Create a pattern from String, or panic if the pattern is not valid.
+    ///
+    /// # Panics
+    ///
+    /// Panics on an invalid pattern.
     pub fn must(pattern: String) -> Self {
         if let Some(pat) = Self::new(pattern) {
             pat
@@ -51,6 +60,7 @@ impl Pattern {
         }
     }
 
+    /// Create a new pattern if it is valid; else None.
     pub fn new(pattern: String) -> Option<Self> {
         if Pattern::is_valid(&pattern) {
             Some(Self { pattern })
@@ -59,6 +69,7 @@ impl Pattern {
         }
     }
 
+    /// Run fnmatch of the pattern against `text`.
     pub fn fnmatch(&self, text: &str) -> bool {
         fnmatch(&self.pattern, text)
     }
