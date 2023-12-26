@@ -13,6 +13,7 @@ members = [
     "guacamole",
     "indicio",
     "keyvalint",
+    "keyvalint_bench",
     "lsmtk",
     "macarunes",
     "mani",
