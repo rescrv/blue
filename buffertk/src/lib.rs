@@ -11,17 +11,37 @@ pub use varint::v64;
 pub enum Error {
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
-    BufferTooShort { required: usize, had: usize },
+    BufferTooShort {
+        /// Number of bytes required to read the buffer.
+        required: usize,
+        /// Number of bytes available to read.
+        had: usize,
+    },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow { bytes: usize },
+    VarintOverflow {
+        /// Number of bytes in the varint.
+        bytes: usize,
+    },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow { value: u64 },
+    UnsignedOverflow {
+        /// Value that would overflow (typically a u32).
+        value: u64,
+    },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow { value: i64 },
+    SignedOverflow {
+        /// Value that would overflow (typically an i32).
+        value: i64,
+    },
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge { tag: u64 },
+    TagTooLarge {
+        /// Value that's too large for a tag.
+        tag: u64,
+    },
     /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant { discriminant: u32 },
+    UnknownDiscriminant {
+        /// Discriminant that's not known.
+        discriminant: u32,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -108,6 +128,7 @@ pub trait Packable {
 /// The format understood by `T:Unpackable` must correspond to the format serialized by
 /// `T:Packable`.
 pub trait Unpackable<'a>: Sized {
+    /// Type of error this unpackable returns.
     type Error;
 
     /// `unpack` attempts to return an Unpackable object stored in a prefix of `buf`.  The method
