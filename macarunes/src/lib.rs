@@ -717,6 +717,7 @@ mod tests {
     use super::crypto::*;
     use super::*;
 
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn usize() {
         assert!(usize::BITS >= u32::BITS)
@@ -724,6 +725,7 @@ mod tests {
 
     const THIRD_PARTY_BYTES: usize = 64;
 
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn constants() {
         assert_eq!(
@@ -761,7 +763,7 @@ mod tests {
             162, 90, 231, 25, 109, 203, 125, 202, 5, 154, 203, 100, 253, 229, 85, 34, 10, 44, 108,
             180, 112,
         ];
-        let mut plaintext = known_plaintext.clone();
+        let mut plaintext = known_plaintext;
         let mut ciphertext = [0u8; ZERO_BYTES + SIGNATURE_BYTES];
         // encrypt
         secretbox_xsalsa20poly1305(&key, &nonce, &plaintext, &mut ciphertext);
