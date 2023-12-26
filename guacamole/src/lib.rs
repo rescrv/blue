@@ -253,7 +253,7 @@ mod tests {
 
     use rand::Rng;
 
-    const TEST_CASES: &[(&'static str, u64, [u32; 16])] = &[
+    const TEST_CASES: &[(&str, u64, [u32; 16])] = &[
         (
             "zero",
             0,
@@ -306,9 +306,9 @@ mod tests {
         for (descr, seed, output) in TEST_CASES {
             let mut g = Guacamole::default();
             g.seek(*seed);
-            for i in 0..16 {
+            for (i, item) in output.iter().enumerate().take(16) {
                 let x: u32 = g.gen::<u32>();
-                assert_eq!(output[i], x, "test case = {}[{}]", descr, i);
+                assert_eq!(*item, x, "test case = {}[{}]", descr, i);
             }
         }
     }
