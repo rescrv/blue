@@ -76,19 +76,25 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
 #[macro_export]
 macro_rules! generate_id {
     ($what:ident, $prefix:literal) => {
+        /// A one_two_eight identifier.
         #[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Hash)]
         pub struct $what {
+            /// The raw bytes for this identifier.
             pub id: [u8; $crate::BYTES],
         }
 
         impl $what {
+            /// The smallest identifier.
             pub const BOTTOM: $what = $what {
                 id: [0u8; $crate::BYTES],
             };
+
+            /// The largest identifier.
             pub const TOP: $what = $what {
                 id: [0xffu8; $crate::BYTES],
             };
 
+            /// Generate a new identifier, failing if urandom fails.
             pub fn generate() -> Option<$what> {
                 match $crate::urandom() {
                     Some(id) => Some($what { id }),
@@ -96,6 +102,7 @@ macro_rules! generate_id {
                 }
             }
 
+            /// Construct an identifier from its human-readable form.
             pub fn from_human_readable(s: &str) -> Option<Self> {
                 let prefix = $prefix;
                 if !s.starts_with(prefix) {
@@ -107,19 +114,23 @@ macro_rules! generate_id {
                 }
             }
 
+            /// Construct a string corresponding to the human-readable form of this identifier.
             pub fn human_readable(&self) -> String {
                 let readable = $prefix.to_string();
                 readable + &$crate::encode(&self.id)
             }
 
+            /// Return the prefix-free encoding of this identifier.
             pub fn prefix_free_readable(&self) -> String {
                 $crate::encode(&self.id)
             }
 
+            /// Create a new identifier from raw bytes.
             pub fn new(id: [u8; $crate::BYTES]) -> Self {
                 Self { id }
             }
 
+            /// Increment the identifier by one.
             pub fn next(mut self) -> Self {
                 for byte_index in (0..$crate::BYTES).rev() {
                     self.id[byte_index] = self.id[byte_index].wrapping_add(1);
