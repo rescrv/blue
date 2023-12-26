@@ -141,7 +141,7 @@ end: ........ Unceremoniously end this adventure.
 /////////////////////////////////////////////// main ///////////////////////////////////////////////
 
 fn tell_tale(_file: &str, _line: u32, script: &str) {
-    let tale = ExpectTextTale::new(script).expect("could parse script");
+    let tale = ExpectTextTale::new(script, "> ").expect("could parse script");
     let mut player = Player::new(tale);
     player.bootstrap();
 }

@@ -161,7 +161,7 @@ fn main() -> Result<()> {
         Ok(())
     } else {
         for arg in args {
-            let tale = ExpectTextTale::new(arg)?;
+            let tale = ExpectTextTale::new(arg, "> ")?;
             let mut player = Player::new(tale);
             player.bootstrap();
         }

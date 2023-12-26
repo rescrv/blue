@@ -20,3 +20,8 @@ utilz = { path = "../utilz", version = "0.2" }
 name = "texttale"
 path = "examples/texttale.rs"
 required-features=["binaries"]
+
+[[example]]
+name = "menu"
+path = "examples/menu.rs"
+required-features=["binaries"]
