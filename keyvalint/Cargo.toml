@@ -7,5 +7,7 @@ edition = "2021"
 default = ["reference"]
 
 reference = []
+rocksdb = ["dep:rocksdb"]
 
 [dependencies]
+rocksdb = { version = "0.21", optional = true }

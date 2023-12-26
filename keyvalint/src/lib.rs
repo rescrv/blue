@@ -1,15 +1,106 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
+use std::sync::Arc;
 
 #[cfg(feature = "reference")]
 pub mod reference;
+#[cfg(feature = "rocksdb")]
+pub mod rocksdb;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 pub const MAX_KEY_LEN: usize = 1usize << 14; /* 16KiB */
 pub const MAX_VALUE_LEN: usize = 1usize << 15; /* 32KiB */
-pub const MAX_BATCH_LEN: usize = 1usize << 16; /* 64KiB */
+pub const MAX_BATCH_LEN: usize = (1usize << 20) - (1usize << 16); /* 1MiB - 64KiB */
+
+pub const DEFAULT_KEY: &[u8] = &[];
+pub const DEFAULT_TIMESTAMP: u64 = 0;
+pub const MIN_KEY: &[u8] = &[];
+pub const MAX_KEY: &[u8] = &[0xffu8; 11];
+
+// NOTE(rescrv):  This is an approximate size.  This constant isn't intended to be a maximum size,
+// but rather a size that, once exceeded, will cause the table to return a TableFull error.  The
+// general pattern is that the block will exceed this size by up to one key-value pair, so subtract
+// some slop.  64MiB is overkill, but will last for awhile.
+pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
+
+//////////////////////////////////////////////// Key ///////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct Key {
+    pub key: Vec<u8>,
+    pub timestamp: u64,
+}
+
+impl Default for Key {
+    fn default() -> Self {
+        Self {
+            key: DEFAULT_KEY.into(),
+            timestamp: DEFAULT_TIMESTAMP,
+        }
+    }
+}
+
+impl Eq for Key {}
+
+impl PartialEq for Key {
+    fn eq(&self, rhs: &Key) -> bool {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.eq(&rhs)
+    }
+}
+
+impl Ord for Key {
+    fn cmp(&self, rhs: &Key) -> std::cmp::Ordering {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.cmp(&rhs)
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, rhs: &Key) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+impl<'a> From<KeyRef<'a>> for Key {
+    fn from(kr: KeyRef<'a>) -> Self {
+        Self {
+            key: kr.key.into(),
+            timestamp: kr.timestamp,
+        }
+    }
+}
+
+impl<'a> From<KeyValueRef<'a>> for Key {
+    fn from(kvr: KeyValueRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+        }
+    }
+}
+
+impl From<KeyValuePair> for Key {
+    fn from(kvr: KeyValuePair) -> Self {
+        Self {
+            key: kvr.key,
+            timestamp: kvr.timestamp,
+        }
+    }
+}
+
+impl From<&KeyValuePair> for Key {
+    fn from(kvr: &KeyValuePair) -> Self {
+        Self {
+            key: kvr.key.clone(),
+            timestamp: kvr.timestamp,
+        }
+    }
+}
 
 ////////////////////////////////////////////// KeyRef //////////////////////////////////////////////
 
@@ -88,11 +179,73 @@ impl<'a, 'b: 'a> From<&'a KeyValueRef<'b>> for KeyRef<'a> {
     }
 }
 
+impl<'a> From<&'a Key> for KeyRef<'a> {
+    fn from(k: &'a Key) -> Self {
+        Self {
+            key: &k.key,
+            timestamp: k.timestamp,
+        }
+    }
+}
+
 impl<'a> From<&'a KeyValuePair> for KeyRef<'a> {
     fn from(kvp: &'a KeyValuePair) -> Self {
         Self {
             key: &kvp.key,
             timestamp: kvp.timestamp,
+        }
+    }
+}
+
+/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct KeyValuePair {
+    pub key: Vec<u8>,
+    pub timestamp: u64,
+    pub value: Option<Vec<u8>>,
+}
+
+impl Eq for KeyValuePair {}
+
+impl PartialEq for KeyValuePair {
+    fn eq(&self, rhs: &KeyValuePair) -> bool {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.eq(&rhs)
+    }
+}
+
+impl Ord for KeyValuePair {
+    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
+        let lhs: KeyRef = self.into();
+        let rhs: KeyRef = rhs.into();
+        lhs.cmp(&rhs)
+    }
+}
+
+impl PartialOrd for KeyValuePair {
+    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+
+impl<'a> From<KeyRef<'a>> for KeyValuePair {
+    fn from(kvr: KeyRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: None,
+        }
+    }
+}
+
+impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
+    fn from(kvr: KeyValueRef<'a>) -> Self {
+        Self {
+            key: kvr.key.into(),
+            timestamp: kvr.timestamp,
+            value: kvr.value.map(|v| v.into()),
         }
     }
 }
@@ -171,72 +324,9 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
     }
 }
 
-/////////////////////////////////////// KeyValuePair ///////////////////////////////////////
-
-#[derive(Clone, Debug)]
-pub struct KeyValuePair {
-    pub key: Vec<u8>,
-    pub timestamp: u64,
-    pub value: Option<Vec<u8>>,
-}
-
-impl KeyValuePair {
-    pub fn from_key_value_ref(kvr: &KeyValueRef<'_>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
-        }
-    }
-}
-
-impl Eq for KeyValuePair {}
-
-impl PartialEq for KeyValuePair {
-    fn eq(&self, rhs: &KeyValuePair) -> bool {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.eq(&rhs)
-    }
-}
-
-impl Ord for KeyValuePair {
-    fn cmp(&self, rhs: &KeyValuePair) -> std::cmp::Ordering {
-        let lhs: KeyRef = self.into();
-        let rhs: KeyRef = rhs.into();
-        lhs.cmp(&rhs)
-    }
-}
-
-impl PartialOrd for KeyValuePair {
-    fn partial_cmp(&self, rhs: &KeyValuePair) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(rhs))
-    }
-}
-
-impl<'a> From<KeyRef<'a>> for KeyValuePair {
-    fn from(kvr: KeyRef<'a>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: None,
-        }
-    }
-}
-
-impl<'a> From<KeyValueRef<'a>> for KeyValuePair {
-    fn from(kvr: KeyValueRef<'a>) -> Self {
-        Self {
-            key: kvr.key.into(),
-            timestamp: kvr.timestamp,
-            value: kvr.value.map(|v| v.into()),
-        }
-    }
-}
-
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
-pub trait WriteBatch: Default {
+pub trait WriteBatch {
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]);
     fn del(&mut self, key: &[u8], timestamp: u64);
 }
@@ -245,45 +335,34 @@ pub trait WriteBatch: Default {
 
 pub trait KeyValueStore {
     type Error: Debug;
-    type WriteBatch: WriteBatch;
+    type WriteBatch<'a>: WriteBatch;
+
+    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error>;
+    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error>;
+    fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Self::Error>;
+}
+
+impl<K: KeyValueStore> KeyValueStore for Arc<K> {
+    type Error = K::Error;
+    type WriteBatch<'a> = K::WriteBatch<'a>;
 
     fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error> {
-        let mut wb = Self::WriteBatch::default();
-        wb.put(key, timestamp, value);
-        self.write(wb)
+        K::put(self, key, timestamp, value)
     }
 
     fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error> {
-        let mut wb = Self::WriteBatch::default();
-        wb.del(key, timestamp);
-        self.write(wb)
+        K::del(self, key, timestamp)
     }
 
-    fn write(&self, write_batch: Self::WriteBatch) -> Result<(), Self::Error>;
-}
-
-/////////////////////////////////////////// KeyValueLoad ///////////////////////////////////////////
-
-pub trait KeyValueLoad {
-    type Error: Debug;
-    type Cursor<'a>: Cursor
-    where
-        Self: 'a;
-
-    fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<&'_ [u8]>, Self::Error>;
-    fn range_scan<R: RangeBounds<[u8]>>(
-        &self,
-        range: R,
-        timestamp: u64,
-    ) -> Result<Self::Cursor<'_>, Self::Error>;
+    fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Self::Error> {
+        K::write(self, write_batch)
+    }
 }
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 pub trait Cursor {
-    type Error;
-
-    fn reset(&mut self) -> Result<(), Self::Error>;
+    type Error: Debug;
 
     fn seek_to_first(&mut self) -> Result<(), Self::Error>;
     fn seek_to_last(&mut self) -> Result<(), Self::Error>;
@@ -294,6 +373,135 @@ pub trait Cursor {
 
     fn key(&self) -> Option<KeyRef>;
     fn value(&self) -> Option<&'_ [u8]>;
+
+    fn key_value(&self) -> Option<KeyValueRef> {
+        if let (Some(kr), value) = (self.key(), self.value()) {
+            Some(KeyValueRef {
+                key: kr.key,
+                timestamp: kr.timestamp,
+                value,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl Cursor for () {
+    type Error = ();
+
+    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn seek(&mut self, _: &[u8]) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn prev(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn next(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn key(&self) -> Option<KeyRef> {
+        None
+    }
+
+    fn value(&self) -> Option<&'_ [u8]> {
+        None
+    }
+}
+
+impl<E: Debug> Cursor for Box<dyn Cursor<Error = E>> {
+    type Error = E;
+
+    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+        self.as_mut().seek_to_first()
+    }
+
+    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+        self.as_mut().seek_to_last()
+    }
+
+    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
+        self.as_mut().seek(key)
+    }
+
+    fn prev(&mut self) -> Result<(), Self::Error> {
+        self.as_mut().prev()
+    }
+
+    fn next(&mut self) -> Result<(), Self::Error> {
+        self.as_mut().next()
+    }
+
+    fn key(&self) -> Option<KeyRef> {
+        self.as_ref().key()
+    }
+
+    fn value(&self) -> Option<&'_ [u8]> {
+        self.as_ref().value()
+    }
+}
+
+/////////////////////////////////////////// KeyValueLoad ///////////////////////////////////////////
+
+pub trait KeyValueLoad {
+    type Error: Debug;
+    type RangeScan<'a>: Cursor
+    where
+        Self: 'a;
+
+    fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<Vec<u8>>, Self::Error> {
+        let mut is_tombstone = false;
+        self.load(key, timestamp, &mut is_tombstone)
+    }
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Self::Error>;
+
+    fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+        timestamp: u64,
+    ) -> Result<Self::RangeScan<'_>, Self::Error>;
+}
+
+impl<K: KeyValueLoad> KeyValueLoad for Arc<K> {
+    type Error = K::Error;
+    type RangeScan<'a> = K::RangeScan<'a>
+    where
+        Self: 'a;
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Self::Error> {
+        K::load(self, key, timestamp, is_tombstone)
+    }
+
+    fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+        timestamp: u64,
+    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+        K::range_scan(self, start_bound, end_bound, timestamp)
+    }
 }
 
 /////////////////////////////////////////// compare_bytes //////////////////////////////////////////
