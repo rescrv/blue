@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn basics() {
         let lockfile = Lockfile::lock("LOCKFILE.basics").expect("no error expected");
-        if !lockfile.is_some() {
+        if lockfile.is_none() {
             panic!("should have returned a valid lock");
         }
         drop(lockfile);
@@ -131,10 +131,10 @@ mod tests {
     fn cannot_lock_twice() {
         let lockfile1 = Lockfile::lock("LOCKFILE.cannot_lock_twice").expect("no error expected");
         let lockfile2 = Lockfile::lock("LOCKFILE.cannot_lock_twice").expect("no error expected");
-        if !lockfile1.is_some() {
+        if lockfile1.is_none() {
             panic!("first lock should have succeeded");
         }
-        if !lockfile2.is_none() {
+        if lockfile2.is_some() {
             panic!("second lock should have failed");
         }
     }
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn wait() {
         let lockfile = Lockfile::wait("LOCKFILE.wait").expect("no error expected");
-        if !lockfile.is_some() {
+        if lockfile.is_none() {
             panic!("should have returned a valid lock");
         }
         drop(lockfile);
