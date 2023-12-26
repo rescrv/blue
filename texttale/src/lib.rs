@@ -14,9 +14,13 @@ use rustyline::Editor;
 /// as a string.  Will return None when the user kills the session or the underlying writer is
 /// exhausted.
 pub trait TextTale: Write {
+    /// Handle an unexpected EOF.
     fn unexpected_eof(&mut self);
+    /// Get the current prompt.
     fn get_prompt(&mut self) -> &'static str;
+    /// Set the current prompt.
     fn set_prompt(&mut self, prompt: &'static str);
+    /// Return the next command, according to the texttale's rules.
     fn next_command(&mut self) -> Option<String>;
 }
 
@@ -29,6 +33,7 @@ pub struct ShellTextTale {
 }
 
 impl ShellTextTale {
+    /// Create a new texttale shell, using the provided readline editor and prompt.
     pub fn new(rl: Editor<(), MemHistory>, prompt: &'static str) -> Self {
         Self { rl, prompt }
     }
@@ -85,6 +90,8 @@ pub struct ExpectTextTale {
 }
 
 impl ExpectTextTale {
+    /// Create a new expect text tale that reads from script and compares the output of the
+    /// texttale against the expected output in the script.
     pub fn new<P: AsRef<Path>>(script: P, prompt: &'static str) -> Result<Self, std::io::Error> {
         let script = read_to_string(script)?;
         let input_lines = script.lines().map(|s| s.to_string()).collect();
@@ -201,8 +208,11 @@ impl TextTale for ExpectTextTale {
 
 /// A [StoryElement] dictates what to do next in the story.
 pub enum StoryElement {
+    /// Continue with the story.
     Continue,
+    /// Return from the current function defined by the story macro.
     Return,
+    /// Print the provided help string before the next prompt.
     PrintHelp,
 }
 
@@ -333,8 +343,11 @@ macro_rules! story {
 
 /// A [Menu] dictates what to do next within a menu.
 pub enum Menu {
+    /// Continue to the next prompt in the menu.
     Continue,
+    /// Retry the current prompt; usually this is used for data that doesn't validate.
     Retry,
+    /// Announce an unexpected end-of-file.
     UnexpectedEof,
 }
 
