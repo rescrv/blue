@@ -21,22 +21,22 @@ use zerror_derive::ZerrorCore;
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 #[allow(non_snake_case)]
-fn LOCKFILE<P: AsRef<Path>>(root: P) -> PathBuf {
+pub fn LOCKFILE<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("LOCKFILE")
 }
 
 #[allow(non_snake_case)]
-fn MANIFEST<P: AsRef<Path>>(root: P) -> PathBuf {
+pub fn MANIFEST<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("MANIFEST")
 }
 
 #[allow(non_snake_case)]
-fn TEMPORARY<P: AsRef<Path>>(root: P) -> PathBuf {
+pub fn TEMPORARY<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("MANIFEST.tmp")
 }
 
 #[allow(non_snake_case)]
-fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
+pub fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
     root.as_ref()
         .to_path_buf()
         .join(format!("MANIFEST.{}", idx))
@@ -44,8 +44,13 @@ fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
 
 const TX_SEPARATOR: &str = "--------";
 
-fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
-    let path = path.as_ref().as_os_str().to_str();
+pub fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
+    let path = match path.as_ref().file_name() {
+        Some(path) => path.to_str(),
+        None => {
+            return None;
+        }
+    };
     let path = match path {
         Some(path) => path,
         None => {
@@ -277,6 +282,11 @@ impl Manifest {
     /// Iterate over the log's contents (in-memory).
     pub fn strs(&self) -> impl Iterator<Item = &String> {
         self.strs.iter()
+    }
+
+    /// Get the provided info field.
+    pub fn info(&self, c: char) -> Option<&String> {
+        self.info.get(&c)
     }
 
     /// Number of bytes used for this log.
@@ -515,10 +525,18 @@ impl Edit {
         Ok(())
     }
 
+    pub fn added(&self) -> impl Iterator<Item = &String> {
+        self.add_strs.iter()
+    }
+
     pub fn rm(&mut self, s: &str) -> Result<(), Error> {
         let s = Self::check_str(s)?;
         self.rm_strs.insert(s);
         Ok(())
+    }
+
+    pub fn rmed(&self) -> impl Iterator<Item = &String> {
+        self.rm_strs.iter()
     }
 
     pub fn info(&mut self, c: char, s: &str) -> Result<(), Error> {
@@ -526,6 +544,10 @@ impl Edit {
         let s = Self::check_str(s)?;
         self.info.insert(c, s);
         Ok(())
+    }
+
+    pub fn get_info(&self, c: char) -> Option<&String> {
+        self.info.get(&c)
     }
 
     fn check_str(s: &str) -> Result<String, Error> {
@@ -692,9 +714,11 @@ mod tests {
     #[test]
     fn not_exist_fail_if_not_exist() {
         let root = test_root(module_path!(), line!());
-        let mut opts = ManifestOptions::default();
-        opts.fail_if_not_exist = true;
-        if let Err(Error::ManifestNotExist { .. }) = Manifest::open(opts, &root) {
+        let opts = ManifestOptions {
+            fail_if_not_exist: true,
+            ..Default::default()
+        };
+        if let Err(Error::ManifestNotExist { .. }) = Manifest::open(opts, root) {
         } else {
             panic!("bad case");
         }
@@ -766,6 +790,27 @@ a4e79c62+thing two
 ",
             read_to_string(root.join("MANIFEST.1")).unwrap()
         );
+    }
+
+    #[test]
+    fn open_after_rollover() {
+        let root = test_root(module_path!(), line!());
+        let opts = ManifestOptions::default();
+        let mut mani = Manifest::open(opts.clone(), &root).unwrap();
+        let mut edit = Edit::default();
+        edit.add("thing one").unwrap();
+        edit.add("thing two").unwrap();
+        mani.apply(edit).unwrap();
+        assert_eq!(
+            "dcab9d28+thing one
+a4e79c62+thing two
+--------
+",
+            read_to_string(root.join("MANIFEST")).unwrap()
+        );
+        mani.rollover().unwrap();
+        drop(mani);
+        let _mani = Manifest::open(opts.clone(), &root).unwrap();
     }
 
     #[test]
