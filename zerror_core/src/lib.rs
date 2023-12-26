@@ -19,10 +19,12 @@ static DEFAULT_ERROR_CORE: Counter = Counter::new("zerror_core.default");
 static DEFAULT_ERROR_CORE_MONITOR: Stationary =
     Stationary::new("zerror_core.default", &DEFAULT_ERROR_CORE);
 
+/// Register the monitors for this crate.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&DEFAULT_ERROR_CORE_MONITOR);
 }
 
+/// Register the biometrics for this crate.
 pub fn register_biometrics(collector: Collector) {
     collector.register_counter(&DEFAULT_ERROR_CORE);
 }
@@ -92,6 +94,7 @@ impl ErrorCore {
         }
     }
 
+    /// Print the long-form of the error.
     pub fn long_form(&self) -> String {
         let mut s = String::default();
         for token in self.internals.toks.iter() {
@@ -113,6 +116,7 @@ impl ErrorCore {
         s.trim().to_owned() + "\n"
     }
 
+    /// Set the token associated with identifier.
     pub fn set_token(&mut self, identifier: &str, value: &str) {
         self.internals.toks.push(Token {
             identifier: identifier.to_owned(),
@@ -120,6 +124,7 @@ impl ErrorCore {
         });
     }
 
+    /// Sets a URL under an identifier.
     pub fn set_url(&mut self, identifier: &str, url: &str) {
         self.internals.urls.push(Url {
             identifier: identifier.to_owned(),
@@ -127,6 +132,7 @@ impl ErrorCore {
         });
     }
 
+    /// Sets a variable that's debug-printable.
     pub fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
         self.internals.vars.push(Variable {
             identifier: variable.to_owned(),
