@@ -60,11 +60,14 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
 #[macro_export]
 macro_rules! iotoz {
     ($error:ident) => {
+        /// IO to Z.
         pub trait IoToZ<T>: Sized
         where
             $error: Z,
         {
+            /// Convert the error into the result type.
             fn as_z(self) -> Result<T, $error>;
+            /// A pretty unwrap method.
             fn pretty_unwrap(self) -> T;
         }
 

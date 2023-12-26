@@ -104,12 +104,14 @@ impl EnumVisitor for CoreMethodsVisitor {
         }
         quote! {
             impl #ty_name {
+                /// Get an immutable reference to this core.
                 pub fn core(&self) -> &::zerror_core::ErrorCore {
                     match self {
                         #variant_sum
                     }
                 }
 
+                /// Get a mutable reference to this core.
                 pub fn core_mut(&mut self) -> &mut ::zerror_core::ErrorCore {
                     match self {
                         #variant_sum
