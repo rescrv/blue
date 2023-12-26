@@ -5,16 +5,7 @@ use toml::Table;
 
 const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb", "scrunch", "tuple_db"];
 
-const EXCLUDE_DIRS: &[&str] = &[
-    ".git",
-    "target",
-    "biometrics_tuple_db",
-    "napkins",
-    "paxos_pb",
-    // TODO(rescrv): Stuff to integrate eventually.
-    "scrunch",
-    "statslicer",
-];
+const EXCLUDE_DIRS: &[&str] = &[".git", "target", "napkins", "statslicer"];
 
 fn workspace_members() -> Vec<String> {
     let workspace_text = read_to_string("Cargo.toml").expect("reading workspace toml");
@@ -50,6 +41,7 @@ fn workspace_members() -> Vec<String> {
             );
         }
     }
+    members.sort();
     members
 }
 
