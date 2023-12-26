@@ -5,6 +5,7 @@
 //! `SslStream<TcpStream>`, allowing parallel sending and processing of messages.  The general
 //! pattern is to lock the send channel, send data, and then use `sync42::wait_list::WaitList` to
 //! synchronize receivers.
+#![allow(missing_docs)]
 
 use std::net::{TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
