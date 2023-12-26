@@ -1,3 +1,5 @@
+//! Compute the inverse setsum for every hash provided on the command line.
+
 use setsum::Setsum;
 
 fn main() {
