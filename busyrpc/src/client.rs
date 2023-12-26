@@ -13,7 +13,7 @@ use buffertk::{stack_pack, Unpacker};
 
 use rpc_pb::sd::{Host, HostID};
 
-use sync42::monitor::{Coordination, CriticalSection, Monitor};
+use sync42::monitor::{Monitor, MonitorCore};
 use sync42::spin_lock::SpinLock;
 use sync42::state_hash_table::{Handle, StateHashTable};
 
@@ -196,41 +196,6 @@ struct ChannelCoordination {
     enqueued_requests: LinkedList<Vec<u8>>,
 }
 
-impl Coordination<MonitorState<'_>> for ChannelCoordination {
-    fn acquire<'a: 'b, 'b>(
-        mut mtx: MutexGuard<'a, Self>,
-        ms: &'b mut MonitorState<'_>,
-    ) -> (bool, MutexGuard<'a, Self>) {
-        mtx.enqueued_requests.append(&mut ms.requests);
-        while mtx.has_sender && !ms.sht.is_set() {
-            mtx.senders_waiting += 1;
-            mtx = ms.cv.wait(mtx).unwrap();
-            mtx.senders_waiting -= 1;
-        }
-        if ms.sht.is_set() {
-            if mtx.senders_waiting > 0 {
-                ms.cv.notify_one();
-            }
-            (false, mtx)
-        } else {
-            ms.requests.append(&mut mtx.enqueued_requests);
-            mtx.has_sender = true;
-            (true, mtx)
-        }
-    }
-
-    fn release<'a: 'b, 'b>(
-        mut mtx: MutexGuard<'a, Self>,
-        ms: &'b mut MonitorState<'_>,
-    ) -> MutexGuard<'a, Self> {
-        mtx.has_sender = false;
-        if mtx.senders_waiting > 0 {
-            ms.cv.notify_one();
-        }
-        mtx
-    }
-}
-
 ////////////////////////////////////// ChannelCriticalSection //////////////////////////////////////
 
 struct ChannelCriticalSection {
@@ -279,17 +244,63 @@ impl ChannelCriticalSection {
     }
 }
 
-impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
-    fn critical_section<'a: 'b, 'b>(&'a mut self, ms: &'b mut MonitorState<'_>) {
+//////////////////////////////////////// ChannelMonitorCore ////////////////////////////////////////
+
+#[derive(Debug, Default)]
+struct ChannelMonitorCore;
+
+impl<'c> MonitorCore<ChannelCoordination, ChannelCriticalSection, MonitorState<'c>>
+    for ChannelMonitorCore
+{
+    fn acquire<'a: 'b, 'b>(
+        &self,
+        mut mtx: MutexGuard<'a, ChannelCoordination>,
+        ms: &'b mut MonitorState<'_>,
+    ) -> (bool, MutexGuard<'a, ChannelCoordination>) {
+        mtx.enqueued_requests.append(&mut ms.requests);
+        while mtx.has_sender && !ms.sht.is_set() {
+            mtx.senders_waiting += 1;
+            mtx = ms.cv.wait(mtx).unwrap();
+            mtx.senders_waiting -= 1;
+        }
+        if ms.sht.is_set() {
+            if mtx.senders_waiting > 0 {
+                ms.cv.notify_one();
+            }
+            (false, mtx)
+        } else {
+            ms.requests.append(&mut mtx.enqueued_requests);
+            mtx.has_sender = true;
+            (true, mtx)
+        }
+    }
+
+    fn release<'a: 'b, 'b>(
+        &self,
+        mut mtx: MutexGuard<'a, ChannelCoordination>,
+        ms: &'b mut MonitorState<'_>,
+    ) -> MutexGuard<'a, ChannelCoordination> {
+        mtx.has_sender = false;
+        if mtx.senders_waiting > 0 {
+            ms.cv.notify_one();
+        }
+        mtx
+    }
+
+    fn critical_section<'a: 'b, 'b>(
+        &self,
+        crit: &'a mut ChannelCriticalSection,
+        ms: &'b mut MonitorState<'_>,
+    ) {
         let mut requests = LinkedList::default();
         std::mem::swap(&mut requests, &mut ms.requests);
         for req in requests.into_iter() {
-            if let Err(err) = self.channel.send(&req) {
+            if let Err(err) = crit.channel.send(&req) {
                 ms.sht.set_error(err);
                 return;
             }
         }
-        if self.close {
+        if crit.close {
             ms.sht.set_error(rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: "transport closed".to_owned(),
@@ -299,7 +310,7 @@ impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
         let mut events = libc::POLLIN | libc::POLLOUT | libc::POLLERR | libc::POLLHUP;
         while !ms.sht.is_set() {
             let mut pfd = libc::pollfd {
-                fd: self.channel.as_raw_fd(),
+                fd: crit.channel.as_raw_fd(),
                 events,
                 revents: 0,
             };
@@ -311,16 +322,16 @@ impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
                 }
             }
             if pfd.revents & libc::POLLIN != 0 {
-                while !self.do_read(ms) && !ms.sht.has_error() {
+                while !crit.do_read(ms) && !ms.sht.has_error() {
                     READ_SPIN.click();
                 }
                 READ_TO_COMPLETION.click();
             }
-            if pfd.revents & libc::POLLOUT != 0 && !self.do_write(ms) {
+            if pfd.revents & libc::POLLOUT != 0 && !crit.do_write(ms) {
                 events &= !libc::POLLOUT;
             }
             if pfd.revents & (libc::POLLERR | libc::POLLHUP) != 0 {
-                self.close = true;
+                crit.close = true;
             }
         }
     }
@@ -329,7 +340,8 @@ impl CriticalSection<MonitorState<'_>> for ChannelCriticalSection {
 ///////////////////////////////////////// MonitoredChannel /////////////////////////////////////////
 
 struct MonitoredChannel<'a: 'b, 'b> {
-    monitor: Monitor<MonitorState<'b>, ChannelCoordination, ChannelCriticalSection>,
+    monitor:
+        Monitor<ChannelCoordination, ChannelCriticalSection, MonitorState<'b>, ChannelMonitorCore>,
     available: Condvar,
     _a: std::marker::PhantomData<&'a ()>,
 }
@@ -509,6 +521,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let monitored_channel = MonitoredChannel {
             monitor: Monitor::new(
+                ChannelMonitorCore,
                 ChannelCoordination::default(),
                 ChannelCriticalSection {
                     channel,

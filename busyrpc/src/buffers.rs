@@ -303,7 +303,7 @@ mod recv_buffer {
             .unwrap();
         if let RecvBuffer::Body { crc, buf, idx } = &recv_buf {
             assert_eq!(3653830891, *crc);
-            let buf: &[u8] = &buf.as_ref().unwrap();
+            let buf: &[u8] = buf.as_ref().unwrap();
             assert_eq!(&[0u8; 16], buf);
             assert_eq!(0, *idx);
         } else {

@@ -9,10 +9,6 @@ use biometrics::{Collector, Counter};
 
 use buffertk::{stack_pack, Unpackable};
 
-use prototk::field_types::message;
-
-use indicio::Trace;
-
 use zerror_core::ErrorCore;
 
 use rpc_pb::{Context, Error, Request, Response, Status};
@@ -191,11 +187,11 @@ impl Internals {
                 Ok(None) => {
                     continue 'serving;
                 }
-                Err(err) => {
+                Err(_err) => {
                     POLL_ERROR.click();
-                    Trace::new("busyrpc.poll.error")
-                        .with_value::<message<Error>, 1>(err)
-                        .finish();
+                    //Trace::new("busyrpc.poll.error")
+                    //    .with_value::<message<Error>, 1>(err)
+                    //    .finish();
                     continue 'serving;
                 }
             };
@@ -204,7 +200,7 @@ impl Internals {
                 Some(chan) => chan,
                 None => {
                     GET_CHANNEL_FAILED.click();
-                    Trace::new("busyrpc.poll.get_channel_failed").finish();
+                    //Trace::new("busyrpc.poll.get_channel_failed").finish();
                     continue 'serving;
                 }
             };
@@ -212,11 +208,11 @@ impl Internals {
             if events & POLLOUT != 0 {
                 SAW_POLLOUT.click();
                 events &= !POLLOUT;
-                if let Err(err) = chan_guard.do_send_work() {
+                if let Err(_err) = chan_guard.do_send_work() {
                     SEND_FAILED.click();
-                    Trace::new("busyrpc.send.error")
-                        .with_value::<message<Error>, 1>(err)
-                        .finish();
+                    //Trace::new("busyrpc.send.error")
+                    //    .with_value::<message<Error>, 1>(err)
+                    //    .finish();
                     events = POLLERR;
                 } else if chan_guard.needs_write() {
                     NEEDS_WRITE.click();
@@ -235,11 +231,11 @@ impl Internals {
                 let fd = chan_guard.as_raw_fd();
                 drop(chan_guard);
                 self.cancel_channel(fd);
-            } else if let Err(err) = self.pollster.arm(fd, events & POLLOUT != 0) {
+            } else if let Err(_err) = self.pollster.arm(fd, events & POLLOUT != 0) {
                 POLL_ERROR.click();
-                Trace::new("busyrpc.poll.error")
-                    .with_value::<message<Error>, 1>(err)
-                    .finish();
+                //Trace::new("busyrpc.poll.error")
+                //    .with_value::<message<Error>, 1>(err)
+                //    .finish();
             }
         }
     }
@@ -250,20 +246,20 @@ impl Internals {
         let channel_p = Arc::clone(&channel);
         self.channels.lock().unwrap().insert(fd, channel);
         let mut chan_guard = channel_p.lock().unwrap();
-        if let Err(err) = self.pollster.arm(fd, true) {
+        if let Err(_err) = self.pollster.arm(fd, true) {
             ADD_CHANNEL_ARM_FAILED.click();
-            Trace::new("busyrpc.poll.error")
-                .with_value::<message<rpc_pb::Error>, 1>(err)
-                .finish();
+            //Trace::new("busyrpc.poll.error")
+            //    .with_value::<message<rpc_pb::Error>, 1>(err)
+            //    .finish();
         };
         if self.do_recv_work(&mut chan_guard) {
             ADD_CHANNEL_RECV_FAILED.click();
             self.channels.lock().unwrap().remove(&fd);
-        } else if let Err(err) = self.pollster.arm(fd, true) {
+        } else if let Err(_err) = self.pollster.arm(fd, true) {
             POLL_ERROR.click();
-            Trace::new("busyrpc.poll.error")
-                .with_value::<message<Error>, 1>(err)
-                .finish();
+            //Trace::new("busyrpc.poll.error")
+            //    .with_value::<message<Error>, 1>(err)
+            //    .finish();
         }
     }
 
@@ -285,20 +281,20 @@ impl Internals {
         let mut error = false;
         match chan.do_recv_work(f) {
             Ok(_) => {}
-            Err(err) => {
+            Err(_err) => {
                 RECV_FAILED.click();
-                Trace::new("busyrpc.recv.error")
-                    .with_value::<message<Error>, 1>(err)
-                    .finish();
+                //Trace::new("busyrpc.recv.error")
+                //    .with_value::<message<Error>, 1>(err)
+                //    .finish();
                 error = true;
             }
         };
         for buffer in buffers.into_iter() {
-            if let Err(err) = self.handle_rpc(chan, buffer) {
+            if let Err(_err) = self.handle_rpc(chan, buffer) {
                 HANDLE_RPC_FAILED.click();
-                Trace::new("busyrpc.rpc.error")
-                    .with_value::<message<Error>, 1>(err)
-                    .finish();
+                //Trace::new("busyrpc.rpc.error")
+                //    .with_value::<message<Error>, 1>(err)
+                //    .finish();
                 error = true;
             }
         }
@@ -441,31 +437,31 @@ impl Server {
                     let stream = match acceptor.accept(stream) {
                         Ok(stream) => stream,
                         Err(err) => {
-                            let err = rpc_pb::Error::TransportFailure {
+                            let _err = rpc_pb::Error::TransportFailure {
                                 core: ErrorCore::default(),
                                 what: err.to_string(),
                             };
-                            Trace::new("busyrpc.accept.error")
-                                .with_value::<message<Error>, 1>(err)
-                                .finish();
+                            //Trace::new("busyrpc.accept.error")
+                            //    .with_value::<message<Error>, 1>(err)
+                            //    .finish();
                             continue 'listening;
                         }
                     };
                     DO_ACCEPT.click();
                     match self.add_channel(stream) {
                         Ok(_) => {}
-                        Err(err) => {
-                            Trace::new("busyrpc.add_channel.error")
-                                .with_value::<message<Error>, 1>(err)
-                                .finish();
+                        Err(_err) => {
+                            //Trace::new("busyrpc.add_channel.error")
+                            //    .with_value::<message<Error>, 1>(err)
+                            //    .finish();
                             continue 'listening;
                         }
                     };
                 }
-                Err(err) => {
-                    Trace::new("busyrpc.listen.error")
-                        .with_value::<message<Error>, 1>(err.into())
-                        .finish();
+                Err(_err) => {
+                    //Trace::new("busyrpc.listen.error")
+                    //    .with_value::<message<Error>, 1>(err.into())
+                    //    .finish();
                 }
             }
         }

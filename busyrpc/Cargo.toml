@@ -9,7 +9,8 @@ license = "Apache-2.0"
 [features]
 default = ["binaries"]
 
-binaries = ["arrrg", "arrrg_derive", "getopts", "guacamole"]
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
 libc = "0.2"
