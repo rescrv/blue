@@ -6,4 +6,19 @@ edition = "2021"
 description = "Buffertk provides tooling for serializing and deserializing data."
 license = "Apache-2.0"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
+
+[[bin]]
+name = "unvarint"
+path = "src/bin/unvarint.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "varint"
+path = "src/bin/varint.rs"
+required-features=["binaries"]

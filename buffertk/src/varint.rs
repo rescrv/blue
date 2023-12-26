@@ -430,9 +430,7 @@ mod tests {
             assert_eq!(bytes, enc.len(), "human got test case wrong?");
             assert!(enc.len() <= 10, "human got test harness wrong?");
             let mut buf: [u8; 10] = [0xff; 10];
-            for i in 0..enc.len() {
-                buf[i] = enc[i];
-            }
+            buf[..enc.len()].copy_from_slice(enc);
             let (x, rem): (v64, &[u8]) = Unpackable::unpack(&buf).unwrap();
             let v: v64 = num.into();
             assert_eq!(v, x, "human got decode wrong?");
