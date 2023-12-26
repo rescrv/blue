@@ -20,6 +20,8 @@ static NEW_WAIT_LIST: Counter = Counter::new("sync42.wait_list.new");
 
 static NOTIFY_HEAD: Counter = Counter::new("sync42.wait_list.notify_head");
 static NOTIFY_HEAD_DROPPED: Counter = Counter::new("sync42.wait_list.notify_head_dropped");
+static NOTIFY_HEAD_GUARD: Counter = Counter::new("sync42.wait_list.notify_head_guard");
+static NOTIFY_WAITER_AVAILABLE: Counter = Counter::new("sync42.wait_list.notify_waiter_available");
 static WAITING_FOR_WAITERS: Counter = Counter::new("sync42.wait_list.waiting_for_waiters");
 
 static LINK: Counter = Counter::new("sync42.wait_list.link");
@@ -30,6 +32,8 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&NEW_WAIT_LIST);
     collector.register_counter(&NOTIFY_HEAD);
     collector.register_counter(&NOTIFY_HEAD_DROPPED);
+    collector.register_counter(&NOTIFY_HEAD_GUARD);
+    collector.register_counter(&NOTIFY_WAITER_AVAILABLE);
     collector.register_counter(&WAITING_FOR_WAITERS);
     collector.register_counter(&LINK);
     collector.register_counter(&UNLINK);
@@ -189,6 +193,7 @@ impl<T: Clone> WaitList<T> {
             state.waiting_for_available > 0
         };
         if notify {
+            NOTIFY_WAITER_AVAILABLE.click();
             self.wait_waiter_available.notify_one();
         }
         guard.owned = false;
@@ -198,8 +203,7 @@ impl<T: Clone> WaitList<T> {
 
     /// Notify the first waiter in the list.  Notification is dropped if there is no waiter.
     pub fn notify_head(&self) {
-        let mut state = self.state.lock().unwrap();
-        state = self.assert_invariants(state);
+        let state = self.state.lock().unwrap();
         if state.head < state.tail {
             NOTIFY_HEAD.click();
             self.index_waitlist(state.head).cond.notify_one();
@@ -279,7 +283,8 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
 
     /// True iff the thread is the lowest-index thread in the system.
     pub fn is_head(&mut self) -> bool {
-        let state = self.list.state.lock().unwrap();
+        let mut state = self.list.state.lock().unwrap();
+        state = self.list.assert_invariants(state);
         state.head == self.index
     }
 
@@ -332,7 +337,7 @@ impl<'a, T: Clone + 'a> WaitGuard<'a, T> {
 impl<'a, T: Clone + 'a> Drop for WaitGuard<'a, T> {
     fn drop(&mut self) {
         if self.owned {
-            self.list._unlink(self)
+            self.list._unlink(self);
         }
     }
 }

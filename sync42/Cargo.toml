@@ -6,7 +6,35 @@ edition = "2021"
 description = "sync42 provides synchronization tools."
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["binaries"]
+
+binaries = []
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.4" }
+
+[[example]]
+name = "clicker"
+path = "examples/clicker.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "collector"
+path = "examples/collector.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "monitor"
+path = "examples/monitor.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "spin_lock"
+path = "examples/spin_lock.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "work_coalescing_queue"
+path = "examples/work_coalescing_queue.rs"
+required-features=["binaries"]

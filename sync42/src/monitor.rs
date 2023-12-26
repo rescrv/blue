@@ -1,7 +1,7 @@
 //! Implementation of a monitor in classic Hoare-style.
 //!
 //! A monitor allows for synchronization that is more concurrent than just using mutexes and
-//! condition variables.  Concretely, [Monitor] breaks the task into the coordination and the
+//! condition variables.  Concretely, [MonitorCore] breaks the task into the coordination and the
 //! critical section.  Threads can concurrently coordinate the next-best thread to enter the
 //! citical section without blocking the critical section from executing.
 
@@ -9,52 +9,56 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-/// Coordination tracks acquisition and release of the monitor.  It is an error that will induce
-/// panic to allow multiple threads to be between [`Coordination::acquire`] and [`Coordination::release`] calls.
-pub trait Coordination<T> {
-    /// Acquire the monitor.  Returns true if and only if the monitor can enter the critical
-    /// section.
+/// The core traits of the monitor.  Acquire the monitor, enter the critical section, release the
+/// monitor.
+pub trait MonitorCore<COORD, CRIT, WS> {
+    /// Acquire the monitor.  Returns true iff the thread can enter the critical section.
     fn acquire<'a: 'b, 'b>(
-        guard: MutexGuard<'a, Self>,
-        t: &'b mut T,
-    ) -> (bool, MutexGuard<'a, Self>);
-    /// Release the monitor.  In a proper monitor [`Coordination::release`] will always follow a call to
-    /// acquire on the same thread.  Release is responsible for waking threads blocked in acquire.
-    fn release<'a: 'b, 'b>(guard: MutexGuard<'a, Self>, t: &'b mut T) -> MutexGuard<'a, Self>;
+        &self,
+        guard: MutexGuard<'a, COORD>,
+        t: &'b mut WS,
+    ) -> (bool, MutexGuard<'a, COORD>);
+
+    /// Release the monitor.  In a proper monitor release will always follow a call to acquire by
+    /// the same thread.  Release is responsible for waking threads blocked in acquire.
+    fn release<'a: 'b, 'b>(
+        &self,
+        guard: MutexGuard<'a, COORD>,
+        t: &'b mut WS,
+    ) -> MutexGuard<'a, COORD>;
+
+    /// Critical section captures the mutually-exclusive section of the monitor.  The monitor
+    /// ensures that there will only be one thread in the at a time, even in the case of
+    /// acquire/release bugs.
+    fn critical_section<'a: 'b, 'b>(&self, crit: &'a mut CRIT, t: &'b mut WS);
 }
 
-/// Critical section captures the mutually-exclusive section of the monitor.  The monitor ensures
-/// that there will only be one thread in the [`CriticalSection::critical_section`] at a time.
-pub trait CriticalSection<T> {
-    fn critical_section<'a: 'b, 'b>(&'a mut self, t: &'b mut T);
-}
-
-/// Monitor provides the monitor pattern.  It will synchronize calls to acquire and release and the
-/// critical section so that at most one thread is in the critical section at once.
-pub struct Monitor<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> {
+pub struct Monitor<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> {
+    core: M,
     coordination: Mutex<COORD>,
     synchronization: AtomicBool,
     critical_section: UnsafeCell<CRIT>,
-    _t: std::marker::PhantomData<T>,
+    _phantom_ws: std::marker::PhantomData<WS>,
 }
 
-impl<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> Monitor<T, COORD, CRIT> {
+impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Monitor<COORD, CRIT, WS, M> {
     /// Create a new monitor with the provided coordination and critical_section.
-    pub fn new(coordination: COORD, critical_section: CRIT) -> Self {
+    pub fn new(core: M, coordination: COORD, critical_section: CRIT) -> Self {
         Self {
+            core,
             coordination: Mutex::new(coordination),
             synchronization: AtomicBool::new(false),
             critical_section: UnsafeCell::new(critical_section),
-            _t: std::marker::PhantomData,
+            _phantom_ws: std::marker::PhantomData,
         }
     }
 
     /// Enter the monitor and call into the critical section if the call to
-    /// [`Coordination::acquire`] succeeds.
-    pub fn do_it(&self, t: &mut T) {
+    /// [`MonitorCore::acquire`] succeeds.
+    pub fn do_it<'a: 'a, 'b>(&'a self, t: &'b mut WS) {
         {
             let coordination = self.coordination.lock().unwrap();
-            let (acquired, _coordination) = COORD::acquire(coordination, t);
+            let (acquired, _coordination) = self.core.acquire(coordination, t);
             if !acquired {
                 return;
             }
@@ -63,12 +67,21 @@ impl<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> Monitor<T, COORD, CRIT
             }
         }
         let crit: &mut CRIT = unsafe { &mut *self.critical_section.get() };
-        crit.critical_section(t);
+        self.core.critical_section(crit, t);
         let coordination = self.coordination.lock().unwrap();
         self.synchronization.store(false, Ordering::Release);
-        drop(COORD::release(coordination, t));
+        drop(self.core.release(coordination, t));
+    }
+
+    /// Decompose the monitor into its coordinator and critical section respectively.
+    pub fn decompose(self) -> (M, COORD, CRIT) {
+        (
+            self.core,
+            self.coordination.into_inner().unwrap(),
+            self.critical_section.into_inner(),
+        )
     }
 }
 
-unsafe impl<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> Send for Monitor<T, COORD, CRIT> {}
-unsafe impl<T, COORD: Coordination<T>, CRIT: CriticalSection<T>> Sync for Monitor<T, COORD, CRIT> {}
+unsafe impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Send for Monitor<COORD, CRIT, WS, M> {}
+unsafe impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Sync for Monitor<COORD, CRIT, WS, M> {}

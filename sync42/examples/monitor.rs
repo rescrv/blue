@@ -3,7 +3,7 @@ use std::sync::{Arc, Condvar, MutexGuard};
 
 use biometrics::{Collector, Counter};
 
-use sync42::monitor::{Coordination, CriticalSection, Monitor};
+use sync42::monitor::{Monitor, MonitorCore};
 
 //////////////////////////////////////////// Biomentrics ///////////////////////////////////////////
 
@@ -12,7 +12,7 @@ static WRITER_LEAVES_IT: Counter = Counter::new("monitor.writer_leaves_it");
 static WRITER_WAITING: Counter = Counter::new("monitor.writer_waiting");
 static RELEASE_NOTIFIES: Counter = Counter::new("monitor.release_notifies");
 
-fn register_biometrics(collector: &mut Collector) {
+fn register_biometrics(collector: &Collector) {
     collector.register_counter(&WRITER_TAKES_IT);
     collector.register_counter(&WRITER_LEAVES_IT);
     collector.register_counter(&WRITER_WAITING);
@@ -33,11 +33,23 @@ struct CoalesceWrites {
     writes: Vec<String>,
 }
 
-impl Coordination<WriteState<'_>> for CoalesceWrites {
+struct WriteWithMutualExclusion {}
+
+impl WriteWithMutualExclusion {
+    fn do_write(&mut self, write: String) {
+        drop(write);
+    }
+}
+
+#[derive(Default)]
+struct CoalescingMonitor;
+
+impl MonitorCore<CoalesceWrites, WriteWithMutualExclusion, WriteState<'_>> for CoalescingMonitor {
     fn acquire<'a: 'b, 'b>(
-        mut guard: MutexGuard<'a, Self>,
+        &self,
+        mut guard: MutexGuard<'a, CoalesceWrites>,
         ws: &'b mut WriteState<'_>,
-    ) -> (bool, MutexGuard<'a, Self>) {
+    ) -> (bool, MutexGuard<'a, CoalesceWrites>) {
         loop {
             if !guard.writer_has_it {
                 WRITER_TAKES_IT.click();
@@ -59,9 +71,10 @@ impl Coordination<WriteState<'_>> for CoalesceWrites {
     }
 
     fn release<'a: 'b, 'b>(
-        mut guard: MutexGuard<'a, Self>,
+        &self,
+        mut guard: MutexGuard<'a, CoalesceWrites>,
         ws: &'b mut WriteState<'_>,
-    ) -> MutexGuard<'a, Self> {
+    ) -> MutexGuard<'a, CoalesceWrites> {
         guard.writer_has_it = false;
         if guard.writer_waiting {
             RELEASE_NOTIFIES.click();
@@ -69,22 +82,16 @@ impl Coordination<WriteState<'_>> for CoalesceWrites {
         }
         guard
     }
-}
 
-struct WriteWithMutualExclusion {}
-
-impl WriteWithMutualExclusion {
-    fn do_write(&mut self, write: String) {
-        drop(write);
-    }
-}
-
-impl CriticalSection<WriteState<'_>> for WriteWithMutualExclusion {
-    fn critical_section<'a: 'b, 'b>(&'a mut self, ws: &'b mut WriteState) {
+    fn critical_section<'a: 'b, 'b>(
+        &self,
+        crit: &'a mut WriteWithMutualExclusion,
+        ws: &'b mut WriteState,
+    ) {
         let mut writes = Vec::new();
         std::mem::swap(&mut ws.writes, &mut writes);
         for write in writes.into_iter() {
-            self.do_write(write);
+            crit.do_write(write);
         }
     }
 }
@@ -95,7 +102,11 @@ static COUNTER: AtomicU64 = AtomicU64::new(1);
 static DONE: AtomicBool = AtomicBool::new(false);
 static WAIT_TO_WRITE: Condvar = Condvar::new();
 
-fn worker_thread(monitor: Arc<Monitor<WriteState<'_>, CoalesceWrites, WriteWithMutualExclusion>>) {
+fn worker_thread(
+    monitor: Arc<
+        Monitor<CoalesceWrites, WriteWithMutualExclusion, WriteState<'_>, CoalescingMonitor>,
+    >,
+) {
     while !DONE.load(Ordering::Relaxed) {
         let num = COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut ws = WriteState {
@@ -110,9 +121,9 @@ fn worker_thread(monitor: Arc<Monitor<WriteState<'_>, CoalesceWrites, WriteWithM
 fn main() {
     // Setup the environment.
     std::thread::spawn(|| {
-        let mut collector = biometrics::Collector::new();
-        register_biometrics(&mut collector);
-        sync42::register_biometrics(&mut collector);
+        let collector = biometrics::Collector::new();
+        register_biometrics(&collector);
+        sync42::register_biometrics(&collector);
         let fout = std::fs::File::create("/dev/stdout").unwrap();
         let mut emit = biometrics::PlainTextEmitter::new(fout);
         loop {
@@ -129,7 +140,8 @@ fn main() {
         writes: Vec::new(),
     };
     let critical_section = WriteWithMutualExclusion {};
-    let monitor = Arc::new(Monitor::new(coordination, critical_section));
+    let core = CoalescingMonitor;
+    let monitor = Arc::new(Monitor::new(core, coordination, critical_section));
     // Spawn the theads.
     let mut threads = Vec::new();
     for _ in 0..64 {

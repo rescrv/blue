@@ -94,6 +94,7 @@ impl<'a> Clicker<'a> {
         let mut waiter = self.wait_list.link(WaitState::Present);
         let tickets = {
             let mut state = self.state.lock().unwrap();
+            #[allow(clippy::nonminimal_bool)]
             'conditions: while !(state.outstanding_calls < self.concurrent_count_calls)
                 && !(waiter.is_head() && state.head_passback)
             {
