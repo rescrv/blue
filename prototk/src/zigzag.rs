@@ -6,12 +6,12 @@
 // specified the behavior above and the type signature should be sufficient for someone to
 // understand exactly the behavior they are getting.
 
-// Turn a signed integer into an unsigned integer such that the size is proportional to the input.
+/// Turn a signed integer into an unsigned integer such that the size is proportional to the input.
 pub fn zigzag(x: i64) -> u64 {
     ((x << 1) ^ (x >> 63)) as u64
 }
 
-// The inverse of [zigzag].
+/// The inverse of [zigzag].
 pub fn unzigzag(x: u64) -> i64 {
     ((x >> 1) as i64) ^ (-((x & 1) as i64))
 }

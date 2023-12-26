@@ -20,26 +20,59 @@ pub enum Error {
     Success,
     /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
     /// available in the underlying memory.
-    BufferTooShort { required: usize, had: usize },
+    BufferTooShort {
+        /// The number of bytes required to unpack.
+        required: usize,
+        /// The number of bytes available to unpack.
+        had: usize,
+    },
     /// InvalidFieldNumber indicates that the field is not a user-assignable field.
-    InvalidFieldNumber { field_number: u32, what: String },
+    InvalidFieldNumber {
+        /// The u32 field number that's invalid.
+        field_number: u32,
+        /// A human-readable description of why the field number is invalid.
+        what: String,
+    },
     /// UnhandledWireType indicates that the wire_type is not understood by this process and cannot
     /// be skipped.
-    UnhandledWireType { wire_type: u32 },
+    UnhandledWireType {
+        /// The wire type that's not handled.
+        wire_type: u32,
+    },
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge { tag: u64 },
+    TagTooLarge {
+        /// The tag that's too large.
+        tag: u64
+    },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow { bytes: usize },
+    VarintOverflow {
+        /// The number of bytes witnessed in the varint.
+        bytes: usize
+    },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow { value: u64 },
+    UnsignedOverflow {
+        /// The u64 that doesn't fit a u32.
+        value: u64
+    },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow { value: i64 },
+    SignedOverflow {
+        /// The i64 that doesn't fit an i32.
+        value: i64
+    },
     /// WrongLength indicates that a bytes32 did not have 32 bytes.
-    WrongLength { required: usize, had: usize },
+    WrongLength {
+        /// The required number of bytes for the type.
+        required: usize,
+        /// The number of bytes the type claims to be.
+        had: usize,
+    },
     /// StringEncoding indicates that a value is not UTF-8 friendly.
     StringEncoding,
     /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant { discriminant: u32 },
+    UnknownDiscriminant {
+        /// The discriminant that's not handled by this process.
+        discriminant: u32,
+    },
 }
 
 impl Display for Error {
@@ -674,6 +707,7 @@ impl<'a> Message<'a> for Error {}
 
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
+/// WireType represents the different protocol buffers wire types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WireType {
     /// Varint is wire type 0.  The payload is a single v64.
@@ -689,6 +723,7 @@ pub enum WireType {
 }
 
 impl WireType {
+    /// Possibly create a new WireType from the tag bits.
     pub fn new(tag_bits: u32) -> Result<WireType, Error> {
         match tag_bits {
             0 => Ok(WireType::Varint),
@@ -715,10 +750,14 @@ impl WireType {
 
 //////////////////////////////////////////// FieldNumber ///////////////////////////////////////////
 
+/// The first valid field number.
 pub const FIRST_FIELD_NUMBER: u32 = 1;
+/// The last valid field number.
 pub const LAST_FIELD_NUMBER: u32 = (1 << 29) - 1;
 
+/// The first field number reserved by protocol buffers.
 pub const FIRST_RESERVED_FIELD_NUMBER: u32 = 19000;
+/// The last field number reserved by protocol buffers.
 pub const LAST_RESERVED_FIELD_NUMBER: u32 = 19999;
 
 /// [FieldNumber] wraps a u32 and guards it against reserved or invalid field numbers.
@@ -784,10 +823,17 @@ impl std::cmp::PartialEq<u32> for FieldNumber {
 /// A protobuf tag has two parts:  A `field_number` and a `wire_type`.
 #[derive(Clone, Debug)]
 pub struct Tag {
+    /// The field number of this tag.
     pub field_number: FieldNumber,
+    /// The wire type of this tag.
     pub wire_type: WireType,
 }
 
+/// A helper macro to construct tags
+///
+/// # Panics
+///
+/// Panics if the field number is invalid.
 #[macro_export]
 macro_rules! tag {
     ($field_number:literal, $wire_type:ident) => {
@@ -846,14 +892,20 @@ impl<'a> Unpackable<'a> for Tag {
 
 ///////////////////////////////////////////// FieldType ////////////////////////////////////////////
 
+/// A field type is a rust-native type used to convert to and from the wire format.
 pub trait FieldType<'a>: Sized {
+    /// The wire type used by this field type.
     const WIRE_TYPE: WireType;
 
+    /// How this field type represents native values.
     type Native;
 
+    /// Convert the native value into an instance of Self.
     fn from_native(x: Self::Native) -> Self;
+    /// Convert an instance of self into a native type.
     fn into_native(self) -> Self::Native;
 
+    /// Return a field packer for a field number and given field_value.
     fn field_packer<'b, F: FieldPackHelper<'a, Self>>(
         field_number: FieldNumber,
         field_value: &'b F,
@@ -871,8 +923,14 @@ pub trait FieldType<'a>: Sized {
 
 ////////////////////////////////////////// FieldPackHelper /////////////////////////////////////////
 
+/// A FieldPackHelper packs a tag and value in the provided space.
+///
+/// For option this may be zero.  For vector this may be repeated instances of tag + the contents
+/// of the vector.
 pub trait FieldPackHelper<'a, T: FieldType<'a>> {
+    /// The size of encoding self with tag.
     fn field_pack_sz(&self, tag: &Tag) -> usize;
+    /// Pack the tag into the output buffer.
     fn field_pack(&self, tag: &Tag, out: &mut [u8]);
 }
 
@@ -981,7 +1039,9 @@ where
 
 ///////////////////////////////////////// FieldUnpackHelper ////////////////////////////////////////
 
+/// Given a field type that was unpacked, merge it into the rust-native value.
 pub trait FieldUnpackHelper<'a, T: FieldType<'a>> {
+    /// Merge the proto into self.
     fn merge_field(&mut self, proto: T);
 }
 
@@ -1023,6 +1083,8 @@ impl<'a, T, E> FieldUnpackHelper<'a, field_types::message<Result<T, E>>> for Res
 
 //////////////////////////////////////////// FieldPacker ///////////////////////////////////////////
 
+/// A wrapper type that combines [FieldType] and [FieldPackHelper] to make a [buffertk::Packable]
+/// type.
 pub struct FieldPacker<'a, 'b, T, F>
 where
     T: FieldType<'a>,
@@ -1038,6 +1100,7 @@ where
     T: FieldType<'a>,
     F: FieldPackHelper<'a, T>,
 {
+    /// Create a new FieldPacker from the value and field type.
     pub fn new(tag: Tag, field_value: &'b F, field_type: std::marker::PhantomData<&'a T>) -> Self {
         Self {
             tag,
@@ -1063,6 +1126,7 @@ where
 
 /////////////////////////////////////////// FieldIterator //////////////////////////////////////////
 
+/// An iterator over tags and byte strings.
 // TODO(rescrv): This panicked once and I didn't debug it.  Fix that.
 pub struct FieldIterator<'a, 'b> {
     up: Unpacker<'a>,
@@ -1070,6 +1134,7 @@ pub struct FieldIterator<'a, 'b> {
 }
 
 impl<'a, 'b> FieldIterator<'a, 'b> {
+    /// Create a new field iterator that will return tags and their byte strings.
     pub fn new(buf: &'a [u8], err: &'b mut Option<Error>) -> Self {
         Self {
             up: Unpacker::new(buf),
@@ -1077,6 +1142,7 @@ impl<'a, 'b> FieldIterator<'a, 'b> {
         }
     }
 
+    /// The remaining unprocessed buffer.
     pub fn remain(&self) -> &'a [u8] {
         self.up.remain()
     }
@@ -1151,6 +1217,7 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
 
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
+/// A protocol buffers messsage.
 pub trait Message<'a>:
     Default
     + buffertk::Packable
