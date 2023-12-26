@@ -14,9 +14,10 @@ pub struct Details {
 }
 
 /// An [Error] demonstrating three different ways of auto-generating enums.
-#[derive(Debug, Eq, Message, PartialEq)]
+#[derive(Debug, Default, Eq, Message, PartialEq)]
 pub enum Error {
     #[prototk(1, message)]
+    #[default]
     Success,
     #[prototk(2, message)]
     BlockTooSmall {
@@ -27,12 +28,6 @@ pub enum Error {
     },
     #[prototk(3, message)]
     DetailedError(Details),
-}
-
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success
-    }
 }
 
 /////////////////////////////////// What we want to see generated //////////////////////////////////
@@ -101,7 +96,7 @@ fn enum_embed_option() {
     assert_eq!(exp, got, "buffer did not match expectations");
 
     // test unpacking
-    let mut up = buffertk::Unpacker::new(&exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got: EnumWithOptionAndVectorMessages = up.unpack().unwrap();
     assert_eq!(value, got, "unpacker failed");
 
@@ -123,7 +118,7 @@ fn enum_embed_vector() {
     assert_eq!(exp, got, "buffer did not match expectations");
 
     // test unpacking
-    let mut up = buffertk::Unpacker::new(&exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got: EnumWithOptionAndVectorMessages = up.unpack().unwrap();
     assert_eq!(value, got, "unpacker failed");
 
@@ -172,7 +167,7 @@ fn enum_with_array() {
     assert_eq!(exp, got, "buffer did not match expectations");
 
     // test unpacking
-    let mut up = buffertk::Unpacker::new(&exp);
+    let mut up = buffertk::Unpacker::new(exp);
     let got: EnumWithArray = up.unpack().unwrap();
     assert_eq!(value, got, "unpacker failed");
 

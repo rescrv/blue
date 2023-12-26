@@ -1481,8 +1481,7 @@ mod tests {
         // pack_sz
         assert_eq!(1 + expect.len(), value.field_pack_sz(&tag));
         // pack
-        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
-        output.resize(1 + expect.len(), 0);
+        let mut output: Vec<u8> = vec![0; 1 + expect.len()];
         value.field_pack(&tag, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
@@ -1612,8 +1611,8 @@ mod tests {
 
     #[test]
     fn float() {
-        let value = 3.14159;
-        let expect = &[0xd0, 0x0f, 0x49, 0x40];
+        let value = std::f32::consts::PI;
+        let expect = &[0xdb, 0xf, 0x49, 0x40];
 
         // tag
         let tag = Tag {
@@ -1623,8 +1622,7 @@ mod tests {
         // pack_sz
         assert_eq!(1 + expect.len(), value.field_pack_sz(&tag));
         // pack
-        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
-        output.resize(1 + expect.len(), 0);
+        let mut output: Vec<u8> = vec![0; 1 + expect.len()];
         value.field_pack(&tag, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
@@ -1642,8 +1640,8 @@ mod tests {
 
     #[test]
     fn double() {
-        let value = 3.14159;
-        let expect = &[0x6e, 0x86, 0x1b, 0xf0, 0xf9, 0x21, 0x09, 0x40];
+        let value = std::f64::consts::PI;
+        let expect = &[0x18, 0x2d, 0x44, 0x54, 0xfb, 0x21, 0x9, 0x40];
 
         // tag
         let tag = Tag {
@@ -1653,8 +1651,7 @@ mod tests {
         // pack_sz
         assert_eq!(1 + expect.len(), value.field_pack_sz(&tag));
         // pack
-        let mut output: Vec<u8> = Vec::with_capacity(1 + expect.len());
-        output.resize(1 + expect.len(), 0);
+        let mut output: Vec<u8> = vec![0; 1 + expect.len()];
         value.field_pack(&tag, &mut output);
         assert_eq!(expect, &output[1..]);
         // unpack
@@ -1688,6 +1685,7 @@ mod tests {
         let mut input: [u8; 16] = [0u8; 16];
         let mut expect: Vec<u8> = Vec::new();
         expect.push(16);
+        #[allow(clippy::needless_range_loop)]
         for i in 0..16 {
             input[i] = i as u8;
             expect.push(i as u8);
@@ -1700,6 +1698,7 @@ mod tests {
         let mut input: [u8; 32] = [0u8; 32];
         let mut expect: Vec<u8> = Vec::new();
         expect.push(32);
+        #[allow(clippy::needless_range_loop)]
         for i in 0..32 {
             input[i] = i as u8;
             expect.push(i as u8);

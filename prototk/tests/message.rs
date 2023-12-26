@@ -45,12 +45,12 @@ struct NamedStruct {
 fn named_struct() {
     let s = NamedStruct {
         x: 42,
-        y: 3.14159,
+        y: std::f64::consts::PI,
         z: -1,
     };
     // test packing
     let buf = buffertk::stack_pack(&s).to_vec();
-    let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -75,10 +75,10 @@ struct UnnamedStruct(
 
 #[test]
 fn unnamed_struct() {
-    let u = UnnamedStruct(42, 3.14159, -1);
+    let u = UnnamedStruct(42, std::f64::consts::PI, -1);
     // test packing
     let buf = buffertk::stack_pack(&u).to_vec();
-    let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -129,13 +129,13 @@ fn nested_struct() {
     let n = NestedStruct {
         m: NamedStruct {
             x: 42,
-            y: 3.14159,
+            y: std::f64::consts::PI,
             z: -1,
         },
     };
     // test packing
     let buf = buffertk::stack_pack(&n).to_vec();
-    let exp: &[u8] = &[10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[10, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -154,32 +154,32 @@ fn nested_struct() {
 #[derive(Clone, Debug, Message, PartialEq)]
 enum EnumOneOf {
     #[prototk(1, sint64)]
-    VariantOne(i64),
+    One(i64),
     #[prototk(2, uint64)]
-    VariantTwo(u64),
+    Two(u64),
     #[prototk(3, message)]
-    VariantThree(NamedStruct),
+    Three(NamedStruct),
 }
 
 impl Default for EnumOneOf {
     fn default() -> Self {
-        EnumOneOf::VariantOne(0)
+        EnumOneOf::One(0)
     }
 }
 
 #[test]
 fn enum_one_of() {
-    let exp1 = EnumOneOf::VariantOne(-1i64);
-    let exp2 = EnumOneOf::VariantTwo(42u64);
-    let exp3 = EnumOneOf::VariantThree(NamedStruct {
+    let exp1 = EnumOneOf::One(-1i64);
+    let exp2 = EnumOneOf::Two(42u64);
+    let exp3 = EnumOneOf::Three(NamedStruct {
         x: 42,
-        y: 3.14159,
+        y: std::f64::consts::PI,
         z: -1,
     });
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack((&exp1, &exp2, &exp3)).to_vec();
     let exp: &[u8] = &[
-        8, 1, 16, 42, 26, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1,
+        8, 1, 16, 42, 26, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1,
     ];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
@@ -199,16 +199,10 @@ fn enum_one_of() {
 
 /////////////////////////////////////////// Nested Bytes ///////////////////////////////////////////
 
-#[derive(Clone, Debug, Message, PartialEq)]
+#[derive(Clone, Debug, Default, Message, PartialEq)]
 struct WithBytes<'a> {
     #[prototk(1, bytes)]
     payload: &'a [u8],
-}
-
-impl<'a> Default for WithBytes<'a> {
-    fn default() -> Self {
-        WithBytes { payload: &[] }
-    }
 }
 
 #[test]
@@ -301,12 +295,12 @@ fn vector_messages() {
         messages: vec![
             NamedStruct {
                 x: 42,
-                y: 3.14159,
+                y: std::f64::consts::PI,
                 z: -1,
             },
             NamedStruct {
                 x: 42,
-                y: 3.14159,
+                y: std::f64::consts::PI,
                 z: -1,
             },
         ],
@@ -314,8 +308,8 @@ fn vector_messages() {
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
     let exp: &[u8] = &[
-        122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1, 122, 13, 8, 42, 17, 110, 134,
-        27, 240, 249, 33, 9, 64, 24, 1,
+        122, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1, 122, 13, 8, 42, 17, 24, 45, 68,
+        84, 251, 33, 9, 64, 24, 1,
     ];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
@@ -342,13 +336,13 @@ fn option_messages() {
     let vm = OptionOfMessages {
         messages: Some(NamedStruct {
             x: 42,
-            y: 3.14159,
+            y: std::f64::consts::PI,
             z: -1,
         }),
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&vm).to_vec();
-    let exp: &[u8] = &[122, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[122, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -480,12 +474,12 @@ struct OptionStruct {
 fn option_struct() {
     let s = OptionStruct {
         x: Some(42),
-        y: Some(3.14159),
+        y: Some(std::f64::consts::PI),
         z: None,
     };
     // test packing
     let buf = buffertk::stack_pack(&s).to_vec();
-    let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64];
+    let exp: &[u8] = &[8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -515,12 +509,12 @@ struct BoxStruct {
 fn box_struct() {
     let s = BoxStruct {
         x: Box::new(42),
-        y: Box::new(3.14159),
+        y: Box::new(std::f64::consts::PI),
         z: Box::new(-1),
     };
     // test packing
     let buf = buffertk::stack_pack(&s).to_vec();
-    let exp: &[u8] = &[8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -536,16 +530,10 @@ fn box_struct() {
 
 ///////////////////////////////////////////// 16 bytes /////////////////////////////////////////////
 
-#[derive(Clone, Debug, Message, PartialEq)]
+#[derive(Clone, Debug, Default, Message, PartialEq)]
 struct Bytes16 {
     #[prototk(11, bytes16)]
     buffer: [u8; 16],
-}
-
-impl Default for Bytes16 {
-    fn default() -> Self {
-        Self { buffer: [0u8; 16] }
-    }
 }
 
 #[test]
@@ -581,7 +569,7 @@ struct OneGeneric<'a, K: Message<'a>> {
 fn one_generic() {
     let key = NamedStruct {
         x: 42,
-        y: 3.14159,
+        y: std::f64::consts::PI,
         z: -1,
     };
     let two = OneGeneric::<NamedStruct> {
@@ -590,7 +578,7 @@ fn one_generic() {
     };
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&two).to_vec();
-    let exp: &[u8] = &[10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1];
+    let exp: &[u8] = &[10, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
     // test unpacking
@@ -618,10 +606,10 @@ struct TwoGeneric<'a, K: Message<'a>, V: Message<'a>> {
 fn two_generic() {
     let key = NamedStruct {
         x: 42,
-        y: 3.14159,
+        y: std::f64::consts::PI,
         z: -1,
     };
-    let value = UnnamedStruct(42, 3.14159, -1);
+    let value = UnnamedStruct(42, std::f64::consts::PI, -1);
     let two = TwoGeneric::<NamedStruct, UnnamedStruct> {
         key,
         value,
@@ -630,8 +618,8 @@ fn two_generic() {
     // test packing
     let buf: Vec<u8> = buffertk::stack_pack(&two).to_vec();
     let exp: &[u8] = &[
-        10, 13, 8, 42, 17, 110, 134, 27, 240, 249, 33, 9, 64, 24, 1, 18, 13, 8, 42, 17, 110, 134,
-        27, 240, 249, 33, 9, 64, 24, 1,
+        10, 13, 8, 42, 17, 24, 45, 68, 84, 251, 33, 9, 64, 24, 1, 18, 13, 8, 42, 17, 24, 45, 68,
+        84, 251, 33, 9, 64, 24, 1,
     ];
     let got: &[u8] = &buf;
     assert_eq!(exp, got, "buffer did not match expectations");
