@@ -11,16 +11,10 @@ use common::Error;
 
 //////////////////////////////////////////// The Service ///////////////////////////////////////////
 
-#[derive(Debug, Message)]
+#[derive(Debug, Default, Message)]
 pub struct CacheLoad<'a> {
     #[prototk(1, bytes)]
     key: &'a [u8],
-}
-
-impl<'a> Default for CacheLoad<'a> {
-    fn default() -> Self {
-        Self { key: &[] }
-    }
 }
 
 #[derive(Debug, Default, Message)]
@@ -29,18 +23,12 @@ pub struct CacheResponse {
     val: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Message)]
+#[derive(Debug, Default, Message)]
 pub struct CacheStore<'a> {
     #[prototk(1, bytes)]
     key: &'a [u8],
     #[prototk(2, bytes)]
     val: &'a [u8],
-}
-
-impl<'a> Default for CacheStore<'a> {
-    fn default() -> Self {
-        Self { key: &[], val: &[] }
-    }
 }
 
 #[derive(Debug, Default, Message)]

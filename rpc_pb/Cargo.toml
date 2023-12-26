@@ -29,3 +29,13 @@ zerror_derive = { path = "../zerror_derive", version = "0.1" }
 name = "rpc-pb-gen-host-id"
 path = "src/bin/rpc-pb-gen-host-id.rs"
 required-features=["binaries"]
+
+[[example]]
+name = "cache"
+path = "examples/cache.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "ping"
+path = "examples/ping.rs"
+required-features=["binaries"]

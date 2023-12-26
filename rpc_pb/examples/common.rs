@@ -2,9 +2,10 @@ use prototk_derive::Message;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug, Message)]
+#[derive(Debug, Default, Message)]
 pub enum Error {
     #[prototk(1, message)]
+    #[default]
     Success,
     #[prototk(2, message)]
     SerializationError {
@@ -20,12 +21,6 @@ pub enum Error {
         #[prototk(2, string)]
         context: String,
     },
-}
-
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success
-    }
 }
 
 impl From<buffertk::Error> for Error {
