@@ -161,12 +161,12 @@ mod structs {
             _ds: &syn::DataStruct,
             fields: &syn::FieldsNamed,
         ) -> String {
-            let mut output = format!("struct {} {{\n", ty_name.to_string());
+            let mut output = format!("struct {} {{\n", ty_name);
             for field in fields.named.iter() {
                 output += &format!(
                     "    {}: {},\n",
                     field.ident.as_ref().unwrap(),
-                    field.ty.clone().into_token_stream().to_string()
+                    field.ty.clone().into_token_stream(),
                 );
             }
             output += "}";
@@ -179,13 +179,13 @@ mod structs {
             _ds: &syn::DataStruct,
             fields: &syn::FieldsUnnamed,
         ) -> Self::Output {
-            let mut output = format!("struct {}(", ty_name.to_string());
+            let mut output = format!("struct {}(", ty_name);
             let mut first = true;
             for field in fields.unnamed.iter() {
                 if first {
-                    output += &format!("{}", field.ty.clone().into_token_stream().to_string());
+                    output += &format!("{}", field.ty.clone().into_token_stream());
                 } else {
-                    output += &format!(", {}", field.ty.clone().into_token_stream().to_string());
+                    output += &format!(", {}", field.ty.clone().into_token_stream());
                 }
                 first = false;
             }
@@ -198,7 +198,7 @@ mod structs {
             ty_name: &syn::Ident,
             _ds: &syn::DataStruct,
         ) -> Self::Output {
-            format!("struct {};", ty_name.to_string())
+            format!("struct {};", ty_name)
         }
     }
 
@@ -256,7 +256,7 @@ mod enums {
             _de: &syn::DataEnum,
             variants: &[Self::VariantOutput],
         ) -> Self::Output {
-            let mut output = format!("enum {} {{\n", ty_name.to_string());
+            let mut output = format!("enum {} {{\n", ty_name);
             for variant in variants {
                 output += variant;
             }
@@ -271,20 +271,20 @@ mod enums {
             variant: &syn::Variant,
             fields: &syn::FieldsNamed,
         ) -> Self::VariantOutput {
-            let mut output = format!("    {} {{", variant.ident.to_string());
+            let mut output = format!("    {} {{", variant.ident);
             let mut first = true;
             for field in fields.named.iter() {
                 if first {
                     output += &format!(
                         " {}: {}",
-                        field.ident.as_ref().unwrap().to_string(),
-                        field.ty.clone().into_token_stream().to_string()
+                        field.ident.as_ref().unwrap(),
+                        field.ty.clone().into_token_stream(),
                     );
                 } else {
                     output += &format!(
                         ", {}: {}",
-                        field.ident.as_ref().unwrap().to_string(),
-                        field.ty.clone().into_token_stream().to_string()
+                        field.ident.as_ref().unwrap(),
+                        field.ty.clone().into_token_stream(),
                     );
                 }
                 first = false;
@@ -300,13 +300,13 @@ mod enums {
             variant: &syn::Variant,
             fields: &syn::FieldsUnnamed,
         ) -> Self::VariantOutput {
-            let mut output = format!("    {}(", variant.ident.to_string());
+            let mut output = format!("    {}(", variant.ident);
             let mut first = true;
             for field in fields.unnamed.iter() {
                 if first {
-                    output += &format!("{}", field.ty.clone().into_token_stream().to_string());
+                    output += &format!("{}", field.ty.clone().into_token_stream());
                 } else {
-                    output += &format!(", {}", field.ty.clone().into_token_stream().to_string());
+                    output += &format!(", {}", field.ty.clone().into_token_stream());
                 }
                 first = false;
             }
@@ -320,7 +320,7 @@ mod enums {
             _de: &syn::DataEnum,
             variant: &syn::Variant,
         ) -> Self::VariantOutput {
-            format!("    {},\n", variant.ident.to_string())
+            format!("    {},\n", variant.ident)
         }
     }
 
