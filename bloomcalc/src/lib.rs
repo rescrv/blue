@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+/// A Parameter is a typed wrapper around a f64.
 pub trait Parameter {
+    /// Return a new parameter from the provided f64.
     fn new(x: f64) -> Self;
 }
 
