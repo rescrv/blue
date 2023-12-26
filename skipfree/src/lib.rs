@@ -1,3 +1,4 @@
+//! A lock-free skip-list.
 // A transcription of this code from hyperleveldb.
 //
 // That code, in turn, comes from LevelDB which has this copyright claim:
@@ -90,11 +91,13 @@ mod node_ptr {
 
 ///////////////////////////////////////////// SkipList /////////////////////////////////////////////
 
+/// A lock-free skip list, generic over keys and values.
 pub struct SkipList<K, V> {
     head: Arc<AtomicPtr<Node<K, V>>>,
 }
 
 impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
+    /// Insert the provided key and value into the skiplist.
     pub fn insert(&self, key: K, value: V) {
         let (existing, mut prev, mut obs) =
             Self::find_greater_or_equal_and_pointers(&self.head, &key);
@@ -120,11 +123,16 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         }
     }
 
+    /// True iff the skiplist contains `key`.
     pub fn contains(&self, key: &K) -> bool {
         let x = Self::find_greater_or_equal(&self.head, key);
         !x.is_null() && node_ptr::key(x) == key
     }
 
+    /// Return a skiplist iterator.
+    ///
+    /// This iterator will keep the body of the skiplist in-memory even after the skiplist itself
+    /// goes out of scope.
     pub fn iter(&self) -> SkipListIterator<K, V> {
         SkipListIterator {
             head: Arc::clone(&self.head),
@@ -260,6 +268,7 @@ impl<K, V> Drop for SkipList<K, V> {
 
 ///////////////////////////////////////// SkipListIterator /////////////////////////////////////////
 
+/// A SkipList iterator.  Will outlast the skip list it comes from if so chosen.
 #[derive(Clone)]
 pub struct SkipListIterator<K, V> {
     head: Arc<AtomicPtr<Node<K, V>>>,
@@ -267,26 +276,39 @@ pub struct SkipListIterator<K, V> {
 }
 
 impl<K: Eq + Ord + Default, V: Default> SkipListIterator<K, V> {
+    /// Returns true if the skip list is positioned at a key-value pair.
     pub fn is_valid(&self) -> bool {
         !self.node.is_null() && self.node != self.head.load(Ordering::Relaxed)
     }
 
+    /// The key the skiplist is positioned to.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the skiplist is not valid.
     pub fn key(&self) -> &K {
         assert!(self.is_valid());
         node_ptr::key(self.node)
     }
 
+    /// The value the skiplist is positioned to.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the skiplist is not valid.
     pub fn value(&self) -> &V {
         assert!(self.is_valid());
         node_ptr::value(self.node)
     }
 
+    /// Advance forward in the skip list, to the next greater key.
     pub fn next(&mut self) {
         if !self.node.is_null() {
             self.node = node_ptr::get_next(self.node, 0);
         }
     }
 
+    /// Advance forward in the skip list, to the next smaller key.
     pub fn prev(&mut self) {
         if self.node.is_null() {
             self.node = SkipList::find_last(&self.head);
@@ -295,14 +317,21 @@ impl<K: Eq + Ord + Default, V: Default> SkipListIterator<K, V> {
         }
     }
 
+    /// Seek to the first key >= the provided key.
     pub fn seek(&mut self, key: &K) {
         self.node = SkipList::find_greater_or_equal(&self.head, key);
     }
 
+    /// Seek to the empty start of the skiplist.
+    ///
+    /// After this call the skiplist will not be valid.  Call next to get the next node.
     pub fn seek_to_first(&mut self) {
         self.node = node_ptr::get_next(self.head.load(Ordering::Acquire), 0);
     }
 
+    /// Seek to the empty end of the skiplist.
+    ///
+    /// After this call the skiplist will not be valid.  Call prev to get the prev node.
     pub fn seek_to_last(&mut self) {
         self.node = std::ptr::null_mut();
     }
