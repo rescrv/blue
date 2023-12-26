@@ -127,6 +127,7 @@ pub struct WaitList<T: Clone> {
 }
 
 impl<T: Clone> WaitList<T> {
+    /// Create a new wait list.  This should be an infrequent operation.
     pub fn new() -> Self {
         NEW_WAIT_LIST.click();
         let mut waiters: Vec<Waiter<T>> = Vec::new();
@@ -145,6 +146,7 @@ impl<T: Clone> WaitList<T> {
         }
     }
 
+    /// Link into the wait list with the wait guard set to `t`.
     pub fn link(&self, t: T) -> WaitGuard<T> {
         let mut state = self.state.lock().unwrap();
         while state.head + (self.waiters.len() as u64) <= state.tail {
@@ -167,6 +169,12 @@ impl<T: Clone> WaitList<T> {
         }
     }
 
+    /// Unlink the provided `guard`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this guard was not one returned from a prior call to link.  Guards provided via
+    /// iterators are not eligible for this function.
     pub fn unlink(&self, mut guard: WaitGuard<T>) {
         assert!(guard.owned, "must own the guard to explicitly unlink; it is safe to leave unlinking to the drop call");
         self._unlink(&mut guard);

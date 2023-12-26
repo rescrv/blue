@@ -101,6 +101,7 @@ static NEW_STATE_HASH_TABLE: Counter = Counter::new("sync42.state_hash_table.new
 static ENTRY_INSERTED: Counter = Counter::new("sync42.state_hash_table.inserted");
 static ENTRY_REMOVED: Counter = Counter::new("sync42.state_hash_table.removed");
 
+/// Register the biometrics for state hash table.
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&ENTRY_INSERTED);
     collector.register_counter(&ENTRY_REMOVED);
@@ -108,6 +109,7 @@ pub fn register_biometrics(collector: &Collector) {
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
+/// A key for a state hash table.
 pub trait Key: Clone + Debug + Hash + Eq + PartialEq {}
 
 impl Key for u64 {}
@@ -115,6 +117,7 @@ impl Key for String {}
 
 /////////////////////////////////////////////// Value //////////////////////////////////////////////
 
+/// A value for a state hash table.
 pub trait Value: Default {
     /// True iff the value is at a quiescent/finished state.  This means it can be collected, not
     /// that it will be collected.  It is perfectly acceptable to pickup a handle to finished state
@@ -128,6 +131,8 @@ pub trait Value: Default {
 
 ////////////////////////////////////////////// Handle //////////////////////////////////////////////
 
+/// A Handle holds a reference to a key-value pair in a table.  Two handles that come from the same
+/// table and key are guaranteed to refer to the same piece of state.
 pub struct Handle<'a, K: Key, V: Value> {
     table: &'a StateHashTable<K, V>,
     key: K,
@@ -139,6 +144,7 @@ impl<'a, K: Key, V: Value> Handle<'a, K, V> {
         Self { table, key, value }
     }
 
+    /// True if and only if both handles point to the same table and state.
     pub fn is_same(lhs: &Self, rhs: &Self) -> bool {
         std::ptr::eq(lhs.table, rhs.table)
             && lhs.key == rhs.key
@@ -177,11 +183,13 @@ impl<'a, K: Key, V: Value> Drop for Handle<'a, K, V> {
 
 ////////////////////////////////////////// StateHashTable //////////////////////////////////////////
 
+/// StateHashTable is the main collection.
 pub struct StateHashTable<K: Key, V: Value> {
     entries: Mutex<HashMap<K, Arc<V>>>,
 }
 
 impl<K: Key, V: Value> StateHashTable<K, V> {
+    /// Create a new StateHashTable.  This should be an infrequent operation.
     pub fn new() -> Self {
         NEW_STATE_HASH_TABLE.click();
         Self {
@@ -189,6 +197,7 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         }
     }
 
+    /// Create a new piece of state, returning None iff there already exists state for `key`.
     pub fn create_state<'a: 'b, 'b>(&'a self, key: K) -> Option<Handle<'a, K, V>>
     where
         V: From<K>,
@@ -205,6 +214,8 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         }
     }
 
+    /// Return an existing new piece of state, returning None iff there does not exist state for
+    /// `key`.
     pub fn get_state<'a: 'b, 'b>(&'a self, key: K) -> Option<Handle<'b, K, V>> {
         let entries = self.entries.lock().unwrap();
         entries.get(&key).map(|value| Handle {
@@ -214,6 +225,8 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         })
     }
 
+    /// Return an existing piece of state, or create a new one, and always return a handle to the
+    /// state for `key`.
     pub fn get_or_create_state<'a: 'b, 'b>(&'a self, key: K) -> Handle<'b, K, V>
     where
         V: From<K>,

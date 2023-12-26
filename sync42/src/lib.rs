@@ -10,6 +10,8 @@ pub mod work_coalescing_queue;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// The maximum concurrency expected by any type in `sync42`.  Performance is allowed to degrade if
+/// there are more than this many concurrent threads accessing a structure.
 pub const MAX_CONCURRENCY: usize = 1 << 22;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////

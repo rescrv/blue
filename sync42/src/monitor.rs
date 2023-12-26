@@ -3,7 +3,7 @@
 //! A monitor allows for synchronization that is more concurrent than just using mutexes and
 //! condition variables.  Concretely, [MonitorCore] breaks the task into the coordination and the
 //! critical section.  Threads can concurrently coordinate the next-best thread to enter the
-//! citical section without blocking the critical section from executing.
+//! citical section via the coord type, without blocking the critical section from executing.
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +33,8 @@ pub trait MonitorCore<COORD, CRIT, WS> {
     fn critical_section<'a: 'b, 'b>(&self, crit: &'a mut CRIT, t: &'b mut WS);
 }
 
+/// A monitor takes a [MonitorCore] and the associated coordination and critical section types, and
+/// creates a monitor out of it.
 pub struct Monitor<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> {
     core: M,
     coordination: Mutex<COORD>,

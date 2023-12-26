@@ -1,14 +1,18 @@
+//! Manage background-threads.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 ///////////////////////////////////////// BackgroundThread /////////////////////////////////////////
 
+/// A background thread.  Joins on drop, so long as there's no panic in-progress.
 pub struct BackgroundThread {
     done: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl BackgroundThread {
+    /// Spawn a new background thread.
     // TODO(rescrv): Make this pass in something to call rather than an Arc<AtomicBool>.
     pub fn spawn<F: FnOnce(Arc<AtomicBool>) + Send + 'static>(f: F) -> Self {
         let done = Arc::new(AtomicBool::new(false));
@@ -17,6 +21,7 @@ impl BackgroundThread {
         Self { done, thread }
     }
 
+    /// Join the background thread, consuming it.
     pub fn join(self) {
         // Drop will join.
     }

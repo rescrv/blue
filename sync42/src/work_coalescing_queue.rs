@@ -1,3 +1,5 @@
+//! A work coalescing queue batches work to be done together, for purposes of performance.
+
 use std::sync::{Mutex, MutexGuard};
 
 use biometrics::{Collector, Counter};
@@ -11,6 +13,7 @@ static AWAIT_STOLEN: Counter = Counter::new("sync42.work_coalescing_queue.await_
 static SAW_OUTPUT: Counter = Counter::new("sync42.work_coalescing_queue.saw_output");
 static BREAK_EARLY: Counter = Counter::new("sync42.work_coalescing_queue.break_early");
 
+/// Register the biometrics for the work coalescing queue.
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&AWAIT_INPUT);
     collector.register_counter(&AWAIT_STOLEN);
@@ -36,19 +39,31 @@ struct ConcurrentState {
 
 //////////////////////////////////////// WorkCoalescingCore ////////////////////////////////////////
 
+/// A [WorkCoalescingCore] is used to batch work and then convert a batch of work into an iterator
+/// of outputs.
 pub trait WorkCoalescingCore<I: Clone, O: Clone> {
+    /// The type of the accumulator used for batching work.
     type InputAccumulator: Default;
+    /// The type of the iterator used to generate work output.
     type OutputIterator<'a>: Iterator<Item = O>
     where
         Self: 'a;
 
+    /// Returns true iff the accumulator `acc` can merge `other`.
     fn can_batch(&self, acc: &Self::InputAccumulator, other: &I) -> bool;
+    /// Takes `acc` and `other` and produces an accumulator representing both their work.
+    ///
+    /// This will only be callled when `can_batch` returns true.
     fn batch(&mut self, acc: Self::InputAccumulator, other: I) -> Self::InputAccumulator;
+    /// Convert an input accumulator into an output iterator by doing the requisite work.
     fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_>;
 }
 
 //////////////////////////////////////// WorkCoalescingQueue ///////////////////////////////////////
 
+/// A WorkCoalescingQueue can be used to batch work together for purposes of gaining efficiency.
+/// For example, a concurrent log could use the work coalescing queue to batch writes or fsyncs so
+/// that many concurrent threads can witness a single write or fsync.
 pub struct WorkCoalescingQueue<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> {
     wait_list: WaitList<WaitState<I, O>>,
     state: Mutex<ConcurrentState>,
@@ -59,6 +74,7 @@ pub struct WorkCoalescingQueue<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> 
 }
 
 impl<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> WorkCoalescingQueue<I, O, C> {
+    /// Create a new work coalescing queue.
     pub fn new(core: C) -> Self {
         let wait_list = WaitList::new();
         let state = Mutex::default();
@@ -76,10 +92,13 @@ impl<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> WorkCoalescingQueue<I, O, 
         }
     }
 
+    /// Get a MutexGuard protecting the [WorkCoalescingCore].
     pub fn get_core(&self) -> MutexGuard<'_, C> {
         self.core.lock().unwrap()
     }
 
+    /// Do work in order.  This will take the provided input, coalesce it with other threads, and
+    /// then return the output associated with this input.
     pub fn do_work(&self, input: I) -> O {
         let mut waiter = self.wait_list.link(WaitState::Input(input));
         let (work, mut core, taken) = {
@@ -156,6 +175,7 @@ impl<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> WorkCoalescingQueue<I, O, 
         }
     }
 
+    /// Consume the work coalescing queue and return the [WorkCoalescingCore] it contains.
     pub fn into_inner(self) -> C {
         self.core.into_inner().unwrap()
     }
