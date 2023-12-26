@@ -7,6 +7,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Arc;
 
 use rand::Rng;
 
@@ -90,14 +91,15 @@ mod node_ptr {
 ///////////////////////////////////////////// SkipList /////////////////////////////////////////////
 
 pub struct SkipList<K, V> {
-    head: AtomicPtr<Node<K, V>>,
+    head: Arc<AtomicPtr<Node<K, V>>>,
 }
 
 impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     pub fn insert(&self, key: K, value: V) {
-        let (existing, mut prev, mut obs) = self.find_greater_or_equal_and_pointers(&key);
+        let (existing, mut prev, mut obs) =
+            Self::find_greater_or_equal_and_pointers(&self.head, &key);
         assert!(existing.is_null() || node_ptr::key(existing) != &key);
-        let height = self.random_height();
+        let height = Self::random_height();
         let x = Self::new_node(key, value, height);
         for idx in 0..height {
             'lockfree_looping: loop {
@@ -119,13 +121,13 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     }
 
     pub fn contains(&self, key: &K) -> bool {
-        let x = self.find_greater_or_equal(key);
+        let x = Self::find_greater_or_equal(&self.head, key);
         !x.is_null() && node_ptr::key(x) == key
     }
 
-    pub fn iter(&self) -> SkipListIterator<'_, K, V> {
+    pub fn iter(&self) -> SkipListIterator<K, V> {
         SkipListIterator {
-            skiplist: self,
+            head: Arc::clone(&self.head),
             node: std::ptr::null_mut(),
         }
     }
@@ -136,7 +138,7 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         Box::leak(Box::new(Node::new(key, value, height)))
     }
 
-    fn random_height(&self) -> usize {
+    fn random_height() -> usize {
         const BRANCHING: u8 = 4;
         let mut height = 1usize;
         let mut rng = rand::thread_rng();
@@ -152,8 +154,8 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         !node.is_null() && node_ptr::key(node) < key
     }
 
-    fn find_greater_or_equal(&self, key: &K) -> *mut Node<K, V> {
-        let mut x = self.head.load(Ordering::Acquire);
+    fn find_greater_or_equal(head: &AtomicPtr<Node<K, V>>, key: &K) -> *mut Node<K, V> {
+        let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
             let next = node_ptr::get_next(x, level);
@@ -170,10 +172,10 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     // NOTE(rescrv):  I don't want a simpler type.  I want a 3-tuple that I can destructure.
     #[allow(clippy::type_complexity)]
     fn find_greater_or_equal_and_pointers(
-        &self,
+        head: &AtomicPtr<Node<K, V>>,
         key: &K,
     ) -> (*mut Node<K, V>, Vec<*mut Node<K, V>>, Vec<*mut Node<K, V>>) {
-        let mut x = self.head.load(Ordering::Acquire);
+        let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         let mut prev = Vec::with_capacity(MAX_HEIGHT);
         let mut obs = Vec::with_capacity(MAX_HEIGHT);
@@ -198,11 +200,11 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         (found, prev, obs)
     }
 
-    fn find_less_than(&self, key: &K) -> *mut Node<K, V> {
-        let mut x = self.head.load(Ordering::Acquire);
+    fn find_less_than(head: &AtomicPtr<Node<K, V>>, key: &K) -> *mut Node<K, V> {
+        let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
-            assert!(std::ptr::eq(x, self.head.load(Ordering::Relaxed)) || node_ptr::key(x) < key);
+            assert!(std::ptr::eq(x, head.load(Ordering::Relaxed)) || node_ptr::key(x) < key);
             let next = node_ptr::get_next(x, level);
             if next.is_null() || node_ptr::key(next) >= key {
                 if level == 0 {
@@ -216,8 +218,8 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         }
     }
 
-    fn find_last(&self) -> *mut Node<K, V> {
-        let mut x = self.head.load(Ordering::Acquire);
+    fn find_last(head: &AtomicPtr<Node<K, V>>) -> *mut Node<K, V> {
+        let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
             let next = node_ptr::get_next(x, level);
@@ -240,7 +242,7 @@ impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
         for idx in 0..MAX_HEIGHT {
             node_ptr::set_next(head, idx, std::ptr::null_mut());
         }
-        let head = AtomicPtr::new(head);
+        let head = Arc::new(AtomicPtr::new(head));
         Self { head }
     }
 }
@@ -259,54 +261,54 @@ impl<K, V> Drop for SkipList<K, V> {
 ///////////////////////////////////////// SkipListIterator /////////////////////////////////////////
 
 #[derive(Clone)]
-pub struct SkipListIterator<'a, K, V> {
-    skiplist: &'a SkipList<K, V>,
+pub struct SkipListIterator<K, V> {
+    head: Arc<AtomicPtr<Node<K, V>>>,
     node: *mut Node<K, V>,
 }
 
-impl<'a, K: Eq + Ord + Default, V: Default> SkipListIterator<'a, K, V> {
+impl<K: Eq + Ord + Default, V: Default> SkipListIterator<K, V> {
     pub fn is_valid(&self) -> bool {
-        !self.node.is_null()
+        !self.node.is_null() && self.node != self.head.load(Ordering::Relaxed)
     }
 
-    pub fn key(&self) -> &'a K {
+    pub fn key(&self) -> &K {
         assert!(self.is_valid());
         node_ptr::key(self.node)
     }
 
-    pub fn value(&self) -> &'a V {
+    pub fn value(&self) -> &V {
         assert!(self.is_valid());
         node_ptr::value(self.node)
     }
 
     pub fn next(&mut self) {
-        assert!(self.is_valid());
-        self.node = node_ptr::get_next(self.node, 0);
+        if !self.node.is_null() {
+            self.node = node_ptr::get_next(self.node, 0);
+        }
     }
 
     pub fn prev(&mut self) {
-        assert!(self.is_valid());
-        self.node = self.skiplist.find_less_than(node_ptr::key(self.node));
-        if self.node == self.skiplist.head.load(Ordering::Relaxed) {
-            self.node = std::ptr::null_mut();
+        if self.node.is_null() {
+            self.node = SkipList::find_last(&self.head);
+        } else if self.node != self.head.load(Ordering::Relaxed) {
+            self.node = SkipList::find_less_than(&self.head, node_ptr::key(self.node));
         }
     }
 
     pub fn seek(&mut self, key: &K) {
-        self.node = self.skiplist.find_greater_or_equal(key);
+        self.node = SkipList::find_greater_or_equal(&self.head, key);
     }
 
     pub fn seek_to_first(&mut self) {
-        self.node = node_ptr::get_next(self.skiplist.head.load(Ordering::Acquire), 0);
+        self.node = node_ptr::get_next(self.head.load(Ordering::Acquire), 0);
     }
 
     pub fn seek_to_last(&mut self) {
-        self.node = self.skiplist.find_last();
-        if self.node == self.skiplist.head.load(Ordering::Relaxed) {
-            self.node = std::ptr::null_mut();
-        }
+        self.node = std::ptr::null_mut();
     }
 }
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
@@ -379,6 +381,32 @@ mod tests {
         assert!(!iter.is_valid());
     }
 
+    #[test]
+    fn reverse_reverse() {
+        let sl = SkipList::<u64, u64>::default();
+        sl.insert(1, 42);
+        sl.insert(2, 84);
+        sl.insert(3, 126);
+        let mut iter = sl.iter();
+        iter.seek_to_last();
+        assert!(!iter.is_valid());
+        // 3
+        iter.prev();
+        assert!(iter.is_valid());
+        assert_eq!(3, *iter.key());
+        // 2
+        iter.prev();
+        assert!(iter.is_valid());
+        assert_eq!(2, *iter.key());
+        // 1
+        iter.prev();
+        assert!(iter.is_valid());
+        assert_eq!(1, *iter.key());
+        // done
+        iter.prev();
+        assert!(!iter.is_valid());
+    }
+
     fn guacamole_writer(skiplist: Arc<SkipList<u64, u64>>, seed: u64) {
         let mut guac = Guacamole::new(seed);
         for _ in 0..10_000 {
@@ -395,9 +423,9 @@ mod tests {
             let mut prev = None;
             while iter.is_valid() {
                 if let Some(prev) = prev {
-                    assert!(prev <= iter.key());
+                    assert!(prev <= *iter.key());
                 }
-                prev = Some(iter.key());
+                prev = Some(*iter.key());
                 iter.next();
             }
         }
