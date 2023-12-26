@@ -21,8 +21,8 @@ use sst::log::{ConcurrentLogBuilder, LogOptions};
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
 use sst::{
-    check_key_len, check_value_len, Builder, Sst, SstBuilder, SstCursor,
-    SstMetadata, SstMultiBuilder, SstOptions,
+    check_key_len, check_value_len, Builder, Sst, SstBuilder, SstCursor, SstMetadata,
+    SstMultiBuilder, SstOptions,
 };
 use sync42::wait_list::WaitList;
 use utilz::fmt;

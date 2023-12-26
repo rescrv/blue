@@ -12,7 +12,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 ///////////////////////////////////// #[derive(TypedTupleKey)] /////////////////////////////////////
 
-/// Derive a TypedTupleKey. 
+/// Derive a TypedTupleKey.
 #[proc_macro_derive(TypedTupleKey, attributes(tuple_key))]
 pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

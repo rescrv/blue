@@ -42,22 +42,22 @@ pub enum Error {
     /// TagTooLarge indicates the tag would overflow a 32-bit number.
     TagTooLarge {
         /// The tag that's too large.
-        tag: u64
+        tag: u64,
     },
     /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
     VarintOverflow {
         /// The number of bytes witnessed in the varint.
-        bytes: usize
+        bytes: usize,
     },
     /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
     UnsignedOverflow {
         /// The u64 that doesn't fit a u32.
-        value: u64
+        value: u64,
     },
     /// SignedOverflow indicates that a value will not fit its intended (signed) target.
     SignedOverflow {
         /// The i64 that doesn't fit an i32.
-        value: i64
+        value: i64,
     },
     /// WrongLength indicates that a bytes32 did not have 32 bytes.
     WrongLength {
