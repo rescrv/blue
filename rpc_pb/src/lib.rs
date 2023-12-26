@@ -1,12 +1,10 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use biometrics::Counter;
-
 use one_two_eight::{generate_id, generate_id_prototk};
-
 use prototk_derive::Message;
-
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 use zerror_derive::ZerrorCore;
@@ -15,13 +13,12 @@ pub mod sd;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// The maximum request size allowed.
 pub const MAX_REQUEST_SIZE: usize = 1usize << 20;
+/// The maximum response size allowed.
 pub const MAX_RESPONSE_SIZE: usize = 1usize << 20;
+/// The maximum body size.
 pub const MAX_BODY_SIZE: usize = 1usize << 20;
-
-//////////////////////////////////////////// Biometrics ////////////////////////////////////////////
-
-pub static UNUSED_BUFFER: Counter = Counter::new("rpc_pb.unused_buffer");
 
 ////////////////////////////////////////////// TraceID /////////////////////////////////////////////
 
@@ -33,6 +30,7 @@ generate_id_prototk! {ClientID}
 
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
+/// A context passed by the RPC server into a service.
 #[derive(Clone, Debug, Default)]
 pub struct Context {
     clients: Vec<ClientID>,
@@ -40,20 +38,28 @@ pub struct Context {
 }
 
 impl Context {
+    /// The list of clients chained to make this request.
     pub fn clients(&self) -> Vec<ClientID> {
         self.clients.clone()
     }
 
+    /// Extend the context with an additional client.
+    ///
+    /// This makes a copy.
     pub fn with_client(&self, client: ClientID) -> Self {
         let mut ctx = self.clone();
         ctx.clients.push(client);
         ctx
     }
 
+    /// The trace ID of the request.
     pub fn trace_id(&self) -> Option<TraceID> {
         self.trace_id
     }
 
+    /// Extend the context with a trace ID.
+    ///
+    /// This make a copy.
     pub fn with_trace_id(&self, trace: TraceID) -> Self {
         let mut ctx = self.clone();
         ctx.trace_id = Some(trace);
@@ -72,89 +78,127 @@ impl<'a> From<&Request<'a>> for Context {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// RPC Error.
 #[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
+    /// The default error type.  Necessary to support protobuf, but should otherwise not be
+    /// constructed.
     #[prototk(278528, message)]
     Success {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
     },
+    /// An error was encountered while serializing or deserializing data.
     #[prototk(278529, message)]
     SerializationError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The error that was encountered.
         #[prototk(2, message)]
         err: prototk::Error,
+        /// Additional context for what was happening.
         #[prototk(3, string)]
         context: String,
     },
+    /// The request asks for an unknown server.
     #[prototk(278530, message)]
     UnknownServerName {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The server name requested.
         #[prototk(2, string)]
         name: String,
     },
+    /// The request asks for an unknown method.
     #[prototk(278531, message)]
     UnknownMethodName {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The method name requested.
         #[prototk(2, string)]
         name: String,
     },
+    /// The request exceeds the allowable size.
     #[prototk(278532, message)]
     RequestTooLarge {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// the size requested.
         #[prototk(2, uint64)]
         size: u64,
     },
+    /// There was an error at the transport layer.
     #[prototk(278533, message)]
     TransportFailure {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The string representation of the error.
         #[prototk(2, string)]
         what: String,
     },
+    /// Encryption is misconfigured.
     #[prototk(278534, message)]
     EncryptionMisconfiguration {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// It wasn't possible to probe ulimit -n.
     #[prototk(278535, message)]
     UlimitParseError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// An OS/IO error.
     #[prototk(278536, message)]
     OsError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The string representation of the error.
         #[prototk(2, string)]
         what: String,
     },
+    /// A logic error in the RPC implementation.
     #[prototk(278537, message)]
     LogicError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// Service discovery failed to find the host.
     #[prototk(278538, message)]
     NotFound {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// Resolution failure.
     #[prototk(278539, message)]
     ResolveFailure {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
@@ -201,35 +245,49 @@ iotoz! {Error}
 
 ////////////////////////////////////////////// Status //////////////////////////////////////////////
 
+/// A status represents the return value of an RPC function.
+///
+/// At the outer-most level is a Result that captures RPC errors.
+///
+/// Inside the OK(_) branch of the outer-most level is a Result that switches over client requests.
+/// They are either OK(_) with a body or Err(_) with a serialized error type.
 pub type Status = Result<Result<Vec<u8>, Vec<u8>>, Error>;
-
-////////////////////////////////////////////// Service /////////////////////////////////////////////
-
-pub trait Service {}
 
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
+/// A Server is an object that can be called.
+///
+/// An RPC server will wrap many Server objects and dispatch calls to them appropriately.
 pub trait Server {
+    /// Call the server.
     fn call(&self, ctx: &Context, method: &str, req: &[u8]) -> Status;
 }
 
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
+/// A Client is an object that can be called.
+///
+/// Many Client will wrap a single RPC client to make remote calls.
 pub trait Client {
+    /// Call the client.
     fn call(&self, ctx: &Context, server: &str, method: &str, req: &[u8]) -> Status;
 }
 
 /////////////////////////////////////////////// Frame //////////////////////////////////////////////
 
+/// Messages on the wire are preceded by frames.  Frames are framed by a solitary varint.
 #[derive(Clone, Debug, Default, Message)]
 pub struct Frame {
+    /// The size of the message this frame represents.
     #[prototk(1, uint64)]
     pub size: u64,
+    /// The crc32c of this frame.
     #[prototk(2, fixed32)]
     pub crc32c: u32,
 }
 
 impl Frame {
+    /// Given a buffer, create the frame that should precede it on the wire.
     pub fn from_buffer(buf: &[u8]) -> Self {
         Self {
             size: buf.len() as u64,
@@ -240,54 +298,72 @@ impl Frame {
 
 ////////////////////////////////////////////// Request /////////////////////////////////////////////
 
+/// A request to a server.
 #[derive(Clone, Debug, Default, Message)]
 pub struct Request<'a> {
+    /// The service this request is intended for.
     #[prototk(1, string)]
     pub service: &'a str,
+    /// The method this request intends to call.
     #[prototk(2, string)]
     pub method: &'a str,
+    /// A client-provided sequence number used to match requests to responses.
     #[prototk(3, uint64)]
     pub seq_no: u64,
+    /// The body of the request.
     #[prototk(4, bytes)]
     pub body: &'a [u8],
+    /// A chain of callers.
     #[prototk(5, message)]
     pub caller: Vec<ClientID>,
+    /// The trace ID for this request.
     #[prototk(6, message)]
     pub trace: Option<TraceID>,
 }
 
 ///////////////////////////////////////////// Response /////////////////////////////////////////////
 
+/// A response to a client.
 #[derive(Clone, Debug, Default, Message)]
 pub struct Response<'a> {
+    /// The sequence number provided in the [Request].
     #[prototk(3, uint64)]
     pub seq_no: u64,
+    /// The trace ID for this request.  Can be Some, even if Request was None.
     #[prototk(6, message)]
     pub trace: Option<TraceID>,
+    /// The body of the response.
     #[prototk(7, bytes)]
     pub body: Option<&'a [u8]>,
+    /// The error at service level.
     #[prototk(8, bytes)]
     pub service_error: Option<&'a [u8]>,
+    /// The error at the RPC level.
     #[prototk(9, bytes)]
     pub rpc_error: Option<&'a [u8]>,
 }
 
 ///////////////////////////////////////////// The Macro ////////////////////////////////////////////
 
+/// Create typed server/client methods.
 #[macro_export]
 macro_rules! service {
     (name = $service:ident; server = $server:ident; client = $client:ident; error = $error:ty; $(rpc $method:ident ($req:ident) -> $resp:ident;)+) => {
+        /// A typed RPC service.
         pub trait $service {
             $(
+                /// Auto-generated service method generated by service!.
                 fn $method(&self, ctx: &$crate::Context, req: $req) -> Result<$resp, $error>;
             )*
         }
 
+        /// A typed RPC client.
         pub struct $client {
             client: std::sync::Arc<dyn $crate::Client>,
         }
 
         impl $client where {
+            /// Create a new client.
             pub fn new(client: std::sync::Arc<dyn $crate::Client>) -> Self {
                 Self {
                     client,
@@ -301,11 +377,13 @@ macro_rules! service {
             )*
         }
 
+        /// A typed RPC server.
         pub struct $server<S: $service> {
             server: S,
         }
 
         impl<S: $service> $server<S> {
+            /// Bind the provided server.
             pub fn bind(server: S) -> $server<S> {
                 $server {
                     server,
@@ -319,9 +397,11 @@ macro_rules! service {
     };
 }
 
+/// Create a client method.
 #[macro_export]
 macro_rules! client_method {
     ($service:ident, $method:ident, $req:ident, $resp:ty, $error:ty) => {
+        /// Auto-generated method generated by client_method!.
         fn $method(&self, ctx: &$crate::Context, req: $req) -> Result<$resp, $error> {
             let req = ::buffertk::stack_pack(req).to_vec();
             let status = self
@@ -336,9 +416,11 @@ macro_rules! client_method {
     };
 }
 
+/// Generate the server `call` method.
 #[macro_export]
 macro_rules! server_methods {
     ($service:ident, $error:ty, $($method:ident, $req:ident, $resp:ident),+) => {
+        /// Auto-generated method generated by server_methods!.
         fn call(&self, ctx: &$crate::Context, method: &str, req: &[u8]) -> $crate::Status {
             use buffertk::stack_pack;
             match method {
@@ -369,16 +451,19 @@ macro_rules! server_methods {
 
 ////////////////////////////////////////// ServerRegistry //////////////////////////////////////////
 
+/// A ServerRegistry multiplexes servers to dispatch calls by server name.
 pub struct ServerRegistry {
     registry: HashMap<&'static str, Box<dyn Server>>,
 }
 
 impl ServerRegistry {
+    /// Register the provided server with this ServerRegistry.
     pub fn register<S: Server + 'static>(&mut self, name: &'static str, server: S) {
         assert!(!self.registry.contains_key(name));
         self.registry.insert(name, Box::new(server));
     }
 
+    /// Get the server registered with `name`.
     pub fn get_server(&self, name: &str) -> Option<&dyn Server> {
         self.registry.get(name).map(|x| x.as_ref())
     }

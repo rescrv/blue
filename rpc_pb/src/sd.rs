@@ -1,3 +1,5 @@
+//! Service discovery is the act of translating a [Host] into a real-world address.
+
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::str::FromStr;
@@ -22,6 +24,7 @@ generate_id_prototk! {HostID}
 
 /////////////////////////////////////////////// Host ///////////////////////////////////////////////
 
+/// A Host captures a process-unique, stable identifier with its connection string.
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 pub struct Host {
     #[prototk(1, message)]
@@ -31,10 +34,12 @@ pub struct Host {
 }
 
 impl Host {
+    /// Get the ID for this host.
     pub fn host_id(&self) -> HostID {
         self.host_id
     }
 
+    /// Get the connection string for this host.
     pub fn connect(&self) -> &str {
         &self.connect
     }
@@ -72,6 +77,7 @@ impl FromStr for Host {
 
 ///////////////////////////////////////// ServiceDiscovery /////////////////////////////////////////
 
+/// RegisterRequest captures the request to register a host in a given environment.
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 pub struct RegisterRequest {
     #[prototk(1, message)]
@@ -84,9 +90,11 @@ pub struct RegisterRequest {
     host: Host,
 }
 
+/// RegisterResponse indicates the registration request succeeded.
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 pub struct RegisterResponse {}
 
+/// ResolveRequest requests a set of hosts for a given environment/deployment.
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 pub struct ResolveRequest {
     #[prototk(1, message)]
@@ -99,6 +107,7 @@ pub struct ResolveRequest {
     count: u32,
 }
 
+/// ResolveResponse lists a set of hosts in response to a ResolveRequest.
 #[derive(Clone, Debug, Default, Message)]
 pub struct ResolveResponse {
     #[prototk(1, message)]
@@ -119,6 +128,7 @@ service! {
 
 ///////////////////////////////////////// ServiceDiscovery /////////////////////////////////////////
 
+/// An in-memory implementation of service discovery.
 #[derive(Default)]
 pub struct ServiceDiscovery {
     env_id: EnvironmentID,
@@ -127,6 +137,7 @@ pub struct ServiceDiscovery {
 }
 
 impl ServiceDiscovery {
+    /// Create a new service discovery instance for the given environment.
     pub fn new(env_id: EnvironmentID) -> Result<Self, Error> {
         if env_id == EnvironmentID::default() {
             Err(Error::NotFound {
