@@ -4,6 +4,7 @@ use std::fmt::Write;
 use std::fs::File;
 use std::io::Read;
 
+/// The number of bytes in a one_two_eight identifier.
 pub const BYTES: usize = 16;
 
 const SLICES: [(usize, usize); 5] = [(0, 4), (4, 6), (6, 8), (8, 10), (10, 16)];
