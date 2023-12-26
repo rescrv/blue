@@ -12,6 +12,7 @@ use prototk_derive::Message;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// The number of bytes expected in a macaroon signature.
 pub const SIGNATURE_BYTES: usize = 32;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -23,18 +24,23 @@ static VERIFIER_THIRD_PARTY_SUCCESS: Counter = Counter::new("macaroons.verifier.
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-/// Error cases.
+/// The error cases macarunes can encounter.
 #[derive(Clone, Debug, Default, Message)]
 pub enum Error {
+    /// Success is the default error.
     #[prototk(294912, message)]
     #[default]
     Success,
+    /// The macarunes detected a cycle.  This is a P(0) event for valid macarunes trees.
     #[prototk(294913, message)]
     Cycle,
+    /// The proof carried by macarunes does not hold up under scrutiny.
     #[prototk(294914, message)]
     ProofInvalid,
+    /// The client is lacking a loader for the given macarune.
     #[prototk(294915, message)]
     MissingLoader {
+        /// A textual description of the loader that's needed.
         #[prototk(1, string)]
         what: String,
     },
@@ -241,6 +247,7 @@ pub struct Secret {
 }
 
 impl Secret {
+    /// A textual representation of the secret.
     pub fn hexdigest(&self) -> String {
         let mut hexdigest = String::with_capacity(2 * SIGNATURE_BYTES);
         for item in &self.bytes {
@@ -249,10 +256,12 @@ impl Secret {
         hexdigest
     }
 
+    /// Do our best to scrub the secret from memory.
     pub fn scrub(&mut self) {
         crypto::explicit_bzero(&mut self.bytes);
     }
 
+    /// Generate a random secret using a secure random number generator.
     pub fn random() -> Self {
         let mut x = Self {
             bytes: [0u8; SIGNATURE_BYTES],
@@ -466,7 +475,11 @@ impl Debug for Macaroon {
 
 /// A [Loader] is a client-side way to get macaroons by identifier.  Used by [RequestBuilder].
 pub trait Loader: Debug {
+    /// The location this loader serves.
     fn location(&self) -> &'static str;
+    /// Lookup the discharge macaroon with the given identifier.
+    ///
+    /// Assumes the caller will verify the macaroon's location against `self.location()`.
     fn lookup(&self, identifier: &str) -> Result<Macaroon, Error>;
 }
 
