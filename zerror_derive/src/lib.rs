@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![recursion_limit = "128"]
 
 extern crate proc_macro;
@@ -14,6 +15,8 @@ use derive_util::EnumVisitor;
 
 /////////////////////////////////////// #[derive(ZerrorCore)] //////////////////////////////////////
 
+/// Derive ZerrorCore for an error.  This assumes a type has a core, and makes the with_* methods
+/// for it.
 #[proc_macro_derive(ZerrorCore, attributes())]
 pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
