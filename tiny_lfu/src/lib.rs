@@ -8,7 +8,9 @@ use std::sync::Mutex;
 
 mod vector;
 
+/// The minimum probability allowed.
 pub const MIN_PROBABILITY: f64 = 0.000000001;
+/// The maximum number of keys allowed.
 pub const MAX_KEYS: usize = 32;
 
 const KEYS: [u64; MAX_KEYS] = [
