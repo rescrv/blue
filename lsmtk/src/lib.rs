@@ -11,7 +11,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 
 use biometrics::{Collector, Counter};
 use indicio::clue;
-use keyvalint::{Cursor, KeyRef, KeyValuePair, KeyValueRef};
+use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValuePair, KeyValueRef};
 use mani::{Edit, Manifest, ManifestOptions};
 use setsum::Setsum;
 use sst::bounds_cursor::BoundsCursor;
@@ -21,7 +21,7 @@ use sst::log::{ConcurrentLogBuilder, LogOptions};
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
 use sst::{
-    check_key_len, check_value_len, compare_bytes, Builder, Sst, SstBuilder, SstCursor,
+    check_key_len, check_value_len, Builder, Sst, SstBuilder, SstCursor,
     SstMetadata, SstMultiBuilder, SstOptions,
 };
 use sync42::wait_list::WaitList;

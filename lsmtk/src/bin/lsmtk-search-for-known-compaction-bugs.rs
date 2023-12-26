@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use std::ops::Add;
 
 use arrrg::CommandLine;
+use keyvalint::compare_bytes;
 use setsum::Setsum;
-use sst::compare_bytes;
 
 use lsmtk::{CompactionID, TreeLogKey, TreeLogValue};
 
