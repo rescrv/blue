@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::fmt::Display;
 
 use biometrics::{Counter, Gauge, Sensor};
@@ -10,18 +12,25 @@ generate_id! {FiringID, "firing:"}
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
 
+/// A condition represents the state of a monitor.
 #[derive(Clone, Debug)]
 pub enum Condition {
+    /// When the system is stable, it is represented by this variant.
     Stable {
+        /// The context associated with this condition.
         context: String,
     },
+    /// When the system witnesses an event, it is represented by this variant.
     Firing {
+        /// The description of what caused it to fire.
         description: &'static str,
+        /// The context associated with this condition.
         context: String,
     },
 }
 
 impl Condition {
+    /// Returns a new stable condition.
     pub fn stable() -> Self {
         // TODO(rescrv): click!("hey_listen.condition.stable");
         Condition::Stable {
@@ -29,6 +38,7 @@ impl Condition {
         }
     }
 
+    /// Returns a firing condition.
     pub fn firing(description: &'static str) -> Self {
         // TODO(rescrv): click!("hey_listen.condition.firing");
         Condition::Firing {
@@ -37,6 +47,7 @@ impl Condition {
         }
     }
 
+    /// Adds context to the condition.
     pub fn with_context<V: Display>(mut self, field_name: &str, field_value: V) -> Self {
         let ctx = &format!("{} = {}\n", field_name, field_value);
         match &mut self {
@@ -49,6 +60,7 @@ impl Condition {
         self
     }
 
+    /// Returns a description of the condition.
     pub fn description(&self) -> &str {
         match &self {
             Condition::Stable { context: _ } => "success",
@@ -59,6 +71,7 @@ impl Condition {
         }
     }
 
+    /// Returns the context associated with this condition.
     pub fn context(&self) -> &str {
         match &self {
             Condition::Stable { context } => context,
@@ -72,11 +85,16 @@ impl Condition {
 
 ////////////////////////////////////////////// Monitor /////////////////////////////////////////////
 
+/// Monitors the state of the process.
 trait Monitor {
+    /// The type of the state that's used to carry state between successive calls to [evaluate].
     type State: Default;
 
+    /// The label associated with the monitor.
     fn label(&self) -> &'static str;
+    /// Witness the state of the monitor.
     fn witness(&self) -> Self::State;
+    /// Evaluate the condition monitored by the monitor.
     fn evaluate(&self, previous: &Self::State) -> Condition;
 }
 
@@ -158,6 +176,9 @@ impl<M: Monitor + 'static> State<M> {
 
 ///////////////////////////////////////////// HeyListen ////////////////////////////////////////////
 
+/// HeyListen watches a set of monitors in a way that allows conditions to be reliably detected.
+/// It is intended that there will be a `register_tatl` function or similar in each module with a
+/// monitor, and the [HeyListen] instance passed to that function will watch the monitors.
 pub struct HeyListen {
     success_rate: Vec<State<SuccessRate>>,
     stationary: Vec<State<Stationary>>,
@@ -166,6 +187,7 @@ pub struct HeyListen {
 }
 
 impl HeyListen {
+    /// Create a new instance of HeyListen.
     pub fn new() -> Self {
         Self {
             success_rate: Vec::new(),
@@ -175,22 +197,27 @@ impl HeyListen {
         }
     }
 
+    /// Register a success rate that computes the ratio of success to total activity.
     pub fn register_success_rate(&mut self, monitor: &'static SuccessRate) {
         self.success_rate.push(State::new(monitor));
     }
 
+    /// Register a stationary that triggers when the value changes.
     pub fn register_stationary(&mut self, monitor: &'static Stationary) {
         self.stationary.push(State::new(monitor));
     }
 
+    /// Register a monitor that detects when something is below the provided threshold.
     pub fn register_below_threshold(&mut self, monitor: &'static BelowThreshold) {
         self.below_threshold.push(State::new(monitor));
     }
 
+    /// Register a monitor that detects when something is above the provided threshold.
     pub fn register_above_threshold(&mut self, monitor: &'static AboveThreshold) {
         self.above_threshold.push(State::new(monitor));
     }
 
+    /// Evaluate the registered monitors.
     pub fn evaluate(&mut self) {
         for state in self.success_rate.iter_mut() {
             state.evaluate();
@@ -206,6 +233,9 @@ impl HeyListen {
         }
     }
 
+    /// Return the list of firing conditions.
+    ///
+    /// The return FiringID is stable until a call to reset with the label and FiringID.
     pub fn firing(&self) -> impl Iterator<Item = (&'static str, FiringID, Condition, Condition)> {
         let mut iter = Vec::new();
         self.firing_one(&self.success_rate, &mut iter);
@@ -234,7 +264,8 @@ impl HeyListen {
         }
     }
 
-    pub fn reset(&mut self, label: &'static str, firing: FiringID) {
+    /// Reset the specified monitor.  This is used to acknowledge alerts.
+    pub fn reset(&mut self, label: &str, firing: FiringID) {
         for state in self.success_rate.iter_mut() {
             if state.monitor.label() == label {
                 state.reset(firing);
@@ -272,6 +303,7 @@ struct SuccessRateState {
     failure: u64,
 }
 
+/// A SuccessRate compares success/(success + failure) from two counters.
 pub struct SuccessRate {
     label: &'static str,
     success: &'static Counter,
@@ -280,6 +312,7 @@ pub struct SuccessRate {
 }
 
 impl SuccessRate {
+    /// Create a new success rate.
     pub const fn new(
         label: &'static str,
         success: &'static Counter,
@@ -377,12 +410,14 @@ struct StationaryState {
     count: u64,
 }
 
+/// A Stationary triggers whenever a counter increments.
 pub struct Stationary {
     label: &'static str,
     counter: &'static Counter,
 }
 
 impl Stationary {
+    /// Create a new stationary that watches the specified counter.
     pub const fn new(label: &'static str, counter: &'static Counter) -> Self {
         Self { label, counter }
     }
@@ -422,6 +457,7 @@ impl Monitor for Stationary {
 
 ////////////////////////////////////////// BelowThreshold //////////////////////////////////////////
 
+/// BelowThreshold monitors a gauge to see if it dips below a threshold.
 pub struct BelowThreshold {
     label: &'static str,
     gauge: &'static Gauge,
@@ -429,6 +465,7 @@ pub struct BelowThreshold {
 }
 
 impl BelowThreshold {
+    /// Create a new BelowTheshold monitor.
     pub const fn new(label: &'static str, gauge: &'static Gauge, threshold: f64) -> Self {
         Self {
             label,
@@ -461,6 +498,7 @@ impl Monitor for BelowThreshold {
 
 ////////////////////////////////////////// AboveThreshold //////////////////////////////////////////
 
+/// AboveThreshold monitors a gauge to see if it dips below a threshold.
 pub struct AboveThreshold {
     label: &'static str,
     gauge: &'static Gauge,
@@ -468,6 +506,7 @@ pub struct AboveThreshold {
 }
 
 impl AboveThreshold {
+    /// Creates a new AboveThreshold.
     pub const fn new(label: &'static str, gauge: &'static Gauge, threshold: f64) -> Self {
         Self {
             label,
