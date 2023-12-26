@@ -1,3 +1,5 @@
+//! Biometrics emitters for workloads.
+
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -7,12 +9,16 @@ use biometrics::{Counter, Emitter, Gauge, Moments, Sensor};
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
 
 /// An emitter that puts readings one-per-line.
+///
+/// This differs from the biometrics emitter because it will start from 0 every time instead of
+/// emitting the current time.
 pub struct PlainTextEmitter {
     output: File,
     offset: Mutex<Option<u64>>,
 }
 
 impl PlainTextEmitter {
+    /// Create a new emitter with the output file.
     pub fn new(output: File) -> Self {
         let offset = Mutex::new(None);
         Self { output, offset }

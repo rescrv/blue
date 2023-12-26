@@ -1,3 +1,5 @@
+//! A NOP benchmark.  Useful for testing benchmark overhead.
+
 use std::ops::Bound;
 
 use arrrg::CommandLine;
@@ -20,7 +22,7 @@ struct NopOptions {
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
 #[derive(Debug, Default)]
-pub struct WriteBatch {
+struct WriteBatch {
     print: bool,
 }
 
@@ -55,14 +57,8 @@ impl WriteBatchTrait for WriteBatch {
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
-pub struct Cursor {
+struct Cursor {
     print: bool,
-}
-
-impl Cursor {
-    pub fn new(print: bool) -> Self {
-        Self { print }
-    }
 }
 
 impl CursorTrait for Cursor {

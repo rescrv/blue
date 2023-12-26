@@ -1,3 +1,5 @@
+//! A RocksDB benchmark.
+
 use rocksdb::DB;
 
 use arrrg::CommandLine;

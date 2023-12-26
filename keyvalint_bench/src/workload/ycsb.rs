@@ -1,3 +1,7 @@
+//! A workload that's capable of running something similar to YCSB.
+//!
+//! NOTE:  This workload currently doesn't support either D or F workload types.
+
 use std::fmt::Debug;
 use std::fs::File;
 use std::ops::Bound;
@@ -176,33 +180,41 @@ impl State {
 
 ////////////////////////////////////////// WorkloadOptions /////////////////////////////////////////
 
+/// YCSB workload options.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct WorkloadOptions {
+    /// The armnod options for generating keys.
     #[cfg_attr(feature = "command_line", arrrg(nested))]
     key: ArmnodOptions,
+    /// The armnod options for generating values.
     #[cfg_attr(feature = "command_line", arrrg(nested))]
     value: ArmnodOptions,
+    /// The weight assigned to write operations.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Weight to assign to write operations")
     )]
     write_weight: f64,
+    /// The weight assigned to read operations.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Weight to assign to read operations")
     )]
     read_weight: f64,
+    /// The weight assigned to scan operations.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Weight to assign to scan operations")
     )]
     scan_weight: f64,
+    /// The number of keys to scan.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Number of keys to scan (constant).")
     )]
     scan_keys: u64,
+    /// Change behavior to enumerate all keys instead of running for [duration_secs].
     #[cfg_attr(
         feature = "command_line",
         arrrg(
@@ -211,18 +223,22 @@ pub struct WorkloadOptions {
         )
     )]
     load: bool,
+    /// The number of worker threads to spawn.
     #[cfg_attr(feature = "command_line", arrrg(optional, "Number of threads to run."))]
     worker_threads: u64,
+    /// The target throughput.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Target throughput to sustain.")
     )]
     target_throughput: u64,
+    /// The number of seconds to run the test.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Number of seconds to run the experiment.")
     )]
     duration_secs: u64,
+    /// The path to which metrics should be written in biometrics plaintext form.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Metrics output (default: \"ycsb.txt\").")
@@ -271,12 +287,14 @@ impl Eq for WorkloadOptions {}
 
 ///////////////////////////////////////////// Workload /////////////////////////////////////////////
 
+/// The YCSB workload.
 pub struct Workload<KVS: KeyValueStore> {
     options: WorkloadOptions,
     _phantom_kvs: std::marker::PhantomData<KVS>,
 }
 
 impl<KVS: KeyValueStore> Workload<KVS> {
+    /// Create a new workload from options.
     pub fn new(options: WorkloadOptions) -> Self {
         Self {
             options,

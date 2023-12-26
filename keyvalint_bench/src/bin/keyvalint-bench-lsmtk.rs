@@ -1,3 +1,5 @@
+//! A benchmark of lsmtk.
+
 use std::sync::Arc;
 
 use arrrg::CommandLine;

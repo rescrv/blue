@@ -1,3 +1,5 @@
+//! Benchmark the [sst::log:ConcurrentLog].
+
 use std::fs::File;
 use std::ops::Bound;
 

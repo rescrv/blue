@@ -1,3 +1,5 @@
+//! Workloads for keyvalint_bench.
+
 #[cfg(feature = "command_line")]
 use arrrg::CommandLine;
 
@@ -8,6 +10,7 @@ use crate::{KeyValueStore, Workload};
 
 //////////////////////////////////////////////// get ///////////////////////////////////////////////
 
+/// Parse a workload from the command-line.
 #[cfg(feature = "command_line")]
 pub fn from_command_line<KVS: KeyValueStore + 'static>(
     usage: &str,
