@@ -1,3 +1,5 @@
+//! Lazy cursoring, so we can limit the number of files open at once.
+
 use std::path::{Path, PathBuf};
 
 use keyvalint::{Cursor, KeyRef};
@@ -16,6 +18,7 @@ enum Position {
 
 //////////////////////////////////////////// LazyCursor ////////////////////////////////////////////
 
+/// A LazyCursor instantiates its contents lazily, one file at a time.
 pub struct LazyCursor<FM: AsRef<FileManager>> {
     file_manager: FM,
     path: PathBuf,
@@ -23,6 +26,7 @@ pub struct LazyCursor<FM: AsRef<FileManager>> {
 }
 
 impl<FM: AsRef<FileManager>> LazyCursor<FM> {
+    /// Create a new LazyCursor.
     pub fn new<P: AsRef<Path>>(file_manager: FM, path: P) -> Self {
         Self {
             file_manager,

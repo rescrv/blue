@@ -1,3 +1,5 @@
+//! Convert a log file to sst.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 

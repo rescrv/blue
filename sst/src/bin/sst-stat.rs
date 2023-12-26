@@ -1,3 +1,5 @@
+//! Show the metadata for each sst listed on the command-line.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 

@@ -1,17 +1,18 @@
-/// The primary point of the pruning cursor is to turn an in-memory skip-list into something that
-/// looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
-/// working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
-/// to create a cursor over an immutable data set.
+//! The primary point of the pruning cursor is to turn an in-memory skip-list into something that
+//! looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
+//! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
+//! to create a cursor over an immutable data set.
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
-use keyvalint::{Cursor, KeyRef};
+use keyvalint::{compare_bytes, Cursor, KeyRef};
 use zerror_core::ErrorCore;
 
-use super::{compare_bytes, Error};
+use super::Error;
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
+/// A PruningCursor returns the latest value less than or equal to a timestmap.
 pub struct PruningCursor<C: Cursor, E: Debug + From<Error>> {
     cursor: C,
     timestamp: u64,
@@ -20,6 +21,7 @@ pub struct PruningCursor<C: Cursor, E: Debug + From<Error>> {
 }
 
 impl<E: Debug + From<Error>, C: Cursor<Error = E>> PruningCursor<C, E> {
+    /// Create a new pruning cursor.
     pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, E> {
         cursor.seek_to_first()?;
         Ok(Self {

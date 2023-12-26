@@ -508,6 +508,7 @@ fn gc_policy(input: &str) -> ParseResult<GarbageCollectionPolicy> {
 ///
 /// Panics when the stream of keys is not sorted according to Sst sorting rules.
 pub trait Determiner {
+    /// Returns true iff the key, tombstones, and present value should be retained.
     fn retain(&mut self, key: &[u8], tombstones: &[u64], exists: u64) -> bool;
 }
 

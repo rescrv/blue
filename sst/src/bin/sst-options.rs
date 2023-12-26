@@ -1,3 +1,5 @@
+//! Pretty-print how the command-line is interpereted.
+
 use arrrg::CommandLine;
 
 use sst::SstOptions;

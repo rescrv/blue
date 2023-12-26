@@ -1,3 +1,5 @@
+//! Convert "<key> <value>\n" lines from a file into an sst.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::{SystemTime, UNIX_EPOCH};

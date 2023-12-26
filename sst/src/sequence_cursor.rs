@@ -1,9 +1,12 @@
+#![allow(missing_docs)]
+
 use keyvalint::{Cursor, KeyRef};
 
 use super::{Error, TableMetadata};
 
 ////////////////////////////////////////// SequenceCursor //////////////////////////////////////////
 
+// TODO(rescrv):  I don't like this cursor's structure.  Rethink it, then document.
 pub struct SequenceCursor<T: TableMetadata, C: Cursor>
 where
     C: TryFrom<T>,

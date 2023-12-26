@@ -1,3 +1,5 @@
+//! Tools for ingesting data into a directory.
+
 use std::fs::{remove_file, rename, File};
 use std::path::PathBuf;
 
@@ -7,15 +9,20 @@ use super::{Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABL
 
 /////////////////////////////////////////// IngestOptions //////////////////////////////////////////
 
+/// IngestOptions captures what we care about for ingesting data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct IngestOptions {
+    /// The directory in which to write log files.
     #[cfg_attr(feature = "command_line", arrrg(required, "Path to write logs."))]
     log_dir: String,
+    /// The LogOptions to use for ingesting data.
     #[cfg_attr(feature = "command_line", arrrg(nested))]
     log: LogOptions,
+    /// The directory in which to put ssts once generated.
     #[cfg_attr(feature = "command_line", arrrg(required, "Path to write ssts."))]
     sst_dir: String,
+    /// The options to use for creating ssts.
     #[cfg_attr(feature = "command_line", arrrg(nested))]
     sst: SstOptions,
 }
@@ -33,6 +40,13 @@ impl Default for IngestOptions {
 
 ////////////////////////////////////////////// Jester //////////////////////////////////////////////
 
+/// Jester provides a builder interface and writes logs that get converted into ssts.
+///
+/// It's not intended to be a general-purpose key-value store.  Rather, it is intended for things
+/// like logging of stats.
+///
+/// NOTE:  Jester isn't well tested and doesn't recover logs on errors.  It's a TODO to do so.
+// TODO(rescrv): Make this recover logs on crash/restart.
 pub struct Jester {
     options: IngestOptions,
     counter: u64,
@@ -41,6 +55,7 @@ pub struct Jester {
 }
 
 impl Jester {
+    /// Create a new Jester from IngestOptions.
     pub fn new(options: IngestOptions) -> Self {
         Self {
             options,
@@ -50,6 +65,7 @@ impl Jester {
         }
     }
 
+    /// Flush the Jester.
     pub fn flush(&mut self) -> Result<(), Error> {
         self.get_builder()?.flush()
     }

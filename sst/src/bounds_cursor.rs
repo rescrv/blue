@@ -1,10 +1,12 @@
+//! Bounds cursor restricts a general cursor to be between some pair of keys.
+
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Bound;
 
-use keyvalint::{Cursor, KeyRef};
+use keyvalint::{compare_bytes, Cursor, KeyRef};
 
-use super::{compare_bytes, Error};
+use super::Error;
 
 ////////////////////////////////////////////// Bounds //////////////////////////////////////////////
 
@@ -17,6 +19,7 @@ enum Bounds {
 
 /////////////////////////////////////////// BoundsCursor ///////////////////////////////////////////
 
+/// A BoundsCursor restricts another cursor to be between the provided start and end bounds.
 pub struct BoundsCursor<C: Cursor, E: Debug + From<Error>> {
     cursor: C,
     bounds: Bounds,
@@ -27,6 +30,7 @@ pub struct BoundsCursor<C: Cursor, E: Debug + From<Error>> {
 }
 
 impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
+    /// Create a new [BoundsCursor] with the prescribed `start_bound` and `end_bound`.
     pub fn new<T: AsRef<[u8]>>(
         cursor: C,
         start_bound: &Bound<T>,

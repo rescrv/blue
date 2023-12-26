@@ -1,9 +1,11 @@
+//! Dump a log to stdout for inspection.
+
 use arrrg::CommandLine;
 
 use sst::{LogIterator, LogOptions};
 
 fn main() {
-    let (opts, args) = LogOptions::from_command_line("Usage: log-dump [OPTIONS] [SSTs]");
+    let (opts, args) = LogOptions::from_command_line("Usage: log-dump [OPTIONS] [LOGs]");
     // parse
     for log in args {
         let mut log = LogIterator::new(opts.clone(), log).unwrap();

@@ -1,3 +1,7 @@
+//! Reference types for comparing sst and block behavior.
+
+// TODO(rescrv): dedupe with keyvalint.
+
 use std::rc::Rc;
 
 use keyvalint::{Cursor, KeyRef, KeyValuePair};
@@ -6,12 +10,14 @@ use super::{check_key_len, check_table_size, check_value_len, Error, TableMetada
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
+/// A ReferenceTable provides the table interface as a comparison for specifying behavior.
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceTable {
     entries: Rc<Vec<KeyValuePair>>,
 }
 
 impl ReferenceTable {
+    /// Return a new cursor over this table.
     pub fn cursor(&self) -> ReferenceCursor {
         ReferenceCursor {
             entries: Rc::clone(&self.entries),
@@ -46,6 +52,7 @@ impl TableMetadata for ReferenceTable {
 
 ///////////////////////////////////////// ReferenceBuilder /////////////////////////////////////////
 
+/// A builder that returns a ReferenceTable.
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceBuilder {
     entries: Vec<KeyValuePair>,
@@ -53,10 +60,12 @@ pub struct ReferenceBuilder {
 }
 
 impl ReferenceBuilder {
+    /// The approximate size of the builder.
     pub fn approximate_size(&self) -> usize {
         self.approximate_size
     }
 
+    /// Put a key in the reference builder.
     pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         check_key_len(key)?;
         check_value_len(value)?;
@@ -71,6 +80,7 @@ impl ReferenceBuilder {
         Ok(())
     }
 
+    /// Delete a key from the reference builder.
     pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         check_key_len(key)?;
         self.approximate_size += key.len() + 8;
@@ -84,6 +94,7 @@ impl ReferenceBuilder {
         Ok(())
     }
 
+    /// Seal the reference builder and get a ReferenceTable.
     pub fn seal(self) -> Result<ReferenceTable, Error> {
         let mut entries = self.entries;
         entries.sort();
@@ -95,6 +106,7 @@ impl ReferenceBuilder {
 
 ////////////////////////////////////////// ReferenceCursor /////////////////////////////////////////
 
+/// A cursor over a reference table.
 #[derive(Clone, Debug)]
 pub struct ReferenceCursor {
     entries: Rc<Vec<KeyValuePair>>,

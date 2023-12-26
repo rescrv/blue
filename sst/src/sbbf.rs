@@ -1,5 +1,5 @@
-/// This file implements the split-block bloom-filter used by parquet:
-/// https://github.com/apache/parquet-format/blob/master/BloomFilter.md
+//! This file implements the split-block bloom-filter used by parquet:
+//! https://github.com/apache/parquet-format/blob/master/BloomFilter.md
 use std::convert::TryFrom;
 
 use siphasher::sip::SipHasher24;
@@ -83,14 +83,16 @@ impl TryFrom<&[u8]> for Block {
 
 ////////////////////////////////////////////// Filter //////////////////////////////////////////////
 
+/// A split-block bloom-filter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Filter {
     blocks: Vec<Block>,
 }
 
 impl Filter {
+    /// Create a new bloom filter with size bits.
     pub fn new(size: u32) -> Self {
-        // Add 7 and divide by 8 to get number of bits.
+        // Add 7 and divide by 8 to get number of bytes.
         // Divide by 32 for number of blocks.
         // Add one to make sure it's never 0.
         let size = ((size.saturating_add(7) >> 3) >> 5) + 1;
@@ -99,16 +101,19 @@ impl Filter {
         Self { blocks }
     }
 
+    /// Insert item into the bloom filter.
     pub fn insert(&mut self, item: &[u8]) {
         self.deferred_insert(Self::defer_insert(item));
     }
 
+    /// Check if item exists in the bloom filter.
     pub fn check(&self, item: &[u8]) -> bool {
         let x = Self::defer_insert(item);
         let (block_idx, x) = self.do_hashing(x);
         self.blocks[block_idx].check(x)
     }
 
+    /// Convert a bloom filter into a byte string.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(32 * self.blocks.len());
         for b in self.blocks.iter() {
@@ -117,11 +122,14 @@ impl Filter {
         bytes
     }
 
+    /// Defer inserting this item; instead, return a u64 that can be provided to a subsequent
+    /// [deferred_insert].
     pub fn defer_insert(item: &[u8]) -> u64 {
         let hasher = SipHasher24::new_with_key(&KEY);
         hasher.hash(item)
     }
 
+    /// Insert an item previously returned by [defer_insert].
     pub fn deferred_insert(&mut self, item: u64) {
         let (block_idx, x) = self.do_hashing(item);
         self.blocks[block_idx].insert(x);

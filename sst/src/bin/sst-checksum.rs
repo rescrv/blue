@@ -1,3 +1,5 @@
+//! Output the setsum associated with each sst.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 use keyvalint::Cursor;

@@ -1,3 +1,5 @@
+//! Make a jester that converts files to ssts.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 

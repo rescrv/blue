@@ -1,3 +1,5 @@
+//! Create a log from plaintext.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 

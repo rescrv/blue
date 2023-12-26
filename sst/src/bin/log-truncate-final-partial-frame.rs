@@ -1,3 +1,5 @@
+//! Truncate a log file that has the final-partial-frame corruption case present.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 

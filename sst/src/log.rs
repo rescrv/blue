@@ -1,3 +1,5 @@
+//! A log is an unordered table.
+
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write as IoWrite};
@@ -25,6 +27,7 @@ use super::{
 static APPEND: Counter = Counter::new("sst.log.append");
 static FSYNC: Counter = Counter::new("sst.log.fsync");
 
+/// Register the biometrics for the log.
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&APPEND);
     collector.register_counter(&FSYNC);
@@ -32,6 +35,7 @@ pub fn register_biometrics(collector: &Collector) {
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
+/// The maximum batch size that can be written to a log.
 pub const MAX_BATCH_SIZE: u64 = BLOCK_SIZE - 2 * HEADER_MAX_SIZE;
 
 const BLOCK_BITS: u64 = 20;
@@ -86,6 +90,7 @@ struct Header {
     crc32c: u32,
 }
 
+/// The maximum header size for a log header.
 pub const HEADER_MAX_SIZE: u64 = 1 // one byte for size of header
                                + 1 + 10 // size is a varint
                                + 1 + 1 // discriminant is a varint of one byte---always
@@ -96,13 +101,17 @@ const HEADER_SECOND: u32 = 3;
 
 //////////////////////////////////////////// LogOptions ////////////////////////////////////////////
 
+/// Options used for creating and reading logs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct LogOptions {
+    /// The number of bytes to use for a write buffer.
     #[cfg_attr(feature = "command_line", arrrg(optional, "Size of the write buffer."))]
     pub(crate) write_buffer: usize,
+    /// The number of bytes to use for a read buffer.
     #[cfg_attr(feature = "command_line", arrrg(optional, "Size of the read buffer."))]
     pub(crate) read_buffer: usize,
+    /// The size at which to rollover the log for multi-file log builders.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Roll over logs that exceed this number of bytes.")
@@ -122,7 +131,9 @@ impl Default for LogOptions {
 
 /////////////////////////////////////////////// Write //////////////////////////////////////////////
 
+/// An extension of std::io::Write that does fsync.
 pub trait Write: std::io::Write {
+    /// Return when the data is known to be durable.
     fn fsync(&mut self) -> Result<(), Error>;
 }
 
@@ -147,6 +158,7 @@ impl<W: Write> Write for BufWriter<W> {
 
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
+/// A WriteBatch for appending to a log.
 #[derive(Clone, Debug, Default)]
 pub struct WriteBatch {
     buffer: Vec<u8>,
@@ -154,6 +166,7 @@ pub struct WriteBatch {
 }
 
 impl WriteBatch {
+    /// Insert the key-value pair into the write batch.
     pub fn insert(&mut self, kvr: KeyValueRef<'_>) -> Result<(), Error> {
         if let Some(value) = kvr.value {
             self.put(kvr.key, kvr.timestamp, value)
@@ -215,6 +228,7 @@ impl Builder for WriteBatch {
 
 //////////////////////////////////////////// LogBuilder ////////////////////////////////////////////
 
+/// A LogBuilder is a non-concurrent log writer.
 pub struct LogBuilder<W: Write> {
     options: LogOptions,
     output: BufWriter<W>,
@@ -223,6 +237,7 @@ pub struct LogBuilder<W: Write> {
 }
 
 impl LogBuilder<File> {
+    /// Create a new log builder with the provided options at the prescribed path.
     pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
         let file: File = OpenOptions::new()
             .create_new(true)
@@ -232,6 +247,7 @@ impl LogBuilder<File> {
         Self::from_write(options, file)
     }
 
+    /// fsync the log builder.
     pub fn fsync(&mut self) -> Result<(), Error> {
         FSYNC.click();
         self.output.flush()?;
@@ -240,6 +256,7 @@ impl LogBuilder<File> {
 }
 
 impl<W: Write> LogBuilder<W> {
+    /// Create a new LogBuilder from options and a write.
     pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
         let output = BufWriter::with_capacity(options.write_buffer, write);
         Ok(Self {
@@ -250,11 +267,13 @@ impl<W: Write> LogBuilder<W> {
         })
     }
 
+    /// Flush the log to the OS.  This does not call fsync.
     pub fn flush(&mut self) -> Result<(), Error> {
         self.output.flush()?;
         Ok(())
     }
 
+    /// Append a write batch to the log.
     pub fn append(&mut self, write_batch: &WriteBatch) -> Result<(), Error> {
         if write_batch.buffer.is_empty() {
             return Err(Error::EmptyBatch {
@@ -440,6 +459,8 @@ impl WorkCoalescingCore<(), bool> for FsyncCoalescingCore {
     }
 }
 
+/// A ConcurrentLogBuilder provides a non-standard builder interface that is internally
+/// synchronized.  This will be orders of magnitude faster than standard LogBuilder.
 pub struct ConcurrentLogBuilder<W: Write> {
     write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Option<Error>, WriteCoalescingCore<W>>,
     // TODO(rescrv): Make this return Option<Error> too.
@@ -449,11 +470,13 @@ pub struct ConcurrentLogBuilder<W: Write> {
 }
 
 impl ConcurrentLogBuilder<File> {
+    /// Create a new concurrent log builder.
     pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
         let builder = LogBuilder::new(options, file_name)?;
         Self::from_builder(builder)
     }
 
+    /// fsync the data to disk.  This will return when all previously written data is durable.
     pub fn fsync(&self) -> Result<(), Error> {
         if !self.fsync_cq.do_work(()) {
             Err(Error::Corruption {
@@ -467,11 +490,13 @@ impl ConcurrentLogBuilder<File> {
 }
 
 impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
+    /// Create a new ConcurrentLogBuilder from the given writer.
     pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
         let builder = LogBuilder::from_write(options, write)?;
         Self::from_builder(builder)
     }
 
+    /// Create a new ConcurrentLogBuilder from the provided builder.
     pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, Error> {
         let raw_builder = builder.output.get_ref().as_raw_fd();
         let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore { builder });
@@ -486,16 +511,21 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
         })
     }
 
+    /// Flush data to the OS.
     pub fn flush(&self) -> Result<(), Error> {
         let mut write = self.write_cq.get_core();
         write.builder.flush()
     }
 
+    /// Return the approximate number of bytes written.
     pub fn approximate_size(&self) -> usize {
         let write = self.write_cq.get_core();
         write.builder.approximate_size()
     }
 
+    /// Append `write_batch` to the log.
+    ///
+    /// Returns after fsync is done.
     pub fn append(&self, write_batch: WriteBatch) -> Result<(), Error> {
         if write_batch.buffer.is_empty() {
             return Err(Error::EmptyBatch {
@@ -517,6 +547,9 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
         Ok(())
     }
 
+    /// Put a key-value pair in the log.
+    ///
+    /// Returns after fsync is done.
     pub fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         let mut wb = WriteBatch::default();
         wb.put(key, timestamp, value)?;
@@ -524,6 +557,9 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
         Ok(())
     }
 
+    /// Put a key-value tombstone in the log.
+    ///
+    /// Returns after fsync is done.
     pub fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         let mut wb = WriteBatch::default();
         wb.del(key, timestamp)?;
@@ -531,6 +567,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
         Ok(())
     }
 
+    /// Seal the log and return its setsum.
     pub fn seal(self) -> Result<Setsum, Error> {
         let core = self.write_cq.into_inner();
         core.builder.seal()
@@ -539,6 +576,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
 
 //////////////////////////////////////////// LogIterator ///////////////////////////////////////////
 
+/// An iterator over logs.
 pub struct LogIterator<R: Read + Seek> {
     input: BufReader<R>,
     buffer: Vec<u8>,
@@ -546,6 +584,7 @@ pub struct LogIterator<R: Read + Seek> {
 }
 
 impl LogIterator<File> {
+    /// Open `file_name` using `options` as a guide and return a [LogIterator].
     pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
         let file: File = OpenOptions::new()
             .create(false)
@@ -556,6 +595,7 @@ impl LogIterator<File> {
 }
 
 impl<R: Read + Seek> LogIterator<R> {
+    /// Create a new [LogIterator] from options and a reader.
     pub fn from_reader(options: LogOptions, reader: R) -> Result<Self, Error> {
         let input = BufReader::with_capacity(options.read_buffer, reader);
         Ok(Self {
@@ -565,6 +605,7 @@ impl<R: Read + Seek> LogIterator<R> {
         })
     }
 
+    /// Return the next item in the log, or None when the log has been traversed.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<KeyValueRef>, Error> {
         if self.buffer_idx < self.buffer.len() {
@@ -745,6 +786,7 @@ impl<R: Read + Seek> LogIterator<R> {
 
 ////////////////////////////////////////// log_to_builder //////////////////////////////////////////
 
+/// Given a log, write it out to the provided builder.
 pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
     log_options: LogOptions,
     log_path: P,
@@ -777,6 +819,7 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
 
 /////////////////////////////////////////// log_to_setsum //////////////////////////////////////////
 
+/// Given a log, read and compute its setsum.
 pub fn log_to_setsum<P: AsRef<Path>>(
     log_options: LogOptions,
     log_path: P,
@@ -795,6 +838,9 @@ pub fn log_to_setsum<P: AsRef<Path>>(
 
 /////////////////////////////////// truncate_final_partial_frame ///////////////////////////////////
 
+/// Return the truncation point for a log that is corrupt with the final_partial_frame corruption.
+///
+/// This can happen if a process exits between write calls in append_split.
 pub fn truncate_final_partial_frame<P: AsRef<Path>>(
     log_options: LogOptions,
     log_path: P,

@@ -1,3 +1,5 @@
+//! A MergingCursor merges several cursors together.
+
 use keyvalint::{Cursor, KeyRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
@@ -37,6 +39,7 @@ impl Comparator {
 
 /////////////////////////////////////////// MergingCursor //////////////////////////////////////////
 
+/// MergingCursor takes several cursors of type `C` and merges them into one logical cursor.
 pub struct MergingCursor<C: Cursor> {
     comparator: Comparator,
     cursors: Vec<C>,
@@ -54,6 +57,7 @@ impl<C: Cursor + Clone> Clone for MergingCursor<C> {
 }
 
 impl<C: Cursor> MergingCursor<C> {
+    /// Create a new MergingCursor that wraps `cursors`.
     pub fn new(cursors: Vec<C>) -> Result<Self, C::Error> {
         let mut cursor = Self {
             comparator: Comparator::Forward,

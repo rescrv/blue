@@ -1,3 +1,8 @@
+//! sst stands for sorted-string-table.
+//!
+//! This crate provides an implementation of an SST and most common cursoring patterns necessary to
+//! create something like a log-structured merge tree out of SSTs.
+
 extern crate prototk;
 #[macro_use]
 extern crate prototk_derive;
@@ -12,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
 use buffertk::{stack_pack, Packable, Unpacker};
-use keyvalint::{Cursor, KeyRef, KeyValueRef};
+use keyvalint::{compare_bytes, compare_key, Cursor, KeyRef, KeyValueRef};
 use tatl::{HeyListen, Stationary};
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
@@ -86,6 +91,7 @@ static SST_CURSOR_PREV: Counter = Counter::new("sst.cursor.prev");
 static SST_CURSOR_NEXT: Counter = Counter::new("sst.cursor.next");
 static SST_CURSOR_NEW: Counter = Counter::new("sst.cursor.new");
 
+/// Register this crate's biometrics.
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&LOGIC_ERROR);
     collector.register_counter(&CORRUPTION);
@@ -122,6 +128,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     log::register_biometrics(collector);
 }
 
+/// Register this crate's monitors.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOGIC_ERROR_MONITOR);
     hey_listen.register_stationary(&CORRUPTION_MONITOR);
@@ -134,17 +141,11 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
-pub use keyvalint::MAX_BATCH_LEN;
-pub use keyvalint::MAX_KEY_LEN;
-pub use keyvalint::MAX_VALUE_LEN;
+use keyvalint::MAX_KEY_LEN;
+use keyvalint::MAX_VALUE_LEN;
+use keyvalint::TABLE_FULL_SIZE;
 
-pub use keyvalint::DEFAULT_KEY;
-pub use keyvalint::DEFAULT_TIMESTAMP;
-pub use keyvalint::MAX_KEY;
-pub use keyvalint::MIN_KEY;
-
-pub use keyvalint::TABLE_FULL_SIZE;
-
+/// Check that the key is of valid length, or return a descriptive error.
 pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
@@ -159,6 +160,7 @@ pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
     }
 }
 
+/// Check that the value is of valid length, or return a descriptive error.
 pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
@@ -173,6 +175,7 @@ pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
     }
 }
 
+/// Check that the table size is allowable, or return a descriptive error.
 pub fn check_table_size(size: usize) -> Result<(), Error> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
@@ -189,112 +192,160 @@ pub fn check_table_size(size: usize) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// The sst Error type.
 #[derive(Clone, Message, ZerrorCore)]
 pub enum Error {
+    /// Success.  Used for Message default.  Should not be constructed otherwise.
     #[prototk(442368, message)]
     Success {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
     },
+    /// Indicates the key length is too big for sst.
     #[prototk(442369, message)]
     KeyTooLarge {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The length of the key.
         #[prototk(2, uint64)]
         length: usize,
+        /// The limit on length of the key.
         #[prototk(3, uint64)]
         limit: usize,
     },
+    /// Indicates the value length is too big for sst.
     #[prototk(442370, message)]
     ValueTooLarge {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The length of the value.
         #[prototk(2, uint64)]
         length: usize,
+        /// The limit on length of the value.
         #[prototk(3, uint64)]
         limit: usize,
     },
+    /// The SST was provided keys out of order.
     #[prototk(442371, message)]
     SortOrder {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The most recently inserted key.
         #[prototk(2, bytes)]
         last_key: Vec<u8>,
+        /// The most recently inserted timestamp.
         #[prototk(3, uint64)]
         last_timestamp: u64,
+        /// The key that happened out of order.
         #[prototk(4, bytes)]
         new_key: Vec<u8>,
+        /// The timestamp that happened out of order.
         #[prototk(5, uint64)]
         new_timestamp: u64,
     },
+    /// The table is full.
     #[prototk(442372, message)]
     TableFull {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The attempted size of the table.
         #[prototk(2, uint64)]
         size: usize,
+        /// The limit on size of the table.
         #[prototk(3, uint64)]
         limit: usize,
     },
+    /// The block was too small to be considered valid.
     #[prototk(442373, message)]
     BlockTooSmall {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The length observed.
         #[prototk(2, uint64)]
         length: usize,
+        /// The length required.
         #[prototk(3, uint64)]
         required: usize,
     },
+    /// There was an error unpacking data.
     #[prototk(442374, message)]
     UnpackError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The prototk unpack error.
         #[prototk(2, message)]
         error: prototk::Error,
+        /// Additional context.
         #[prototk(3, string)]
         context: String,
     },
+    /// A block failed its crc check.
     #[prototk(442375, message)]
     Crc32cFailure {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The starting offset.
         #[prototk(2, uint64)]
         start: u64,
+        /// The limit offset.
         #[prototk(3, uint64)]
         limit: u64,
+        /// The computed crc.
         #[prototk(3, fixed32)]
         crc32c: u32,
     },
+    /// General corruption was observed.
     #[prototk(442376, message)]
     Corruption {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A description of what was corrupt.
         #[prototk(2, string)]
         context: String,
     },
+    /// A logic error was encountered.
     #[prototk(442377, message)]
     LogicError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         context: String,
     },
+    /// A system error was encountered.
     #[prototk(442378, message)]
     SystemError {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// A hint as to what went wrong.
         #[prototk(2, string)]
         what: String,
     },
+    /// Too many files were opened at once.
     #[prototk(442379, message)]
     TooManyOpenFiles {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
+        /// The limit on the number of files allowed.
         #[prototk(2, uint64)]
         limit: usize,
     },
+    /// An empty batch was provided to a builder that cannot accept empty batches.
     #[prototk(442380, message)]
     EmptyBatch {
+        /// The error core.
         #[prototk(1, message)]
         core: ErrorCore,
     },
@@ -418,14 +469,20 @@ struct KeyValueDel<'a> {
 
 ////////////////////////////////////////////// Builder /////////////////////////////////////////////
 
+/// A Builder is a generic way of building a sorted (sst) or unsorted (log) string table.
 pub trait Builder {
+    /// The type that gets returned from seal.
     type Sealed;
 
+    /// The approximate size of the builder.
     fn approximate_size(&self) -> usize;
 
+    /// Put a key into the builder.
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
+    /// Put a tombstone into the builder.
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
 
+    /// Seal the builder to stop further writes and return the Sealed type.
     fn seal(self) -> Result<Self::Sealed, Error>;
 }
 
@@ -524,30 +581,42 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ // index block
 
 /////////////////////////////////////////// TableMetadata //////////////////////////////////////////
 
+/// TableMetadata captures information about a table.
+// TODO(rescrv): deprecate this.
 pub trait TableMetadata {
+    /// The first key in the table.
     fn first_key(&self) -> KeyRef;
+    /// The last key in the table.
     fn last_key(&self) -> KeyRef;
 }
 
 //////////////////////////////////////////// SstMetadata ///////////////////////////////////////////
 
+/// Metadata about an Sst.
 #[derive(Clone, Eq, Message, Ord, PartialEq, PartialOrd)]
 pub struct SstMetadata {
+    /// The digest of the setsum covering this Sst.
     #[prototk(1, bytes32)]
     pub setsum: [u8; 32],
+    /// The smallest key in the sst.
     #[prototk(2, bytes)]
     pub first_key: Vec<u8>,
+    /// The largest key in the sst.
     #[prototk(3, bytes)]
     pub last_key: Vec<u8>,
+    /// The smallest timestamp (not necessarily correlated with first_key).
     #[prototk(4, uint64)]
     pub smallest_timestamp: u64,
+    /// The biggest timestamp (not necessarily correlated with last_key).
     #[prototk(5, uint64)]
     pub biggest_timestamp: u64,
+    /// The file size.
     #[prototk(6, uint64)]
     pub file_size: u64,
 }
 
 impl SstMetadata {
+    /// The first key, escaped for printing.
     pub fn first_key_escaped(&self) -> String {
         // TODO(rescrv): dedupe this with sst-dump
         String::from_utf8(
@@ -559,6 +628,7 @@ impl SstMetadata {
         .unwrap()
     }
 
+    /// The last key, escaped for printing.
     pub fn last_key_escaped(&self) -> String {
         String::from_utf8(
             self.last_key
@@ -593,6 +663,7 @@ impl Debug for SstMetadata {
 
 //////////////////////////////////////////////// Sst ///////////////////////////////////////////////
 
+/// An Sst represents an immutable sorted string table.
 #[derive(Clone, Debug)]
 pub struct Sst {
     // The file backing the table.
@@ -608,11 +679,13 @@ pub struct Sst {
 }
 
 impl Sst {
+    /// Open the provided path using options.
     pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Self, Error> {
         let handle = open_without_manager(path.as_ref())?;
         Sst::from_file_handle(handle)
     }
 
+    /// Create an Sst from a file handle.
     pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
         SST_OPEN.click();
         // Read and parse the final block's offset
@@ -699,11 +772,13 @@ impl Sst {
         })
     }
 
+    /// Get a new cursor for the Sst.
     pub fn cursor(&self) -> SstCursor {
         SST_CURSOR_NEW.click();
         SstCursor::new(self.clone())
     }
 
+    /// Get the Sst's metadata.  This will involve reading the first and last keys from disk.
     pub fn metadata(&self) -> Result<SstMetadata, Error> {
         SST_METADATA.click();
         let mut cursor = self.cursor();
@@ -734,10 +809,12 @@ impl Sst {
         })
     }
 
+    /// Return the setsum stored in the final block of the sst.
     pub fn fast_setsum(&self) -> Setsum {
         Setsum::from_digest(self.final_block.setsum)
     }
 
+    /// Inspect the sst by printing its internal structure.
     pub fn inspect(&self) -> Result<(), Error> {
         let mut meta_cursor = self.index_block.cursor();
         meta_cursor.seek_to_first()?;
@@ -915,8 +992,10 @@ impl keyvalint::KeyValueLoad for Sst {
 
 ///////////////////////////////////////// BlockCompression /////////////////////////////////////////
 
+/// An enum matching the types of compression supported.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BlockCompression {
+    /// Do not use any compression (default).
     NoCompression,
 }
 
@@ -933,42 +1012,56 @@ impl BlockCompression {
 
 //////////////////////////////////////////// SstOptions ////////////////////////////////////////////
 
+/// The minimum target block size.
 pub const CLAMP_MIN_TARGET_BLOCK_SIZE: u32 = 1u32 << 12;
+/// The maximum target block size.
 pub const CLAMP_MAX_TARGET_BLOCK_SIZE: u32 = 1u32 << 24;
 
+/// The minimum target file size.
 pub const CLAMP_MIN_TARGET_FILE_SIZE: u32 = 1u32 << 12;
+/// The maximum target file size.
 pub const CLAMP_MAX_TARGET_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
 
+/// The minimum minimum file size.
 pub const CLAMP_MIN_MINIMUM_FILE_SIZE: u32 = 1u32 << 12;
+/// The maximum minimum file size.
 pub const CLAMP_MAX_MINIMUM_FILE_SIZE: u32 = TABLE_FULL_SIZE as u32;
 
+/// Options for working with Ssts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct SstOptions {
+    /// Options for the blocks of the sst.
     #[cfg_attr(feature = "command_line", arrrg(nested))]
     block: BlockBuilderOptions,
+    /// The type of compression in use.
     // TODO(rescrv): arrrg needs an enum helper.
     block_compression: BlockCompression,
+    /// The target block size.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Target block size.", "BYTES")
     )]
     target_block_size: usize,
+    /// The target file size.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Target file size.", "BYTES")
     )]
     target_file_size: usize,
+    /// The minimum file size.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Minimum file size.", "BYTES")
     )]
     minimum_file_size: usize,
+    /// The write buffer size.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Write buffer size.", "BYTES")
     )]
     write_buffer_size: usize,
+    /// The number of bits to allocate per key-value pair in bloom filters.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Bloom filter bits per key.", "BITS/KEY")
@@ -977,16 +1070,19 @@ pub struct SstOptions {
 }
 
 impl SstOptions {
+    /// Set the block options.
     pub fn block(mut self, block: BlockBuilderOptions) -> Self {
         self.block = block;
         self
     }
 
+    /// Set the block compression.
     pub fn block_compression(mut self, block_compression: BlockCompression) -> Self {
         self.block_compression = block_compression;
         self
     }
 
+    /// Set the target block size.
     pub fn target_block_size(mut self, mut target_block_size: u32) -> Self {
         if target_block_size < CLAMP_MIN_TARGET_BLOCK_SIZE {
             target_block_size = CLAMP_MIN_TARGET_BLOCK_SIZE;
@@ -998,6 +1094,7 @@ impl SstOptions {
         self
     }
 
+    /// Set the target file size.
     pub fn target_file_size(mut self, mut target_file_size: u32) -> Self {
         if target_file_size < CLAMP_MIN_TARGET_FILE_SIZE {
             target_file_size = CLAMP_MIN_TARGET_FILE_SIZE;
@@ -1009,6 +1106,7 @@ impl SstOptions {
         self
     }
 
+    /// Set the minimum file size.
     pub fn minimum_file_size(mut self, mut minimum_file_size: u32) -> Self {
         if minimum_file_size < CLAMP_MIN_MINIMUM_FILE_SIZE {
             minimum_file_size = CLAMP_MIN_MINIMUM_FILE_SIZE;
@@ -1037,6 +1135,7 @@ impl Default for SstOptions {
 
 //////////////////////////////////////////// SstBuilder ////////////////////////////////////////////
 
+/// Build Ssts by providing keys in-order.
 pub struct SstBuilder {
     // Options for every "normal" table entry.
     options: SstOptions,
@@ -1063,6 +1162,7 @@ pub struct SstBuilder {
 }
 
 impl SstBuilder {
+    /// Create a new SstBuilder.
     pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, Error> {
         BUILDER_NEW.click();
         let block_options = options.block.clone();
@@ -1284,6 +1384,7 @@ impl Builder for SstBuilder {
 
 ////////////////////////////////////////// SstMultiBuilder /////////////////////////////////////////
 
+/// Create an SstBuilder that will create numbered files of similar prefix and suffix.
 pub struct SstMultiBuilder {
     prefix: PathBuf,
     suffix: String,
@@ -1294,6 +1395,7 @@ pub struct SstMultiBuilder {
 }
 
 impl SstMultiBuilder {
+    /// Create Ssts with prefix, suffix, and options.
     pub fn new(prefix: PathBuf, suffix: String, options: SstOptions) -> Self {
         Self {
             prefix,
@@ -1305,6 +1407,7 @@ impl SstMultiBuilder {
         }
     }
 
+    /// Provide a hint that this would be a good spot to split to create a new sst.
     pub fn split_hint(&mut self) -> Result<(), Error> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
@@ -1368,6 +1471,7 @@ impl Builder for SstMultiBuilder {
 
 ///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
+/// A cursor over an Sst.
 #[derive(Clone, Debug)]
 pub struct SstCursor {
     table: Sst,
@@ -1566,34 +1670,6 @@ impl From<Sst> for SstCursor {
         SST_CURSOR_NEW.click();
         Self::new(table)
     }
-}
-
-/////////////////////////////////////////// compare_bytes //////////////////////////////////////////
-
-// Content under CC By-Sa.  I just use as is, as can you.
-// https://codereview.stackexchange.com/questions/233872/writing-slice-compare-in-a-more-compact-way
-pub fn compare_bytes(a: &[u8], b: &[u8]) -> Ordering {
-    for (ai, bi) in a.iter().zip(b.iter()) {
-        match ai.cmp(bi) {
-            Ordering::Equal => continue,
-            ord => return ord,
-        }
-    }
-
-    /* if every single element was equal, compare length */
-    a.len().cmp(&b.len())
-}
-// End borrowed code
-
-//////////////////////////////////////////// compare_key ///////////////////////////////////////////
-
-pub fn compare_key(
-    key_lhs: &[u8],
-    timestamp_lhs: u64,
-    key_rhs: &[u8],
-    timestamp_rhs: u64,
-) -> Ordering {
-    compare_bytes(key_lhs, key_rhs).then(timestamp_lhs.cmp(&timestamp_rhs).reverse())
 }
 
 //////////////////////////////////////////// divide_keys ///////////////////////////////////////////

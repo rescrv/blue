@@ -1,30 +1,36 @@
+//! A block is the base unit of an SST.  This module provides implementations of cursors and
+//! builders for blocks.
+
 use std::cmp;
 use std::cmp::Ordering;
 use std::ops::Bound;
 use std::rc::Rc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
-use keyvalint::{Cursor, KeyRef};
+use keyvalint::{compare_bytes, compare_key, Cursor, KeyRef};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_bytes, compare_key, Builder, Error,
-    KeyValueDel, KeyValueEntry, KeyValuePut, CORRUPTION, LOGIC_ERROR,
+    check_key_len, check_table_size, check_value_len, Builder, Error, KeyValueDel, KeyValueEntry,
+    KeyValuePut, CORRUPTION, LOGIC_ERROR,
 };
 use crate::bounds_cursor::BoundsCursor;
 use crate::pruning_cursor::PruningCursor;
 
 //////////////////////////////////////// BlockBuilderOptions ///////////////////////////////////////
 
+/// Options for building blocks.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct BlockBuilderOptions {
+    /// Store a complete key every bytes_restart_interval bytes.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Store a complete key every this many bytes.", "BYTES")
     )]
     bytes_restart_interval: u64,
+    /// Store a complete key every key_value_pairs_restart_interval keys.
     #[cfg_attr(
         feature = "command_line",
         arrrg(optional, "Store a complete key every this many keys.", "KEYS")
@@ -33,11 +39,13 @@ pub struct BlockBuilderOptions {
 }
 
 impl BlockBuilderOptions {
+    /// Set the bytes_restart_interval.
     pub fn bytes_restart_interval(mut self, bytes_restart_interval: u32) -> Self {
         self.bytes_restart_interval = bytes_restart_interval as u64;
         self
     }
 
+    /// Set the key_value_pairs_restart_interval.
     pub fn key_value_pairs_restart_interval(
         mut self,
         key_value_pairs_restart_interval: u32,
@@ -58,6 +66,7 @@ impl Default for BlockBuilderOptions {
 
 /////////////////////////////////////////////// Block //////////////////////////////////////////////
 
+/// A Block captures an immutable, sorted sequence of key-value pairs.
 #[derive(Clone, Debug)]
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
@@ -70,6 +79,7 @@ pub struct Block {
 }
 
 impl Block {
+    /// Create a new block from the provided bytes.
     pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
         // Load num_restarts.
         let bytes = Rc::new(bytes);
@@ -109,10 +119,12 @@ impl Block {
         Ok(block)
     }
 
+    /// Return a reference to the block's bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
 
+    /// Return a cursor over the block.
     pub fn cursor(&self) -> BlockCursor {
         BlockCursor::new(self.clone())
     }
@@ -207,7 +219,7 @@ impl keyvalint::KeyValueLoad for Block {
 
 /////////////////////////////////////////// BlockBuilder ///////////////////////////////////////////
 
-// Build a block.
+/// Build a block.
 #[derive(Clone, Debug)]
 pub struct BlockBuilder {
     options: BlockBuilderOptions,
@@ -221,6 +233,7 @@ pub struct BlockBuilder {
 }
 
 impl BlockBuilder {
+    /// Create a new block builder.
     pub fn new(options: BlockBuilderOptions) -> Self {
         let buffer = Vec::default();
         let restarts = vec![0];
@@ -401,6 +414,7 @@ impl PartialEq for CursorPosition {
 
 //////////////////////////////////////////// BlockCursor ///////////////////////////////////////////
 
+/// A cursor over a block.
 #[derive(Clone, Debug)]
 pub struct BlockCursor {
     block: Block,
@@ -408,6 +422,7 @@ pub struct BlockCursor {
 }
 
 impl BlockCursor {
+    /// Create a new BlockCursor from the provided block.
     pub fn new(block: Block) -> Self {
         BlockCursor {
             block,

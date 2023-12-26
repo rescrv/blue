@@ -1,3 +1,5 @@
+//! Inspect the internals of an sst.
+
 use arrrg::CommandLine;
 
 use sst::{Sst, SstOptions};

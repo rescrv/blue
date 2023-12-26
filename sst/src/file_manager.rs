@@ -1,3 +1,5 @@
+//! Management of open files.  Intended to re-use open files and fail when too many files are open.
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::c_int;
@@ -27,6 +29,7 @@ static TOO_MANY_OPEN_FILES: Counter = Counter::new("sst.file_manager.too_many_op
 static TOO_MANY_OPEN_FILES_MONITOR: Stationary =
     Stationary::new("sst.file_manager.too_many_open_files", &TOO_MANY_OPEN_FILES);
 
+/// Register the biometrics for this module.
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&FILE_MANAGER_OPEN);
     collector.register_counter(&FILE_MANAGER_OPEN_WITHOUT_MANAGER);
@@ -34,12 +37,14 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&TOO_MANY_OPEN_FILES);
 }
 
+/// Register the monitors for this module.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&TOO_MANY_OPEN_FILES_MONITOR);
 }
 
 //////////////////////////////////////////// FileHandle ////////////////////////////////////////////
 
+/// A FileHandle represents an open, materialized, non-preemptable file.
 #[derive(Clone, Debug)]
 pub struct FileHandle {
     file: Arc<File>,
@@ -47,6 +52,7 @@ pub struct FileHandle {
 }
 
 impl FileHandle {
+    /// Return the path associated with the file handle.
     pub fn path(&self) -> Result<PathBuf, Error> {
         let fd = check_fd(self.file.as_raw_fd())?;
         let state = self.state.lock().unwrap();
@@ -63,6 +69,7 @@ impl FileHandle {
         }
     }
 
+    /// Perform a read_exact_at on the file.
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
         self.file
             .read_exact_at(buf, offset)
@@ -72,6 +79,7 @@ impl FileHandle {
             .with_variable("amount", buf.len())
     }
 
+    /// return the size of the file.
     pub fn size(&self) -> Result<u64, Error> {
         Ok(self.file.metadata()?.len())
     }
@@ -123,6 +131,7 @@ impl State {
 
 //////////////////////////////////////////// FileManager ///////////////////////////////////////////
 
+/// FileManager manages open files.
 pub struct FileManager {
     max_open_files: usize,
     state: Arc<Mutex<State>>,
@@ -130,6 +139,7 @@ pub struct FileManager {
 }
 
 impl FileManager {
+    /// Create a new file manager that will not open more than `max_open_files`.
     pub fn new(max_open_files: usize) -> Self {
         Self {
             max_open_files,
@@ -138,6 +148,7 @@ impl FileManager {
         }
     }
 
+    /// Open the given path, if allocation limits allow.
     pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<FileHandle, Error> {
         // Check if the file is opened or opening.
         {
@@ -221,6 +232,7 @@ impl FileManager {
         })
     }
 
+    /// Stat the provided path, if allocation limits allow.
     pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, Error> {
         let handle = self.open(path)?;
         let sst = Sst::from_file_handle(handle)?;
@@ -266,6 +278,7 @@ fn open(path: PathBuf) -> Result<File, Error> {
 
 /////////////////////////////////////// open_without_manager ///////////////////////////////////////
 
+/// Open a file handle without caring about the number of open files.
 pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error> {
     let path = path.as_ref().to_path_buf();
     FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();

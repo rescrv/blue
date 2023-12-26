@@ -1,3 +1,5 @@
+//! Dump key-value pairs from an sst to stdout.
+
 use arrrg::CommandLine;
 use keyvalint::Cursor;
 

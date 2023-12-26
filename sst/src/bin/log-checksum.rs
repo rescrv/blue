@@ -1,3 +1,5 @@
+//! Outut the setsum associated with each log.
+
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
