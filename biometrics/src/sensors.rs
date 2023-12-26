@@ -15,6 +15,7 @@ pub struct Counter {
 }
 
 impl Counter {
+    /// Create a new counter with the provided label.
     pub const fn new(label: &'static str) -> Counter {
         Counter {
             label,
@@ -22,11 +23,13 @@ impl Counter {
         }
     }
 
+    /// Increment the counter by one.
     #[inline(always)]
     pub fn click(&'static self) {
         self.count(1)
     }
 
+    /// Increment the counter by `x`.
     #[inline(always)]
     pub fn count(&'static self, x: u64) {
         self.count.fetch_add(x, Ordering::Relaxed);
@@ -58,6 +61,7 @@ pub struct Gauge {
 }
 
 impl Gauge {
+    /// Create a new Gauge from the provided label.
     pub const fn new(label: &'static str) -> Gauge {
         Gauge {
             label,
@@ -65,6 +69,7 @@ impl Gauge {
         }
     }
 
+    /// Set the value of the gauge.
     #[inline(always)]
     pub fn set(&'static self, x: f64) {
         self.value.store(x.to_bits(), Ordering::Relaxed);
@@ -95,6 +100,7 @@ pub struct Moments {
 }
 
 impl Moments {
+    /// Create a new set of moments with the provided label.
     pub const fn new(label: &'static str) -> Self {
         Self {
             label,
@@ -102,6 +108,7 @@ impl Moments {
         }
     }
 
+    /// Add the provided f64 to the accumulated moments.
     pub fn add(&'static self, x: f64) {
         let mut value = self.value.lock().unwrap();
         value.push(x);

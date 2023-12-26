@@ -19,6 +19,7 @@ pub use sensors::Moments;
 /// library.  An algebraic sensor allows one to take two readings, one on each side of a bucket,
 /// and compute the bucket with a single subtraction.
 pub trait Sensor {
+    /// The type of a sensor reading.
     type Reading;
 
     /// Every sensor has a label.  This is a UTF-8 string.  It must be static because sensors are
@@ -188,6 +189,7 @@ impl Default for Collector {
 
 /// [Emitter] outputs the sensor state via I/O.
 pub trait Emitter {
+    /// The type of error this emitter returns.
     type Error;
 
     /// Read the provided [Counter].
@@ -214,6 +216,7 @@ pub struct PlainTextEmitter {
 }
 
 impl PlainTextEmitter {
+    /// Create a new plain-text emitter.
     pub fn new(output: File) -> Self {
         Self { output }
     }

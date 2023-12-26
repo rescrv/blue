@@ -8,10 +8,15 @@
 /// perfectly recorded moments for the interval between the points.
 #[derive(Clone, Default, Debug)]
 pub struct Moments {
+    /// The number of observations.
     pub n: u64,
+    /// A value used to calculate mean.  It is mean.
     pub m1: f64,
+    /// A value used to calculate variance.  It is not variance.
     pub m2: f64,
+    /// A value used to calculate skewness.  It is not skewness.
     pub m3: f64,
+    /// A value used to calculate kurtosis.  It is not kurtosis.
     pub m4: f64,
 }
 
