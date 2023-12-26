@@ -386,20 +386,26 @@ impl Iterator for Listener {
 //////////////////////////////////////// SplitChannelOptions ///////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
+#[cfg_attr(feature = "command_line", derive(arrrg_derive::CommandLine))]
 pub struct SplitChannelOptions {
-    #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to use.", "HOST"))]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Hostname to use.", "HOST"))]
     host: String,
-    #[cfg_attr(feature = "binaries", arrrg(required, "Port to use.", "PORT"))]
+    #[cfg_attr(feature = "command_line", arrrg(required, "Port to use.", "PORT"))]
     port: u16,
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Set CA file.", "PEM"))]
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Set CA file.", "PEM"))]
     ca_file: Option<String>,
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Set private-key file.", "PEM"))]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Set private-key file.", "PEM")
+    )]
     private_key_file: Option<String>,
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Set certificate file.", "PEM"))]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(optional, "Set certificate file.", "PEM")
+    )]
     certificate_file: Option<String>,
     #[cfg_attr(
-        feature = "binaries",
+        feature = "command_line",
         arrrg(
             flag,
             "Set SSL verify mode to None.  Useful when certificates don't match."
