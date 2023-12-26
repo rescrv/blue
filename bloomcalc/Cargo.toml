@@ -6,8 +6,19 @@ edition = "2021"
 description = "bloomcalc provides a calculator for bloom filters."
 license = "Apache-2.0"
 
-[dependencies]
-getopts = "0.2"
+[features]
+default = ["binaries"]
 
-arrrg = { path = "../arrrg", version = "0.2" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2" }
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
+[dependencies]
+getopts = { version = "0.2", optional = true }
+
+arrrg = { path = "../arrrg", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+
+[[bin]]
+name = "bloomcalc"
+path = "src/bin/bloomcalc.rs"
+required-features=["binaries"]
