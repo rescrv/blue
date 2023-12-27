@@ -21,7 +21,7 @@ siphasher = "1.0.0"
 
 armnod = { path = "../armnod", version = "0.4" }
 arrrg = { path = "../arrrg", version = "0.2", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.3", optional = true }
 biometrics = { path = "../biometrics", version = "0.4" }
 buffertk = { path = "../buffertk", version = "0.5" }
 guacamole = { path = "../guacamole", version = "0.4" }
