@@ -1,5 +1,5 @@
 zerror derive
-==================
+=============
 
 This library provides a derive macro so that an enum with a { core: ErrorCore } member will have the requisite methods
 for manipulating the core.

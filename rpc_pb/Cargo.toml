@@ -23,7 +23,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.5" }
 utilz = { path = "../utilz", version = "0.3" }
 zerror = { path = "../zerror", version = "0.3" }
 zerror_core = { path = "../zerror_core", version = "0.3" }
-zerror_derive = { path = "../zerror_derive", version = "0.1" }
+zerror_derive = { path = "../zerror_derive", version = "0.2" }
 
 [[bin]]
 name = "rpc-pb-gen-host-id"
