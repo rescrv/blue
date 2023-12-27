@@ -21,4 +21,4 @@ Warts
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/buffertk/latest/mani/).
+The latest documentation is always available at [docs.rs](https://docs.rs/mani/latest/mani/).
