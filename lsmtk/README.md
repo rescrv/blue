@@ -1,10 +1,9 @@
 lsmtk
 =====
 
-This library provides an implementation of an log-structured merge graph; a
-generalization of a log-structured merge tree.  This merge graph uses a new
-compaction algorithm called *triangular compaction* that achieves a factor of
-6.5x write amplification both in theory and in practice.
+This library provides an implementation of an log-structured merge tree; a This
+merge tree uses a new compaction algorithm called *triangular compaction* that
+achieves a factor of 6.5x write amplification both in theory and in practice.
 
 Triangular Compaction
 ---------------------
@@ -39,7 +38,7 @@ The triangular compaction algorithm generalizes this intuition to select
 triangles from the LSM tree such that the transitive closure of files under that
 level will be included in the compaction.
 
-Check `graph.rs` for the compaction algorithm.
+Check `src/tree/mod.rs` for the compaction algorithm.
 
 Trade-Offs
 ----------
@@ -84,14 +83,10 @@ Warts
 -----
 
 - This library is under-tested and will see active development in the future.
-- Compaction is single-threaded and CPU bound.  This is not a problem right now
-  because the ingestion algorithm is efficient.
 - Tricks used in LevelDB (grandfather overlap) and PebblesDB (guard pages) are
   not used.  These are 100% compatible and would only improve the compaction
   algorithm's performance.
 - There is no back pressure against excessive ingest.
-- There is no gathering of adjacent SSTs from the apex of the triangle.  This
-  would only improve write amplification.
 - There's a concurrency bug that shows up around the point of 40GiB where
   compaction will stall.  This is just at the prototype phase and I've run out
   of funds to continue developing it.
