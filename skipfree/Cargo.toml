@@ -9,4 +9,4 @@ edition = "2021"
 rand = "0.7"
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.4" }
+guacamole = { path = "../guacamole", version = "0.5" }
