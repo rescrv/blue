@@ -100,6 +100,11 @@ Warts
 - setsum-merge tool is missing
 - setsum-diff tool is missing
 
+Updates
+=======
+
+- Version 0.5 switched from sha2 to sha3 as the one-element hash function for performance reasons.
+
 Documentation
 =============
 
