@@ -1,6 +1,6 @@
 [package]
 name = "biometrics_pb"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "biometrics_pb provides protocol buffers corresponding to biometric readings."
