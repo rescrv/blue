@@ -7,7 +7,7 @@ Status
 ------
 
 Active development.  Busybee is likely to change in the near future in backwards-incompatible ways.  Planned changes
-will affect how errors are handled.  Currently they are not well-handled.  This library is currently beta at best.
+will affect how errors are handled.  This library is currently beta.
 
 Scope
 -----
@@ -22,4 +22,4 @@ Warts
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/busybee/latest/busybee/).
+The latest documentation is always available at [docs.rs](https://docs.rs/busyrpc/latest/busyrpc/).
