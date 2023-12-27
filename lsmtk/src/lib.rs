@@ -1300,11 +1300,12 @@ impl KeyValueStore {
                 .info('O')
                 .and_then(|h| Setsum::from_hexdigest(h))
                 .unwrap_or_default();
-            let output = input + setsum;
+            let discard = Setsum::default() - setsum;
+            let output = input - discard;
             let mut edit = Edit::default();
             edit.info('I', &input.hexdigest())?;
             edit.info('O', &output.hexdigest())?;
-            edit.info('D', &setsum.hexdigest())?;
+            edit.info('D', &discard.hexdigest())?;
             edit.add(&setsum.hexdigest())?;
             mani.apply(edit)?;
         }

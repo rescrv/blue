@@ -487,7 +487,11 @@ impl ManifestVerifier {
                         context: format!(
                             "manifest has bad discard: expected {discard:?}, but got {computed_discard:?}"
                         ),
-                    });
+                    })
+                    .with_variable("discard", discard.hexdigest())
+                    .with_variable("discard^-1", (Setsum::default() - discard).hexdigest())
+                    .with_variable("computed_discard", computed_discard.hexdigest())
+                    .with_variable("computed_discard^-1", (Setsum::default() - computed_discard).hexdigest());
                 }
                 acc -= computed_discard;
             }
