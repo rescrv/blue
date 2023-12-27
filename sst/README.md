@@ -1,7 +1,7 @@
 sst
 ===
 
-SST provides a sorted string table abstraction."
+SST provides a sorted string table abstraction.
 
 Status
 ------
