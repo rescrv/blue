@@ -14,4 +14,4 @@ syn = "1.0"
 quote = "1.0"
 proc-macro2 = "1.0"
 
-derive_util = { path = "../derive_util", version = "0.2" }
+derive_util = { path = "../derive_util", version = "0.3" }

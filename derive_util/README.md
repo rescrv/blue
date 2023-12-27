@@ -106,4 +106,4 @@ Warts
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/prototk/latest/prototk/).
+The latest documentation is always available at [docs.rs](https://docs.rs/derive_util/latest/derive_util/).

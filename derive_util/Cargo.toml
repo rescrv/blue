@@ -1,6 +1,6 @@
 [package]
 name = "derive_util"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "derive_util provides tools for derive macros."
