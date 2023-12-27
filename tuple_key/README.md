@@ -8,8 +8,8 @@ string that sorts in the same way.
 Status
 ------
 
-Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
-The clock was last reset 2023-08-02.
+Active development.  This library has seen recent changes to match the types of keys supported by protobuf maps.
+Version 0.4 reset the serialization in backwards-incompatible ways.
 
 Scope
 -----
