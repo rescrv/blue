@@ -7,7 +7,7 @@ description = "biometrics_pb provides protocol buffers corresponding to biometri
 license = "Apache-2.0"
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.4" }
+biometrics = { path = "../biometrics", version = "0.5" }
 buffertk = { path = "../buffertk", version = "0.5" }
 one_two_eight = { path = "../one_two_eight", version = "0.3" }
 prototk = { path = "../prototk", version = "0.4" }

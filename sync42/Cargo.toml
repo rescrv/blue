@@ -12,7 +12,7 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.4" }
+biometrics = { path = "../biometrics", version = "0.5" }
 
 [[example]]
 name = "clicker"

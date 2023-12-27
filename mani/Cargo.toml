@@ -16,7 +16,7 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 crc32c = "0.6"
 rand = "0.7"
 
-biometrics = { path = "../biometrics", version = "0.4" }
+biometrics = { path = "../biometrics", version = "0.5" }
 buffertk = { path = "../buffertk", version = "0.5" }
 prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.5" }
