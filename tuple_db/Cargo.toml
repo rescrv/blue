@@ -12,5 +12,5 @@ prototk = { path = "../prototk", version = "0.4" }
 prototk_derive = { path = "../prototk_derive", version = "0.5" }
 tuple_key = { path = "../tuple_key", version = "0.3" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.3" }
-zerror = { path = "../zerror", version = "0.2" }
+zerror = { path = "../zerror", version = "0.3" }
 zerror_core = { path = "../zerror_core", version = "0.3" }

@@ -30,7 +30,7 @@ lsmtk = { path = "../lsmtk", version = "0.1" }
 sst = { path = "../sst", version = "0.4" }
 sync42 = { path = "../sync42", version = "0.5" }
 utilz = { path = "../utilz", version = "0.3" }
-zerror = { path = "../zerror", version = "0.2" }
+zerror = { path = "../zerror", version = "0.3" }
 
 [[bin]]
 name = "keyvalint-bench-concurrent-log"
