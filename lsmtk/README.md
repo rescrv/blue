@@ -1,7 +1,7 @@
 lsmtk
 =====
 
-This library provides an implementation of an log-structured merge tree; a This
+This library provides an implementation of an log-structured merge tree;  this
 merge tree uses a new compaction algorithm called *triangular compaction* that
 achieves a factor of 6.5x write amplification both in theory and in practice.
 
@@ -94,4 +94,4 @@ Warts
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/buffertk/latest/buffertk/).
+The latest documentation is always available at [docs.rs](https://docs.rs/lsmtk/latest/lsmtk/).
