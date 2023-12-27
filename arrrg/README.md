@@ -53,4 +53,4 @@ Warts
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/arrrg_derive/latest/arrrg_derive/).
+The latest documentation is always available at [docs.rs](https://docs.rs/arrrg/latest/arrrg/).
