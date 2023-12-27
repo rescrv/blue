@@ -11,5 +11,5 @@ default = ["generate_id_prototk"]
 generate_id_prototk = ["buffertk", "prototk"]
 
 [dependencies]
-buffertk = { path = "../buffertk", version = "0.4", optional = true }
+buffertk = { path = "../buffertk", version = "0.5", optional = true }
 prototk = { path = "../prototk", version = "0.4", optional = true }

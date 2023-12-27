@@ -18,7 +18,7 @@ getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.2", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.2", optional = true }
 biometrics = { path = "../biometrics", version = "0.4" }
-buffertk = { path = "../buffertk", version = "0.4" }
+buffertk = { path = "../buffertk", version = "0.5" }
 indicio = { path = "../indicio", version = "0.1" }
 keyvalint = { path = "../keyvalint", version = "0.1" }
 mani = { path = "../mani", version = "0.1" }
