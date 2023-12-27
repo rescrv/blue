@@ -11,7 +11,7 @@ Active development.  Indicio is likely to change in the near future in backwards
 Scope
 -----
 
-Indicio will provide the interface for publishing traces and connect Trace::publish to the thread-local emitter.
+Indicio will provide the interface for publishing clues and to the thread-local emitter.
 
 Warts
 -----
