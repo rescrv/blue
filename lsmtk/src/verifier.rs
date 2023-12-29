@@ -63,34 +63,20 @@ impl LsmVerifier {
     }
 
     pub fn verify(&mut self) -> Result<(), Error> {
-        let entries = self.list_mani_fragments()?;
+        let mut entries = list_mani_fragments(&self.root)?;
+        // Drop the last #'d entry and the main file.
+        // We need to keep it around so that a crash/restart
+        // of mani will pick a strictly higher log number.
+        //
+        // We pop twice.  It's guaranteed by list_mani_fragments function
+        // to put these at the end.  If we pop too much, that's OK.
+        entries.pop();
+        entries.pop();
         for entry in entries {
             // 1. We're going to always process the lowest numbered log.
             self.process_one(&entry)?;
         }
         Ok(())
-    }
-
-    fn list_mani_fragments(&self) -> Result<Vec<PathBuf>, Error> {
-        let mut entries = vec![];
-        let mani_root = MANI_ROOT(&self.root);
-        for entry in read_dir(&mani_root)? {
-            let entry = entry?;
-            entries.push(entry.path());
-        }
-        let mut entries = entries
-            .iter()
-            .filter_map(mani::extract_backup)
-            .collect::<Vec<_>>();
-        entries.sort();
-        // Drop the last entry.
-        // We need to keep it around so that a crash/restart
-        // of mani will pick a strictly higher log number.
-        entries.pop();
-        Ok(entries
-            .into_iter()
-            .map(|x| mani::BACKUP(&mani_root, x))
-            .collect::<Vec<_>>())
     }
 
     fn process_one(&mut self, entry: &PathBuf) -> Result<(), Error> {
@@ -116,7 +102,7 @@ impl LsmVerifier {
             if !path.exists() {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    what: format!("waiting for \"{}\"", path.to_string_lossy()),
+                    setsum: sst.digest(),
                 });
             }
             edit.add(&basename_string(&path)?)?;
@@ -128,7 +114,7 @@ impl LsmVerifier {
             } else {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    what: format!("waiting for \"{}\"", setsum.hexdigest()),
+                    setsum: setsum.digest(),
                 });
             }
         }
@@ -557,4 +543,26 @@ fn setsum_from_info_default(info: char, value: Option<&String>) -> Result<Setsum
             context: format!("manifest '{info}' field has bad digest: {hex_digest}"),
         }),
     }
+}
+
+////////////////////////////////////////// public helpers //////////////////////////////////////////
+
+pub fn list_mani_fragments<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>, Error> {
+    let mut entries = vec![];
+    let mani_root = MANI_ROOT(root.as_ref());
+    for entry in read_dir(&mani_root)? {
+        let entry = entry?;
+        entries.push(entry.path());
+    }
+    let mut entries = entries
+        .iter()
+        .filter_map(mani::extract_backup)
+        .collect::<Vec<_>>();
+    entries.sort();
+    let mut entries = entries
+        .into_iter()
+        .map(|x| mani::BACKUP(&mani_root, x))
+        .collect::<Vec<_>>();
+    entries.push(mani::MANIFEST(&mani_root));
+    Ok(entries)
 }

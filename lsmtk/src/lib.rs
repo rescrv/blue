@@ -12,7 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use biometrics::{Collector, Counter};
 use indicio::clue;
 use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValuePair, KeyValueRef};
-use mani::{Edit, Manifest, ManifestOptions};
+use mani::{Edit, Manifest, ManifestIterator, ManifestOptions};
 use setsum::Setsum;
 use sst::bounds_cursor::BoundsCursor;
 use sst::file_manager::FileManager;
@@ -278,7 +278,7 @@ pub enum Error {
     },
     Backoff {
         core: ErrorCore,
-        what: String,
+        setsum: [u8; 32],
     },
 }
 
@@ -687,7 +687,14 @@ impl LsmTree {
         let root: PathBuf = PathBuf::from(&options.path);
         ensure_dir(root.clone(), "root")?;
         make_all_dirs(&root)?;
-        let mani = Manifest::open(options.mani.clone(), MANI_ROOT(&root))?;
+        let mut mani = Manifest::open(options.mani.clone(), MANI_ROOT(&root))?;
+        if mani.info('I').is_none() {
+            let mut edit = Edit::default();
+            edit.info('I', &Setsum::default().hexdigest())?;
+            edit.info('D', &Setsum::default().hexdigest())?;
+            edit.info('O', &Setsum::default().hexdigest())?;
+            mani.apply(edit)?;
+        }
         Self::from_manifest(options, mani)
     }
 
@@ -695,7 +702,7 @@ impl LsmTree {
         let root: PathBuf = PathBuf::from(&options.path);
         let mani = RwLock::new(mani);
         let file_manager = Arc::new(FileManager::new(options.max_open_files));
-        let (metadata, _) = Self::list_ssts_present(&root, &mani.read().unwrap(), &file_manager)?;
+        let metadata = Self::list_ssts_from_manifest(&root, &mani.read().unwrap(), &file_manager)?;
         let tree = Mutex::new(Arc::new(Tree::open(options.clone(), metadata)?));
         let compaction = Mutex::new(());
         let tree_setsum = tree.lock().unwrap().compute_setsum().hexdigest();
@@ -719,7 +726,7 @@ impl LsmTree {
         let references = ReferenceCounter::default();
         Self::explicit_ref(&references, &tree.lock().unwrap());
         OPEN_DB.click();
-        let db = Self {
+        let mut db = Self {
             root,
             options,
             file_manager,
@@ -730,15 +737,15 @@ impl LsmTree {
             compact,
             references,
         };
-        // TODO(rescrv): cleanup orphaned sst files
+        db.cleanup_orphans()?;
         Ok(db)
     }
 
-    fn list_ssts_present<P: AsRef<Path>>(
+    fn list_ssts_from_manifest<P: AsRef<Path>>(
         root: P,
         mani: &Manifest,
         file_manager: &FileManager,
-    ) -> Result<(Vec<SstMetadata>, HashSet<Setsum>), Error> {
+    ) -> Result<Vec<SstMetadata>, Error> {
         let mut metadata = vec![];
         let mut setsums = HashSet::new();
         for hexdigest in mani.strs() {
@@ -752,7 +759,43 @@ impl LsmTree {
             metadata.push(sst.metadata()?);
             setsums.insert(setsum);
         }
-        Ok((metadata, setsums))
+        Ok(metadata)
+    }
+
+    fn cleanup_orphans(&mut self) -> Result<(), Error> {
+        let manis = verifier::list_mani_fragments(&self.root)?;
+        let mut ssts_to_remove = HashSet::new();
+        for mani in manis.into_iter() {
+            let mani_iter = ManifestIterator::open(mani)?;
+            let mut first = true;
+            for edit in mani_iter {
+                let edit = edit?;
+                if first {
+                    first = false;
+                    continue;
+                }
+                for rmed in edit.rmed() {
+                    if let Some(setsum) = Setsum::from_hexdigest(rmed) {
+                        ssts_to_remove.insert(setsum);
+                    }
+                }
+                for added in edit.added() {
+                    if let Some(setsum) = Setsum::from_hexdigest(added) {
+                        ssts_to_remove.remove(&setsum);
+                    }
+                }
+            }
+        }
+        for setsum in ssts_to_remove.into_iter() {
+            let sst_path = SST_FILE(&self.root, setsum);
+            let trash_path = TRASH_SST(&self.root, setsum);
+            if sst_path.exists() && !trash_path.exists() {
+                // The verifier will pick up on there being orphans, so we can ignore error here.
+                // TODO(rescrv):  Make the verifier detect this case.
+                let _ = rename(sst_path, trash_path);
+            }
+        }
+        Ok(())
     }
 
     pub fn ingest<P: AsRef<Path>>(&self, sst_path: P) -> Result<(), Error> {
@@ -1808,7 +1851,7 @@ mod tests {
         .expect("manifest info should never fail");
         edit.info(
             'D',
-            "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a",
+            "006c171eacb7d291d0a7ff7725d09411731ae623625b10a933859a2a4a1f8495",
         )
         .expect("manifest info should never fail");
         mani.apply(edit).expect("manifest apply should never fail");
@@ -1820,8 +1863,81 @@ mod tests {
             "key2" => "value2",
         };
         assert!(!PathBuf::from(&root).join("log.0").exists());
-        // TODO(rescrv): kvs_check
     }
 
+    #[test]
+    fn orphan_cleanup() {
+        let root = test_util::test_root(module_path!(), line!());
+        let options = LsmtkOptions {
+            path: root.clone(),
+            ..Default::default()
+        };
+        let sst_root = SST_ROOT(&root);
+        let _path = sst_for_test! {
+            sst_root:
+            "key1" => "value1",
+            "key2" => "value2",
+        };
+        let mut mani =
+            Manifest::open(options.mani.clone(), MANI_ROOT(&root)).expect("manifest should open");
+        let mut edit = Edit::default();
+        edit.info(
+            'I',
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'O',
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'D',
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("manifest info should never fail");
+        mani.apply(edit).expect("manifest apply should never fail");
+        let mut edit = Edit::default();
+        edit.add("fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a")
+            .expect("manifest edit should never fail");
+        edit.info(
+            'I',
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'O',
+            "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'D',
+            "006c171eacb7d291d0a7ff7725d09411731ae623625b10a933859a2a4a1f8495",
+        )
+        .expect("manifest info should never fail");
+        mani.apply(edit).expect("manifest apply should never fail");
+        let mut edit = Edit::default();
+        edit.rm("fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a")
+            .expect("manifest edit should never fail");
+        edit.info(
+            'I',
+            "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'O',
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .expect("manifest info should never fail");
+        edit.info(
+            'D',
+            "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a",
+        )
+        .expect("manifest info should never fail");
+        mani.apply(edit).expect("manifest apply should never fail");
+        drop(mani);
+        let _kvs = KeyValueStore::open(options).expect("key-value store should open");
+        assert!(PathBuf::from(TRASH_SST(&root, Setsum::from_hexdigest("fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a").expect("valid setsum"))).exists());
+    }
     // TODO(rescrv): two log files
 }
