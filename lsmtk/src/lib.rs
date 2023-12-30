@@ -820,8 +820,6 @@ impl LsmTree {
         hard_link(&sst_path, target).as_z()?;
         edit.add(&setsum.hexdigest())?;
         self.apply_manifest_ingest(acc, edit, metadata)?;
-        let _mutex = self.compaction.lock().unwrap();
-        self.compact.notify_all();
         Ok(())
     }
 
@@ -1083,11 +1081,14 @@ impl LsmTree {
         mut mani_edit: Edit,
         new: SstMetadata,
     ) -> Result<(), Error> {
-        let _mutex = self.compaction.lock().unwrap();
-        let mut tree = self.tree.lock().unwrap();
+        let mut mutex = self.compaction.lock().unwrap();
+        let mut tree = self.get_tree();
         while tree.should_stall_ingest() {
             INGEST_STALL.click();
-            tree = self.stall.wait(tree).unwrap();
+            mutex = self.stall.wait(mutex).unwrap();
+            let mut tree2 = self.get_tree();
+            std::mem::swap(&mut tree, &mut tree2);
+            self.explicit_unref(tree2);
         }
         let tree_setsum = tree.compute_setsum();
         // NOTE(rescrv):  We subtract because we are removing the discard setsum.
@@ -1100,10 +1101,13 @@ impl LsmTree {
         // TODO(rescrv):  Do not hold tree lock across manifest edit.
         self.mani.write().unwrap().apply(mani_edit)?;
         let new_tree = Arc::new(tree.ingest(new)?);
-        self.install_tree(&mut tree, new_tree);
         // TODO(rescrv): don't hold the lock for computing setsum.
-        let tree_setsum = tree.compute_setsum();
+        let tree_setsum = new_tree.compute_setsum();
         assert_eq!(tree_setsum, output_setsum);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
+        self.compact.notify_all();
         Ok(())
     }
 
@@ -1115,7 +1119,7 @@ impl LsmTree {
         outputs: Vec<SstMetadata>,
     ) -> Result<(), Error> {
         let _mutex = self.compaction.lock().unwrap();
-        let mut tree = self.tree.lock().unwrap();
+        let tree = self.get_tree();
         let tree_setsum = tree.compute_setsum();
         let output_setsum = tree_setsum - discard_setsum;
         // TODO(rescrv): poison here.
@@ -1124,10 +1128,12 @@ impl LsmTree {
         mani_edit.info('D', &discard_setsum.hexdigest())?;
         self.mani.write().unwrap().apply(mani_edit)?;
         let new_tree = Arc::new(tree.apply_compaction(compaction, outputs)?);
-        self.install_tree(&mut tree, new_tree);
         // TODO(rescrv): don't hold the lock for computing setsum.
-        let tree_setsum = tree.compute_setsum();
+        let tree_setsum = new_tree.compute_setsum();
         assert_eq!(tree_setsum, output_setsum);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
         self.stall.notify_all();
         Ok(())
     }
@@ -1138,12 +1144,14 @@ impl LsmTree {
         let file = self.file_manager.open(sst_path)?;
         let sst = Sst::from_file_handle(file)?;
         let meta = sst.metadata()?;
-        let mut tree = self.tree.lock().unwrap();
+        let tree = self.get_tree();
         let tree_setsum1 = tree.compute_setsum();
         let new_tree = Arc::new(tree.apply_compaction(compaction, vec![meta])?);
-        self.install_tree(&mut tree, new_tree);
-        let tree_setsum2 = tree.compute_setsum();
+        let tree_setsum2 = new_tree.compute_setsum();
         assert_eq!(tree_setsum1, tree_setsum2);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
         self.stall.notify_all();
         Ok(())
     }
@@ -1152,9 +1160,10 @@ impl LsmTree {
         Arc::clone(&*self.tree.lock().unwrap())
     }
 
-    fn install_tree(&self, tree1: &mut MutexGuard<'_, Arc<Tree>>, mut tree2: Arc<Tree>) {
+    fn install_tree(&self, mut tree2: Arc<Tree>) {
         Self::explicit_ref(&self.references, &tree2);
-        std::mem::swap(&mut **tree1, &mut tree2);
+        let mut tree1 = self.tree.lock().unwrap();
+        std::mem::swap(&mut *tree1, &mut tree2);
         self.explicit_unref(tree2);
     }
 
