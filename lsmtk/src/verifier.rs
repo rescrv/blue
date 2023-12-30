@@ -102,7 +102,7 @@ impl LsmVerifier {
             if !path.exists() {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    setsum: sst.digest(),
+                    setsum: sst.hexdigest(),
                 });
             }
             edit.add(&basename_string(&path)?)?;
@@ -114,7 +114,7 @@ impl LsmVerifier {
             } else {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    setsum: setsum.digest(),
+                    setsum: setsum.hexdigest(),
                 });
             }
         }

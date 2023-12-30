@@ -278,7 +278,7 @@ pub enum Error {
     },
     Backoff {
         core: ErrorCore,
-        setsum: [u8; 32],
+        setsum: String,
     },
 }
 
