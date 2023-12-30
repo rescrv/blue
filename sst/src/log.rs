@@ -404,7 +404,7 @@ struct WriteCoalescingCore<W: Write> {
 
 impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, Error>> for WriteCoalescingCore<W> {
     type InputAccumulator = WriteBatch;
-    type OutputIterator<'a> = std::vec::IntoIter<Result<u64, Error>> where W: 'a;
+    type OutputIterator<'a> = std::iter::Take<std::iter::Repeat<Result<u64, Error>>> where W: 'a;
 
     fn can_batch(&self, acc: &WriteBatch, other: &Arc<WriteBatch>) -> bool {
         check_batch_size(acc.buffer.len().saturating_add(other.buffer.len())).is_ok()
@@ -417,22 +417,14 @@ impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, Error>> for Write
     }
 
     fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
-        let mut ret = Vec::with_capacity(taken);
         self.written += acc.buffer.len() as u64;
         if let Err(err) = self.builder.append(&acc) {
-            for _ in 0..taken {
-                ret.push(Err(err.clone()))
-            }
+            std::iter::repeat(Err(err)).take(taken)
         } else if let Err(err) = self.builder.flush() {
-            for _ in 0..taken {
-                ret.push(Err(err.clone()))
-            }
+            std::iter::repeat(Err(err)).take(taken)
         } else {
-            for _ in 0..taken {
-                ret.push(Ok(self.written))
-            }
+            std::iter::repeat(Ok(self.written)).take(taken)
         }
-        ret.into_iter()
     }
 }
 
