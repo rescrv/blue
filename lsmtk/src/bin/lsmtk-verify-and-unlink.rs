@@ -4,7 +4,7 @@ use arrrg::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
 use zerror::Z;
 
-use lsmtk::{IoToZ, LsmVerifier, LsmtkOptions};
+use lsmtk::{Error, IoToZ, LsmVerifier, LsmtkOptions};
 
 fn main() {
     let (options, free) =
@@ -29,7 +29,11 @@ fn main() {
     let mut verifier = LsmVerifier::open(options).as_z().pretty_unwrap();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(1_000));
-        if let Err(err) = verifier.verify() {
+        let ret = verifier.verify();
+        if let Err(Error::Backoff { setsum, .. }) = ret {
+            // TODO(rescrv):  Output this error if we wait more than too many seconds.
+            _ = setsum;
+        } else if let Err(err) = ret {
             eprintln!("error:\n{}", err.long_form());
         }
     }
