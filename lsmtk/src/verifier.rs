@@ -396,7 +396,12 @@ impl LsmVerifier {
         }
         entries.sort();
         let mut map = HashMap::new();
-        for (number, path) in &entries[..count] {
+        let entries = if entries.len() >= count {
+            &entries[..count]
+        } else {
+            &[]
+        };
+        for (number, path) in entries {
             let setsum = sst::log::log_to_setsum(self.options.log.clone(), path)?;
             map.insert(setsum.into_inner(), format!("log.{number}"));
         }
