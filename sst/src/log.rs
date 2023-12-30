@@ -399,11 +399,12 @@ impl<W: Write> Builder for LogBuilder<W> {
 
 struct WriteCoalescingCore<W: Write> {
     builder: LogBuilder<W>,
+    written: u64,
 }
 
-impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Option<Error>> for WriteCoalescingCore<W> {
+impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, Error>> for WriteCoalescingCore<W> {
     type InputAccumulator = WriteBatch;
-    type OutputIterator<'a> = std::vec::IntoIter<Option<Error>> where W: 'a;
+    type OutputIterator<'a> = std::vec::IntoIter<Result<u64, Error>> where W: 'a;
 
     fn can_batch(&self, acc: &WriteBatch, other: &Arc<WriteBatch>) -> bool {
         check_batch_size(acc.buffer.len().saturating_add(other.buffer.len())).is_ok()
@@ -417,17 +418,18 @@ impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Option<Error>> for WriteCoale
 
     fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
         let mut ret = Vec::with_capacity(taken);
+        self.written += acc.buffer.len() as u64;
         if let Err(err) = self.builder.append(&acc) {
             for _ in 0..taken {
-                ret.push(Some(err.clone()))
+                ret.push(Err(err.clone()))
             }
         } else if let Err(err) = self.builder.flush() {
             for _ in 0..taken {
-                ret.push(Some(err.clone()))
+                ret.push(Err(err.clone()))
             }
         } else {
             for _ in 0..taken {
-                ret.push(None)
+                ret.push(Ok(self.written))
             }
         }
         ret.into_iter()
@@ -436,35 +438,48 @@ impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Option<Error>> for WriteCoale
 
 struct FsyncCoalescingCore {
     raw_builder: RawFd,
+    synced: u64,
 }
 
-impl WorkCoalescingCore<(), bool> for FsyncCoalescingCore {
-    type InputAccumulator = usize;
+impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
+    type InputAccumulator = u64;
     type OutputIterator<'a> = std::vec::IntoIter<bool>;
 
-    fn can_batch(&self, acc: &usize, _: &()) -> bool {
-        *acc < usize::MAX
+    fn can_batch(&self, acc: &u64, input: &u64) -> bool {
+        if *acc > 0 && *acc <= self.synced && *input <= self.synced {
+            true
+        } else if *acc > 0 && *acc <= self.synced {
+            false
+        } else {
+            true
+        }
     }
 
-    fn batch(&mut self, acc: usize, _: ()) -> Self::InputAccumulator {
-        acc + 1
+    fn batch(&mut self, acc: u64, seen: u64) -> Self::InputAccumulator {
+        std::cmp::max(acc, seen)
     }
 
     fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
-        assert_eq!(taken, acc);
         FSYNC.click();
-        // SAFETY(rescrv):  The worst thing that can happen is we fsync on a fd that's not ours.
-        let ret = unsafe { libc::fsync(self.raw_builder) } >= 0;
-        vec![ret; acc].into_iter()
+        if self.synced >= acc {
+            vec![true; taken].into_iter()
+        } else {
+            // SAFETY(rescrv):  The worst thing that can happen is we fsync on a fd that's not ours.
+            let ret = unsafe { libc::fdatasync(self.raw_builder) } >= 0;
+            if ret {
+                self.synced = acc;
+            }
+            vec![ret; taken].into_iter()
+        }
     }
 }
 
 /// A ConcurrentLogBuilder provides a non-standard builder interface that is internally
 /// synchronized.  This will be orders of magnitude faster than standard LogBuilder.
 pub struct ConcurrentLogBuilder<W: Write> {
-    write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Option<Error>, WriteCoalescingCore<W>>,
+    write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Result<u64, Error>, WriteCoalescingCore<W>>,
     // TODO(rescrv): Make this return Option<Error> too.
-    fsync_cq: WorkCoalescingQueue<(), bool, FsyncCoalescingCore>,
+    fsync_cq: WorkCoalescingQueue<u64, bool, FsyncCoalescingCore>,
     poison: AtomicBool,
     _phantom_w: std::marker::PhantomData<W>,
 }
@@ -478,7 +493,7 @@ impl ConcurrentLogBuilder<File> {
 
     /// fsync the data to disk.  This will return when all previously written data is durable.
     pub fn fsync(&self) -> Result<(), Error> {
-        if !self.fsync_cq.do_work(()) {
+        if !self.fsync_cq.do_work(0) {
             Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "log is poisoned".to_string(),
@@ -499,8 +514,8 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Create a new ConcurrentLogBuilder from the provided builder.
     pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, Error> {
         let raw_builder = builder.output.get_ref().as_raw_fd();
-        let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore { builder });
-        let fsync_cq = WorkCoalescingQueue::new(FsyncCoalescingCore { raw_builder });
+        let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore { builder, written: 0 });
+        let fsync_cq = WorkCoalescingQueue::new(FsyncCoalescingCore { raw_builder, synced: 0 });
         let poison = AtomicBool::new(false);
         let _phantom_w = std::marker::PhantomData;
         Ok(Self {
@@ -532,11 +547,14 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
                 core: ErrorCore::default(),
             });
         }
-        if let Some(err) = self.write_cq.do_work(Arc::new(write_batch)) {
-            self.poison.store(true, atomic::Ordering::Relaxed);
-            return Err(err);
-        }
-        if !self.fsync_cq.do_work(()) {
+        let written = match self.write_cq.do_work(Arc::new(write_batch)) {
+            Ok(written) => written,
+            Err(err) => {
+                self.poison.store(true, atomic::Ordering::Relaxed);
+                return Err(err);
+            }
+        };
+        if !self.fsync_cq.do_work(written) {
             self.poison.store(true, atomic::Ordering::Relaxed);
             let err = Error::Corruption {
                 core: ErrorCore::default(),
