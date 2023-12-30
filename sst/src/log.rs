@@ -443,7 +443,7 @@ struct FsyncCoalescingCore {
 
 impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
     type InputAccumulator = u64;
-    type OutputIterator<'a> = std::vec::IntoIter<bool>;
+    type OutputIterator<'a> = std::iter::Take<std::iter::Repeat<bool>>;
 
     fn can_batch(&self, acc: &u64, input: &u64) -> bool {
         if *acc > 0 && *acc <= self.synced && *input <= self.synced {
@@ -462,14 +462,14 @@ impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
     fn work(&mut self, taken: usize, acc: Self::InputAccumulator) -> Self::OutputIterator<'_> {
         FSYNC.click();
         if self.synced >= acc {
-            vec![true; taken].into_iter()
+            std::iter::repeat(true).take(taken)
         } else {
             // SAFETY(rescrv):  The worst thing that can happen is we fsync on a fd that's not ours.
             let ret = unsafe { libc::fdatasync(self.raw_builder) } >= 0;
             if ret {
                 self.synced = acc;
             }
-            vec![ret; taken].into_iter()
+            std::iter::repeat(ret).take(taken)
         }
     }
 }
