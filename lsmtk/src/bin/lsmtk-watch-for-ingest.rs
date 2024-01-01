@@ -94,7 +94,7 @@ fn main() {
         }
         ingest.sort_by_key(|x| x.0.modified().expect("platform should provide mtime"));
         for (_, path) in ingest.iter() {
-            tree.ingest(path).as_z().pretty_unwrap();
+            tree.ingest(path, None).as_z().pretty_unwrap();
         }
         for (_, path) in ingest.into_iter() {
             remove_file(path).as_z().pretty_unwrap();

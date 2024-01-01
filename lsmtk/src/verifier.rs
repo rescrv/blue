@@ -11,7 +11,6 @@
 /// 6.  Unlink the files logged in 4.
 /// 7.  Log to remove every file listed in 4's edit.
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fs::{read_dir, remove_file};
 use std::path::{Path, PathBuf};
 
@@ -25,8 +24,7 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    parse_log_file, Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_ROOT, TRASH_SST,
-    VERIFY_ROOT,
+    Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_ROOT, TRASH_SST, TRASH_LOG, VERIFY_ROOT,
 };
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -102,21 +100,20 @@ impl LsmVerifier {
             if !path.exists() {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    setsum: sst.hexdigest(),
+                    path: basename_string(&path)?,
                 });
             }
             edit.add(&basename_string(&path)?)?;
         }
-        let logs_by_setsum = self.get_logs_from_trash(logs_to_rm.len())?;
-        for setsum in logs_to_rm.iter() {
-            if let Some(path) = logs_by_setsum.get(setsum) {
-                edit.add(&basename_string(path)?)?;
-            } else {
+        for log_num in logs_to_rm.iter() {
+            let log_path = TRASH_LOG(&self.root, *log_num);
+            if !log_path.exists() {
                 return Err(Error::Backoff {
                     core: ErrorCore::default(),
-                    setsum: setsum.hexdigest(),
+                    path: basename_string(&log_path)?,
                 });
             }
+            edit.add(&basename_string(log_path)?)?;
         }
         edit.info('O', &output_setsum.hexdigest())?;
         edit.info('M', &basename_string(entry)?)?;
@@ -161,7 +158,7 @@ impl LsmVerifier {
         &self,
         entry: &PathBuf,
         mut acc: Setsum,
-    ) -> Result<(Setsum, Vec<Setsum>, Vec<Setsum>), Error> {
+    ) -> Result<(Setsum, Vec<Setsum>, Vec<u64>), Error> {
         let mani_iter = ManifestIterator::open(entry)?;
         let mut ssts_to_remove = vec![];
         let mut logs_to_remove = vec![];
@@ -227,9 +224,14 @@ impl LsmVerifier {
                 ssts_to_remove.push(setsum);
             }
             if !first {
-                if edit.added().count() == 1 && edit.rmed().count() == 0 {
-                    // SAFETY(rescrv):  We are adding data, so compute the inverse of what we discard.
-                    logs_to_remove.push(Setsum::default() - computed_discard);
+                if let Some(log_num) = edit.get_info('L') {
+                    let log_num: u64 = log_num.parse()
+                        .map_err(|_|
+                            Error::Corruption {
+                                core: ErrorCore::default(),
+                                context: format!("manifest has bad L field: got {log_num:?}"),
+                            })?;
+                    logs_to_remove.push(log_num);
                 }
                 if discard != computed_discard {
                     return Err(Error::Corruption {
@@ -383,29 +385,6 @@ impl LsmVerifier {
         };
         let sst = Sst::from_file_handle(file)?;
         Ok(sst.cursor())
-    }
-
-    fn get_logs_from_trash(&mut self, count: usize) -> Result<HashMap<Setsum, String>, Error> {
-        let trash_root = TRASH_ROOT(&self.root);
-        let mut entries = Vec::with_capacity(count);
-        for entry in read_dir(trash_root)? {
-            let entry = entry?;
-            if let Some(number) = parse_log_file(entry.path()) {
-                entries.push((number, entry.path()));
-            }
-        }
-        entries.sort();
-        let mut map = HashMap::new();
-        let entries = if entries.len() >= count {
-            &entries[..count]
-        } else {
-            &[]
-        };
-        for (number, path) in entries {
-            let setsum = sst::log::log_to_setsum(self.options.log.clone(), path)?;
-            map.insert(setsum.into_inner(), format!("log.{number}"));
-        }
-        Ok(map)
     }
 }
 

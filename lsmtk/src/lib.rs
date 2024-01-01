@@ -125,6 +125,11 @@ pub fn TRASH_SST<P: AsRef<Path>>(root: P, setsum: Setsum) -> PathBuf {
 }
 
 #[allow(non_snake_case)]
+pub fn TRASH_LOG<P: AsRef<Path>>(root: P, number: u64) -> PathBuf {
+    TRASH_ROOT(root).join(format!("log.{number}"))
+}
+
+#[allow(non_snake_case)]
 pub fn INGEST_ROOT<P: AsRef<Path>>(root: P) -> PathBuf {
     root.as_ref().to_path_buf().join("ingest")
 }
@@ -278,7 +283,7 @@ pub enum Error {
     },
     Backoff {
         core: ErrorCore,
-        setsum: String,
+        path: String,
     },
 }
 
@@ -798,7 +803,7 @@ impl LsmTree {
         Ok(())
     }
 
-    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P) -> Result<(), Error> {
+    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P, log_num: Option<u64>) -> Result<(), Error> {
         // For each SST, hardlink it into the ingest root.
         let mut edit = Edit::default();
         let mut acc = Setsum::default();
@@ -819,6 +824,9 @@ impl LsmTree {
         INGEST_LINK.click();
         hard_link(&sst_path, target).as_z()?;
         edit.add(&setsum.hexdigest())?;
+        if let Some(log_num) = log_num {
+            edit.info('L', &format!("{}", log_num))?;
+        }
         self.apply_manifest_ingest(acc, edit, metadata)?;
         Ok(())
     }
@@ -1445,7 +1453,7 @@ impl KeyValueStore {
                 .with_variable("imm", imm_setsum.hexdigest());
                 return Err(err);
             }
-            self.tree.ingest(&sst_path)?;
+            self.tree.ingest(&sst_path, Some(imm_trigger))?;
             remove_file(sst_path)?;
             if let Some(file_name) = imm_path.file_name() {
                 rename(&imm_path, TRASH_ROOT(&self.root).join(file_name))?;

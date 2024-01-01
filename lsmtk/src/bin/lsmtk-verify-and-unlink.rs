@@ -30,9 +30,9 @@ fn main() {
     loop {
         std::thread::sleep(std::time::Duration::from_millis(1_000));
         let ret = verifier.verify();
-        if let Err(Error::Backoff { setsum, .. }) = ret {
+        if let Err(Error::Backoff { path, .. }) = ret {
             // TODO(rescrv):  Output this error if we wait more than too many seconds.
-            _ = setsum;
+            _ = path;
         } else if let Err(err) = ret {
             eprintln!("error:\n{}", err.long_form());
         }
