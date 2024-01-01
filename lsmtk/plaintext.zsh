@@ -15,8 +15,8 @@ $BINDIR/armnod --chooser-mode random --length-mode uniform --min-length 512 --ma
 paste keys values > key-value-pairs
 rm keys values
 
-# Split the keys and values into 128MB tables.
-split --line-bytes 64M -x --additional-suffix .txt key-value-pairs table
+# Split the keys and values into 16MB tables.  This corresponds to 16k ops/s.
+split --line-bytes 16M -x --additional-suffix .txt key-value-pairs table
 rm key-value-pairs
 
 # Convert each table to an sst.
@@ -25,6 +25,5 @@ do
     LC_ALL=C sort -S 256M -o $table $table
     rm -f ${table:r}.sst
     $BINDIR/sst-from-plaintext --plaintext ${table} --output ${table:r}.sst --timestamp
-    $BINDIR/sst-checksum ${table:r}.sst
     rm ${table}
 done
