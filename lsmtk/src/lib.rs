@@ -1000,10 +1000,8 @@ impl LsmTree {
         let mut acc = Setsum::default();
         // Figure out the moves to make, update the mani_edit, compute setsum, and create a cursor.
         for input in compaction.inputs() {
-            let sst_path = SST_FILE(&self.root, input);
-            let file = self.file_manager.open(&sst_path)?;
             mani_edit.rm(&input.hexdigest())?;
-            let sst = Sst::from_file_handle(file)?;
+            let sst = self.open_sst(input)?;
             cursors.push(sst.cursor());
             acc += input;
             COMPACTION_NEW_CURSOR.click();
@@ -1148,9 +1146,7 @@ impl LsmTree {
 
     fn apply_moving_compaction(&self, compaction: Compaction, output: Setsum) -> Result<(), Error> {
         let _mutex = self.compaction.lock().unwrap();
-        let sst_path = SST_FILE(&self.root, output);
-        let file = self.file_manager.open(sst_path)?;
-        let sst = Sst::from_file_handle(file)?;
+        let sst = self.open_sst(output)?;
         let meta = sst.metadata()?;
         let tree = self.get_tree();
         let tree_setsum1 = tree.compute_setsum();
@@ -1162,6 +1158,12 @@ impl LsmTree {
         self.explicit_unref(tree);
         self.stall.notify_all();
         Ok(())
+    }
+
+    fn open_sst(&self, setsum: Setsum) -> Result<Sst, Error> {
+        let sst_path = SST_FILE(&self.root, setsum);
+        let file = self.file_manager.open(sst_path)?;
+        Ok(Sst::from_file_handle(file)?)
     }
 
     fn get_tree(&self) -> Arc<Tree> {
