@@ -41,7 +41,7 @@ impl Value for Vec<u8> {
 
 impl<V: Value> Value for Arc<V> {
     fn approximate_size(&self) -> usize {
-        <V as Value>::approximate_size(&*self)
+        <V as Value>::approximate_size(self)
     }
 }
 
@@ -94,7 +94,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                 Entry::Vacant(entry) => {
                     entry.insert(ptr);
                     state.size += node.value.approximate_size() + std::mem::size_of::<Node<K, V>>();
-                    if state.head == std::ptr::null_mut() {
+                    if state.head.is_null() {
                         assert_eq!(std::ptr::null_mut(), state.tail);
                         node.next = std::ptr::null_mut();
                         node.prev = std::ptr::null_mut();
@@ -112,7 +112,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                 }
             }
         }
-        while state.size > self.capacity && state.head != std::ptr::null_mut() {
+        while state.size > self.capacity && !state.head.is_null() {
             // SAFETY(rescrv):  We only held a reference to `node` and we dropped it before this.
             state = unsafe { self.remove_lru(state) };
         }
@@ -138,7 +138,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
         &self,
         mut state: MutexGuard<'a, State<K, V>>,
     ) -> MutexGuard<'a, State<K, V>> {
-        if state.tail != std::ptr::null_mut() {
+        if !state.tail.is_null() {
             assert_ne!(std::ptr::null_mut(), state.head);
             let ptr = state.tail;
             // Do this in a block so the reference `tail` will go out of scope before the drop.
@@ -146,14 +146,14 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                 // SAFETY(rescrv):  The caller guarantees no nodes in the list are available as &Node
                 // or &mut Node, so we can do this deref.
                 let tail = &mut *ptr;
-                if tail.prev != std::ptr::null_mut() {
+                if !tail.prev.is_null() {
                     // SAFETY(rescrv):  We know this node is different, so the same argument applies.
                     let new_tail = &mut *tail.prev;
                     new_tail.next = std::ptr::null_mut();
                 }
                 state.size -= tail.value.approximate_size();
                 state.tail = tail.prev;
-                if state.tail == std::ptr::null_mut() {
+                if state.tail.is_null() {
                     state.head = std::ptr::null_mut();
                 }
                 tail.prev = std::ptr::null_mut();
@@ -167,9 +167,9 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     }
 
     // The caller must make sure no references to linked nodes remain.
-    unsafe fn move_lru_to_front<'a>(
+    unsafe fn move_lru_to_front(
         &self,
-        mut state: MutexGuard<'a, State<K, V>>,
+        mut state: MutexGuard<'_, State<K, V>>,
         ptr: *mut Node<K, V>,
     ) {
         if ptr != state.head {
@@ -179,7 +179,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             assert_ne!(std::ptr::null_mut(), node.prev);
             let prev = &mut *node.prev;
             prev.next = node.next;
-            if node.next != std::ptr::null_mut() {
+            if !node.next.is_null() {
                 let next = &mut *node.next;
                 next.prev = node.prev;
             } else {
@@ -201,7 +201,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
 impl<K: Clone + Eq + Hash, V: Value> Drop for LeastRecentlyUsedCache<K, V> {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
-        while state.head != std::ptr::null_mut() {
+        while !state.head.is_null() {
             // SAFETY(rescrv):  We only held a reference to `node` and we dropped it before this.
             state = unsafe { self.remove_lru(state) };
         }
