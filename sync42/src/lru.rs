@@ -65,10 +65,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             tail: std::ptr::null_mut(),
             keys: HashMap::new(),
         });
-        Self {
-            capacity,
-            state,
-        }
+        Self { capacity, state }
     }
 
     /// Insert (K, V) into the LRU, overwriting any existing key/value.
@@ -90,8 +87,10 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                     state.size += existing_node.value.approximate_size();
                     state.size -= node.value.approximate_size();
                     // SAFETY(rescrv): We won't access ptr after this access.
-                    unsafe { Node::drop(ptr); }
-                },
+                    unsafe {
+                        Node::drop(ptr);
+                    }
+                }
                 Entry::Vacant(entry) => {
                     entry.insert(ptr);
                     state.size += node.value.approximate_size() + std::mem::size_of::<Node<K, V>>();
@@ -110,7 +109,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                         head.prev = ptr;
                         state.head = ptr;
                     }
-                },
+                }
             }
         }
         while state.size > self.capacity && state.head != std::ptr::null_mut() {
@@ -135,7 +134,10 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     }
 
     // The caller must make sure no references to linked nodes remain.
-    unsafe fn remove_lru<'a>(&self, mut state: MutexGuard<'a, State<K, V>>) -> MutexGuard<'a, State<K, V>> {
+    unsafe fn remove_lru<'a>(
+        &self,
+        mut state: MutexGuard<'a, State<K, V>>,
+    ) -> MutexGuard<'a, State<K, V>> {
         if state.tail != std::ptr::null_mut() {
             assert_ne!(std::ptr::null_mut(), state.head);
             let ptr = state.tail;
@@ -165,7 +167,11 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     }
 
     // The caller must make sure no references to linked nodes remain.
-    unsafe fn move_lru_to_front<'a>(&self, mut state: MutexGuard<'a, State<K, V>>, ptr: *mut Node<K, V>) {
+    unsafe fn move_lru_to_front<'a>(
+        &self,
+        mut state: MutexGuard<'a, State<K, V>>,
+        ptr: *mut Node<K, V>,
+    ) {
         if ptr != state.head {
             // SAFETY(rescrv):  No references exist outside this function, and this is our first.
             let node = &mut *ptr;
@@ -202,8 +208,14 @@ impl<K: Clone + Eq + Hash, V: Value> Drop for LeastRecentlyUsedCache<K, V> {
     }
 }
 
-unsafe impl<K: Clone + Eq + Hash + Send + Sync, V: Value + Send + Sync> Send for LeastRecentlyUsedCache<K, V> {}
-unsafe impl<K: Clone + Eq + Hash + Send + Sync, V: Value + Send + Sync> Sync for LeastRecentlyUsedCache<K, V> {}
+unsafe impl<K: Clone + Eq + Hash + Send + Sync, V: Value + Send + Sync> Send
+    for LeastRecentlyUsedCache<K, V>
+{
+}
+unsafe impl<K: Clone + Eq + Hash + Send + Sync, V: Value + Send + Sync> Sync
+    for LeastRecentlyUsedCache<K, V>
+{
+}
 
 /////////////////////////////////////////////// State //////////////////////////////////////////////
 
@@ -273,7 +285,11 @@ mod tests {
         assert_eq!(Some("World".to_string()), lru.lookup("Goodbye".to_string()));
     }
 
-    fn guacamole_thread(lru: Arc<LeastRecentlyUsedCache<u64, u64>>, seed: u64, count: Arc<AtomicU64>) {
+    fn guacamole_thread(
+        lru: Arc<LeastRecentlyUsedCache<u64, u64>>,
+        seed: u64,
+        count: Arc<AtomicU64>,
+    ) {
         let mut guac = Guacamole::new(seed);
         while count.load(Ordering::Relaxed) < 100_000 {
             let k = guac.gen::<u64>();

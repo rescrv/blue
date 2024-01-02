@@ -24,7 +24,7 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_ROOT, TRASH_SST, TRASH_LOG, VERIFY_ROOT,
+    Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_LOG, TRASH_ROOT, TRASH_SST, VERIFY_ROOT,
 };
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -225,12 +225,10 @@ impl LsmVerifier {
             }
             if !first {
                 if let Some(log_num) = edit.get_info('L') {
-                    let log_num: u64 = log_num.parse()
-                        .map_err(|_|
-                            Error::Corruption {
-                                core: ErrorCore::default(),
-                                context: format!("manifest has bad L field: got {log_num:?}"),
-                            })?;
+                    let log_num: u64 = log_num.parse().map_err(|_| Error::Corruption {
+                        core: ErrorCore::default(),
+                        context: format!("manifest has bad L field: got {log_num:?}"),
+                    })?;
                     logs_to_remove.push(log_num);
                 }
                 if discard != computed_discard {

@@ -506,8 +506,14 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Create a new ConcurrentLogBuilder from the provided builder.
     pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, Error> {
         let raw_builder = builder.output.get_ref().as_raw_fd();
-        let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore { builder, written: 0 });
-        let fsync_cq = WorkCoalescingQueue::new(FsyncCoalescingCore { raw_builder, synced: 0 });
+        let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore {
+            builder,
+            written: 0,
+        });
+        let fsync_cq = WorkCoalescingQueue::new(FsyncCoalescingCore {
+            raw_builder,
+            synced: 0,
+        });
         let poison = AtomicBool::new(false);
         let _phantom_w = std::marker::PhantomData;
         Ok(Self {

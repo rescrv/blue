@@ -24,8 +24,8 @@ use sst::{
     check_key_len, check_value_len, Builder, Sst, SstBuilder, SstCursor, SstMetadata,
     SstMultiBuilder, SstOptions,
 };
-use sync42::wait_list::WaitList;
 use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
+use sync42::wait_list::WaitList;
 use utilz::fmt;
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
@@ -648,11 +648,7 @@ pub struct LsmtkOptions {
     gc_policy: GarbageCollectionPolicy,
     #[cfg_attr(
         feature = "command_line",
-        arrrg(
-            optional,
-            "Number of bytes to use for the sst cache.",
-            "BYTES"
-        )
+        arrrg(optional, "Number of bytes to use for the sst cache.", "BYTES")
     )]
     sst_cache_bytes: usize,
 }
@@ -1195,9 +1191,12 @@ impl LsmTree {
             let sst_path = SST_FILE(&self.root, setsum);
             let file = self.file_manager.open(sst_path)?;
             let sst = Arc::new(Sst::from_file_handle(file)?);
-            self.sst_cache.insert(setsum, CachedSst {
-                ptr: Arc::clone(&sst),
-            });
+            self.sst_cache.insert(
+                setsum,
+                CachedSst {
+                    ptr: Arc::clone(&sst),
+                },
+            );
             Ok(sst)
         }
     }
@@ -1634,7 +1633,13 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
                 return Ok(ret);
             }
         }
-        let ret = tree.load(&self.tree.file_manager, &self.tree.sst_cache, key, timestamp, is_tombstone)?;
+        let ret = tree.load(
+            &self.tree.file_manager,
+            &self.tree.sst_cache,
+            key,
+            timestamp,
+            is_tombstone,
+        )?;
         self.tree.explicit_unref(tree);
         Ok(ret)
     }
@@ -1992,7 +1997,14 @@ mod tests {
         mani.apply(edit).expect("manifest apply should never fail");
         drop(mani);
         let _kvs = KeyValueStore::open(options).expect("key-value store should open");
-        assert!(PathBuf::from(TRASH_SST(&root, Setsum::from_hexdigest("fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a").expect("valid setsum"))).exists());
+        assert!(PathBuf::from(TRASH_SST(
+            &root,
+            Setsum::from_hexdigest(
+                "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a"
+            )
+            .expect("valid setsum")
+        ))
+        .exists());
     }
     // TODO(rescrv): two log files
 }

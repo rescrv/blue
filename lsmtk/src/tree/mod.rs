@@ -15,7 +15,9 @@ use sst::{Sst, SstMetadata};
 use sync42::lru::LeastRecentlyUsedCache;
 use zerror_core::ErrorCore;
 
-use super::{compare_bytes, CachedSst, Error, LsmtkOptions, TreeLogKey, TreeLogValue, LSM_TREE_LOG, SST_FILE};
+use super::{
+    compare_bytes, CachedSst, Error, LsmtkOptions, TreeLogKey, TreeLogValue, LSM_TREE_LOG, SST_FILE,
+};
 
 mod recover;
 
@@ -279,9 +281,12 @@ impl Tree {
             let sst_path = SST_FILE(&self.options.path, setsum);
             let file = fm.open(sst_path)?;
             let sst = Arc::new(Sst::from_file_handle(file)?);
-            sc.insert(setsum, CachedSst {
-                ptr: Arc::clone(&sst),
-            });
+            sc.insert(
+                setsum,
+                CachedSst {
+                    ptr: Arc::clone(&sst),
+                },
+            );
             sst
         };
         Ok(sst.load(key, timestamp, is_tombstone)?)
