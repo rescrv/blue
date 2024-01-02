@@ -48,8 +48,8 @@ impl<T> Debug for SpinLock<T> {
     }
 }
 
-unsafe impl<T> Send for SpinLock<T> {}
-unsafe impl<T> Sync for SpinLock<T> {}
+unsafe impl<T: Send> Send for SpinLock<T> {}
+unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 /////////////////////////////////////////// SpinLockGuard //////////////////////////////////////////
 

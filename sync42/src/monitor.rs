@@ -85,5 +85,5 @@ impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Monitor<COORD, CRIT, WS, 
     }
 }
 
-unsafe impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Send for Monitor<COORD, CRIT, WS, M> {}
-unsafe impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Sync for Monitor<COORD, CRIT, WS, M> {}
+unsafe impl<COORD: Send, CRIT: Send, WS, M: MonitorCore<COORD, CRIT, WS>> Send for Monitor<COORD, CRIT, WS, M> {}
+unsafe impl<COORD: Send, CRIT: Send, WS, M: MonitorCore<COORD, CRIT, WS>> Sync for Monitor<COORD, CRIT, WS, M> {}
