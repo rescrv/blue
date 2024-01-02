@@ -12,9 +12,10 @@ use sst::lazy_cursor::LazyCursor;
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
 use sst::{Sst, SstMetadata};
+use sync42::lru::LeastRecentlyUsedCache;
 use zerror_core::ErrorCore;
 
-use super::{compare_bytes, Error, LsmtkOptions, TreeLogKey, TreeLogValue, LSM_TREE_LOG, SST_FILE};
+use super::{compare_bytes, CachedSst, Error, LsmtkOptions, TreeLogKey, TreeLogValue, LSM_TREE_LOG, SST_FILE};
 
 mod recover;
 
@@ -234,6 +235,7 @@ impl Tree {
     pub fn load(
         &self,
         fm: &FileManager,
+        sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
@@ -242,7 +244,7 @@ impl Tree {
         let mut level0 = self.levels[0].ssts.clone();
         level0.sort_by_key(|md| md.biggest_timestamp);
         for l0 in level0.into_iter().rev() {
-            let ret = self.load_from_sst(fm, &l0, key, timestamp, is_tombstone)?;
+            let ret = self.load_from_sst(fm, sc, &l0, key, timestamp, is_tombstone)?;
             if ret.is_some() || *is_tombstone {
                 return Ok(ret);
             }
@@ -251,7 +253,7 @@ impl Tree {
             let lower_bound = level.lower_bound(key);
             let upper_bound = level.upper_bound(key);
             for sst in level.ssts[lower_bound..upper_bound].iter() {
-                let ret = self.load_from_sst(fm, sst, key, timestamp, is_tombstone)?;
+                let ret = self.load_from_sst(fm, sc, sst, key, timestamp, is_tombstone)?;
                 if ret.is_some() || *is_tombstone {
                     return Ok(ret);
                 }
@@ -263,14 +265,25 @@ impl Tree {
     pub fn load_from_sst<'a: 'b, 'b>(
         &self,
         fm: &FileManager,
+        sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
         md: &SstMetadata,
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Error> {
-        let sst_path = SST_FILE(&self.options.path, Setsum::from_digest(md.setsum));
-        let handle = fm.open(sst_path)?;
-        let sst = Sst::from_file_handle(handle)?;
+        let setsum = Setsum::from_digest(md.setsum);
+        let sst = if let Some(sst) = sc.lookup(setsum) {
+            assert_eq!(Setsum::from_digest(sst.ptr.metadata()?.setsum), setsum);
+            sst.ptr
+        } else {
+            let sst_path = SST_FILE(&self.options.path, setsum);
+            let file = fm.open(sst_path)?;
+            let sst = Arc::new(Sst::from_file_handle(file)?);
+            sc.insert(setsum, CachedSst {
+                ptr: Arc::clone(&sst),
+            });
+            sst
+        };
         Ok(sst.load(key, timestamp, is_tombstone)?)
     }
 

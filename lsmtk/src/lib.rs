@@ -25,6 +25,7 @@ use sst::{
     SstMultiBuilder, SstOptions,
 };
 use sync42::wait_list::WaitList;
+use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
 use utilz::fmt;
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
@@ -645,6 +646,15 @@ pub struct LsmtkOptions {
         )
     )]
     gc_policy: GarbageCollectionPolicy,
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(
+            optional,
+            "Number of bytes to use for the sst cache.",
+            "BYTES"
+        )
+    )]
+    sst_cache_bytes: usize,
 }
 
 impl LsmtkOptions {
@@ -669,7 +679,21 @@ impl Default for LsmtkOptions {
             l0_write_stall_threshold_bytes: 1 << 28,
             memtable_size_bytes: 1 << 26,
             gc_policy: GarbageCollectionPolicy::try_from("versions = 1").unwrap(),
+            sst_cache_bytes: 1 << 26,
         }
+    }
+}
+
+///////////////////////////////////////////// CachedSst ////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+struct CachedSst {
+    ptr: Arc<Sst>,
+}
+
+impl LruValue for CachedSst {
+    fn approximate_size(&self) -> usize {
+        std::mem::size_of::<Sst>()
     }
 }
 
@@ -685,6 +709,7 @@ pub struct LsmTree {
     stall: Condvar,
     compact: Condvar,
     references: ReferenceCounter<Setsum>,
+    sst_cache: LeastRecentlyUsedCache<Setsum, CachedSst>,
 }
 
 impl LsmTree {
@@ -729,6 +754,7 @@ impl LsmTree {
         let stall = Condvar::new();
         let compact = Condvar::new();
         let references = ReferenceCounter::default();
+        let sst_cache = LeastRecentlyUsedCache::new(options.sst_cache_bytes);
         Self::explicit_ref(&references, &tree.lock().unwrap());
         OPEN_DB.click();
         let mut db = Self {
@@ -741,6 +767,7 @@ impl LsmTree {
             stall,
             compact,
             references,
+            sst_cache,
         };
         db.cleanup_orphans()?;
         Ok(db)
@@ -1160,10 +1187,19 @@ impl LsmTree {
         Ok(())
     }
 
-    fn open_sst(&self, setsum: Setsum) -> Result<Sst, Error> {
-        let sst_path = SST_FILE(&self.root, setsum);
-        let file = self.file_manager.open(sst_path)?;
-        Ok(Sst::from_file_handle(file)?)
+    // TODO(rescrv): Dedupe with tree.
+    fn open_sst(&self, setsum: Setsum) -> Result<Arc<Sst>, Error> {
+        if let Some(sst) = self.sst_cache.lookup(setsum) {
+            Ok(sst.ptr)
+        } else {
+            let sst_path = SST_FILE(&self.root, setsum);
+            let file = self.file_manager.open(sst_path)?;
+            let sst = Arc::new(Sst::from_file_handle(file)?);
+            self.sst_cache.insert(setsum, CachedSst {
+                ptr: Arc::clone(&sst),
+            });
+            Ok(sst)
+        }
     }
 
     fn get_tree(&self) -> Arc<Tree> {
@@ -1598,7 +1634,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
                 return Ok(ret);
             }
         }
-        let ret = tree.load(&self.tree.file_manager, key, timestamp, is_tombstone)?;
+        let ret = tree.load(&self.tree.file_manager, &self.tree.sst_cache, key, timestamp, is_tombstone)?;
         self.tree.explicit_unref(tree);
         Ok(ret)
     }

@@ -4,7 +4,7 @@
 use std::cmp;
 use std::cmp::Ordering;
 use std::ops::Bound;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
 use keyvalint::{compare_bytes, compare_key, Cursor, KeyRef};
@@ -70,7 +70,7 @@ impl Default for BlockBuilderOptions {
 #[derive(Clone, Debug)]
 pub struct Block {
     // The raw bytes built by a builder or loaded off disk.
-    bytes: Rc<Vec<u8>>,
+    bytes: Arc<Vec<u8>>,
 
     // The restart intervals.  restarts_boundary points to the first restart point.
     restarts_boundary: usize,
@@ -82,7 +82,7 @@ impl Block {
     /// Create a new block from the provided bytes.
     pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
         // Load num_restarts.
-        let bytes = Rc::new(bytes);
+        let bytes = Arc::new(bytes);
         if bytes.len() < 4 {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
