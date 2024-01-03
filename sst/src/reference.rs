@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use keyvalint::{Cursor, KeyRef, KeyValuePair};
 
-use super::{check_key_len, check_table_size, check_value_len, Error, TableMetadata};
+use super::{check_key_len, check_table_size, check_value_len, Error};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 
@@ -22,30 +22,6 @@ impl ReferenceTable {
         ReferenceCursor {
             entries: Rc::clone(&self.entries),
             index: -1,
-        }
-    }
-}
-
-impl TableMetadata for ReferenceTable {
-    fn first_key(&self) -> KeyRef {
-        if self.entries.is_empty() {
-            KeyRef {
-                key: "".as_bytes(),
-                timestamp: 0,
-            }
-        } else {
-            (&self.entries[0]).into()
-        }
-    }
-
-    fn last_key(&self) -> KeyRef {
-        if self.entries.is_empty() {
-            KeyRef {
-                key: "".as_bytes(),
-                timestamp: 0,
-            }
-        } else {
-            (&self.entries[self.entries.len() - 1]).into()
         }
     }
 }

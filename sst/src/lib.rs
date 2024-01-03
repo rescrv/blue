@@ -578,17 +578,6 @@ const FINAL_BLOCK_MAX_SZ: usize = 2 + 10 + BLOCK_METADATA_MAX_SZ // index block
                                 + 2 + 10 // biggest timestamp
                                 + 2 + 8; // final_block_offset;
 
-/////////////////////////////////////////// TableMetadata //////////////////////////////////////////
-
-/// TableMetadata captures information about a table.
-// TODO(rescrv): deprecate this.
-pub trait TableMetadata {
-    /// The first key in the table.
-    fn first_key(&self) -> KeyRef;
-    /// The last key in the table.
-    fn last_key(&self) -> KeyRef;
-}
-
 //////////////////////////////////////////// SstMetadata ///////////////////////////////////////////
 
 /// Metadata about an Sst.
