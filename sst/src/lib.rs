@@ -34,7 +34,6 @@ pub mod merging_cursor;
 pub mod pruning_cursor;
 pub mod reference;
 pub mod sbbf;
-pub mod sequence_cursor;
 pub mod setsum;
 
 pub use log::{LogBuilder, LogIterator, LogOptions};
