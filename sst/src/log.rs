@@ -438,13 +438,7 @@ impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
     type OutputIterator<'a> = std::iter::Take<std::iter::Repeat<bool>>;
 
     fn can_batch(&self, acc: &u64, input: &u64) -> bool {
-        if *acc > 0 && *acc <= self.synced && *input <= self.synced {
-            true
-        } else if *acc > 0 && *acc <= self.synced {
-            false
-        } else {
-            true
-        }
+        *acc > self.synced || (*acc > 0 && *input <= self.synced)
     }
 
     fn batch(&mut self, acc: u64, seen: u64) -> Self::InputAccumulator {
