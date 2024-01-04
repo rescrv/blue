@@ -1,8 +1,6 @@
 extern crate sst;
 
-use rand::{Rng, RngCore};
-
-use guacamole::Guacamole;
+use guacamole::{FromGuacamole, Guacamole};
 use keyvalint::{Cursor, KeyValueLoad};
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
@@ -23,7 +21,7 @@ impl BufferGuacamole {
 
     fn guacamole(&self, guac: &mut Guacamole) -> Vec<u8> {
         let mut buf = vec![0u8; self.sz];
-        guac.fill_bytes(&mut buf);
+        guac.generate(&mut buf);
         buf
     }
 }
@@ -35,7 +33,7 @@ pub struct TimestampGuacamole {}
 
 impl TimestampGuacamole {
     fn guacamole(&self, guac: &mut Guacamole) -> u64 {
-        guac.gen()
+        u64::from_guacamole(&mut (), guac)
     }
 }
 
@@ -109,7 +107,7 @@ pub struct KeyValueOperationGuacamole {
 
 impl KeyValueOperationGuacamole {
     fn guacamole(&mut self, guac: &mut Guacamole) -> KeyValueOperation {
-        let pick: f64 = guac.gen();
+        let pick: f64 = f64::from_guacamole(&mut (), guac);
         if pick <= self.weight_put {
             KeyValueOperation::Put(self.guacamole_put.guacamole(guac))
         } else if pick <= self.weight_put + self.weight_del {
@@ -254,7 +252,7 @@ where
         let mut cursor = table.cursor();
         cursor.seek(&key).unwrap();
         for _ in 0..config.seek_distance {
-            let will_do_prev = guac.gen_range(0.0, 1.0) < config.prev_probability;
+            let will_do_prev = f64::from_guacamole(&mut (), &mut guac) < config.prev_probability;
             if will_do_prev {
                 ref_cursor.prev().unwrap();
                 cursor.prev().unwrap();

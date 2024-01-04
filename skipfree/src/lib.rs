@@ -344,9 +344,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    use rand::Rng;
-
-    use guacamole::Guacamole;
+    use guacamole::{FromGuacamole, Guacamole};
 
     use super::SkipList;
 
@@ -439,8 +437,8 @@ mod tests {
     fn guacamole_writer(skiplist: Arc<SkipList<u64, u64>>, seed: u64) {
         let mut guac = Guacamole::new(seed);
         for _ in 0..10_000 {
-            let k = guac.gen::<u64>();
-            let v = guac.gen::<u64>();
+            let k = u64::from_guacamole(&mut (), &mut guac);
+            let v = u64::from_guacamole(&mut (), &mut guac);
             skiplist.insert(k, v);
         }
     }
@@ -463,8 +461,8 @@ mod tests {
     fn guacamole(seed: u64) {
         let skiplist = Arc::new(SkipList::default());
         let mut guac = Guacamole::new(seed);
-        let readers = guac.gen::<u8>() % 16;
-        let writers = guac.gen::<u8>() % 4;
+        let readers = u64::from_guacamole(&mut (), &mut guac) % 16;
+        let writers = u64::from_guacamole(&mut (), &mut guac) % 4;
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let mut reader_threads = Vec::with_capacity(readers as usize);
         for _ in 0..readers {
@@ -475,7 +473,7 @@ mod tests {
         let mut writer_threads = Vec::with_capacity(writers as usize);
         for _ in 0..writers {
             let sl = Arc::clone(&skiplist);
-            let seed = guac.gen::<u64>();
+            let seed = u64::from_guacamole(&mut (), &mut guac);
             writer_threads.push(std::thread::spawn(move || {
                 guacamole_writer(sl, seed);
             }));

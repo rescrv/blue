@@ -14,7 +14,6 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
 crc32c = "0.6"
-rand = "0.7"
 
 biometrics = { path = "../biometrics", version = "0.5" }
 buffertk = { path = "../buffertk", version = "0.5" }

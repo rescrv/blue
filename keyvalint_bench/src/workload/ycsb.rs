@@ -9,11 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use rand::Rng;
-
 use armnod::{Armnod, ArmnodOptions};
 use biometrics::{Collector, Counter, Moments};
-use guacamole::Guacamole;
+use guacamole::{FromGuacamole, Guacamole};
 use keyvalint::Cursor;
 
 use crate::metrics::PlainTextEmitter;
@@ -81,9 +79,10 @@ impl State {
         let mut backlog = 0u64;
         while self.options.load || self.started.elapsed().as_secs() < self.options.duration_secs {
             let start = Instant::now();
-            let next_request_micros =
-                (0.0 - guac.gen::<f64>().ln() / interarrival_time) * 1_000_000.0;
-            let weight: f64 = guac.gen();
+            let next_request_micros = (0.0
+                - f64::from_guacamole(&mut (), &mut guac).ln() / interarrival_time)
+                * 1_000_000.0;
+            let weight: f64 = f64::from_guacamole(&mut (), &mut guac);
             if weight < write_thresh {
                 if !self.write(&*kvs, &mut guac, &mut keys, &mut values) {
                     break;

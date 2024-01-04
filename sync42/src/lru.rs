@@ -257,9 +257,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
-    use rand::Rng;
-
-    use guacamole::Guacamole;
+    use guacamole::{FromGuacamole, Guacamole};
 
     use super::*;
 
@@ -292,8 +290,8 @@ mod tests {
     ) {
         let mut guac = Guacamole::new(seed);
         while count.load(Ordering::Relaxed) < 100_000 {
-            let k = guac.gen::<u64>();
-            let v = guac.gen::<u64>();
+            let k = u64::from_guacamole(&mut (), &mut guac);
+            let v = u64::from_guacamole(&mut (), &mut guac);
             lru.insert(k, v);
             lru.lookup(k);
             count.fetch_add(1, Ordering::Relaxed);
@@ -303,12 +301,12 @@ mod tests {
     fn guacamole(seed: u64) {
         let lru = Arc::new(LeastRecentlyUsedCache::new(1_000));
         let mut guac = Guacamole::new(seed);
-        let num_threads = guac.gen::<usize>() % 32;
+        let num_threads = usize::from_guacamole(&mut (), &mut guac) % 32;
         let count = Arc::new(AtomicU64::new(0));
         let mut threads = Vec::with_capacity(num_threads);
         for _ in 0..num_threads {
             let l = Arc::clone(&lru);
-            let s = guac.gen::<u64>();
+            let s = u64::from_guacamole(&mut (), &mut guac);
             let c = Arc::clone(&count);
             threads.push(std::thread::spawn(move || guacamole_thread(l, s, c)));
         }

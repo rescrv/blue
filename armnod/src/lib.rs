@@ -1,9 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use rand::RngCore;
-
-use guacamole::Guacamole;
-use guacamole::Zipf;
+use guacamole::{FromGuacamole, Guacamole, Zipf};
 
 //////////////////////////////////////////// SeedChoice ////////////////////////////////////////////
 
@@ -64,7 +61,7 @@ impl SeedChooser for SetStringChooser {
     /// Endlessly return the next seed for strings on `[0, cardinality)`.  Note that the SeedChoice
     /// will not be over the same interval, but over the complete u64.
     fn which_seed(&mut self, guac: &mut Guacamole) -> SeedChoice {
-        let seed = guac.next_u64();
+        let seed = u64::from_guacamole(&mut (), guac);
         let index = seed % self.cardinality;
         SeedChoice::Seed(index.wrapping_mul(SET_SPREADER))
     }
@@ -180,7 +177,7 @@ impl UniformLengthChooser {
 impl LengthChooser for UniformLengthChooser {
     fn how_long(&mut self, guac: &mut Guacamole) -> u32 {
         let range = self.max_length - self.min_length + 1;
-        let offset = guac.next_u32() % range;
+        let offset = u32::from_guacamole(&mut (), guac) % range;
         assert!(self.min_length + offset <= self.max_length);
         self.min_length + offset
     }
@@ -243,7 +240,7 @@ impl CharSetChooser {
 impl CharacterChooser for CharSetChooser {
     fn which_char(&mut self, guac: &mut Guacamole) -> char {
         let mut byte = [0u8; 1];
-        guac.fill_bytes(&mut byte);
+        guac.generate(&mut byte);
         self.chars[byte[0] as usize]
     }
 
@@ -296,7 +293,7 @@ impl Armnod {
     fn choose_seeded(&mut self, guac: &mut Guacamole) -> Option<String> {
         let length = self.length.how_long(guac) as usize;
         self.buffer.resize(length, 0);
-        guac.fill_bytes(&mut self.buffer);
+        guac.generate(&mut self.buffer);
         let string = self.characters.whole_string(&mut self.buffer);
         Some(string)
     }

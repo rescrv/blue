@@ -16,8 +16,6 @@ rocksdb = ["dep:rocksdb", "keyvalint/rocksdb"]
 
 [dependencies]
 getopts = { version = "0.2", optional = true }
-rand = "0.7"
-
 rocksdb = { version = "0.21", optional = true }
 
 armnod = { path = "../armnod", version = "0.5" }

@@ -715,9 +715,7 @@ impl Iterator for ManifestIterator {
 mod tests {
     use std::fs::{read_to_string, remove_dir_all};
 
-    use rand::Rng;
-
-    use guacamole::Guacamole;
+    use guacamole::{FromGuacamole, Guacamole};
 
     use super::*;
 
@@ -968,22 +966,22 @@ bc9dae362thing two metadata
         let mut guac2 = Guacamole::new((seed % params.num_strs) as u64);
         format!(
             "string:{}_{}_{}",
-            guac2.gen::<u64>(),
-            guac2.gen::<u64>(),
-            guac2.gen::<u64>()
+            u64::from_guacamole(&mut (), &mut guac2),
+            u64::from_guacamole(&mut (), &mut guac2),
+            u64::from_guacamole(&mut (), &mut guac2)
         )
     }
 
     fn build_info(params: &GuacamoleParameters, guac: &mut Guacamole) -> (char, String) {
-        let info_set_idx = guac.gen::<usize>() % params.info_set.len();
+        let info_set_idx = usize::from_guacamole(&mut (), guac) % params.info_set.len();
         assert!(info_set_idx < params.info_set.len());
         (
             params.info_set[info_set_idx],
             format!(
                 "info:{}_{}_{}",
-                guac.gen::<u64>(),
-                guac.gen::<u64>(),
-                guac.gen::<u64>()
+                u64::from_guacamole(&mut (), guac),
+                u64::from_guacamole(&mut (), guac),
+                u64::from_guacamole(&mut (), guac)
             ),
         )
     }
@@ -994,13 +992,13 @@ bc9dae362thing two metadata
         guac: &mut Guacamole,
     ) -> Edit {
         let mut edit = Edit::default();
-        let num_to_add = guac.gen::<u64>() % params.num_to_add;
-        let num_to_rm = guac.gen::<u64>() % params.num_to_rm;
-        let num_info = guac.gen::<u64>() % params.num_info;
+        let num_to_add = u64::from_guacamole(&mut (), guac) % params.num_to_add;
+        let num_to_rm = u64::from_guacamole(&mut (), guac) % params.num_to_rm;
+        let num_info = u64::from_guacamole(&mut (), guac) % params.num_info;
         'to_add: for _ in 0..num_to_add {
             let mut retries = 0;
             let s = loop {
-                let s = build_string(params, guac.gen::<usize>());
+                let s = build_string(params, usize::from_guacamole(&mut (), guac));
                 if !mani.strs.contains(&s) {
                     break s;
                 }
@@ -1014,7 +1012,7 @@ bc9dae362thing two metadata
         'to_rm: for _ in 0..num_to_rm {
             let mut retries = 0;
             let s = loop {
-                let s = build_string(params, guac.gen::<usize>());
+                let s = build_string(params, usize::from_guacamole(&mut (), guac));
                 if mani.strs.contains(&s) {
                     break s;
                 }

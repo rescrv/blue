@@ -1,9 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-extern crate rand;
-
-use rand::RngCore;
-
 pub mod combinators;
 
 mod zipf;
@@ -221,29 +217,6 @@ impl Default for Guacamole {
         // Need to seek to mash the buffer.
         g.seek(0);
         g
-    }
-}
-
-impl RngCore for Guacamole {
-    fn fill_bytes(&mut self, buf: &mut [u8]) {
-        Guacamole::generate(self, buf)
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        let mut bytes = [0u8; 4];
-        self.fill_bytes(&mut bytes);
-        u32::from_le_bytes(bytes)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        let mut bytes = [0u8; 8];
-        self.fill_bytes(&mut bytes);
-        u64::from_le_bytes(bytes)
-    }
-
-    fn try_fill_bytes(&mut self, buf: &mut [u8]) -> Result<(), rand::Error> {
-        self.fill_bytes(buf);
-        Ok(())
     }
 }
 
@@ -485,8 +458,6 @@ macro_rules! weighted {
 mod tests {
     use super::*;
 
-    use rand::Rng;
-
     const TEST_CASES: &[(&str, u64, [u32; 16])] = &[
         (
             "zero",
@@ -541,7 +512,7 @@ mod tests {
             let mut g = Guacamole::default();
             g.seek(*seed);
             for (i, item) in output.iter().enumerate().take(16) {
-                let x: u32 = g.gen::<u32>();
+                let x: u32 = u32::from_guacamole(&mut (), &mut g);
                 assert_eq!(*item, x, "test case = {}[{}]", descr, i);
             }
         }

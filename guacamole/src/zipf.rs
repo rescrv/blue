@@ -1,6 +1,4 @@
-use rand::Rng;
-
-use super::Guacamole;
+use super::{FromGuacamole, Guacamole};
 
 const ZIPFS: &[Zipf] = &[
     Zipf {
@@ -746,7 +744,7 @@ impl Zipf {
     /// Zipf distribution on [0, n), where 0 is the most common element, 1 the next most common and
     /// so on.  It's not perfect, so expect to see cases where the distribution doesn't hold.
     pub fn next(&self, guac: &mut Guacamole) -> u64 {
-        let u: f64 = guac.gen();
+        let u: f64 = f64::from_guacamole(&mut (), guac);
         let uz: f64 = u * self.zetan;
         if uz < 1.0 {
             return 1;
