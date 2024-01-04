@@ -4,6 +4,8 @@ extern crate rand;
 
 use rand::RngCore;
 
+pub mod combinators;
+
 mod zipf;
 
 pub use zipf::Zipf;
@@ -245,6 +247,238 @@ impl RngCore for Guacamole {
     }
 }
 
+/////////////////////////////////////////// FromGuacamole //////////////////////////////////////////
+
+/// Generate Self from a reference to T and an instance of guacamole.
+///
+/// See the combinators module for this put to good effect.
+pub trait FromGuacamole<T> {
+    fn from_guacamole(t: &mut T, guac: &mut Guacamole) -> Self;
+}
+
+///////////////////////////////////////////// integers /////////////////////////////////////////////
+
+macro_rules! guacamole_from_le_bytes {
+    ($what:ty) => {
+        impl FromGuacamole<()> for $what {
+            fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
+                const SZ: usize = std::mem::size_of::<$what>();
+                let mut buf: [u8; SZ] = [0; SZ];
+                guac.generate(&mut buf);
+                <$what>::from_le_bytes(buf)
+            }
+        }
+    };
+}
+
+guacamole_from_le_bytes!(i8);
+guacamole_from_le_bytes!(u8);
+
+guacamole_from_le_bytes!(i16);
+guacamole_from_le_bytes!(u16);
+
+guacamole_from_le_bytes!(i32);
+guacamole_from_le_bytes!(u32);
+
+guacamole_from_le_bytes!(i64);
+guacamole_from_le_bytes!(u64);
+
+guacamole_from_le_bytes!(i128);
+guacamole_from_le_bytes!(u128);
+
+guacamole_from_le_bytes!(isize);
+guacamole_from_le_bytes!(usize);
+
+////////////////////////////////////////// floating point //////////////////////////////////////////
+
+// Trick confirmed by:
+// https://prng.di.unimi.it/
+
+impl FromGuacamole<()> for f32 {
+    fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
+        let mut buf = [0u8; 4];
+        guac.generate(&mut buf[0..3]);
+        let x = u32::from_le_bytes(buf);
+        (x & 0xffffffu32) as f32 / (1u32 << f32::MANTISSA_DIGITS) as f32
+    }
+}
+
+impl FromGuacamole<()> for f64 {
+    fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
+        let mut buf = [0u8; 8];
+        guac.generate(&mut buf[0..7]);
+        let x = u64::from_le_bytes(buf);
+        (x & 0x1fffffffffffffu64) as f64 / (1u64 << f64::MANTISSA_DIGITS) as f64
+    }
+}
+
+/////////////////////////////////////////////// tuple //////////////////////////////////////////////
+
+macro_rules! guacamole_from_tuple {
+    ( $($name:ident)+ ) => {
+        #[allow(non_snake_case)]
+        impl<$($name: FromGuacamole<()>),+> FromGuacamole<()> for ($($name,)+) {
+            fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
+                $(let $name = $name::from_guacamole(&mut (), guac);)+
+                ($($name,)+)
+            }
+        }
+    };
+}
+
+guacamole_from_tuple! { A }
+guacamole_from_tuple! { A B }
+guacamole_from_tuple! { A B C }
+guacamole_from_tuple! { A B C D }
+guacamole_from_tuple! { A B C D E }
+guacamole_from_tuple! { A B C D E F }
+guacamole_from_tuple! { A B C D E F G }
+guacamole_from_tuple! { A B C D E F G H }
+guacamole_from_tuple! { A B C D E F G H I }
+guacamole_from_tuple! { A B C D E F G H I J }
+guacamole_from_tuple! { A B C D E F G H I J K }
+guacamole_from_tuple! { A B C D E F G H I J K L }
+guacamole_from_tuple! { A B C D E F G H I J K L M }
+guacamole_from_tuple! { A B C D E F G H I J K L M N }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U V }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U V W }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U V W X }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U V W X Y }
+guacamole_from_tuple! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
+
+/////////////////////////////////////////////// array //////////////////////////////////////////////
+
+macro_rules! guacamole_from_array {
+    ( $num:tt $($name:ident)+ ) => {
+        #[allow(non_snake_case)]
+        impl<U, T: FromGuacamole<U>> FromGuacamole<U> for [T; $num] {
+            fn from_guacamole(u: &mut U, guac: &mut Guacamole) -> Self {
+                $(let $name = T::from_guacamole(u, guac);)+
+                [$($name,)+]
+            }
+        }
+    };
+}
+
+guacamole_from_array! { 1 A }
+guacamole_from_array! { 2 A B }
+guacamole_from_array! { 3 A B C }
+guacamole_from_array! { 4 A B C D }
+guacamole_from_array! { 5 A B C D E }
+guacamole_from_array! { 6 A B C D E F }
+guacamole_from_array! { 7 A B C D E F G }
+guacamole_from_array! { 8 A B C D E F G H }
+guacamole_from_array! { 9 A B C D E F G H I }
+guacamole_from_array! { 10 A B C D E F G H I J }
+guacamole_from_array! { 11 A B C D E F G H I J K }
+guacamole_from_array! { 12 A B C D E F G H I J K L }
+guacamole_from_array! { 13 A B C D E F G H I J K L M }
+guacamole_from_array! { 14 A B C D E F G H I J K L M N }
+guacamole_from_array! { 15 A B C D E F G H I J K L M N O }
+guacamole_from_array! { 16 A B C D E F G H I J K L M N O P }
+guacamole_from_array! { 17 A B C D E F G H I J K L M N O P Q }
+guacamole_from_array! { 18 A B C D E F G H I J K L M N O P Q R }
+guacamole_from_array! { 19 A B C D E F G H I J K L M N O P Q R S }
+guacamole_from_array! { 20 A B C D E F G H I J K L M N O P Q R S T }
+guacamole_from_array! { 21 A B C D E F G H I J K L M N O P Q R S T U }
+guacamole_from_array! { 22 A B C D E F G H I J K L M N O P Q R S T U V }
+guacamole_from_array! { 23 A B C D E F G H I J K L M N O P Q R S T U V W }
+guacamole_from_array! { 24 A B C D E F G H I J K L M N O P Q R S T U V W X }
+guacamole_from_array! { 25 A B C D E F G H I J K L M N O P Q R S T U V W X Y }
+guacamole_from_array! { 26 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
+guacamole_from_array! { 27 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA }
+guacamole_from_array! { 28 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB }
+guacamole_from_array! { 29 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC }
+guacamole_from_array! { 30 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD }
+guacamole_from_array! { 31 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD AE }
+guacamole_from_array! { 32 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD AE AF }
+
+/////////////////////////////////////////////// char ///////////////////////////////////////////////
+
+// From the rust documentation:
+//
+// A char is a ‘Unicode scalar value’, which is any ‘Unicode code point’ other than a surrogate
+// code point. This has a fixed numerical definition: code points are in the range 0 to 0x10FFFF,
+// inclusive. Surrogate code points, used by UTF-16, are in the range 0xD800 to 0xDFFF.
+const MAX_CHAR: u32 = 0x10FFFFu32;
+const FIRST_SURROGATE: u32 = 0xD800u32;
+const LAST_SURROGATE: u32 = 0xDFFFu32;
+const SURROGATE_GAP: u32 = LAST_SURROGATE - FIRST_SURROGATE + 1;
+const CHAR_RANGE: u32 = MAX_CHAR - SURROGATE_GAP + 1;
+
+fn char_from_u24(x: u32) -> char {
+    let c = ((x as u64 * CHAR_RANGE as u64) >> 24) as u32;
+    if c >= FIRST_SURROGATE {
+        char::from_u32(c + SURROGATE_GAP).expect("char should be utf8")
+    } else {
+        char::from_u32(c).expect("char should be utf8")
+    }
+}
+
+impl FromGuacamole<()> for char {
+    fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
+        let mut buf = [0u8; 4];
+        guac.generate(&mut buf[0..3]);
+        let x = u32::from_le_bytes(buf);
+        char_from_u24(x)
+    }
+}
+
+////////////////////////////////////////// weighted macro //////////////////////////////////////////
+
+/// Run a block of code with the weight assigned to it.  For example:
+///
+/// ```
+/// use guacamole::FromGuacamole;
+///
+/// #[derive(Clone, Debug, Eq, PartialEq)]
+/// enum Count {
+///     One,
+///     Two,
+///     Three,
+/// }
+///
+/// let func = guacamole::weighted! {
+///     0.5 => {
+///         Count::One
+///     }
+///     0.25 => {
+///         Count::Two
+///     }
+///     0.25 => {
+///         Count::Three
+///     }
+/// };
+/// ```
+#[macro_export]
+macro_rules! weighted {
+    ($($weight:literal => $code:block)+) => {
+        {
+            let total = $($weight + )+ 0.0;
+            let acc = 0.0;
+            move |guac: &mut $crate::Guacamole| {
+                let weight = f32::from_guacamole(&mut (), guac) * total;
+                $(
+                    let acc = acc + $weight;
+                    if weight <= acc {
+                        return {
+                            $code
+                        }
+                    }
+                )+
+                panic!("error calculating weighted probabilities");
+            }
+        }
+    };
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -310,6 +544,189 @@ mod tests {
                 let x: u32 = g.gen::<u32>();
                 assert_eq!(*item, x, "test case = {}[{}]", descr, i);
             }
+        }
+    }
+
+    #[test]
+    fn i8_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(12i8, i8::from_guacamole(&mut (), &mut g));
+        assert_eq!(-19i8, i8::from_guacamole(&mut (), &mut g));
+        assert_eq!(89i8, i8::from_guacamole(&mut (), &mut g));
+        assert_eq!(79i8, i8::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn u8_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(12u8, u8::from_guacamole(&mut (), &mut g));
+        assert_eq!(237u8, u8::from_guacamole(&mut (), &mut g));
+        assert_eq!(89u8, u8::from_guacamole(&mut (), &mut g));
+        assert_eq!(79u8, u8::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn i16_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(-4852i16, i16::from_guacamole(&mut (), &mut g));
+        assert_eq!(20313i16, i16::from_guacamole(&mut (), &mut g));
+        assert_eq!(6582i16, i16::from_guacamole(&mut (), &mut g));
+        assert_eq!(-6581i16, i16::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn u16_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(60684u16, u16::from_guacamole(&mut (), &mut g));
+        assert_eq!(20313u16, u16::from_guacamole(&mut (), &mut g));
+        assert_eq!(6582u16, u16::from_guacamole(&mut (), &mut g));
+        assert_eq!(58955u16, u16::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn i32_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(1331293452i32, i32::from_guacamole(&mut (), &mut g));
+        assert_eq!(-431285834i32, i32::from_guacamole(&mut (), &mut g));
+        assert_eq!(-242250468i32, i32::from_guacamole(&mut (), &mut g));
+        assert_eq!(624269013i32, i32::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn u32_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(1331293452u32, u32::from_guacamole(&mut (), &mut g));
+        assert_eq!(3863681462u32, u32::from_guacamole(&mut (), &mut g));
+        assert_eq!(4052716828u32, u32::from_guacamole(&mut (), &mut g));
+        assert_eq!(624269013u32, u32::from_guacamole(&mut (), &mut g));
+    }
+
+    #[test]
+    fn i64_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(
+            -1852358550926791412i64,
+            i64::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(2681214998793915676i64, i64::from_guacamole(&mut (), &mut g));
+        assert_eq!(4092481979873166344i64, i64::from_guacamole(&mut (), &mut g));
+        assert_eq!(
+            -5424627454596165171i64,
+            i64::from_guacamole(&mut (), &mut g)
+        );
+    }
+
+    #[test]
+    fn u64_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(
+            16594385522782760204u64,
+            u64::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(2681214998793915676u64, u64::from_guacamole(&mut (), &mut g));
+        assert_eq!(4092481979873166344u64, u64::from_guacamole(&mut (), &mut g));
+        assert_eq!(
+            13022116619113386445u64,
+            u64::from_guacamole(&mut (), &mut g)
+        );
+    }
+
+    #[test]
+    fn i128_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(
+            49459686889342826596546834789656292620i128,
+            i128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            -100066714350153939649187475127612799992i128,
+            i128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            -86802739999401378514630235182376832904i128,
+            i128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            116000783475269626238547120300001778485i128,
+            i128::from_guacamole(&mut (), &mut g)
+        );
+    }
+
+    #[test]
+    fn u128_consts() {
+        let mut g = Guacamole::default();
+        assert_eq!(
+            49459686889342826596546834789656292620u128,
+            u128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            240215652570784523814187132304155411464u128,
+            u128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            253479626921537084948744372249391378552u128,
+            u128::from_guacamole(&mut (), &mut g)
+        );
+        assert_eq!(
+            116000783475269626238547120300001778485u128,
+            u128::from_guacamole(&mut (), &mut g)
+        );
+    }
+
+    #[test]
+    fn f32_consts() {
+        let mut g = Guacamole::default();
+        fn approx(lhs: f32, rhs: f32) -> bool {
+            lhs + f32::EPSILON > rhs && rhs + f32::EPSILON > lhs
+        }
+        assert!(approx(0.3512733, f32::from_guacamole(&mut (), &mut g)));
+        assert!(approx(0.10043806, f32::from_guacamole(&mut (), &mut g)));
+        assert!(approx(0.11288899, f32::from_guacamole(&mut (), &mut g)));
+        assert!(approx(0.94359666, f32::from_guacamole(&mut (), &mut g)));
+    }
+
+    #[test]
+    fn f64_consts() {
+        let mut g = Guacamole::default();
+        fn approx(lhs: f64, rhs: f64) -> bool {
+            lhs + f64::EPSILON > rhs && rhs + f64::EPSILON > lhs
+        }
+        assert!(approx(
+            0.34688868997855726,
+            f64::from_guacamole(&mut (), &mut g)
+        ));
+        assert!(approx(
+            0.7136161617026147,
+            f64::from_guacamole(&mut (), &mut g)
+        ));
+        assert!(approx(
+            0.42236662661995317,
+            f64::from_guacamole(&mut (), &mut g)
+        ));
+        assert!(approx(
+            0.31137933809655505,
+            f64::from_guacamole(&mut (), &mut g)
+        ));
+    }
+
+    #[test]
+    fn tuple_consts() {
+        let mut g = Guacamole::default();
+        let x: (u8, u8, u8, u8) = FromGuacamole::from_guacamole(&mut (), &mut g);
+        assert_eq!((12u8, 237u8, 89u8, 79u8), x);
+    }
+
+    #[test]
+    fn array_consts() {
+        let mut g = Guacamole::default();
+        let x: [u8; 4] = FromGuacamole::from_guacamole(&mut (), &mut g);
+        assert_eq!([12u8, 237u8, 89u8, 79u8], x);
+    }
+
+    #[test]
+    fn char_util() {
+        for i in 0..(1 << 24) {
+            char_from_u24(i);
         }
     }
 }
