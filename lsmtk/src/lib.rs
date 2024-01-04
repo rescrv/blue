@@ -1997,13 +1997,13 @@ mod tests {
         mani.apply(edit).expect("manifest apply should never fail");
         drop(mani);
         let _kvs = KeyValueStore::open(options).expect("key-value store should open");
-        assert!(PathBuf::from(TRASH_SST(
+        assert!(TRASH_SST(
             &root,
             Setsum::from_hexdigest(
                 "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a"
             )
             .expect("valid setsum")
-        ))
+        )
         .exists());
     }
     // TODO(rescrv): two log files
