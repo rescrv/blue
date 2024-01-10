@@ -152,6 +152,22 @@ pub fn uuid(guac: &mut Guacamole) -> String {
     s
 }
 
+pub fn enumerate() -> impl FnMut(&mut Guacamole) -> usize {
+    let mut x = 0;
+    move |_| {
+        let ret = x;
+        x += 1;
+        ret
+    }
+}
+
+pub fn from_seed<T, F: FnMut(&mut Guacamole) -> T>(mut func: F) -> impl FnMut(usize) -> T {
+    move |index| {
+        let mut g = Guacamole::new(index as u64);
+        func(&mut g)
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
