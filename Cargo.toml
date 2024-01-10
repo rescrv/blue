@@ -29,6 +29,7 @@ members = [
     "sig_fig_histogram",
     "split_channel",
     "sst",
+    "statslicer",
     "sync42",
     "tatl",
     "texttale",

@@ -1,0 +1,31 @@
+[package]
+name = "statslicer"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "Guacamole provides a linearly-seekable random number generator."
+license = "Apache-2.0"
+
+[features]
+default = ["binaries"]
+
+binaries = []
+
+[dependencies]
+getopts = "0.2"
+
+arrrg = { path = "../arrrg", version = "0.3" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.1" }
+
+[dev-dependencies]
+guacamole = { path = "../guacamole", version = "0.6" }
+
+[[bin]]
+name = "statslicer"
+path = "src/bin/statslicer.rs"
+required-features=["binaries"]
+
+[[bench]]
+name = "example"
+harness = false
