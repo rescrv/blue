@@ -169,7 +169,11 @@ pub struct Guacamole {
 impl Guacamole {
     /// Create a new [Guacamole] and seek it to `x`.
     pub fn new(x: u64) -> Self {
-        let mut g = Guacamole::default();
+        let mut g = Guacamole {
+            nonce: 0,
+            index: 0,
+            buffer: MashOutput { blocks: [0; 16] },
+        };
         g.seek(x);
         g
     }
