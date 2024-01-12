@@ -26,6 +26,7 @@ members = [
     "scrunch",
     "setsum",
     "skipfree",
+    "sig_fig_histogram",
     "split_channel",
     "sst",
     "sync42",
