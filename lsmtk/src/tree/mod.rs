@@ -1,23 +1,31 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
+use std::fs::{
+    create_dir, hard_link, remove_dir, remove_dir_all, remove_file, rename
+};
+use std::io::ErrorKind;
 use std::ops::Bound;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::{Collector, Counter};
 use indicio::clue;
-use keyvalint::{Cursor, KeyValueLoad};
+use keyvalint::{compare_bytes, Cursor, KeyValueLoad, KeyRef};
+use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
 use sst::file_manager::FileManager;
 use sst::lazy_cursor::LazyCursor;
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
-use sst::{Sst, SstMetadata};
-use sync42::lru::LeastRecentlyUsedCache;
+use sst::{Builder, Sst, SstCursor, SstMetadata, SstMultiBuilder};
+use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
+use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{
-    compare_bytes, CachedSst, Error, LsmtkOptions, TreeLogKey, TreeLogValue, LSM_TREE_LOG, SST_FILE,
-};
+use super::{ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, TreeLogKey, TreeLogValue, COMPACTION_DIR, LSM_TREE_LOG, MANI_ROOT, SST_FILE, TRASH_SST};
+use crate::reference_counter::ReferenceCounter;
+use crate::verifier;
 
 mod recover;
 
@@ -28,6 +36,12 @@ use recover::recover;
 pub const NUM_LEVELS: usize = 16;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static OPEN_DB: Counter = Counter::new("lsmtk.open");
+
+static BYTES_INGESTED: Counter = Counter::new("lsmtk.ingest.bytes");
+static INGEST_LINK: Counter = Counter::new("lsmtk.ingest.link");
+static INGEST_STALL: Counter = Counter::new("lsmtk.ingest.stall");
 
 static FIND_TRIVIAL_MOVE: Counter = Counter::new("lsmtk.tree.find_trivial_move.find_trivial_move");
 static FIND_TRIVIAL_MOVE_EMPTY_LEVEL: Counter =
@@ -63,7 +77,25 @@ static MANDATORY_COMPACTION: Counter = Counter::new("lsmtk.tree.mandatory_compac
 static SKIPPED_FOR_CURVE: Counter = Counter::new("lsmtk.tree.skipped_for_curve");
 static CLEAR_OUT_FOR_L0: Counter = Counter::new("lsmtk.tree.clear_out_for_l0");
 
+static COMPACTION_THREAD_NO_COMPACTION: Counter =
+    Counter::new("lsmtk.compaction_thread.no_compaction");
+
+static COMPACTION_PERFORM: Counter = Counter::new("lsmtk.compaction");
+static COMPACTION_NEW_CURSOR: Counter = Counter::new("lsmtk.compaction.new_cursor");
+static COMPACTION_KEYS_WRITTEN: Counter = Counter::new("lsmtk.compaction.keys_written");
+static COMPACTION_BYTES_WRITTEN: Counter = Counter::new("lsmtk.compaction.bytes_written");
+static COMPACTION_LINK: Counter = Counter::new("lsmtk.compaction.link");
+static COMPACTION_REMOVE: Counter = Counter::new("lsmtk.compaction.remove");
+
+static GARBAGE_COLLECTION_PERFORM: Counter = Counter::new("lsmtk.garbage_collection");
+static GARBAGE_COLLECTION_KEYS_DROPPED: Counter =
+    Counter::new("lsmtk.garbage_collection.keys_dropped");
+
 pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&OPEN_DB);
+    collector.register_counter(&BYTES_INGESTED);
+    collector.register_counter(&INGEST_LINK);
+    collector.register_counter(&INGEST_STALL);
     collector.register_counter(&FIND_TRIVIAL_MOVE);
     collector.register_counter(&FIND_TRIVIAL_MOVE_EMPTY_LEVEL);
     collector.register_counter(&FIND_TRIVIAL_MOVE_LEVEL0);
@@ -85,6 +117,15 @@ pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&MANDATORY_COMPACTION);
     collector.register_counter(&SKIPPED_FOR_CURVE);
     collector.register_counter(&CLEAR_OUT_FOR_L0);
+    collector.register_counter(&COMPACTION_THREAD_NO_COMPACTION);
+    collector.register_counter(&COMPACTION_PERFORM);
+    collector.register_counter(&COMPACTION_NEW_CURSOR);
+    collector.register_counter(&COMPACTION_KEYS_WRITTEN);
+    collector.register_counter(&COMPACTION_BYTES_WRITTEN);
+    collector.register_counter(&COMPACTION_LINK);
+    collector.register_counter(&COMPACTION_REMOVE);
+    collector.register_counter(&GARBAGE_COLLECTION_PERFORM);
+    collector.register_counter(&GARBAGE_COLLECTION_KEYS_DROPPED);
 }
 
 /////////////////////////////////////////////// Level //////////////////////////////////////////////
@@ -173,7 +214,8 @@ impl Compaction {
 
 ////////////////////////////////////////////// Version /////////////////////////////////////////////
 
-pub struct Version {
+// TODO(rescrv): Hide this
+pub(crate) struct Version {
     options: LsmtkOptions,
     levels: Vec<Level>,
     ongoing: Arc<Mutex<Vec<Arc<CompactionCore>>>>,
@@ -185,22 +227,22 @@ fn compare_for_min_max(lhs: &&[u8], rhs: &&[u8]) -> Ordering {
 }
 
 impl Version {
-    pub fn open(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Self, Error> {
+    fn open(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Self, Error> {
         recover(options, metadata)
     }
 
-    pub fn should_stall_ingest(&self) -> bool {
+    fn should_stall_ingest(&self) -> bool {
         self.levels[0].ssts.len() >= self.options.l0_write_stall_threshold_files
             || self.levels[0].size() >= self.options.l0_write_stall_threshold_bytes as u64
     }
 
-    pub fn should_perform_mandatory_compaction(&self) -> bool {
+    fn should_perform_mandatory_compaction(&self) -> bool {
         self.levels[0].ssts.len() >= self.options.l0_mandatory_compaction_threshold_files
             || self.levels[0].size() >= self.options.l0_mandatory_compaction_threshold_bytes as u64
             || self.levels.iter().all(|x| !x.ssts.is_empty())
     }
 
-    pub fn setsums(&self) -> Vec<Setsum> {
+    fn setsums(&self) -> Vec<Setsum> {
         let mut setsums = vec![];
         for level in self.levels.iter() {
             for md in level.ssts.iter() {
@@ -210,7 +252,7 @@ impl Version {
         setsums
     }
 
-    pub fn ingest(&self, to_add: SstMetadata) -> Result<Self, Error> {
+    fn ingest(&self, to_add: SstMetadata) -> Result<Self, Error> {
         // TODO(rescrv):  Put it at the highest level with a hole.
         clue! { LSM_TREE_LOG, TreeLogKey::BySetsum {
                 setsum: to_add.setsum
@@ -224,7 +266,7 @@ impl Version {
         Ok(new_tree)
     }
 
-    pub fn compute_setsum(&self) -> Setsum {
+    fn compute_setsum(&self) -> Setsum {
         let mut acc = Setsum::default();
         for level in self.levels.iter() {
             for file in level.ssts.iter() {
@@ -234,6 +276,7 @@ impl Version {
         acc
     }
 
+    // TODO(rescrv):  Put this on the RAII type returned from get_tree.
     pub fn load(
         &self,
         fm: &FileManager,
@@ -264,7 +307,7 @@ impl Version {
         Ok(None)
     }
 
-    pub fn load_from_sst<'a: 'b, 'b>(
+    fn load_from_sst<'a: 'b, 'b>(
         &self,
         fm: &FileManager,
         sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
@@ -292,6 +335,7 @@ impl Version {
         Ok(sst.load(key, timestamp, is_tombstone)?)
     }
 
+    // TODO(rescrv):  Put this on the RAII type returned from get_tree.
     pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         fm: &Arc<FileManager>,
@@ -353,7 +397,7 @@ impl Version {
         Ok(MergingCursor::new(cursors)?)
     }
 
-    pub fn next_compaction(&self) -> Option<Compaction> {
+    fn next_compaction(&self) -> Option<Compaction> {
         let compaction_id = match CompactionID::generate() {
             Some(compaction_id) => compaction_id,
             None => CompactionID::BOTTOM,
@@ -450,7 +494,7 @@ impl Version {
         }
     }
 
-    pub fn release_compaction(&self, compaction: Compaction) -> Result<(), Error> {
+    fn release_compaction(&self, compaction: Compaction) -> Result<(), Error> {
         let mut ongoing_list = self.ongoing.lock().unwrap();
         for (idx, ongoing) in ongoing_list.iter().enumerate() {
             if Arc::ptr_eq(ongoing, &compaction.core) {
@@ -464,7 +508,7 @@ impl Version {
         })
     }
 
-    pub fn apply_compaction(
+    fn apply_compaction(
         &self,
         compaction: Compaction,
         outputs: Vec<SstMetadata>,
@@ -898,18 +942,18 @@ enum SplitKey {
     Last(usize),
 }
 
-pub struct SplitHint {
+struct SplitHint {
     tree: Arc<Version>,
     index: SplitKey,
 }
 
 impl SplitHint {
-    pub fn new(tree: Arc<Version>) -> Self {
+    fn new(tree: Arc<Version>) -> Self {
         let index = SplitKey::First(0);
         Self { tree, index }
     }
 
-    pub fn hint_key(&self) -> &[u8] {
+    fn hint_key(&self) -> &[u8] {
         match self.index {
             SplitKey::First(x) => {
                 if x < self.ssts().len() {
@@ -925,7 +969,7 @@ impl SplitHint {
         keyvalint::MAX_KEY
     }
 
-    pub fn witness(&mut self, key: &[u8]) -> bool {
+    fn witness(&mut self, key: &[u8]) -> bool {
         let mut should_split = false;
         while self.index() < self.ssts().len()
             && compare_bytes(key, self.hint_key()) == Ordering::Greater
@@ -953,6 +997,566 @@ impl SplitHint {
 
     fn ssts(&self) -> &[Arc<SstMetadata>] {
         &self.tree.levels[self.tree.levels.len() - 1].ssts
+    }
+}
+
+///////////////////////////////////////////// CachedSst ////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct CachedSst {
+    ptr: Arc<Sst>,
+}
+
+impl LruValue for CachedSst {
+    fn approximate_size(&self) -> usize {
+        std::mem::size_of::<Sst>()
+    }
+}
+
+////////////////////////////////////////////// LsmTree /////////////////////////////////////////////
+
+pub struct LsmTree {
+    root: PathBuf,
+    options: LsmtkOptions,
+    // TODO(rescrv):  Hide this
+    pub(crate) file_manager: Arc<FileManager>,
+    mani: RwLock<Manifest>,
+    tree: Mutex<Arc<Version>>,
+    compaction: Mutex<()>,
+    stall: Condvar,
+    compact: Condvar,
+    references: ReferenceCounter<Setsum>,
+    // TODO(rescrv):  Hide this
+    pub(crate) sst_cache: LeastRecentlyUsedCache<Setsum, CachedSst>,
+}
+
+impl LsmTree {
+    pub fn open(options: LsmtkOptions) -> Result<Self, Error> {
+        let root: PathBuf = PathBuf::from(&options.path);
+        ensure_dir(root.clone(), "root")?;
+        make_all_dirs(&root)?;
+        let mut mani = Manifest::open(options.mani.clone(), MANI_ROOT(&root))?;
+        if mani.info('I').is_none() {
+            let mut edit = Edit::default();
+            edit.info('I', &Setsum::default().hexdigest())?;
+            edit.info('D', &Setsum::default().hexdigest())?;
+            edit.info('O', &Setsum::default().hexdigest())?;
+            mani.apply(edit)?;
+        }
+        Self::from_manifest(options, mani)
+    }
+
+    pub(crate) fn from_manifest(options: LsmtkOptions, mani: Manifest) -> Result<Self, Error> {
+        let root: PathBuf = PathBuf::from(&options.path);
+        let mani = RwLock::new(mani);
+        let file_manager = Arc::new(FileManager::new(options.max_open_files));
+        let metadata = Self::list_ssts_from_manifest(&root, &mani.read().unwrap(), &file_manager)?;
+        let tree = Mutex::new(Arc::new(Version::open(options.clone(), metadata)?));
+        let compaction = Mutex::new(());
+        let tree_setsum = tree.lock().unwrap().compute_setsum().hexdigest();
+        let mani_setsum = mani
+            .read()
+            .unwrap()
+            .info('O')
+            .map(|s| s.to_string())
+            .unwrap_or(Setsum::default().hexdigest());
+        if tree_setsum != mani_setsum {
+            return Err(Error::Corruption {
+                core: ErrorCore::default(),
+                context: "setsum of tree does not match setsum of manifest".to_string(),
+            })
+            .as_z()
+            .with_variable("tree", tree_setsum)
+            .with_variable("mani", mani_setsum);
+        }
+        let stall = Condvar::new();
+        let compact = Condvar::new();
+        let references = ReferenceCounter::default();
+        let sst_cache = LeastRecentlyUsedCache::new(options.sst_cache_bytes);
+        Self::explicit_ref(&references, &tree.lock().unwrap());
+        OPEN_DB.click();
+        let mut db = Self {
+            root,
+            options,
+            file_manager,
+            mani,
+            tree,
+            compaction,
+            stall,
+            compact,
+            references,
+            sst_cache,
+        };
+        db.cleanup_orphans()?;
+        Ok(db)
+    }
+
+    fn list_ssts_from_manifest<P: AsRef<Path>>(
+        root: P,
+        mani: &Manifest,
+        file_manager: &FileManager,
+    ) -> Result<Vec<SstMetadata>, Error> {
+        let mut metadata = vec![];
+        let mut setsums = HashSet::new();
+        for hexdigest in mani.strs() {
+            let setsum = Setsum::from_hexdigest(hexdigest).ok_or(Error::Corruption {
+                core: ErrorCore::default(),
+                context: "setsum invalid".to_string(),
+            })?;
+            let path = SST_FILE(&root, setsum);
+            let file = file_manager.open(&path)?;
+            let sst = Sst::from_file_handle(file)?;
+            metadata.push(sst.metadata()?);
+            setsums.insert(setsum);
+        }
+        Ok(metadata)
+    }
+
+    fn cleanup_orphans(&mut self) -> Result<(), Error> {
+        let manis = verifier::list_mani_fragments(&self.root)?;
+        let mut ssts_to_remove = HashSet::new();
+        for mani in manis.into_iter() {
+            let mani_iter = ManifestIterator::open(mani)?;
+            let mut first = true;
+            for edit in mani_iter {
+                let edit = edit?;
+                if first {
+                    first = false;
+                    continue;
+                }
+                for rmed in edit.rmed() {
+                    if let Some(setsum) = Setsum::from_hexdigest(rmed) {
+                        ssts_to_remove.insert(setsum);
+                    }
+                }
+                for added in edit.added() {
+                    if let Some(setsum) = Setsum::from_hexdigest(added) {
+                        ssts_to_remove.remove(&setsum);
+                    }
+                }
+            }
+        }
+        for setsum in ssts_to_remove.into_iter() {
+            let sst_path = SST_FILE(&self.root, setsum);
+            let trash_path = TRASH_SST(&self.root, setsum);
+            if sst_path.exists() && !trash_path.exists() {
+                // The verifier will pick up on there being orphans, so we can ignore error here.
+                // TODO(rescrv):  Make the verifier detect this case.
+                let _ = rename(sst_path, trash_path);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P, log_num: Option<u64>) -> Result<(), Error> {
+        // For each SST, hardlink it into the ingest root.
+        let mut edit = Edit::default();
+        let mut acc = Setsum::default();
+        let metadata = self.file_manager.stat(&sst_path)?;
+        BYTES_INGESTED.count(metadata.file_size);
+        // Update the setsum for the ingest.
+        // We are adding data, not removing it, so subtract to balance the added output.
+        let setsum = Setsum::from_digest(metadata.setsum);
+        acc -= setsum;
+        // Hard-link the file into place.
+        let target = SST_FILE(&self.root, setsum);
+        if target.exists() {
+            return Err(Error::DuplicateSst {
+                core: ErrorCore::default(),
+                what: target.to_string_lossy().to_string(),
+            });
+        }
+        INGEST_LINK.click();
+        hard_link(&sst_path, target).as_z()?;
+        edit.add(&setsum.hexdigest())?;
+        if let Some(log_num) = log_num {
+            edit.info('L', &format!("{}", log_num))?;
+        }
+        self.apply_manifest_ingest(acc, edit, metadata)?;
+        Ok(())
+    }
+
+    pub fn compaction_thread(&self) -> Result<(), Error> {
+        loop {
+            let compaction = {
+                let mut mutex = self.compaction.lock().unwrap();
+                'inner: loop {
+                    let tree = self.get_tree();
+                    let compaction = tree.next_compaction();
+                    self.explicit_unref(tree);
+                    if let Some(compaction) = compaction {
+                        break 'inner compaction;
+                    } else {
+                        COMPACTION_THREAD_NO_COMPACTION.click();
+                        mutex = self.compact.wait(mutex).unwrap();
+                    }
+                }
+            };
+            if let Err(err) = self.perform_compaction(compaction.clone()) {
+                let _mutex = self.compaction.lock().unwrap();
+                let tree = self.get_tree();
+                let _ = tree.release_compaction(compaction);
+                self.explicit_unref(tree);
+                return Err(err);
+            }
+        }
+    }
+
+    fn perform_compaction(&self, compaction: Compaction) -> Result<(), Error> {
+        COMPACTION_PERFORM.click();
+        if compaction.inputs().count() == 1 {
+            // SAFETY(rescrv): This is ensured by count in a good implementation.
+            let input = compaction.inputs().next().unwrap();
+            return self.apply_moving_compaction(compaction, input);
+        }
+        if compaction.top_level() {
+            return self.perform_garbage_collection(compaction);
+        }
+        let mut mani_edit = Edit::default();
+        let (input_setsum, mut cursor, compaction_dir) =
+            self.compaction_setup(&compaction, &mut mani_edit)?;
+        cursor.seek_to_first()?;
+        // Get a set of hints as to where to split the multi-builder.
+        let tree = self.get_tree();
+        let mut split_hint = SplitHint::new(tree.clone());
+        // Setup the compaction multi-builder.
+        let mut sstmb = SstMultiBuilder::new(
+            compaction_dir.clone(),
+            ".sst".to_string(),
+            self.options.sst.clone(),
+        );
+        'looping: loop {
+            cursor.next()?;
+            let kvr = match cursor.key_value() {
+                Some(v) => v,
+                None => {
+                    break 'looping;
+                }
+            };
+            if !compaction.top_level() && split_hint.witness(kvr.key) {
+                sstmb.split_hint()?;
+            }
+            COMPACTION_KEYS_WRITTEN.click();
+            match kvr.value {
+                Some(v) => {
+                    sstmb.put(kvr.key, kvr.timestamp, v)?;
+                }
+                None => {
+                    sstmb.del(kvr.key, kvr.timestamp)?;
+                }
+            }
+        }
+        drop(cursor);
+        // SAFETY(rescrv): Drop the split hint before calling explicit_unref on the tree.
+        drop(split_hint);
+        self.explicit_unref(tree);
+        // Seal the multi-builder.
+        let paths = sstmb.seal()?;
+        // Finish the compaction
+        self.compaction_finish(
+            compaction,
+            compaction_dir,
+            paths,
+            input_setsum,
+            Setsum::default(),
+            mani_edit,
+        )
+    }
+
+    fn perform_garbage_collection(&self, compaction: Compaction) -> Result<(), Error> {
+        GARBAGE_COLLECTION_PERFORM.click();
+        let mut mani_edit = Edit::default();
+        let (input_setsum, mut cursor, compaction_dir) =
+            self.compaction_setup(&compaction, &mut mani_edit)?;
+        cursor.seek_to_first()?;
+        let mut gc_cursor = cursor.clone();
+        gc_cursor.next()?;
+        let mut gc = self.options.gc_policy.collector(gc_cursor, 0)?;
+        // Setup the compaction multi-builder.
+        let mut sstmb = SstMultiBuilder::new(
+            compaction_dir.clone(),
+            ".sst".to_string(),
+            self.options.sst.clone(),
+        );
+        let mut gc_next = gc.next()?;
+        let mut discard = Setsum::default();
+        'looping: loop {
+            cursor.next()?;
+            let kvr = match cursor.key_value() {
+                Some(v) => v,
+                None => {
+                    break 'looping;
+                }
+            };
+            let retain = if let Some(gcn) = gc_next {
+                match gcn.cmp(&KeyRef::from(&kvr)) {
+                    Ordering::Less => {
+                        return Err(Error::LogicError {
+                            core: ErrorCore::default(),
+                            context: "gc iterator out of sync with inputs".to_string(),
+                        });
+                    }
+                    Ordering::Equal => {
+                        gc_next = gc.next()?;
+                        true
+                    }
+                    Ordering::Greater => false,
+                }
+            } else {
+                false
+            };
+            if retain {
+                COMPACTION_KEYS_WRITTEN.click();
+                match kvr.value {
+                    Some(v) => {
+                        sstmb.put(kvr.key, kvr.timestamp, v)?;
+                    }
+                    None => {
+                        sstmb.del(kvr.key, kvr.timestamp)?;
+                    }
+                }
+            } else {
+                GARBAGE_COLLECTION_KEYS_DROPPED.click();
+                let mut setsum = sst::Setsum::default();
+                setsum.insert(kvr);
+                discard += setsum.into_inner();
+            }
+        }
+        drop(cursor);
+        // Seal the multi-builder.
+        let paths = sstmb.seal()?;
+        // Finish the compaction
+        self.compaction_finish(
+            compaction,
+            compaction_dir,
+            paths,
+            input_setsum,
+            discard,
+            mani_edit,
+        )
+    }
+
+    fn compaction_setup(
+        &self,
+        compaction: &Compaction,
+        mani_edit: &mut Edit,
+    ) -> Result<(Setsum, MergingCursor<SstCursor>, PathBuf), Error> {
+        let mut cursors: Vec<SstCursor> = vec![];
+        let mut acc = Setsum::default();
+        // Figure out the moves to make, update the mani_edit, compute setsum, and create a cursor.
+        for input in compaction.inputs() {
+            mani_edit.rm(&input.hexdigest())?;
+            let sst = self.open_sst(input)?;
+            cursors.push(sst.cursor());
+            acc += input;
+            COMPACTION_NEW_CURSOR.click();
+            clue! { LSM_TREE_LOG, TreeLogKey::BySetsum {
+                    setsum: input.digest(),
+                } => TreeLogValue::GatherInput {
+                }
+            };
+        }
+        // Setup the compaction output directory.
+        let compaction_dir = COMPACTION_DIR(&self.root, acc);
+        if compaction_dir.exists() {
+            clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
+                    compaction_id: compaction.compaction_id(),
+                } => TreeLogValue::RemoveCompactionDir {
+                    dir: compaction_dir.to_string_lossy().to_string(),
+                }
+            };
+            remove_dir_all(&compaction_dir)
+                .as_z()
+                .with_variable("dir", &compaction_dir)?;
+        }
+        create_dir(&compaction_dir)?;
+        Ok((acc, MergingCursor::new(cursors)?, compaction_dir))
+    }
+
+    fn compaction_finish(
+        &self,
+        compaction: Compaction,
+        compaction_dir: PathBuf,
+        paths: Vec<PathBuf>,
+        input_setsum: Setsum,
+        discard_setsum: Setsum,
+        mut mani_edit: Edit,
+    ) -> Result<(), Error> {
+        let mut outputs = vec![];
+        let mut output_setsum = Setsum::default();
+        // NOTE(rescrv):  Sometimes compaction generates the same file as input and output.  We are
+        // not to remove the file in that case.
+        for path in paths.iter() {
+            let metadata = self.file_manager.stat(path)?;
+            let setsum = Setsum::from_digest(metadata.setsum);
+            output_setsum += setsum;
+            COMPACTION_BYTES_WRITTEN.count(metadata.file_size);
+            mani_edit.add(&setsum.hexdigest())?;
+            let new_path = SST_FILE(&self.root, setsum);
+            COMPACTION_LINK.click();
+            match hard_link(path, &new_path) {
+                Ok(_) => {}
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
+                err @ Err(_) => {
+                    return err
+                        .as_z()
+                        .with_variable("src", path)
+                        .with_variable("dst", &new_path);
+                }
+            };
+            outputs.push(metadata);
+        }
+        if input_setsum != output_setsum + discard_setsum {
+            return Err(Error::Corruption {
+                core: ErrorCore::default(),
+                context: "setsum does not balance input = output + discard".to_string(),
+            }
+            .with_variable("input_setsum", input_setsum.hexdigest())
+            .with_variable("output_setsum", output_setsum.hexdigest())
+            .with_variable("discard_setsum", discard_setsum.hexdigest()));
+        }
+        let ret = self.apply_manifest_compaction(compaction, discard_setsum, mani_edit, outputs);
+        for path in paths.into_iter() {
+            COMPACTION_REMOVE.click();
+            remove_file(&path).as_z().with_variable("path", &path)?;
+        }
+        remove_dir(&compaction_dir)
+            .as_z()
+            .with_variable("dir", &compaction_dir)?;
+        ret
+    }
+
+    fn apply_manifest_ingest(
+        &self,
+        setsum: Setsum,
+        mut mani_edit: Edit,
+        new: SstMetadata,
+    ) -> Result<(), Error> {
+        let mut mutex = self.compaction.lock().unwrap();
+        let mut tree = self.get_tree();
+        while tree.should_stall_ingest() {
+            INGEST_STALL.click();
+            mutex = self.stall.wait(mutex).unwrap();
+            let mut tree2 = self.get_tree();
+            std::mem::swap(&mut tree, &mut tree2);
+            self.explicit_unref(tree2);
+        }
+        let tree_setsum = tree.compute_setsum();
+        // NOTE(rescrv):  We subtract because we are removing the discard setsum.
+        // This has the happy effect of subtracting the inverse of what we added.
+        let output_setsum = tree_setsum - setsum;
+        // TODO(rescrv): poison here.
+        mani_edit.info('I', &tree_setsum.hexdigest())?;
+        mani_edit.info('O', &output_setsum.hexdigest())?;
+        mani_edit.info('D', &setsum.hexdigest())?;
+        // TODO(rescrv):  Do not hold tree lock across manifest edit.
+        self.mani.write().unwrap().apply(mani_edit)?;
+        let new_tree = Arc::new(tree.ingest(new)?);
+        // TODO(rescrv): don't hold the lock for computing setsum.
+        let tree_setsum = new_tree.compute_setsum();
+        assert_eq!(tree_setsum, output_setsum);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
+        self.compact.notify_all();
+        Ok(())
+    }
+
+    fn apply_manifest_compaction(
+        &self,
+        compaction: Compaction,
+        discard_setsum: Setsum,
+        mut mani_edit: Edit,
+        outputs: Vec<SstMetadata>,
+    ) -> Result<(), Error> {
+        let _mutex = self.compaction.lock().unwrap();
+        let tree = self.get_tree();
+        let tree_setsum = tree.compute_setsum();
+        let output_setsum = tree_setsum - discard_setsum;
+        // TODO(rescrv): poison here.
+        mani_edit.info('I', &tree_setsum.hexdigest())?;
+        mani_edit.info('O', &output_setsum.hexdigest())?;
+        mani_edit.info('D', &discard_setsum.hexdigest())?;
+        self.mani.write().unwrap().apply(mani_edit)?;
+        let new_tree = Arc::new(tree.apply_compaction(compaction, outputs)?);
+        // TODO(rescrv): don't hold the lock for computing setsum.
+        let tree_setsum = new_tree.compute_setsum();
+        assert_eq!(tree_setsum, output_setsum);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
+        self.stall.notify_all();
+        Ok(())
+    }
+
+    fn apply_moving_compaction(&self, compaction: Compaction, output: Setsum) -> Result<(), Error> {
+        let _mutex = self.compaction.lock().unwrap();
+        let sst = self.open_sst(output)?;
+        let meta = sst.metadata()?;
+        let tree = self.get_tree();
+        let tree_setsum1 = tree.compute_setsum();
+        let new_tree = Arc::new(tree.apply_compaction(compaction, vec![meta])?);
+        let tree_setsum2 = new_tree.compute_setsum();
+        assert_eq!(tree_setsum1, tree_setsum2);
+        self.install_tree(new_tree);
+        // TODO(rescrv): Make this a handle?.
+        self.explicit_unref(tree);
+        self.stall.notify_all();
+        Ok(())
+    }
+
+    // TODO(rescrv): Dedupe with tree.
+    fn open_sst(&self, setsum: Setsum) -> Result<Arc<Sst>, Error> {
+        if let Some(sst) = self.sst_cache.lookup(setsum) {
+            Ok(sst.ptr)
+        } else {
+            let sst_path = SST_FILE(&self.root, setsum);
+            let file = self.file_manager.open(sst_path)?;
+            let sst = Arc::new(Sst::from_file_handle(file)?);
+            self.sst_cache.insert(
+                setsum,
+                CachedSst {
+                    ptr: Arc::clone(&sst),
+                },
+            );
+            Ok(sst)
+        }
+    }
+
+    // TODO(rescrv): make private
+    pub(crate) fn get_tree(&self) -> Arc<Version> {
+        Arc::clone(&*self.tree.lock().unwrap())
+    }
+
+    // TODO(rescrv): make private
+    pub(crate) fn install_tree(&self, mut tree2: Arc<Version>) {
+        Self::explicit_ref(&self.references, &tree2);
+        let mut tree1 = self.tree.lock().unwrap();
+        std::mem::swap(&mut *tree1, &mut tree2);
+        self.explicit_unref(tree2);
+    }
+
+    // TODO(rescrv): make private
+    pub(crate) fn explicit_ref(references: &ReferenceCounter<Setsum>, tree: &Version) {
+        for setsum in tree.setsums() {
+            references.inc(setsum);
+        }
+    }
+
+    // TODO(rescrv): make private
+    pub(crate) fn explicit_unref(&self, tree: Arc<Version>) {
+        if Arc::strong_count(&tree) != 1 {
+            return;
+        }
+        for setsum in tree.setsums() {
+            if self.references.dec(setsum) {
+                let sst_path = SST_FILE(&self.root, setsum);
+                let trash_path = TRASH_SST(&self.root, setsum);
+                // SAFETY(rescrv):  This will just leave an orphan.
+                // The verifier will pick up on there being orphans.
+                let _ = rename(sst_path, trash_path);
+            }
+        }
     }
 }
 
