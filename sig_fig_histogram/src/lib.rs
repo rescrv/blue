@@ -74,6 +74,7 @@ impl SigFigBucketizer {
 ///////////////////////////////////////////// Histogram ////////////////////////////////////////////
 
 /// A basic Histogram type.
+#[derive(Clone, Debug)]
 pub struct Histogram {
     sfb: SigFigBucketizer,
     buckets: Vec<u64>,
