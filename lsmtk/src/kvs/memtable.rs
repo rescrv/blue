@@ -6,7 +6,8 @@ use skipfree::{SkipList, SkipListIterator};
 use sst::bounds_cursor::BoundsCursor;
 use sst::pruning_cursor::PruningCursor;
 
-use super::{Error, WriteBatch};
+use super::WriteBatch;
+use crate::Error;
 
 ///////////////////////////////////////////// MemTable /////////////////////////////////////////////
 
