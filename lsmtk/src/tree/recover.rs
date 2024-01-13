@@ -55,7 +55,7 @@ impl From<BTreeSet<(usize, usize)>> for AdjacencyList {
 
 ////////////////////////////////////////////// recover /////////////////////////////////////////////
 
-pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Tree, Error> {
+pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Version, Error> {
     // Create a forward adjacency list.
     let forward_adj_list = construct_adj_list(&metadata)?;
     // Create a list of vertices.
@@ -163,7 +163,7 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Tree
     }
     // Return a new tree.
     let ongoing = Arc::new(Mutex::default());
-    Ok(Tree {
+    Ok(Version {
         options,
         levels,
         ongoing,

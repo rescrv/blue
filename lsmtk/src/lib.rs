@@ -38,7 +38,7 @@ mod verifier;
 
 use memtable::MemTable;
 use reference_counter::ReferenceCounter;
-use tree::{Compaction, Tree};
+use tree::{Compaction, Version};
 
 pub use tree::{CompactionID, NUM_LEVELS};
 pub use verifier::{LsmVerifier, ManifestVerifier};
@@ -700,7 +700,7 @@ pub struct LsmTree {
     options: LsmtkOptions,
     file_manager: Arc<FileManager>,
     mani: RwLock<Manifest>,
-    tree: Mutex<Arc<Tree>>,
+    tree: Mutex<Arc<Version>>,
     compaction: Mutex<()>,
     stall: Condvar,
     compact: Condvar,
@@ -729,7 +729,7 @@ impl LsmTree {
         let mani = RwLock::new(mani);
         let file_manager = Arc::new(FileManager::new(options.max_open_files));
         let metadata = Self::list_ssts_from_manifest(&root, &mani.read().unwrap(), &file_manager)?;
-        let tree = Mutex::new(Arc::new(Tree::open(options.clone(), metadata)?));
+        let tree = Mutex::new(Arc::new(Version::open(options.clone(), metadata)?));
         let compaction = Mutex::new(());
         let tree_setsum = tree.lock().unwrap().compute_setsum().hexdigest();
         let mani_setsum = mani
@@ -1201,24 +1201,24 @@ impl LsmTree {
         }
     }
 
-    fn get_tree(&self) -> Arc<Tree> {
+    fn get_tree(&self) -> Arc<Version> {
         Arc::clone(&*self.tree.lock().unwrap())
     }
 
-    fn install_tree(&self, mut tree2: Arc<Tree>) {
+    fn install_tree(&self, mut tree2: Arc<Version>) {
         Self::explicit_ref(&self.references, &tree2);
         let mut tree1 = self.tree.lock().unwrap();
         std::mem::swap(&mut *tree1, &mut tree2);
         self.explicit_unref(tree2);
     }
 
-    fn explicit_ref(references: &ReferenceCounter<Setsum>, tree: &Tree) {
+    fn explicit_ref(references: &ReferenceCounter<Setsum>, tree: &Version) {
         for setsum in tree.setsums() {
             references.inc(setsum);
         }
     }
 
-    fn explicit_unref(&self, tree: Arc<Tree>) {
+    fn explicit_unref(&self, tree: Arc<Version>) {
         if Arc::strong_count(&tree) != 1 {
             return;
         }

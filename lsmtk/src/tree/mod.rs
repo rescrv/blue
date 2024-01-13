@@ -171,9 +171,9 @@ impl Compaction {
     }
 }
 
-/////////////////////////////////////////////// Tree ///////////////////////////////////////////////
+////////////////////////////////////////////// Version /////////////////////////////////////////////
 
-pub struct Tree {
+pub struct Version {
     options: LsmtkOptions,
     levels: Vec<Level>,
     ongoing: Arc<Mutex<Vec<Arc<CompactionCore>>>>,
@@ -184,7 +184,7 @@ fn compare_for_min_max(lhs: &&[u8], rhs: &&[u8]) -> Ordering {
     compare_bytes(lhs, rhs)
 }
 
-impl Tree {
+impl Version {
     pub fn open(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Self, Error> {
         recover(options, metadata)
     }
@@ -878,7 +878,7 @@ impl Tree {
     }
 }
 
-impl Clone for Tree {
+impl Clone for Version {
     fn clone(&self) -> Self {
         let options = self.options.clone();
         let levels = self.levels.clone();
@@ -899,12 +899,12 @@ enum SplitKey {
 }
 
 pub struct SplitHint {
-    tree: Arc<Tree>,
+    tree: Arc<Version>,
     index: SplitKey,
 }
 
 impl SplitHint {
-    pub fn new(tree: Arc<Tree>) -> Self {
+    pub fn new(tree: Arc<Version>) -> Self {
         let index = SplitKey::First(0);
         Self { tree, index }
     }
