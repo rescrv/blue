@@ -186,6 +186,26 @@ impl Histogram {
         }
         histogram
     }
+
+    /// Merge two histograms without loss of precision.
+    ///
+    /// # Panics
+    ///
+    /// If the signficant figures are different between the histograms.
+    pub fn merge(one: Self, two: Self) -> Self {
+        assert_eq!(one.sig_figs(), two.sig_figs());
+        let mut three = Self {
+            sfb: one.sfb,
+            buckets: vec![0; std::cmp::max(one.buckets.len(), two.buckets.len())],
+        };
+        for (idx, bucket) in one.iter().enumerate() {
+            three.buckets[idx] += bucket;
+        }
+        for (idx, bucket) in two.iter().enumerate() {
+            three.buckets[idx] += bucket;
+        }
+        three
+    }
 }
 
 ///////////////////////////////////////// LockFreeHistogram ////////////////////////////////////////
