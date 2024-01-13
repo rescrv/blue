@@ -18,12 +18,11 @@ mod reference_counter;
 mod tree;
 mod verifier;
 
-pub use kvs::{WriteBatch, KeyValueStore};
-pub use tree::{CompactionID, NUM_LEVELS, LsmTree};
+pub use kvs::{KeyValueStore, WriteBatch};
+pub use tree::{CompactionID, LsmTree, NUM_LEVELS};
 pub use verifier::{LsmVerifier, ManifestVerifier};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
-
 
 pub fn register_biometrics(collector: &Collector) {
     tree::register_biometrics(collector);

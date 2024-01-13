@@ -1,8 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::fs::{
-    create_dir, hard_link, remove_dir, remove_dir_all, remove_file, rename
-};
+use std::fs::{create_dir, hard_link, remove_dir, remove_dir_all, remove_file, rename};
 use std::io::ErrorKind;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -10,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::{Collector, Counter};
 use indicio::clue;
-use keyvalint::{compare_bytes, Cursor, KeyValueLoad, KeyRef};
+use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValueLoad};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -23,7 +21,10 @@ use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
-use super::{ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, TreeLogKey, TreeLogValue, COMPACTION_DIR, LSM_TREE_LOG, MANI_ROOT, SST_FILE, TRASH_SST};
+use super::{
+    ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, TreeLogKey, TreeLogValue,
+    COMPACTION_DIR, LSM_TREE_LOG, MANI_ROOT, SST_FILE, TRASH_SST,
+};
 use crate::reference_counter::ReferenceCounter;
 use crate::verifier;
 
