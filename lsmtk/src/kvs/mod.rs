@@ -421,11 +421,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
                 return Ok(ret);
             }
         }
-        let ret = version.load(
-            key,
-            timestamp,
-            is_tombstone,
-        )?;
+        let ret = version.load(key, timestamp, is_tombstone)?;
         Ok(ret)
     }
 

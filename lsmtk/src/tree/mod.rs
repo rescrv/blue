@@ -1026,7 +1026,13 @@ impl<'a> VersionRef<'a> {
         timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Error> {
-        self.version.load(&self.tree.file_manager, &self.tree.sst_cache, key, timestamp, is_tombstone)
+        self.version.load(
+            &self.tree.file_manager,
+            &self.tree.sst_cache,
+            key,
+            timestamp,
+            is_tombstone,
+        )
     }
 
     pub fn range_scan<T: AsRef<[u8]>>(
@@ -1035,7 +1041,8 @@ impl<'a> VersionRef<'a> {
         end_bound: &Bound<T>,
         timestamp: u64,
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
-        self.version.range_scan(&self.tree.file_manager, start_bound, end_bound, timestamp)
+        self.version
+            .range_scan(&self.tree.file_manager, start_bound, end_bound, timestamp)
     }
 }
 
