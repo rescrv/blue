@@ -612,7 +612,7 @@ impl Default for LsmtkOptions {
             log: LogOptions::default(),
             sst: SstOptions::default(),
             path: "db".to_owned(),
-            max_open_files: 1 << 9,
+            max_open_files: 1 << 19,
             max_compaction_bytes: 1 << 29,
             max_compaction_files: 1 << 6,
             l0_mandatory_compaction_threshold_files: 4,
