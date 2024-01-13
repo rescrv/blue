@@ -277,8 +277,7 @@ impl Version {
         acc
     }
 
-    // TODO(rescrv):  Put this on the RAII type returned from get_tree.
-    pub fn load(
+    fn load(
         &self,
         fm: &FileManager,
         sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
@@ -336,8 +335,7 @@ impl Version {
         Ok(sst.load(key, timestamp, is_tombstone)?)
     }
 
-    // TODO(rescrv):  Put this on the RAII type returned from get_tree.
-    pub fn range_scan<T: AsRef<[u8]>>(
+    fn range_scan<T: AsRef<[u8]>>(
         &self,
         fm: &Arc<FileManager>,
         start_bound: &Bound<T>,
@@ -1014,21 +1012,52 @@ impl LruValue for CachedSst {
     }
 }
 
+//////////////////////////////////////////// VersionRef ////////////////////////////////////////////
+
+pub struct VersionRef<'a> {
+    tree: &'a LsmTree,
+    version: Arc<Version>,
+}
+
+impl<'a> VersionRef<'a> {
+    pub fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        self.version.load(&self.tree.file_manager, &self.tree.sst_cache, key, timestamp, is_tombstone)
+    }
+
+    pub fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+        timestamp: u64,
+    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
+        self.version.range_scan(&self.tree.file_manager, start_bound, end_bound, timestamp)
+    }
+}
+
+impl<'a> Drop for VersionRef<'a> {
+    fn drop(&mut self) {
+        self.tree.explicit_unref(&self.version);
+    }
+}
+
 ////////////////////////////////////////////// LsmTree /////////////////////////////////////////////
 
 pub struct LsmTree {
     root: PathBuf,
     options: LsmtkOptions,
-    // TODO(rescrv):  Hide this
-    pub(crate) file_manager: Arc<FileManager>,
+    file_manager: Arc<FileManager>,
     mani: RwLock<Manifest>,
-    tree: Mutex<Arc<Version>>,
+    version: Mutex<Arc<Version>>,
     compaction: Mutex<()>,
     stall: Condvar,
     compact: Condvar,
     references: ReferenceCounter<Setsum>,
-    // TODO(rescrv):  Hide this
-    pub(crate) sst_cache: LeastRecentlyUsedCache<Setsum, CachedSst>,
+    sst_cache: LeastRecentlyUsedCache<Setsum, CachedSst>,
 }
 
 impl LsmTree {
@@ -1052,36 +1081,36 @@ impl LsmTree {
         let mani = RwLock::new(mani);
         let file_manager = Arc::new(FileManager::new(options.max_open_files));
         let metadata = Self::list_ssts_from_manifest(&root, &mani.read().unwrap(), &file_manager)?;
-        let tree = Mutex::new(Arc::new(Version::open(options.clone(), metadata)?));
+        let version = Mutex::new(Arc::new(Version::open(options.clone(), metadata)?));
         let compaction = Mutex::new(());
-        let tree_setsum = tree.lock().unwrap().compute_setsum().hexdigest();
+        let version_setsum = version.lock().unwrap().compute_setsum().hexdigest();
         let mani_setsum = mani
             .read()
             .unwrap()
             .info('O')
             .map(|s| s.to_string())
             .unwrap_or(Setsum::default().hexdigest());
-        if tree_setsum != mani_setsum {
+        if version_setsum != mani_setsum {
             return Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "setsum of tree does not match setsum of manifest".to_string(),
             })
             .as_z()
-            .with_variable("tree", tree_setsum)
+            .with_variable("tree", version_setsum)
             .with_variable("mani", mani_setsum);
         }
         let stall = Condvar::new();
         let compact = Condvar::new();
         let references = ReferenceCounter::default();
         let sst_cache = LeastRecentlyUsedCache::new(options.sst_cache_bytes);
-        Self::explicit_ref(&references, &tree.lock().unwrap());
+        Self::explicit_ref(&references, &version.lock().unwrap());
         OPEN_DB.click();
         let mut db = Self {
             root,
             options,
             file_manager,
             mani,
-            tree,
+            version,
             compaction,
             stall,
             compact,
@@ -1182,9 +1211,8 @@ impl LsmTree {
             let compaction = {
                 let mut mutex = self.compaction.lock().unwrap();
                 'inner: loop {
-                    let tree = self.get_tree();
-                    let compaction = tree.next_compaction();
-                    self.explicit_unref(tree);
+                    let version = self.take_snapshot();
+                    let compaction = version.version.next_compaction();
                     if let Some(compaction) = compaction {
                         break 'inner compaction;
                     } else {
@@ -1195,9 +1223,8 @@ impl LsmTree {
             };
             if let Err(err) = self.perform_compaction(compaction.clone()) {
                 let _mutex = self.compaction.lock().unwrap();
-                let tree = self.get_tree();
-                let _ = tree.release_compaction(compaction);
-                self.explicit_unref(tree);
+                let version = self.take_snapshot();
+                let _ = version.version.release_compaction(compaction);
                 return Err(err);
             }
         }
@@ -1218,8 +1245,8 @@ impl LsmTree {
             self.compaction_setup(&compaction, &mut mani_edit)?;
         cursor.seek_to_first()?;
         // Get a set of hints as to where to split the multi-builder.
-        let tree = self.get_tree();
-        let mut split_hint = SplitHint::new(tree.clone());
+        let version = self.take_snapshot();
+        let mut split_hint = SplitHint::new(version.version.clone());
         // Setup the compaction multi-builder.
         let mut sstmb = SstMultiBuilder::new(
             compaction_dir.clone(),
@@ -1248,9 +1275,6 @@ impl LsmTree {
             }
         }
         drop(cursor);
-        // SAFETY(rescrv): Drop the split hint before calling explicit_unref on the tree.
-        drop(split_hint);
-        self.explicit_unref(tree);
         // Seal the multi-builder.
         let paths = sstmb.seal()?;
         // Finish the compaction
@@ -1434,15 +1458,15 @@ impl LsmTree {
         new: SstMetadata,
     ) -> Result<(), Error> {
         let mut mutex = self.compaction.lock().unwrap();
-        let mut tree = self.get_tree();
-        while tree.should_stall_ingest() {
+        let mut version = self.take_snapshot();
+        while version.version.should_stall_ingest() {
             INGEST_STALL.click();
             mutex = self.stall.wait(mutex).unwrap();
-            let mut tree2 = self.get_tree();
-            std::mem::swap(&mut tree, &mut tree2);
-            self.explicit_unref(tree2);
+            let mut version2 = self.take_snapshot();
+            std::mem::swap(&mut version, &mut version2);
+            drop(version2);
         }
-        let tree_setsum = tree.compute_setsum();
+        let tree_setsum = version.version.compute_setsum();
         // NOTE(rescrv):  We subtract because we are removing the discard setsum.
         // This has the happy effect of subtracting the inverse of what we added.
         let output_setsum = tree_setsum - setsum;
@@ -1452,13 +1476,11 @@ impl LsmTree {
         mani_edit.info('D', &setsum.hexdigest())?;
         // TODO(rescrv):  Do not hold tree lock across manifest edit.
         self.mani.write().unwrap().apply(mani_edit)?;
-        let new_tree = Arc::new(tree.ingest(new)?);
+        let new_version = Arc::new(version.version.ingest(new)?);
         // TODO(rescrv): don't hold the lock for computing setsum.
-        let tree_setsum = new_tree.compute_setsum();
+        let tree_setsum = new_version.compute_setsum();
         assert_eq!(tree_setsum, output_setsum);
-        self.install_tree(new_tree);
-        // TODO(rescrv): Make this a handle?.
-        self.explicit_unref(tree);
+        self.install_version(new_version);
         self.compact.notify_all();
         Ok(())
     }
@@ -1471,21 +1493,19 @@ impl LsmTree {
         outputs: Vec<SstMetadata>,
     ) -> Result<(), Error> {
         let _mutex = self.compaction.lock().unwrap();
-        let tree = self.get_tree();
-        let tree_setsum = tree.compute_setsum();
+        let version = self.take_snapshot();
+        let tree_setsum = version.version.compute_setsum();
         let output_setsum = tree_setsum - discard_setsum;
         // TODO(rescrv): poison here.
         mani_edit.info('I', &tree_setsum.hexdigest())?;
         mani_edit.info('O', &output_setsum.hexdigest())?;
         mani_edit.info('D', &discard_setsum.hexdigest())?;
         self.mani.write().unwrap().apply(mani_edit)?;
-        let new_tree = Arc::new(tree.apply_compaction(compaction, outputs)?);
+        let new_version = Arc::new(version.version.apply_compaction(compaction, outputs)?);
         // TODO(rescrv): don't hold the lock for computing setsum.
-        let tree_setsum = new_tree.compute_setsum();
+        let tree_setsum = new_version.compute_setsum();
         assert_eq!(tree_setsum, output_setsum);
-        self.install_tree(new_tree);
-        // TODO(rescrv): Make this a handle?.
-        self.explicit_unref(tree);
+        self.install_version(new_version);
         self.stall.notify_all();
         Ok(())
     }
@@ -1494,14 +1514,12 @@ impl LsmTree {
         let _mutex = self.compaction.lock().unwrap();
         let sst = self.open_sst(output)?;
         let meta = sst.metadata()?;
-        let tree = self.get_tree();
-        let tree_setsum1 = tree.compute_setsum();
-        let new_tree = Arc::new(tree.apply_compaction(compaction, vec![meta])?);
-        let tree_setsum2 = new_tree.compute_setsum();
+        let version = self.take_snapshot();
+        let tree_setsum1 = version.version.compute_setsum();
+        let new_version = Arc::new(version.version.apply_compaction(compaction, vec![meta])?);
+        let tree_setsum2 = new_version.compute_setsum();
         assert_eq!(tree_setsum1, tree_setsum2);
-        self.install_tree(new_tree);
-        // TODO(rescrv): Make this a handle?.
-        self.explicit_unref(tree);
+        self.install_version(new_version);
         self.stall.notify_all();
         Ok(())
     }
@@ -1524,32 +1542,32 @@ impl LsmTree {
         }
     }
 
-    // TODO(rescrv): make private
-    pub(crate) fn get_tree(&self) -> Arc<Version> {
-        Arc::clone(&*self.tree.lock().unwrap())
+    pub fn take_snapshot(&self) -> VersionRef {
+        let version = Arc::clone(&*self.version.lock().unwrap());
+        VersionRef {
+            tree: self,
+            version,
+        }
     }
 
-    // TODO(rescrv): make private
-    pub(crate) fn install_tree(&self, mut tree2: Arc<Version>) {
-        Self::explicit_ref(&self.references, &tree2);
-        let mut tree1 = self.tree.lock().unwrap();
-        std::mem::swap(&mut *tree1, &mut tree2);
-        self.explicit_unref(tree2);
+    fn install_version(&self, mut version2: Arc<Version>) {
+        Self::explicit_ref(&self.references, &version2);
+        let mut version1 = self.version.lock().unwrap();
+        std::mem::swap(&mut *version1, &mut version2);
+        self.explicit_unref(&version2);
     }
 
-    // TODO(rescrv): make private
-    pub(crate) fn explicit_ref(references: &ReferenceCounter<Setsum>, tree: &Version) {
-        for setsum in tree.setsums() {
+    fn explicit_ref(references: &ReferenceCounter<Setsum>, version: &Version) {
+        for setsum in version.setsums() {
             references.inc(setsum);
         }
     }
 
-    // TODO(rescrv): make private
-    pub(crate) fn explicit_unref(&self, tree: Arc<Version>) {
-        if Arc::strong_count(&tree) != 1 {
+    fn explicit_unref(&self, version: &Arc<Version>) {
+        if Arc::strong_count(version) != 1 {
             return;
         }
-        for setsum in tree.setsums() {
+        for setsum in version.setsums() {
             if self.references.dec(setsum) {
                 let sst_path = SST_FILE(&self.root, setsum);
                 let trash_path = TRASH_SST(&self.root, setsum);

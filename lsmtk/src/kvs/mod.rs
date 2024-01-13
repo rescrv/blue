@@ -403,34 +403,29 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error> {
-        let (mem, imm, tree) = {
+        let (mem, imm, version) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
             let imm = state.imm.as_ref().map(Arc::clone);
-            let tree = self.tree.get_tree();
-            (mem, imm, tree)
+            let version = self.tree.take_snapshot();
+            (mem, imm, version)
         };
         *is_tombstone = false;
         let ret = mem.load(key, timestamp, is_tombstone)?;
         if ret.is_some() || *is_tombstone {
-            self.tree.explicit_unref(tree);
             return Ok(ret);
         }
         if let Some(imm) = imm {
             let ret = imm.load(key, timestamp, is_tombstone)?;
             if ret.is_some() || *is_tombstone {
-                self.tree.explicit_unref(tree);
                 return Ok(ret);
             }
         }
-        let ret = tree.load(
-            &self.tree.file_manager,
-            &self.tree.sst_cache,
+        let ret = version.load(
             key,
             timestamp,
             is_tombstone,
         )?;
-        self.tree.explicit_unref(tree);
         Ok(ret)
     }
 
@@ -440,12 +435,12 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         end_bound: &Bound<T>,
         timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
-        let (mem, imm, tree) = {
+        let (mem, imm, version) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
             let imm = state.imm.as_ref().map(Arc::clone);
-            let tree = self.tree.get_tree();
-            (mem, imm, tree)
+            let version = self.tree.take_snapshot();
+            (mem, imm, version)
         };
         let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = Vec::with_capacity(3);
         let mut mem_scan = mem.range_scan(start_bound, end_bound, timestamp)?;
@@ -456,9 +451,8 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
             imm_scan.seek_to_first()?;
             cursors.push(Box::new(imm_scan));
         }
-        let tree_scan =
-            tree.range_scan(&self.tree.file_manager, start_bound, end_bound, timestamp)?;
-        cursors.push(Box::new(tree_scan));
+        let version_scan = version.range_scan(start_bound, end_bound, timestamp)?;
+        cursors.push(Box::new(version_scan));
         let cursor = MergingCursor::new(cursors)?;
         let cursor = PruningCursor::new(cursor, timestamp)?;
         let cursor = BoundsCursor::new(cursor, start_bound, end_bound)?;
