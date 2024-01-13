@@ -1,21 +1,32 @@
+//! This module includes a set of combinators that make it easy to construct complex types using
+//! simple statements.
+
+use std::time::Duration;
+
 use super::{FromGuacamole, Guacamole};
 
+/// any produces an item of any type, so long as it implements FromGuacamole<()>.
 pub fn any<T: FromGuacamole<()>>(guac: &mut Guacamole) -> T {
     T::from_guacamole(&mut (), guac)
 }
 
+/// from produces an item from the provided parameters, so long as the target type implements
+/// FromGuacamole for the appropriate type.
 pub fn from<T: FromGuacamole<U>, U>(u: &mut U) -> impl FnMut(&mut Guacamole) -> T + '_ {
     |guac| T::from_guacamole(u, guac)
 }
 
+/// A fair coin toss.
 pub fn coin() -> impl FnMut(&mut Guacamole) -> bool {
     |guac| (u8::from_guacamole(&mut (), guac) & 0x1) != 0
 }
 
+/// Returns true with probability p.
 pub fn prob(p: f32) -> impl FnMut(&mut Guacamole) -> bool {
     move |guac| f32::from_guacamole(&mut (), guac) < p
 }
 
+/// Use the first function to tell whether to generate a Some type using the second function.
 pub fn option<P: FnMut(&mut Guacamole) -> bool, F: FnMut(&mut Guacamole) -> T, T>(
     mut pred: P,
     mut func: F,
@@ -29,10 +40,12 @@ pub fn option<P: FnMut(&mut Guacamole) -> bool, F: FnMut(&mut Guacamole) -> T, T
     }
 }
 
+/// Returns a constant and does not consume any guacamole.
 pub fn constant<T: Clone>(t: T) -> impl FnMut(&mut Guacamole) -> T {
     move |_| t.clone()
 }
 
+/// A helper type for [range_to].
 pub trait RangeTo: Copy {
     fn multiply(x: Self, limit: Self) -> Self;
 }
@@ -67,6 +80,7 @@ impl RangeTo for usize {
     }
 }
 
+/// Return a number in the closed-open interval [0, limit).
 pub fn range_to<R: RangeTo + FromGuacamole<()>>(limit: R) -> impl FnMut(&mut Guacamole) -> R {
     move |guac| {
         let x = R::from_guacamole(&mut (), guac);
@@ -74,16 +88,14 @@ pub fn range_to<R: RangeTo + FromGuacamole<()>>(limit: R) -> impl FnMut(&mut Gua
     }
 }
 
-pub fn uniform<
-    R: RangeTo + std::ops::Add<Output = R> + std::ops::Sub<Output = R> + FromGuacamole<()>,
->(
-    start: R,
-    limit: R,
-) -> impl FnMut(&mut Guacamole) -> R {
-    let mut delta_func = range_to(limit - start);
-    move |guac| start + delta_func(guac)
-}
-
+/// Take a function that guacamole and returns a usize, and couple it to a function that takes a
+/// usize and returns an arbitrary type.
+///
+/// This is useful for generating sets of elements.  Use [range_to] or [unique_set] as the first
+/// argument, and [any] (or anything else) as the second argument to quickly and easily generate a
+/// random, finite set of elements according to the distribution of the first argument.
+///
+/// This is *the* motivating use case for guacamole and why it was originally mashed.
 pub fn set_element<M: FnMut(&mut Guacamole) -> usize, F: FnMut(usize) -> T, T>(
     mut membership: M,
     mut func: F,
@@ -91,6 +103,7 @@ pub fn set_element<M: FnMut(&mut Guacamole) -> usize, F: FnMut(usize) -> T, T>(
     move |guac| func(membership(guac))
 }
 
+/// Create a vector with prescribed length and element generation.
 pub fn to_vec<L: FnMut(&mut Guacamole) -> usize, F: FnMut(&mut Guacamole) -> T, T>(
     mut length: L,
     mut func: F,
@@ -105,6 +118,7 @@ pub fn to_vec<L: FnMut(&mut Guacamole) -> usize, F: FnMut(&mut Guacamole) -> T, 
     }
 }
 
+/// Map the type returned by a function that takes guacamole to another type.
 pub fn map<F: FnMut(&mut Guacamole) -> T, M: FnMut(T) -> U, T, U>(
     mut gen: F,
     mut map: M,
@@ -112,6 +126,8 @@ pub fn map<F: FnMut(&mut Guacamole) -> T, M: FnMut(T) -> U, T, U>(
     move |guac| map(gen(guac))
 }
 
+/// Filter values returned by guacamole, returning the first generated value that matches the
+/// prescribed predicate.
 pub fn filter<F: FnMut(&mut Guacamole) -> T, P: FnMut(&T) -> bool, T>(
     mut gen: F,
     mut pred: P,
@@ -124,6 +140,7 @@ pub fn filter<F: FnMut(&mut Guacamole) -> T, P: FnMut(&T) -> bool, T>(
     }
 }
 
+/// Select values from a slice, using an offset function to select the slice.
 pub fn select<'a, O: FnMut(&mut Guacamole) -> usize + 'a, T: Clone>(
     mut offset: O,
     values: &'a [T],
@@ -134,6 +151,7 @@ pub fn select<'a, O: FnMut(&mut Guacamole) -> usize + 'a, T: Clone>(
     }
 }
 
+/// Generate a UUID using guacamole.
 pub fn uuid(guac: &mut Guacamole) -> String {
     use std::fmt::Write;
     let mut id = [0u8; 16];
@@ -152,6 +170,7 @@ pub fn uuid(guac: &mut Guacamole) -> String {
     s
 }
 
+/// Return the non-negative integers in increasing order, consuming no guacamole.
 pub fn enumerate() -> impl FnMut(&mut Guacamole) -> usize {
     let mut x = 0;
     move |_| {
@@ -161,10 +180,71 @@ pub fn enumerate() -> impl FnMut(&mut Guacamole) -> usize {
     }
 }
 
+/// Given a function that takes guacamole and returns an arbitrary type, create a function that
+/// takes a usize as the seed to guacamole and returns an arbitrary value generated from a new
+/// guacamole stream on that seed.
+///
+/// This works well with [set_element] to allow construction of arbitrary sets of data.
 pub fn from_seed<T, F: FnMut(&mut Guacamole) -> T>(mut func: F) -> impl FnMut(usize) -> T {
     move |index| {
         let mut g = Guacamole::new(index as u64);
         func(&mut g)
+    }
+}
+
+/// Create a unique set-generating function.  This takes numbers X in the range [0, usize) and
+/// returns X * random + random.  Random should be selected to be a prime number far apart from
+/// other prime numbers provided to unique_set.  On platforms with 64-bit usize, a 63-bit number
+/// works well.  On platforms with 32-bit usize, a 31-bit number works well.
+pub fn unique_set(set_size: usize, random: usize) -> impl FnMut(&mut Guacamole) -> usize {
+    move |guac| {
+        range_to(set_size)(guac)
+            .wrapping_mul(random)
+            .wrapping_add(random)
+    }
+}
+
+/// Generate numbers uniformly distributed between start and limit.
+pub fn uniform<
+    R: RangeTo + std::ops::Add<Output = R> + std::ops::Sub<Output = R> + FromGuacamole<()>,
+>(
+    start: R,
+    limit: R,
+) -> impl FnMut(&mut Guacamole) -> R {
+    let mut delta_func = range_to(limit - start);
+    move |guac| start + delta_func(guac)
+}
+
+/// Use the Box-Muller transform to generate normal numbers with the prescribed mean and standard
+/// deviation.
+pub fn normal(mean: f64, stdev: f64) -> impl FnMut(&mut Guacamole) -> f64 {
+    move |guac| {
+        // Box-Muller transform:
+        // https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
+        // We return half the numbers we could generate.
+        const TWO_PI: f64 = std::f64::consts::PI * 2.0;
+        let mut u1: f64 = 0.0;
+        while u1 <= 0.0 {
+            u1 = any::<f64>(guac);
+        }
+        let u2 = any::<f64>(guac);
+        let mag = stdev * (-2.0 * u1.ln()).sqrt();
+        mag * (TWO_PI * u2).cos() + mean
+    }
+}
+
+/// Generate numbers according to a poisson distribution with the specified interarrival rate.
+pub fn poisson(interarrival_rate: f64) -> impl FnMut(&mut Guacamole) -> f64 {
+    move |guac| (0.0 - f64::from_guacamole(&mut (), guac).ln()) / interarrival_rate
+}
+
+/// Generate a duration that, if perfectly respected, corresponds to a poisson distribution of
+/// arrivals with the specified interarrival rate.
+pub fn interarrival_duration(interarrival_rate: f64) -> impl FnMut(&mut Guacamole) -> Duration {
+    move |guac| {
+        map(poisson(interarrival_rate), |x| {
+            Duration::from_micros((x * 1_000_000.0) as u64)
+        })(guac)
     }
 }
 
