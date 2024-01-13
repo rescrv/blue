@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use arrrg::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
-use indicio::ProtobufEmitter;
 use zerror::Z;
 
-use lsmtk::{IoToZ, LsmTree, LsmtkOptions, LSM_TREE_LOG};
+use lsmtk::{IoToZ, LsmTree, LsmtkOptions};
 
 fn main() {
     let (options, free) =
@@ -29,9 +28,6 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    LSM_TREE_LOG.register(ProtobufEmitter::new(
-        File::create("lsm_tree_debug.log.pb").as_z().pretty_unwrap(),
-    ));
     let root = PathBuf::from(options.path());
     let tree = Arc::new(LsmTree::open(options).as_z().pretty_unwrap());
     let tree_p = Arc::clone(&tree);
