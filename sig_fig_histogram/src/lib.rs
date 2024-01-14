@@ -193,7 +193,7 @@ impl Histogram {
     /// # Panics
     ///
     /// If the signficant figures are different between the histograms.
-    pub fn merge(one: Self, two: Self) -> Self {
+    pub fn merge(one: &Self, two: &Self) -> Self {
         assert_eq!(one.sig_figs(), two.sig_figs());
         let mut three = Self {
             sfb: one.sfb,
