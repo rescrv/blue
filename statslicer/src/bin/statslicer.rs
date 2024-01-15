@@ -78,7 +78,7 @@ fn cdf_write(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> Res
         if fixed.len() != params.len() {
             return Err(format!("cannot parse {file}: logic error"));
         }
-        let hist = Histogram::load(File::open(&file).expect("should be able to open input file"))
+        let hist = Histogram::load(File::open(file).expect("should be able to open input file"))
             .expect("histogram should load");
         if hist.sig_figs() < cdf.sig_figs {
             return Err(format!(
@@ -300,7 +300,7 @@ fn lines_write(_: &StatSlicerOptions, lines: &LinesOptions, files: Vec<String>) 
         let Some(independent) = params.get(&lines.independent) else {
             return Err(format!("cannot parse {file}: independent parameter missing"));
         };
-        let hist = Histogram::load(File::open(&file).expect("should be able to open input file"))
+        let hist = Histogram::load(File::open(file).expect("should be able to open input file"))
             .expect("histogram should load");
         if hist.sig_figs() < lines.sig_figs {
             return Err(format!(
