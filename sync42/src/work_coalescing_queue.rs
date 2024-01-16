@@ -49,7 +49,9 @@ pub trait WorkCoalescingCore<I: Clone, O: Clone> {
     where
         Self: 'a;
 
-    /// Returns true iff the accumulator `acc` can merge `other`.
+    /// Returns true iff the accumulator `acc` can merge `other`.  This is taken as a hint.  The
+    /// work coalescing queue may override this suggestion e.g. if the core says not even the first
+    /// unit of work may be batched.
     fn can_batch(&self, acc: &Self::InputAccumulator, other: &I) -> bool;
     /// Takes `acc` and `other` and produces an accumulator representing both their work.
     ///
@@ -142,7 +144,7 @@ impl<I: Clone, O: Clone, C: WorkCoalescingCore<I, O>> WorkCoalescingQueue<I, O, 
             'waiters: for mut w in waiter.iter() {
                 match w.load() {
                     WaitState::Input(input) => {
-                        if core.can_batch(&work, &input) {
+                        if taken == 0 || core.can_batch(&work, &input) {
                             work = core.batch(work, input);
                             w.store(WaitState::Stolen);
                             taken += 1;
