@@ -437,8 +437,17 @@ impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
     type InputAccumulator = u64;
     type OutputIterator<'a> = std::iter::Take<std::iter::Repeat<bool>>;
 
+    // NOTE(rescrv):  Trying to simplify this introduced the bug motivating the change documented
+    // in 0c9dfad47c1b9346bbbb192e8ac1d54cad27ae39.
+    #[allow(clippy::needless_bool)]
     fn can_batch(&self, acc: &u64, input: &u64) -> bool {
-        *acc > self.synced || (*acc > 0 && *input <= self.synced)
+        if *acc > 0 && *acc <= self.synced && *input <= self.synced {
+            true
+        } else if *acc > 0 && *acc <= self.synced {
+            false
+        } else {
+            true
+        }
     }
 
     fn batch(&mut self, acc: u64, seen: u64) -> Self::InputAccumulator {
