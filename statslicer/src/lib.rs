@@ -530,10 +530,11 @@ pub fn benchmark_main<P: Parameters, F: FnMut(&P, &mut Bencher)>(
         let mut b = Bencher::new(size, seed, true);
         seed = seed.wrapping_mul(SEED_FACTOR);
         f(params, &mut b);
-        let elapsed: u64 = (b.elapsed.as_nanos() / size as u128)
+        let elapsed: u64 = (b.elapsed.as_nanos())
             .try_into()
             .expect("expect operations to take fewer than 834 days");
-        hist.observe(elapsed as f64)
+        assert!(elapsed < 1 << 55);
+        hist.observe(elapsed as f64 / size as f64)
             .expect("histogram should never fail");
     }
     let output = std::fs::OpenOptions::new()
