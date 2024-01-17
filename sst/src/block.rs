@@ -119,6 +119,11 @@ impl Block {
         Ok(block)
     }
 
+    /// Approximate size of the block, not including the struct itself.
+    pub fn approximate_size(&self) -> usize {
+        self.bytes.len()
+    }
+
     /// Return a reference to the block's bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes

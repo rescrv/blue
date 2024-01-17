@@ -101,6 +101,11 @@ impl Filter {
         Self { blocks }
     }
 
+    /// Approximate size of the filter, not including the struct itself.
+    pub fn approximate_size(&self) -> usize {
+        self.blocks.len() * std::mem::size_of::<Block>()
+    }
+
     /// Insert item into the bloom filter.
     pub fn insert(&mut self, item: &[u8]) {
         self.deferred_insert(Self::defer_insert(item));

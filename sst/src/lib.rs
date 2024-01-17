@@ -760,6 +760,13 @@ impl Sst {
         })
     }
 
+    /// Approximate size of the sst's memory footprint.
+    pub fn approximate_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.index_block.approximate_size()
+            + self.filter.approximate_size()
+    }
+
     /// Get a new cursor for the Sst.
     pub fn cursor(&self) -> SstCursor {
         SST_CURSOR_NEW.click();

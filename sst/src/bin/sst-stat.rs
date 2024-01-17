@@ -16,8 +16,9 @@ fn main() {
     for path in args {
         let sst = Sst::new(cmdline.sst.clone(), &path).expect("sst should open");
         println!(
-            "{} {:?}",
+            "{} size={} metadata={:?}",
             path,
+            sst.approximate_size(),
             sst.metadata().expect("metadata call should succeed")
         );
     }
