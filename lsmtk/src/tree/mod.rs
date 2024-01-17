@@ -1008,7 +1008,7 @@ pub struct CachedSst {
 
 impl LruValue for CachedSst {
     fn approximate_size(&self) -> usize {
-        std::mem::size_of::<Sst>()
+        self.ptr.approximate_size()
     }
 }
 
