@@ -1,11 +1,8 @@
 //! Lazy cursoring, so we can limit the number of files open at once.
 
-use std::path::{Path, PathBuf};
-
 use keyvalint::{Cursor, KeyRef};
 
-use super::file_manager::FileManager;
-use super::{Error, Sst, SstCursor};
+use super::{Error, SstCursor};
 
 ///////////////////////////////////////////// Position /////////////////////////////////////////////
 
@@ -19,27 +16,22 @@ enum Position {
 //////////////////////////////////////////// LazyCursor ////////////////////////////////////////////
 
 /// A LazyCursor instantiates its contents lazily, one file at a time.
-pub struct LazyCursor<FM: AsRef<FileManager>> {
-    file_manager: FM,
-    path: PathBuf,
+pub struct LazyCursor<F: FnMut() -> Result<SstCursor, Error>> {
     position: Position,
+    instantiate: F,
 }
 
-impl<FM: AsRef<FileManager>> LazyCursor<FM> {
+impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
     /// Create a new LazyCursor.
-    pub fn new<P: AsRef<Path>>(file_manager: FM, path: P) -> Self {
+    pub fn new(instantiate: F) -> Self {
         Self {
-            file_manager,
-            path: path.as_ref().to_path_buf(),
             position: Position::First,
+            instantiate,
         }
     }
 
     fn establish_cursor(&mut self) -> Result<&mut SstCursor, Error> {
-        let path = self.path.clone();
-        let handle = self.file_manager.as_ref().open(path)?;
-        let sst = Sst::from_file_handle(handle)?;
-        let cursor = sst.cursor();
+        let cursor = (self.instantiate)()?;
         self.position = Position::Instantiated { cursor };
         if let Position::Instantiated { ref mut cursor } = &mut self.position {
             Ok(cursor)
@@ -49,7 +41,7 @@ impl<FM: AsRef<FileManager>> LazyCursor<FM> {
     }
 }
 
-impl<FM: AsRef<FileManager>> Cursor for LazyCursor<FM> {
+impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
     type Error = Error;
 
     fn seek_to_first(&mut self) -> Result<(), Error> {

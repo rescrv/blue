@@ -344,9 +344,15 @@ impl Version {
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
         let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = vec![];
         for sst in self.levels[0].ssts.iter() {
+            let fm = Arc::clone(fm);
             let sst_path = SST_FILE(&self.options.path, Setsum::from_digest(sst.setsum));
+            let lazy = move || {
+                let handle = fm.as_ref().open(&sst_path)?;
+                let sst = Sst::from_file_handle(handle)?;
+                Ok(sst.cursor())
+            };
             cursors.push(Box::new(PruningCursor::new(
-                LazyCursor::new(Arc::clone(fm), sst_path),
+                LazyCursor::new(lazy),
                 timestamp,
             )?));
         }
@@ -385,9 +391,15 @@ impl Version {
                 let eb = Bound::Included(&sst.last_key);
                 // TODO(rescrv): Use lower_bound and upper_bound functions to speed this up.
                 if compare_bounds_le(start_bound, eb) && compare_bounds_le(sb, end_bound) {
+                    let fm = Arc::clone(fm);
                     let sst_path = SST_FILE(&self.options.path, Setsum::from_digest(sst.setsum));
+                    let lazy = move || {
+                        let handle = fm.as_ref().open(&sst_path)?;
+                        let sst = Sst::from_file_handle(handle)?;
+                        Ok(sst.cursor())
+                    };
                     cursors.push(Box::new(PruningCursor::new(
-                        LazyCursor::new(Arc::clone(fm), sst_path),
+                        LazyCursor::new(lazy),
                         timestamp,
                     )?));
                 }
