@@ -731,6 +731,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn param_float() {
         assert_eq!(Ok(Parameter::Float(3.14)), Parameter::from_str("3.14"));
         assert_eq!(Ok(Parameter::Float(2.72)), Parameter::from_str("2.72"));
