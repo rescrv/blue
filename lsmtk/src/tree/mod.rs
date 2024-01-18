@@ -318,7 +318,6 @@ impl Version {
     ) -> Result<Option<Vec<u8>>, Error> {
         let setsum = Setsum::from_digest(md.setsum);
         let sst = if let Some(sst) = sc.lookup(setsum) {
-            assert_eq!(Setsum::from_digest(sst.ptr.metadata()?.setsum), setsum);
             sst.ptr
         } else {
             let sst_path = SST_FILE(&self.options.path, setsum);
@@ -338,18 +337,29 @@ impl Version {
     fn range_scan<T: AsRef<[u8]>>(
         &self,
         fm: &Arc<FileManager>,
+        sc: &Arc<LeastRecentlyUsedCache<Setsum, CachedSst>>,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
+        fn lazy_cursor(fm: &FileManager, sc: &LeastRecentlyUsedCache<Setsum, CachedSst>, root: &str, setsum: Setsum) -> Result<SstCursor, sst::Error> {
+            if let Some(sst) = sc.lookup(setsum) {
+                Ok(sst.ptr.cursor())
+            } else {
+                let sst_path = SST_FILE(&root, setsum);
+                let handle = fm.open(sst_path)?;
+                let sst = Sst::from_file_handle(handle)?;
+                Ok(sst.cursor())
+            }
+        }
         let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = vec![];
         for sst in self.levels[0].ssts.iter() {
             let fm = Arc::clone(fm);
-            let sst_path = SST_FILE(&self.options.path, Setsum::from_digest(sst.setsum));
+            let sc = Arc::clone(sc);
+            let root = self.options.path.clone();
+            let setsum = Setsum::from_digest(sst.setsum);
             let lazy = move || {
-                let handle = fm.as_ref().open(&sst_path)?;
-                let sst = Sst::from_file_handle(handle)?;
-                Ok(sst.cursor())
+                lazy_cursor(&fm, &sc, &root, setsum)
             };
             cursors.push(Box::new(PruningCursor::new(
                 LazyCursor::new(lazy),
@@ -392,11 +402,11 @@ impl Version {
                 // TODO(rescrv): Use lower_bound and upper_bound functions to speed this up.
                 if compare_bounds_le(start_bound, eb) && compare_bounds_le(sb, end_bound) {
                     let fm = Arc::clone(fm);
-                    let sst_path = SST_FILE(&self.options.path, Setsum::from_digest(sst.setsum));
+                    let sc = Arc::clone(sc);
+                    let root = self.options.path.clone();
+                    let setsum = Setsum::from_digest(sst.setsum);
                     let lazy = move || {
-                        let handle = fm.as_ref().open(&sst_path)?;
-                        let sst = Sst::from_file_handle(handle)?;
-                        Ok(sst.cursor())
+                        lazy_cursor(&fm, &sc, &root, setsum)
                     };
                     cursors.push(Box::new(PruningCursor::new(
                         LazyCursor::new(lazy),
@@ -1054,7 +1064,7 @@ impl<'a> VersionRef<'a> {
         timestamp: u64,
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
         self.version
-            .range_scan(&self.tree.file_manager, start_bound, end_bound, timestamp)
+            .range_scan(&self.tree.file_manager, &self.tree.sst_cache, start_bound, end_bound, timestamp)
     }
 }
 
@@ -1076,7 +1086,7 @@ pub struct LsmTree {
     stall: Condvar,
     compact: Condvar,
     references: ReferenceCounter<Setsum>,
-    sst_cache: LeastRecentlyUsedCache<Setsum, CachedSst>,
+    sst_cache: Arc<LeastRecentlyUsedCache<Setsum, CachedSst>>,
 }
 
 impl LsmTree {
@@ -1121,7 +1131,7 @@ impl LsmTree {
         let stall = Condvar::new();
         let compact = Condvar::new();
         let references = ReferenceCounter::default();
-        let sst_cache = LeastRecentlyUsedCache::new(options.sst_cache_bytes);
+        let sst_cache = Arc::new(LeastRecentlyUsedCache::new(options.sst_cache_bytes));
         Self::explicit_ref(&references, &version.lock().unwrap());
         OPEN_DB.click();
         let mut db = Self {
