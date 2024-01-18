@@ -327,10 +327,12 @@ impl UntypedParameters {
 
     /// Cast all integer parameters to float, leaving the rest as-is.
     pub fn cast_float(&self) -> Self {
-        let values = self.values.iter().map(|p| (p.0.clone(), p.1.cast_float())).collect();
-        Self {
-            values,
-        }
+        let values = self
+            .values
+            .iter()
+            .map(|p| (p.0.clone(), p.1.cast_float()))
+            .collect();
+        Self { values }
     }
 }
 

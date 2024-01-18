@@ -150,10 +150,7 @@ impl State {
         if let Some(key) = keys.choose(guac) {
             let start = Instant::now();
             let mut cursor = kvs
-                .range_scan(
-                    &Bound::Included(key.as_bytes()),
-                    &Bound::Unbounded,
-                )
+                .range_scan(&Bound::Included(key.as_bytes()), &Bound::Unbounded)
                 .expect("key value store should not fail");
             for _ in 0..self.options.scan_keys {
                 cursor.next().unwrap();

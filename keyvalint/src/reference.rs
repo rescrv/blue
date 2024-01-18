@@ -179,11 +179,7 @@ impl KeyValueLoadTrait for KeyValueLoad {
     type Error = String;
     type RangeScan<'a> = Cursor;
 
-    fn load(
-        &self,
-        key: &[u8],
-        is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         let timestamp = u64::MAX;
         let target = KeyRef { key, timestamp };
         Ok(match self.entries.binary_search(&target.into()) {

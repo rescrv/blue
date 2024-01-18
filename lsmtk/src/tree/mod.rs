@@ -343,7 +343,12 @@ impl Version {
         end_bound: &Bound<T>,
         timestamp: u64,
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
-        fn lazy_cursor(fm: &FileManager, sc: &LeastRecentlyUsedCache<Setsum, CachedSst>, root: &str, setsum: Setsum) -> Result<SstCursor, sst::Error> {
+        fn lazy_cursor(
+            fm: &FileManager,
+            sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
+            root: &str,
+            setsum: Setsum,
+        ) -> Result<SstCursor, sst::Error> {
             if let Some(sst) = sc.lookup(setsum) {
                 Ok(sst.ptr.cursor())
             } else {
@@ -359,9 +364,7 @@ impl Version {
             let sc = Arc::clone(sc);
             let root = self.options.path.clone();
             let setsum = Setsum::from_digest(sst.setsum);
-            let lazy = move || {
-                lazy_cursor(&fm, &sc, &root, setsum)
-            };
+            let lazy = move || lazy_cursor(&fm, &sc, &root, setsum);
             cursors.push(Box::new(PruningCursor::new(
                 LazyCursor::new(lazy),
                 timestamp,
@@ -402,13 +405,8 @@ impl Version {
                     let sc = Arc::clone(sc);
                     let root = self.options.path.clone();
                     let setsum = Setsum::from_digest(sst.setsum);
-                    let lazy = move || {
-                        lazy_cursor(&fm, &sc, &root, setsum)
-                    };
-                    this_level_cursors.push(PruningCursor::new(
-                        LazyCursor::new(lazy),
-                        timestamp,
-                    )?);
+                    let lazy = move || lazy_cursor(&fm, &sc, &root, setsum);
+                    this_level_cursors.push(PruningCursor::new(LazyCursor::new(lazy), timestamp)?);
                 }
             }
             if !this_level_cursors.is_empty() {
@@ -1063,8 +1061,13 @@ impl<'a> VersionRef<'a> {
         end_bound: &Bound<T>,
         timestamp: u64,
     ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
-        self.version
-            .range_scan(&self.tree.file_manager, &self.tree.sst_cache, start_bound, end_bound, timestamp)
+        self.version.range_scan(
+            &self.tree.file_manager,
+            &self.tree.sst_cache,
+            start_bound,
+            end_bound,
+            timestamp,
+        )
     }
 }
 

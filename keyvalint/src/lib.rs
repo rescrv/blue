@@ -527,11 +527,7 @@ pub trait KeyValueLoad {
     }
 
     /// Load the newest key.  Specifies `is_tombstone` when the None value returned is a tombstone.
-    fn load(
-        &self,
-        key: &[u8],
-        is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error>;
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error>;
 
     /// Perform a range scan between the specified bounds.
     fn range_scan<T: AsRef<[u8]>>(
@@ -547,11 +543,7 @@ impl<K: KeyValueLoad> KeyValueLoad for Arc<K> {
     where
         Self: 'a;
 
-    fn load(
-        &self,
-        key: &[u8],
-        is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         K::load(self, key, is_tombstone)
     }
 

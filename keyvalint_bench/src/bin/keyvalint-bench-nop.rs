@@ -45,10 +45,7 @@ impl WriteBatchTrait for WriteBatch {
 
     fn del(&mut self, key: &[u8]) {
         if self.print {
-            println!(
-                "WriteBatch::del(\"{}\" => TOMBSTONE)",
-                escape_str(key)
-            );
+            println!("WriteBatch::del(\"{}\" => TOMBSTONE)", escape_str(key));
         }
     }
 }
@@ -144,11 +141,7 @@ impl keyvalint::KeyValueLoad for NopKvs {
         Ok(None)
     }
 
-    fn load(
-        &self,
-        key: &[u8],
-        is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         *is_tombstone = false;
         if self.options.print {
             println!("Cursor::load(\"{}\")", escape_str(key));

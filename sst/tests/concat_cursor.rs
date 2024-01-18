@@ -1,7 +1,7 @@
 extern crate sst;
 
-use sst::reference::{ReferenceBuilder, ReferenceCursor, ReferenceTable};
 use sst::concat_cursor::ConcatenatingCursor;
+use sst::reference::{ReferenceBuilder, ReferenceCursor, ReferenceTable};
 
 mod alphabet;
 

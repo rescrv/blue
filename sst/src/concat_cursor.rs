@@ -15,10 +15,7 @@ impl<C: Cursor> ConcatenatingCursor<C> {
         assert!(!cursors.is_empty());
         let position = 0;
         cursors[0].seek_to_first()?;
-        Ok(Self {
-            cursors,
-            position,
-        })
+        Ok(Self { cursors, position })
     }
 
     fn reposition(&mut self, idx: usize) -> Result<(), C::Error> {
@@ -97,7 +94,9 @@ impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
     fn next(&mut self) -> Result<(), C::Error> {
         loop {
             self.cursors[self.position].next()?;
-            if self.cursors[self.position].value().is_none() && self.position + 1 < self.cursors.len() {
+            if self.cursors[self.position].value().is_none()
+                && self.position + 1 < self.cursors.len()
+            {
                 self.reposition(self.position + 1)?;
                 self.cursors[self.position].seek_to_first()?;
             } else {

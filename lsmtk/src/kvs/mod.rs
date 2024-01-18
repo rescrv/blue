@@ -406,11 +406,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         sst::Error,
     >;
 
-    fn load(
-        &self,
-        key: &[u8],
-        is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);

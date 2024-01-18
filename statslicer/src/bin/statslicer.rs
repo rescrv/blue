@@ -9,7 +9,9 @@ use std::str::FromStr;
 use arrrg::CommandLine;
 use sig_fig_histogram::Histogram;
 
-use statslicer::{compute_difference, experiment_and_parameters, summarize, UnboundParameters, UntypedParameters};
+use statslicer::{
+    compute_difference, experiment_and_parameters, summarize, UnboundParameters, UntypedParameters,
+};
 
 #[derive(Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct StatSlicerOptions {}
@@ -56,7 +58,11 @@ impl Default for CdfOptions {
     }
 }
 
-fn cdf_write(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> Result<Vec<String>, String> {
+fn cdf_write(
+    _: &StatSlicerOptions,
+    cdf: &CdfOptions,
+    files: Vec<String>,
+) -> Result<Vec<String>, String> {
     let mut unbound_params = UnboundParameters::from_str(&cdf.fix)?;
     unbound_params.push(cdf.dependent.clone());
     let mut exp = None;
@@ -93,7 +99,9 @@ fn cdf_write(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> Res
         } else {
             hist
         };
-        let entry = agg.entry(fixed.to_string()).or_insert(Histogram::new(cdf.sig_figs));
+        let entry = agg
+            .entry(fixed.to_string())
+            .or_insert(Histogram::new(cdf.sig_figs));
         *entry = Histogram::merge(entry, &hist);
     }
     if exp.is_none() {
@@ -133,11 +141,7 @@ fn cdf_write(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> Res
     Ok(outputs)
 }
 
-fn cdf_gnuplot(
-    _: &StatSlicerOptions,
-    cdf: &CdfOptions,
-    files: Vec<String>,
-) -> Result<(), String> {
+fn cdf_gnuplot(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> Result<(), String> {
     let unbound_params = UnboundParameters::from_str(&cdf.fix)?;
     let mut exp = None;
     let mut agg = HashMap::new();
@@ -276,7 +280,11 @@ impl Default for LinesOptions {
     }
 }
 
-fn lines_write(_: &StatSlicerOptions, lines: &LinesOptions, files: Vec<String>) -> Result<Vec<String>, String> {
+fn lines_write(
+    _: &StatSlicerOptions,
+    lines: &LinesOptions,
+    files: Vec<String>,
+) -> Result<Vec<String>, String> {
     let mut unbound_params = UnboundParameters::from_str(&lines.fix)?;
     for param in UnboundParameters::from_str(&lines.series)?.iter() {
         unbound_params.push(param.to_string())
@@ -298,7 +306,9 @@ fn lines_write(_: &StatSlicerOptions, lines: &LinesOptions, files: Vec<String>) 
         }
         let fixed = unbound_params.project(&params)?;
         let Some(independent) = params.get(&lines.independent) else {
-            return Err(format!("cannot parse {file}: independent parameter missing"));
+            return Err(format!(
+                "cannot parse {file}: independent parameter missing"
+            ));
         };
         let hist = Histogram::load(File::open(file).expect("should be able to open input file"))
             .expect("histogram should load");
@@ -346,7 +356,11 @@ fn lines_write(_: &StatSlicerOptions, lines: &LinesOptions, files: Vec<String>) 
     Ok(outputs)
 }
 
-fn lines_gnuplot(_: &StatSlicerOptions, cdf: &LinesOptions, files: Vec<String>) -> Result<(), String> {
+fn lines_gnuplot(
+    _: &StatSlicerOptions,
+    cdf: &LinesOptions,
+    files: Vec<String>,
+) -> Result<(), String> {
     let unbound_params = UnboundParameters::from_str(&cdf.fix)?;
     let series_params = UnboundParameters::from_str(&cdf.series)?;
     let mut exp = None;
@@ -367,7 +381,9 @@ fn lines_gnuplot(_: &StatSlicerOptions, cdf: &LinesOptions, files: Vec<String>) 
         let fixed = unbound_params.project(&params)?;
         let series = series_params.project(&params)?;
         if fixed.len() + series.len() != params.len() {
-            return Err(format!("cannot parse {file}: parameters do not match fix/series"));
+            return Err(format!(
+                "cannot parse {file}: parameters do not match fix/series"
+            ));
         }
         let entry = agg.entry(fixed.to_string()).or_insert(vec![]);
         entry.push((series, file));
@@ -447,7 +463,11 @@ set output "exp/lines/{exp}:{fixed_str}.svg""#
     Ok(())
 }
 
-fn lines_main(options: StatSlicerOptions, lines: LinesOptions, files: Vec<String>) -> Result<(), String> {
+fn lines_main(
+    options: StatSlicerOptions,
+    lines: LinesOptions,
+    files: Vec<String>,
+) -> Result<(), String> {
     let liness = lines_write(&options, &lines, files)?;
     lines_gnuplot(&options, &lines, liness)?;
     Ok(())
