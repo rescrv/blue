@@ -12,6 +12,7 @@ use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValueLoad};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
+use sst::concat_cursor::ConcatenatingCursor;
 use sst::file_manager::FileManager;
 use sst::lazy_cursor::LazyCursor;
 use sst::merging_cursor::MergingCursor;
@@ -391,11 +392,7 @@ impl Version {
             }
         }
         for level in self.levels[1..].iter() {
-            // TODO(rescrv): Make it so that these cursors will not be on the heap.
-            // It's not as bad as it seems.  We have a linear number of cursors on the heap, but
-            // we'll seek to the end of one before pulling the next one up.
-            //
-            // Sequence cursor needs some clarity first.
+            let mut this_level_cursors = vec![];
             for sst in level.ssts.iter() {
                 let sb = Bound::Included(&sst.first_key);
                 let eb = Bound::Included(&sst.last_key);
@@ -408,11 +405,14 @@ impl Version {
                     let lazy = move || {
                         lazy_cursor(&fm, &sc, &root, setsum)
                     };
-                    cursors.push(Box::new(PruningCursor::new(
+                    this_level_cursors.push(PruningCursor::new(
                         LazyCursor::new(lazy),
                         timestamp,
-                    )?));
+                    )?);
                 }
+            }
+            if !this_level_cursors.is_empty() {
+                cursors.push(Box::new(ConcatenatingCursor::new(this_level_cursors)?));
             }
         }
         Ok(MergingCursor::new(cursors)?)
