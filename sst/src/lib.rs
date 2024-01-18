@@ -25,6 +25,7 @@ use zerror_derive::ZerrorCore;
 
 pub mod block;
 pub mod bounds_cursor;
+pub mod concat_cursor;
 pub mod file_manager;
 pub mod gc;
 pub mod ingest;
