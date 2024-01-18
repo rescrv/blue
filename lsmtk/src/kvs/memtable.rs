@@ -1,7 +1,7 @@
 use std::ops::Bound;
 use std::sync::atomic::{self, AtomicUsize};
 
-use keyvalint::{compare_bytes, Cursor, Key, KeyRef, WriteBatch as WriteBatchTrait};
+use keyvalint::{compare_bytes, Cursor, Key, KeyRef};
 use skipfree::{SkipList, SkipListIterator};
 use sst::bounds_cursor::BoundsCursor;
 use sst::pruning_cursor::PruningCursor;
@@ -26,29 +26,8 @@ impl MemTable {
         let iter = self.skiplist.iter();
         SkipListIteratorWrapper { iter }
     }
-}
 
-impl keyvalint::KeyValueStore for MemTable {
-    type Error = Error;
-    type WriteBatch<'a> = &'a mut WriteBatch;
-
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error> {
-        let mut wb = WriteBatch::default();
-        wb.put(key, timestamp, value);
-        self.approximate_size
-            .fetch_add(key.len() + value.len() + 16, atomic::Ordering::Relaxed);
-        self.write(&mut wb)
-    }
-
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error> {
-        let mut wb = WriteBatch::default();
-        wb.del(key, timestamp);
-        self.approximate_size
-            .fetch_add(key.len() + 16, atomic::Ordering::Relaxed);
-        self.write(&mut wb)
-    }
-
-    fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Error> {
+    pub fn write(&self, write_batch: &mut WriteBatch) -> Result<(), Error> {
         for entry in write_batch.entries.iter() {
             self.approximate_size.fetch_add(
                 entry.key.len() + entry.value.as_ref().map(|x| x.len()).unwrap_or_default() + 16,
@@ -60,18 +39,13 @@ impl keyvalint::KeyValueStore for MemTable {
         }
         Ok(())
     }
-}
 
-impl keyvalint::KeyValueLoad for MemTable {
-    type Error = Error;
-    type RangeScan<'a> = MemTableCursor;
-
-    fn load(
+    pub fn load(
         &self,
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         let mut cursor = self.skiplist.iter();
         // TODO(rescrv): Make it so I can use a KeyRef on the iterator.
         cursor.seek(&Key {
@@ -86,12 +60,12 @@ impl keyvalint::KeyValueLoad for MemTable {
         }
     }
 
-    fn range_scan<T: AsRef<[u8]>>(
+    pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+    ) -> Result<MemTableCursor, Error> {
         let iter = self.skiplist.iter();
         let wrapper = SkipListIteratorWrapper { iter };
         let cursor = PruningCursor::new(wrapper, timestamp)?;

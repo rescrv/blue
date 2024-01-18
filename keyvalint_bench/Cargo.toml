@@ -31,11 +31,6 @@ utilz = { path = "../utilz", version = "0.3" }
 zerror = { path = "../zerror", version = "0.3" }
 
 [[bin]]
-name = "keyvalint-bench-concurrent-log"
-path = "src/bin/keyvalint-bench-concurrent-log.rs"
-required-features=["binaries"]
-
-[[bin]]
 name = "keyvalint-bench-lsmtk"
 path = "src/bin/keyvalint-bench-lsmtk.rs"
 required-features=["binaries"]

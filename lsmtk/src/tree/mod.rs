@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::{Collector, Counter};
 use indicio::clue;
-use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValueLoad};
+use keyvalint::{compare_bytes, Cursor, KeyRef};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -347,7 +347,7 @@ impl Version {
             if let Some(sst) = sc.lookup(setsum) {
                 Ok(sst.ptr.cursor())
             } else {
-                let sst_path = SST_FILE(&root, setsum);
+                let sst_path = SST_FILE(root, setsum);
                 let handle = fm.open(sst_path)?;
                 let sst = Sst::from_file_handle(handle)?;
                 Ok(sst.cursor())

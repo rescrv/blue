@@ -1,4 +1,3 @@
-use std::cmp::max;
 use std::fs::{hard_link, read_dir, remove_file, rename, File};
 use std::ops::Bound;
 use std::path::PathBuf;
@@ -36,10 +35,8 @@ impl WriteBatch {
         let entries = Vec::with_capacity(cap);
         Self { entries }
     }
-}
 
-impl keyvalint::WriteBatch for WriteBatch {
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
+    fn _put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
         self.entries.push(KeyValuePair {
             key: key.into(),
             timestamp,
@@ -47,7 +44,7 @@ impl keyvalint::WriteBatch for WriteBatch {
         });
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) {
+    fn _del(&mut self, key: &[u8], timestamp: u64) {
         self.entries.push(KeyValuePair {
             key: key.into(),
             timestamp,
@@ -56,19 +53,37 @@ impl keyvalint::WriteBatch for WriteBatch {
     }
 }
 
-impl<'a> keyvalint::WriteBatch for &'a mut WriteBatch {
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
+impl keyvalint::WriteBatch for WriteBatch {
+    fn put(&mut self, key: &[u8], value: &[u8]) {
         self.entries.push(KeyValuePair {
             key: key.into(),
-            timestamp,
+            timestamp: 0,
             value: Some(value.into()),
         });
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) {
+    fn del(&mut self, key: &[u8]) {
         self.entries.push(KeyValuePair {
             key: key.into(),
-            timestamp,
+            timestamp: 0,
+            value: None,
+        });
+    }
+}
+
+impl<'a> keyvalint::WriteBatch for &'a mut WriteBatch {
+    fn put(&mut self, key: &[u8], value: &[u8]) {
+        self.entries.push(KeyValuePair {
+            key: key.into(),
+            timestamp: 0,
+            value: Some(value.into()),
+        });
+    }
+
+    fn del(&mut self, key: &[u8]) {
+        self.entries.push(KeyValuePair {
+            key: key.into(),
+            timestamp: 0,
             value: None,
         });
     }
@@ -319,11 +334,12 @@ impl keyvalint::KeyValueStore for KeyValueStore {
     type Error = Error;
     type WriteBatch<'a> = WriteBatch;
 
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         check_value_len(value)?;
         let key = key.to_vec();
+        let timestamp = 0;
         let value = Some(value.to_vec());
         wb.entries.push(KeyValuePair {
             key,
@@ -333,10 +349,11 @@ impl keyvalint::KeyValueStore for KeyValueStore {
         self.write(wb)
     }
 
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&self, key: &[u8]) -> Result<(), Error> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         let key = key.to_vec();
+        let timestamp = 0;
         let value = None;
         wb.entries.push(KeyValuePair {
             key,
@@ -347,18 +364,10 @@ impl keyvalint::KeyValueStore for KeyValueStore {
     }
 
     fn write(&self, mut batch: Self::WriteBatch<'_>) -> Result<(), Error> {
-        let max_timestamp = batch
-            .entries
-            .iter()
-            .map(|x| x.timestamp)
-            .max()
-            .unwrap_or(u64::MAX);
         let (mut wait_guard, memtable, log) = {
             let mut state = self.state.lock().unwrap();
             let wait_guard = self.wait_list.link(());
-            // TODO(rescrv):  Add a guardrail to prevent max_timestamp from being too far ahead of
-            // wall-clock micros.  This is necessary for safety.
-            let seq_no = max(state.seq_no + 1, max_timestamp);
+            let seq_no = state.seq_no + 1;
             state.seq_no = seq_no;
             for entry in batch.entries.iter_mut() {
                 entry.timestamp = seq_no;
@@ -400,15 +409,14 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
     fn load(
         &self,
         key: &[u8],
-        timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error> {
-        let (mem, imm, version) = {
+        let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
             let imm = state.imm.as_ref().map(Arc::clone);
             let version = self.tree.take_snapshot();
-            (mem, imm, version)
+            (mem, imm, version, state.seq_no)
         };
         *is_tombstone = false;
         let ret = mem.load(key, timestamp, is_tombstone)?;
@@ -429,14 +437,13 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
-        let (mem, imm, version) = {
+        let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
             let imm = state.imm.as_ref().map(Arc::clone);
             let version = self.tree.take_snapshot();
-            (mem, imm, version)
+            (mem, imm, version, state.seq_no)
         };
         let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = Vec::with_capacity(3);
         let mut mem_scan = mem.range_scan(start_bound, end_bound, timestamp)?;

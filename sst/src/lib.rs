@@ -934,18 +934,13 @@ impl Sst {
             }
         }
     }
-}
 
-impl keyvalint::KeyValueLoad for Sst {
-    type Error = Error;
-    type RangeScan<'a> = BoundsCursor<PruningCursor<SstCursor, Error>, Error>;
-
-    fn load(
+    pub fn load(
         &self,
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         *is_tombstone = false;
         if !self.filter.check(key) {
             SST_BLOOM_NEGATIVE.click();
@@ -975,12 +970,12 @@ impl keyvalint::KeyValueLoad for Sst {
         }
     }
 
-    fn range_scan<T: AsRef<[u8]>>(
+    pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+    ) -> Result<BoundsCursor<PruningCursor<SstCursor, Error>, Error>, Error> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }

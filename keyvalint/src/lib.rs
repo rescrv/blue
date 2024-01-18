@@ -359,9 +359,9 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
 /// A write batch aggregates writes to be written together.
 pub trait WriteBatch {
     /// Append the key-value pair to the write batch.
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]);
+    fn put(&mut self, key: &[u8], value: &[u8]);
     /// Append a tombstone to the write batch.
-    fn del(&mut self, key: &[u8], timestamp: u64);
+    fn del(&mut self, key: &[u8]);
 }
 
 /////////////////////////////////////////// KeyValueStore //////////////////////////////////////////
@@ -374,9 +374,9 @@ pub trait KeyValueStore {
     type WriteBatch<'a>: WriteBatch;
 
     /// Put the specified key as a single, isolated write.
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error>;
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Self::Error>;
     /// Delete the specified key as a single, isolated write by writing a tombstone.
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error>;
+    fn del(&self, key: &[u8]) -> Result<(), Self::Error>;
     /// Write the batch to the key-value store.  Whether this is atomic depends upon the key-value
     /// store itself.
     fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Self::Error>;
@@ -386,12 +386,12 @@ impl<K: KeyValueStore> KeyValueStore for Arc<K> {
     type Error = K::Error;
     type WriteBatch<'a> = K::WriteBatch<'a>;
 
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error> {
-        K::put(self, key, timestamp, value)
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Self::Error> {
+        K::put(self, key, value)
     }
 
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error> {
-        K::del(self, key, timestamp)
+    fn del(&self, key: &[u8]) -> Result<(), Self::Error> {
+        K::del(self, key)
     }
 
     fn write(&self, write_batch: Self::WriteBatch<'_>) -> Result<(), Self::Error> {
@@ -519,31 +519,25 @@ pub trait KeyValueLoad {
     where
         Self: 'a;
 
-    /// Get the value associated with the key as of the specified timestamp.  By default this will
-    /// call load and discard the `is_tombstone` parameter.  This should be sufficient for every
-    /// implementation.
-    fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<Vec<u8>>, Self::Error> {
+    /// Get the value associated with the key.  By default this will call load and discard the
+    /// `is_tombstone` parameter.  This should be sufficient for every implementation.
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         let mut is_tombstone = false;
-        self.load(key, timestamp, &mut is_tombstone)
+        self.load(key, &mut is_tombstone)
     }
 
-    /// Load the newest key no newer than the latest timestamp.  Specifies `is_tombstone` when the
-    /// None value returned is a tombstone.
+    /// Load the newest key.  Specifies `is_tombstone` when the None value returned is a tombstone.
     fn load(
         &self,
         key: &[u8],
-        timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error>;
 
-    /// Perform a range scan between the specified bounds.  The timestamp parameter is
-    /// implementation-specific, but should be used to provide a snapshot as of the time specified
-    /// in implementations that support doing so.
+    /// Perform a range scan between the specified bounds.
     fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error>;
 }
 
@@ -556,19 +550,17 @@ impl<K: KeyValueLoad> KeyValueLoad for Arc<K> {
     fn load(
         &self,
         key: &[u8],
-        timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error> {
-        K::load(self, key, timestamp, is_tombstone)
+        K::load(self, key, is_tombstone)
     }
 
     fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
-        K::range_scan(self, start_bound, end_bound, timestamp)
+        K::range_scan(self, start_bound, end_bound)
     }
 }
 

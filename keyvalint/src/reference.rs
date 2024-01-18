@@ -15,7 +15,8 @@ pub struct WriteBatch {
 }
 
 impl WriteBatchTrait for WriteBatch {
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
+    fn put(&mut self, key: &[u8], value: &[u8]) {
+        let timestamp = 1;
         let value = Some(value);
         self.entries.push(KeyValuePair::from(KeyValueRef {
             key,
@@ -24,7 +25,8 @@ impl WriteBatchTrait for WriteBatch {
         }));
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) {
+    fn del(&mut self, key: &[u8]) {
+        let timestamp = 1;
         self.entries
             .push(KeyValuePair::from(KeyRef { key, timestamp }));
     }
@@ -145,15 +147,15 @@ impl KeyValueStoreTrait for KeyValueStore {
     type Error = String;
     type WriteBatch<'a> = WriteBatch;
 
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error> {
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::default();
-        wb.put(key, timestamp, value);
+        wb.put(key, value);
         self.write(wb)
     }
 
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error> {
+    fn del(&self, key: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::default();
-        wb.del(key, timestamp);
+        wb.del(key);
         self.write(wb)
     }
 
@@ -180,9 +182,9 @@ impl KeyValueLoadTrait for KeyValueLoad {
     fn load(
         &self,
         key: &[u8],
-        timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error> {
+        let timestamp = u64::MAX;
         let target = KeyRef { key, timestamp };
         Ok(match self.entries.binary_search(&target.into()) {
             Ok(index) => {
@@ -206,7 +208,6 @@ impl KeyValueLoadTrait for KeyValueLoad {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
         fn key_bound_to_key_ref_bound<U: AsRef<[u8]>>(
             bound: &Bound<U>,
@@ -224,8 +225,8 @@ impl KeyValueLoadTrait for KeyValueLoad {
                 Bound::Unbounded => Bound::Unbounded,
             }
         }
-        let start_bound = key_bound_to_key_ref_bound(start_bound, timestamp);
-        let end_bound = key_bound_to_key_ref_bound(end_bound, timestamp);
+        let start_bound = key_bound_to_key_ref_bound(start_bound, u64::MAX);
+        let end_bound = key_bound_to_key_ref_bound(end_bound, u64::MIN);
         let entries = self
             .entries
             .iter()

@@ -33,23 +33,21 @@ impl WriteBatch {
 }
 
 impl WriteBatchTrait for WriteBatch {
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
+    fn put(&mut self, key: &[u8], value: &[u8]) {
         if self.print {
             println!(
-                "WriteBatch::put(\"{}\" @ {} => \"{}\")",
+                "WriteBatch::put(\"{}\" => \"{}\")",
                 escape_str(key),
-                timestamp,
                 escape_str(value)
             );
         }
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) {
+    fn del(&mut self, key: &[u8]) {
         if self.print {
             println!(
-                "WriteBatch::del(\"{}\" @ {} => TOMBSTONE)",
-                escape_str(key),
-                timestamp
+                "WriteBatch::del(\"{}\" => TOMBSTONE)",
+                escape_str(key)
             );
         }
     }
@@ -118,15 +116,15 @@ impl keyvalint::KeyValueStore for NopKvs {
     type Error = &'static str;
     type WriteBatch<'a> = WriteBatch;
 
-    fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Self::Error> {
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::new(self.options.print);
-        wb.put(key, timestamp, value);
+        wb.put(key, value);
         self.write(wb)
     }
 
-    fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Self::Error> {
+    fn del(&self, key: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::new(self.options.print);
-        wb.del(key, timestamp);
+        wb.del(key);
         self.write(wb)
     }
 
@@ -139,9 +137,9 @@ impl keyvalint::KeyValueLoad for NopKvs {
     type Error = &'static str;
     type RangeScan<'a> = Cursor;
 
-    fn get(&self, key: &[u8], timestamp: u64) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         if self.options.print {
-            println!("Cursor::get(\"{}\", {})", escape_str(key), timestamp);
+            println!("Cursor::get(\"{}\")", escape_str(key));
         }
         Ok(None)
     }
@@ -149,12 +147,11 @@ impl keyvalint::KeyValueLoad for NopKvs {
     fn load(
         &self,
         key: &[u8],
-        timestamp: u64,
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, Self::Error> {
         *is_tombstone = false;
         if self.options.print {
-            println!("Cursor::load(\"{}\", {})", escape_str(key), timestamp);
+            println!("Cursor::load(\"{}\")", escape_str(key));
         }
         Ok(None)
     }
@@ -163,7 +160,6 @@ impl keyvalint::KeyValueLoad for NopKvs {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        timestamp: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
         if self.options.print {
             fn bound_to_string<U: AsRef<[u8]>>(bound: &Bound<U>) -> String {
@@ -174,10 +170,9 @@ impl keyvalint::KeyValueLoad for NopKvs {
                 }
             }
             println!(
-                "Cursor::range_scan(({}, {}), {})",
+                "Cursor::range_scan(({}, {}))",
                 bound_to_string(start_bound),
                 bound_to_string(end_bound),
-                timestamp
             );
         }
         Ok(Cursor {

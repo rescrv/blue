@@ -5,11 +5,11 @@ use rocksdb::{DBIterator, Direction, IteratorMode, WriteBatch, WriteOptions, DB}
 use crate::KeyRef;
 
 impl super::WriteBatch for WriteBatch {
-    fn put(&mut self, key: &[u8], _: u64, value: &[u8]) {
+    fn put(&mut self, key: &[u8], value: &[u8]) {
         self.put(key, value);
     }
 
-    fn del(&mut self, key: &[u8], _: u64) {
+    fn del(&mut self, key: &[u8]) {
         self.delete(key);
     }
 }
@@ -68,13 +68,13 @@ impl super::KeyValueStore for KeyValueStore {
     type Error = String;
     type WriteBatch<'a> = WriteBatch;
 
-    fn put(&self, key: &[u8], _: u64, value: &[u8]) -> Result<(), Self::Error> {
+    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::default();
         wb.put(key, value);
         self.write(wb)
     }
 
-    fn del(&self, key: &[u8], _: u64) -> Result<(), Self::Error> {
+    fn del(&self, key: &[u8]) -> Result<(), Self::Error> {
         let mut wb = Self::WriteBatch::default();
         wb.delete(key);
         self.write(wb)
@@ -96,13 +96,13 @@ impl super::KeyValueLoad for KeyValueStore {
         where
             Self: 'a;
 
-    fn get<'a>(&self, key: &[u8], _: u64) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn get<'a>(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         self.db
             .get(key)
             .map_err(|err| format!("rocksdb get error: {}", err))
     }
 
-    fn load(&self, _: &[u8], _: u64, _: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
+    fn load(&self, _: &[u8], _: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         Err("rocksdb KeyValueLoad interface doesn't support load".to_string())
     }
 
@@ -110,7 +110,6 @@ impl super::KeyValueLoad for KeyValueStore {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-        _: u64,
     ) -> Result<Self::RangeScan<'_>, Self::Error> {
         if let (Bound::Included(start_bound), Bound::Unbounded) = (start_bound, end_bound) {
             Ok(self

@@ -124,13 +124,9 @@ impl State {
     ) -> bool {
         let key = keys.choose(guac);
         let value = values.choose(guac);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .expect("time should always be now")
-            .as_micros() as u64;
         if let (Some(key), Some(value)) = (key, value) {
             let start = Instant::now();
-            kvs.put(key.as_bytes(), timestamp, value.as_bytes())
+            kvs.put(key.as_bytes(), value.as_bytes())
                 .expect("key value store should not fail");
             WRITE.click();
             WRITE_LATENCY.add(start.elapsed().as_micros() as f64);
@@ -142,12 +138,8 @@ impl State {
 
     fn read<KVS: KeyValueStore>(&self, kvs: &KVS, guac: &mut Guacamole, keys: &mut Armnod) {
         if let Some(key) = keys.choose(guac) {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .expect("time should always be now")
-                .as_micros() as u64;
             let start = Instant::now();
-            kvs.get(key.as_bytes(), timestamp)
+            kvs.get(key.as_bytes())
                 .expect("key value store should not fail");
             READ.click();
             READ_LATENCY.add(start.elapsed().as_micros() as f64);
@@ -156,16 +148,11 @@ impl State {
 
     fn scan<KVS: KeyValueStore>(&self, kvs: &KVS, guac: &mut Guacamole, keys: &mut Armnod) {
         if let Some(key) = keys.choose(guac) {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .expect("time should always be now")
-                .as_micros() as u64;
             let start = Instant::now();
             let mut cursor = kvs
                 .range_scan(
                     &Bound::Included(key.as_bytes()),
                     &Bound::Unbounded,
-                    timestamp,
                 )
                 .expect("key value store should not fail");
             for _ in 0..self.options.scan_keys {

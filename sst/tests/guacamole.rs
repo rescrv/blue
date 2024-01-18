@@ -1,11 +1,11 @@
 extern crate sst;
 
 use guacamole::{FromGuacamole, Guacamole};
-use keyvalint::{Cursor, KeyValueLoad};
+use keyvalint::Cursor;
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Sst, SstBuilder, SstCursor};
+use sst::{Builder, Error, Sst, SstBuilder, SstCursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 
@@ -125,6 +125,12 @@ pub trait TableTrait<'a> {
     type Cursor: Cursor;
 
     fn cursor(&self) -> Self::Cursor;
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Error>;
 }
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
@@ -142,6 +148,15 @@ impl<'a> TableTrait<'a> for Block {
     fn cursor(&self) -> Self::Cursor {
         Block::cursor(self)
     }
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        Block::load(self, key, timestamp, is_tombstone)
+    }
 }
 
 impl<'a> TableBuilderTrait<'a> for BlockBuilder {
@@ -156,6 +171,15 @@ impl<'a> TableTrait<'a> for Sst {
 
     fn cursor(&self) -> Self::Cursor {
         Sst::cursor(self)
+    }
+
+    fn load(
+        &self,
+        key: &[u8],
+        timestamp: u64,
+        is_tombstone: &mut bool,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        Sst::load(self, key, timestamp, is_tombstone)
     }
 }
 
@@ -191,7 +215,7 @@ impl Default for FuzzerConfig {
 
 pub fn fuzzer<T, B, F>(name: &str, config: FuzzerConfig, new_table: F)
 where
-    for<'a> T: TableTrait<'a> + KeyValueLoad,
+    for<'a> T: TableTrait<'a>,
     for<'a> B: TableBuilderTrait<'a, Table = T>,
     F: Fn(&str) -> B,
 {

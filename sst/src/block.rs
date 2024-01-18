@@ -176,18 +176,13 @@ impl Block {
 
         left
     }
-}
 
-impl keyvalint::KeyValueLoad for Block {
-    type Error = Error;
-    type RangeScan<'a> = BoundsCursor<PruningCursor<BlockCursor, Error>, Error>;
-
-    fn load(
+    pub fn load(
         &self,
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         *is_tombstone = false;
         let mut cursor = self.cursor();
         cursor.seek(key)?;
@@ -211,12 +206,12 @@ impl keyvalint::KeyValueLoad for Block {
         }
     }
 
-    fn range_scan<T: AsRef<[u8]>>(
+    pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+    ) -> Result<BoundsCursor<PruningCursor<BlockCursor, Error>, Error>, Error> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
