@@ -268,6 +268,16 @@ impl Version {
         Ok(new_tree)
     }
 
+    fn max_timestamp(&self) -> u64 {
+        let mut seq_no = 0;
+        for level in self.levels.iter() {
+            for file in level.ssts.iter() {
+                seq_no = std::cmp::max(file.biggest_timestamp, seq_no);
+            }
+        }
+        seq_no
+    }
+
     fn compute_setsum(&self) -> Setsum {
         let mut acc = Setsum::default();
         for level in self.levels.iter() {
@@ -1151,6 +1161,10 @@ impl LsmTree {
         };
         db.cleanup_orphans()?;
         Ok(db)
+    }
+
+    pub fn max_timestamp(&self) -> u64 {
+        self.version.lock().unwrap().max_timestamp()
     }
 
     fn list_ssts_from_manifest<P: AsRef<Path>>(

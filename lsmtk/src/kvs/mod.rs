@@ -132,6 +132,7 @@ impl KeyValueStore {
         let mem = Arc::new(MemTable::default());
         let mem_path = LOG_FILE(&root, seq_no);
         let mem_log = Self::start_new_log(&mem_path, options.log.clone())?;
+        seq_no = std::cmp::max(seq_no, tree.max_timestamp());
         let mem_seq_no = seq_no;
         seq_no += 1;
         let state = Mutex::new(KeyValueStoreState {
