@@ -1,5 +1,7 @@
 //! biometrics_pb provides protocol buffers corresponding to biometric readings.
 
+use std::fmt::{Display, Formatter};
+
 use one_two_eight::{generate_id, generate_id_prototk};
 
 use prototk_derive::Message;
@@ -9,12 +11,50 @@ use prototk_derive::Message;
 generate_id! {SensorID, "sensor:"}
 generate_id_prototk! {SensorID}
 
+/////////////////////////////////////////// SensorReading //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+pub enum SensorReading {
+    #[default]
+    #[prototk(1, message)]
+    Zero,
+    #[prototk(2, message)]
+    Counter(CounterPb),
+    #[prototk(3, message)]
+    Gauge(GaugePb),
+    #[prototk(4, message)]
+    Moments(MomentsPb),
+}
+
+impl Display for SensorReading {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            SensorReading::Zero => write!(f, "_"),
+            SensorReading::Counter(counter) => {
+                write!(f, "{}", counter.count)
+            },
+            SensorReading::Gauge(gauge) => {
+                write!(f, "{}", gauge.value)
+            },
+            SensorReading::Moments(moments) => {
+                write!(f, "{}, ...", moments.n)
+            },
+        }
+    }
+}
+
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
 pub struct CounterPb {
     #[prototk(1, uint64)]
     pub count: u64,
+}
+
+impl Display for CounterPb {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Counter({})", self.count)
+    }
 }
 
 impl From<u64> for CounterPb {
@@ -29,6 +69,12 @@ impl From<u64> for CounterPb {
 pub struct GaugePb {
     #[prototk(2, double)]
     pub value: f64,
+}
+
+impl Display for GaugePb {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Gauge({})", self.value)
+    }
 }
 
 impl From<f64> for GaugePb {
@@ -51,6 +97,12 @@ pub struct MomentsPb {
     pub m3: f64,
     #[prototk(7, double)]
     pub m4: f64,
+}
+
+impl Display for MomentsPb {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "Moments(n={}, ...)", self.n)
+    }
 }
 
 impl From<biometrics::moments::Moments> for MomentsPb {
