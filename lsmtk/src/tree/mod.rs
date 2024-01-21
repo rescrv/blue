@@ -196,21 +196,21 @@ generate_id_prototk! {CompactionID}
 //////////////////////////////////////////// Compaction ////////////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub struct Compaction {
+struct Compaction {
     core: Arc<CompactionCore>,
 }
 
 impl Compaction {
     #[allow(dead_code)]
-    pub fn compaction_id(&self) -> CompactionID {
+    fn compaction_id(&self) -> CompactionID {
         self.core.compaction_id
     }
 
-    pub fn top_level(&self) -> bool {
+    fn top_level(&self) -> bool {
         self.core.upper_level == NUM_LEVELS - 1
     }
 
-    pub fn inputs(&self) -> impl Iterator<Item = Setsum> + '_ {
+    fn inputs(&self) -> impl Iterator<Item = Setsum> + '_ {
         self.core.inputs.iter().copied()
     }
 }
@@ -1003,7 +1003,7 @@ pub struct VersionRef<'a> {
 }
 
 impl<'a> VersionRef<'a> {
-    pub fn load(
+    pub(crate) fn load(
         &self,
         key: &[u8],
         timestamp: u64,
@@ -1018,7 +1018,7 @@ impl<'a> VersionRef<'a> {
         )
     }
 
-    pub fn range_scan<T: AsRef<[u8]>>(
+    pub(crate) fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
@@ -1116,7 +1116,7 @@ impl LsmTree {
         Ok(db)
     }
 
-    pub fn max_timestamp(&self) -> u64 {
+    pub(crate) fn max_timestamp(&self) -> u64 {
         self.version.lock().unwrap().max_timestamp()
     }
 
@@ -1209,6 +1209,7 @@ impl LsmTree {
         Ok(())
     }
 
+    // TODO(rescrv):  Make this pub(crate).
     pub fn compaction_thread(&self) -> Result<(), Error> {
         loop {
             let compaction = {
@@ -1534,7 +1535,7 @@ impl LsmTree {
         }
     }
 
-    pub fn take_snapshot(&self) -> VersionRef {
+    pub(crate) fn take_snapshot(&self) -> VersionRef {
         let version = Arc::clone(&*self.version.lock().unwrap());
         VersionRef {
             tree: self,
