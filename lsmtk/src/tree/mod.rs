@@ -11,6 +11,7 @@ use keyvalint::{compare_bytes, Cursor, KeyRef};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
+use sst::bounds_cursor::BoundsCursor;
 use sst::concat_cursor::ConcatenatingCursor;
 use sst::file_manager::FileManager;
 use sst::lazy_cursor::LazyCursor;
@@ -1569,6 +1570,28 @@ impl LsmTree {
                 let _ = rename(sst_path, trash_path);
             }
         }
+    }
+}
+
+impl keyvalint::KeyValueLoad for LsmTree {
+    type Error = Error;
+    type RangeScan<'a> = BoundsCursor<PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>, sst::Error>;
+
+    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
+        let version = self.take_snapshot();
+        version.load(key, u64::MAX, is_tombstone)
+    }
+
+    fn range_scan<T: AsRef<[u8]>>(
+        &self,
+        start_bound: &Bound<T>,
+        end_bound: &Bound<T>,
+    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+        let version = self.take_snapshot();
+        let version_scan = version.range_scan(start_bound, end_bound, u64::MAX)?;
+        let cursor = PruningCursor::new(version_scan, u64::MAX)?;
+        let cursor = BoundsCursor::new(cursor, start_bound, end_bound)?;
+        Ok(cursor)
     }
 }
 
