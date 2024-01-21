@@ -296,7 +296,7 @@ impl KeyValueStore {
                 .with_info("imm", imm_setsum.hexdigest());
                 return Err(err);
             }
-            self.tree.ingest(&sst_path, Some(imm_trigger))?;
+            self.tree._ingest(&sst_path, Some(imm_trigger))?;
             remove_file(sst_path)?;
             if let Some(file_name) = imm_path.file_name() {
                 rename(&imm_path, TRASH_ROOT(&self.root).join(file_name))?;

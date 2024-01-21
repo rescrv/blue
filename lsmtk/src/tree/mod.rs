@@ -1177,7 +1177,11 @@ impl LsmTree {
         Ok(())
     }
 
-    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P, log_num: Option<u64>) -> Result<(), Error> {
+    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P) -> Result<(), Error> {
+        self._ingest(sst_path, None)
+    }
+
+    pub(crate) fn _ingest<P: AsRef<Path>>(&self, sst_path: P, log_num: Option<u64>) -> Result<(), Error> {
         // For each SST, hardlink it into the ingest root.
         let mut edit = Edit::default();
         let mut acc = Setsum::default();
