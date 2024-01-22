@@ -131,12 +131,12 @@ impl LsmVerifier {
                     core: ErrorCore::default(),
                     context: "clean up saw log out of order".to_string(),
                 }
-                .with_variable("old log num", log_num_old)
-                .with_variable("new log num", log_num_new));
+                .with_info("old log num", log_num_old)
+                .with_info("new log num", log_num_new));
             }
             if log_num_old == log_num_new && entry.exists() {
                 RM_MANI.click();
-                remove_file(entry).as_z().with_variable("path", entry)?;
+                remove_file(entry).as_z().with_info("path", entry)?;
             }
             let mut edit = Edit::default();
             for path in self.mani.strs() {
@@ -145,7 +145,7 @@ impl LsmVerifier {
                 if full_path.exists() {
                     remove_file(&full_path)
                         .as_z()
-                        .with_variable("path", full_path)?;
+                        .with_info("path", full_path)?;
                 }
                 edit.rm(path)?;
             }
@@ -179,9 +179,9 @@ impl LsmVerifier {
                     core: ErrorCore::default(),
                     context: "manifest does not continue with accumulated setsum".to_string(),
                 }
-                .with_variable("outputs", outputs.hexdigest())
-                .with_variable("acc", acc.hexdigest())
-                .with_variable("fragment", entry.to_string_lossy());
+                .with_info("outputs", outputs.hexdigest())
+                .with_info("acc", acc.hexdigest())
+                .with_info("fragment", entry.to_string_lossy());
                 return Err(err);
             }
             if !first && inputs != acc {
@@ -189,9 +189,9 @@ impl LsmVerifier {
                     core: ErrorCore::default(),
                     context: "manifest does not continue with accumulated setsum".to_string(),
                 }
-                .with_variable("inputs", inputs.hexdigest())
-                .with_variable("acc", acc.hexdigest())
-                .with_variable("fragment", entry.to_string_lossy());
+                .with_info("inputs", inputs.hexdigest())
+                .with_info("acc", acc.hexdigest())
+                .with_info("fragment", entry.to_string_lossy());
                 return Err(err);
             }
             if !first && inputs != outputs + discard {
@@ -199,11 +199,11 @@ impl LsmVerifier {
                     core: ErrorCore::default(),
                     context: "manifest does not balance inputs == outputs + discard".to_string(),
                 }
-                .with_variable("inputs", inputs.hexdigest())
-                .with_variable("outputs", outputs.hexdigest())
-                .with_variable("discard", discard.hexdigest())
-                .with_variable("discard^-1", (Setsum::default() - discard).hexdigest())
-                .with_variable("inputs - outputs", (inputs - outputs).hexdigest());
+                .with_info("inputs", inputs.hexdigest())
+                .with_info("outputs", outputs.hexdigest())
+                .with_info("discard", discard.hexdigest())
+                .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
+                .with_info("inputs - outputs", (inputs - outputs).hexdigest());
                 return Err(err);
             }
             last_outputs = Some(outputs);
@@ -299,8 +299,8 @@ impl LsmVerifier {
                             core: ErrorCore::default(),
                             context: "gc key less than input".to_string(),
                         })
-                        .with_variable("gc", gc_next)
-                        .with_variable("input", i);
+                        .with_info("gc", gc_next)
+                        .with_info("input", i);
                     }
                     Ordering::Equal => {
                         must_return = true;
@@ -315,7 +315,7 @@ impl LsmVerifier {
                             core: ErrorCore::default(),
                             context: "data loss".to_string(),
                         })
-                        .with_variable("input", i);
+                        .with_info("input", i);
                     }
                     let mut setsum = sst::Setsum::default();
                     setsum.insert(input.key_value().unwrap());
@@ -331,7 +331,7 @@ impl LsmVerifier {
                         core: ErrorCore::default(),
                         context: "data construction".to_string(),
                     })
-                    .with_variable("output", o);
+                    .with_info("output", o);
                 }
                 Ordering::Equal => {
                     input.next()?;
@@ -347,7 +347,7 @@ impl LsmVerifier {
                 core: ErrorCore::default(),
                 context: "data construction".to_string(),
             })
-            .with_variable("output", o);
+            .with_info("output", o);
         }
         while let Some(i) = input.key_value() {
             let mut setsum = sst::Setsum::default();
@@ -360,10 +360,10 @@ impl LsmVerifier {
                 core: ErrorCore::default(),
                 context: "garbage collection has bad discard".to_string(),
             })
-            .with_variable("discard", discard.hexdigest())
-            .with_variable("discard^-1", (Setsum::default() - discard).hexdigest())
-            .with_variable("computed_discard", computed_discard.hexdigest())
-            .with_variable(
+            .with_info("discard", discard.hexdigest())
+            .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
+            .with_info("computed_discard", computed_discard.hexdigest())
+            .with_info(
                 "computed_discard^-1",
                 (Setsum::default() - computed_discard).hexdigest(),
             );
@@ -414,9 +414,9 @@ impl ManifestVerifier {
                         core: ErrorCore::default(),
                         context: "manifest does not continue with accumulated setsum".to_string(),
                     }
-                    .with_variable("inputs", inputs.hexdigest())
-                    .with_variable("acc", acc.hexdigest())
-                    .with_variable("fragment", entry.to_string_lossy());
+                    .with_info("inputs", inputs.hexdigest())
+                    .with_info("acc", acc.hexdigest())
+                    .with_info("fragment", entry.to_string_lossy());
                     return Err(err);
                 }
                 if inputs != outputs + discard {
@@ -425,11 +425,11 @@ impl ManifestVerifier {
                         context: "manifest does not balance inputs == outputs + discard"
                             .to_string(),
                     }
-                    .with_variable("inputs", inputs.hexdigest())
-                    .with_variable("outputs", outputs.hexdigest())
-                    .with_variable("discard", discard.hexdigest())
-                    .with_variable("discard^-1", (Setsum::default() - discard).hexdigest())
-                    .with_variable("inputs - outputs", (inputs - outputs).hexdigest());
+                    .with_info("inputs", inputs.hexdigest())
+                    .with_info("outputs", outputs.hexdigest())
+                    .with_info("discard", discard.hexdigest())
+                    .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
+                    .with_info("inputs - outputs", (inputs - outputs).hexdigest());
                     return Err(err);
                 }
             }
@@ -456,10 +456,10 @@ impl ManifestVerifier {
                             "manifest has bad discard: expected {discard:?}, but got {computed_discard:?}"
                         ),
                     })
-                    .with_variable("discard", discard.hexdigest())
-                    .with_variable("discard^-1", (Setsum::default() - discard).hexdigest())
-                    .with_variable("computed_discard", computed_discard.hexdigest())
-                    .with_variable("computed_discard^-1", (Setsum::default() - computed_discard).hexdigest());
+                    .with_info("discard", discard.hexdigest())
+                    .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
+                    .with_info("computed_discard", computed_discard.hexdigest())
+                    .with_info("computed_discard^-1", (Setsum::default() - computed_discard).hexdigest());
                 }
                 acc -= computed_discard;
             }
@@ -479,7 +479,7 @@ fn basename_string<P: AsRef<Path>>(path: P) -> Result<String, Error> {
                 core: ErrorCore::default(),
                 context: "file name contains lossy characters".to_string(),
             })
-            .with_variable("path", path.as_ref().to_string_lossy())
+            .with_info("path", path.as_ref().to_string_lossy())
         } else {
             Ok(file_name_string)
         }
@@ -488,7 +488,7 @@ fn basename_string<P: AsRef<Path>>(path: P) -> Result<String, Error> {
             core: ErrorCore::default(),
             context: "file name has no basename".to_string(),
         })
-        .with_variable("path", path.as_ref().to_string_lossy())
+        .with_info("path", path.as_ref().to_string_lossy())
     }
 }
 

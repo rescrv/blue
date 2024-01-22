@@ -5,7 +5,6 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use rpc_pb::service;
 
 use zerror_core::ErrorCore;
-use zerror_derive::ZerrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -23,7 +22,7 @@ generate_id_prototk!(ReplicaID);
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Message, ZerrorCore)]
+#[derive(Message, zerror_derive::Z)]
 pub enum Error {
     #[prototk(573440, message)]
     Success {

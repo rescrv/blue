@@ -55,7 +55,7 @@ impl FromStr for Host {
                 core: ErrorCore::default(),
                 what: "could not parse string".to_owned(),
             }
-            .with_variable("parts", parts));
+            .with_info("parts", parts));
         }
         let host_id: HostID = match parts[0].parse::<HostID>() {
             Ok(host_id) => host_id,
@@ -64,8 +64,8 @@ impl FromStr for Host {
                     core: ErrorCore::default(),
                     what: "could not parse HostID".to_owned(),
                 }
-                .with_variable("err", err)
-                .with_variable("host_id", parts[0].to_owned()));
+                .with_info("err", err)
+                .with_info("host_id", parts[0].to_owned()));
             }
         };
         Ok(Host {

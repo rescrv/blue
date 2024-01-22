@@ -15,7 +15,7 @@ use zerror_core::ErrorCore;
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error enumerates all conditions of the TupleDB API.
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Message, zerror_derive::Z)]
 pub enum Error {
     #[prototk(442368, message)]
     Success {
@@ -45,48 +45,10 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::TupleKeyError { core, .. } => core,
-            Error::LogicError { core, .. } => core,
-            Error::Corruption { core, .. } => core,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::TupleKeyError { core, .. } => core,
-            Error::LogicError { core, .. } => core,
-            Error::Corruption { core, .. } => core,
-        }
-    }
-}
-
 impl Default for Error {
     fn default() -> Self {
         Error::Success {
             core: ErrorCore::default(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Error::Success { core: _ } => fmt.debug_struct("Success").finish(),
-            Error::TupleKeyError { core: _, error } => fmt
-                .debug_struct("TupleKeyError")
-                .field("error", error)
-                .finish(),
-            Error::LogicError { core: _, what } => {
-                fmt.debug_struct("LogicError").field("what", what).finish()
-            }
-            Error::Corruption { core: _, what } => {
-                fmt.debug_struct("LogicError").field("what", what).finish()
-            }
         }
     }
 }
@@ -97,32 +59,6 @@ impl From<tuple_key::Error> for Error {
             core: ErrorCore::default(),
             error,
         }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        format!("{}", self) + "\n" + &self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
-    where
-        X: Debug,
-    {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 
@@ -237,8 +173,8 @@ impl ProtoBuilder {
                 what: "offset_too_small".to_owned(),
             })
             .as_z()
-            .with_variable("post_u64_offset", post_u64_offset)
-            .with_variable("in_progress_offset", in_progress_offset);
+            .with_info("post_u64_offset", post_u64_offset)
+            .with_info("in_progress_offset", in_progress_offset);
         }
         let msg_sz_v64 = v64::from(msg_sz);
         let msg_sz_v64_pack_sz = msg_sz_v64.pack_sz();
@@ -248,7 +184,7 @@ impl ProtoBuilder {
                 what: "offset_too_small".to_owned(),
             })
             .as_z()
-            .with_variable("msg_sz_v64_pack_sz", msg_sz_v64_pack_sz);
+            .with_info("msg_sz_v64_pack_sz", msg_sz_v64_pack_sz);
         }
         let newly_dropped_bytes = 8 - msg_sz_v64_pack_sz;
         for src in (post_u64_offset..in_progress_offset).rev() {
@@ -285,8 +221,8 @@ impl ProtoBuilder {
                             what: "index miscalculation".to_owned(),
                         })
                         .as_z()
-                        .with_variable("in_progress_idx", in_progress_idx)
-                        .with_variable("frame_idx", frame_idx);
+                        .with_info("in_progress_idx", in_progress_idx)
+                        .with_info("frame_idx", frame_idx);
                     }
                     let msg_sz = in_progress_offset - begin_offset - tag_sz - 8;
                     let newly_dropped_bytes = self.shift_frame(
@@ -319,8 +255,8 @@ impl ProtoBuilder {
                             what: "index miscalculation".to_owned(),
                         })
                         .as_z()
-                        .with_variable("in_progress_idx", in_progress_idx)
-                        .with_variable("frame_idx", frame_idx);
+                        .with_info("in_progress_idx", in_progress_idx)
+                        .with_info("frame_idx", frame_idx);
                     }
                     let msg_sz = in_progress_offset - key_offset - 8;
                     let first_dropped_bytes =

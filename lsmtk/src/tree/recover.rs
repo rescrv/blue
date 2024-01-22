@@ -179,9 +179,9 @@ fn construct_adj_list(metadata: &[SstMetadata]) -> Result<AdjacencyList, Error> 
                 core: ErrorCore::default(),
                 context: "metadata timestamps not in order".to_string(),
             }
-            .with_variable("SST", metadata[i].setsum)
-            .with_variable("smallest_timestamp", metadata[i].smallest_timestamp)
-            .with_variable("biggest_timestamp", metadata[i].biggest_timestamp);
+            .with_info("SST", metadata[i].setsum)
+            .with_info("smallest_timestamp", metadata[i].smallest_timestamp)
+            .with_info("biggest_timestamp", metadata[i].biggest_timestamp);
             return Err(err);
         }
         for j in i + 1..metadata.len() {

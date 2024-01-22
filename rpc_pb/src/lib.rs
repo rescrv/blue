@@ -7,7 +7,6 @@ use one_two_eight::{generate_id, generate_id_prototk};
 use prototk_derive::Message;
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
-use zerror_derive::ZerrorCore;
 
 pub mod sd;
 
@@ -79,7 +78,7 @@ impl<'a> From<&Request<'a>> for Context {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// RPC Error.
-#[derive(Clone, Message, ZerrorCore)]
+#[derive(Clone, Message, zerror_derive::Z)]
 pub enum Error {
     /// The default error type.  Necessary to support protobuf, but should otherwise not be
     /// constructed.

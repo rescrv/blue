@@ -36,6 +36,16 @@ impl Z for SampleError {
         self.var.push(format!("{}: {:?}", variable, x));
         self
     }
+
+    fn with_info<X: Debug>(mut self, name: &str, value: X) -> Self::Error {
+        self.var.push(format!("{}: {:?}", name, value));
+        self
+    }
+
+    fn with_lazy_info<F: FnOnce() -> String>(mut self, name: &str, value: F) -> Self::Error {
+        self.var.push(format!("{}: {:?}", name, value()));
+        self
+    }
 }
 
 iotoz!(SampleError);
@@ -49,10 +59,10 @@ fn sample_error() {
     let success: Result<(), SampleError> = success.as_z();
     let failure: Result<(), SampleError> = failure.as_z();
 
-    let success = success.with_variable("TOKEN", 42);
+    let success = success.with_info("TOKEN", 42);
     assert!(success.is_ok());
 
-    let failure = failure.with_variable("TOKEN", 42);
+    let failure = failure.with_info("TOKEN", 42);
     assert!(failure.is_err());
     if let Err(err) = failure {
         assert_eq!(vec!["TOKEN: 42"], err.var);

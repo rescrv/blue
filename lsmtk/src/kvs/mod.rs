@@ -292,8 +292,8 @@ impl KeyValueStore {
                     core: ErrorCore::default(),
                     context: "Memtable checksum inconsistent".to_string(),
                 }
-                .with_variable("got", got_setsum.hexdigest())
-                .with_variable("imm", imm_setsum.hexdigest());
+                .with_info("got", got_setsum.hexdigest())
+                .with_info("imm", imm_setsum.hexdigest());
                 return Err(err);
             }
             self.tree.ingest(&sst_path, Some(imm_trigger))?;

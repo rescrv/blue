@@ -649,8 +649,8 @@ impl<R: Read + Seek> LogIterator<R> {
                         core: ErrorCore::default(),
                         context: "truncation: no second header".to_owned(),
                     }
-                    .with_variable("header1", header)
-                    .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+                    .with_info("header1", header)
+                    .with_info("offset", self.input.stream_position().unwrap_or(0)));
                 }
             };
             if header2.discriminant != HEADER_SECOND {
@@ -658,16 +658,16 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "invalid discriminant in second header".to_owned(),
                 }
-                .with_variable("discriminant", header2.discriminant)
-                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+                .with_info("discriminant", header2.discriminant)
+                .with_info("offset", self.input.stream_position().unwrap_or(0)));
             }
         } else {
             return Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "invalid discriminant in header".to_owned(),
             }
-            .with_variable("discriminant", header.discriminant)
-            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+            .with_info("discriminant", header.discriminant)
+            .with_info("offset", self.input.stream_position().unwrap_or(0)));
         }
         self.next_from_buffer()
     }
@@ -737,9 +737,9 @@ impl<R: Read + Seek> LogIterator<R> {
                 core: ErrorCore::default(),
                 context: "crc checksum failed".to_owned(),
             }
-            .with_variable("expected", header.crc32c)
-            .with_variable("returned", crc)
-            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+            .with_info("expected", header.crc32c)
+            .with_info("returned", crc)
+            .with_info("offset", self.input.stream_position().unwrap_or(0)));
         }
         Ok(Some(header))
     }
@@ -768,8 +768,8 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "header size exceeds HEADER_MAX_SIZE".to_owned(),
                 }
-                .with_variable("header_sz", header_sz)
-                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+                .with_info("header_sz", header_sz)
+                .with_info("offset", self.input.stream_position().unwrap_or(0)));
             }
             let header = &mut header[..header_sz];
             self.input.read_exact(header)?;
@@ -779,8 +779,8 @@ impl<R: Read + Seek> LogIterator<R> {
                     core: ErrorCore::default(),
                     context: "entry size exceeds TABLE_FULL_SIZE".to_owned(),
                 }
-                .with_variable("size", header.size)
-                .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+                .with_info("size", header.size)
+                .with_info("offset", self.input.stream_position().unwrap_or(0)));
             }
             return Ok(Some(header));
         }
@@ -794,9 +794,9 @@ impl<R: Read + Seek> LogIterator<R> {
                 core: ErrorCore::default(),
                 context: "true-up exceeds HEADER_MAX_SIZE".to_owned(),
             }
-            .with_variable("offset", offset)
-            .with_variable("trued_up", trued_up)
-            .with_variable("offset", self.input.stream_position().unwrap_or(0)));
+            .with_info("offset", offset)
+            .with_info("trued_up", trued_up)
+            .with_info("offset", self.input.stream_position().unwrap_or(0)));
         }
         self.input.seek(SeekFrom::Start(trued_up))?;
         Ok(())

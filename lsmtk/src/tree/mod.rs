@@ -1138,8 +1138,8 @@ impl LsmTree {
                 context: "setsum of tree does not match setsum of manifest".to_string(),
             })
             .as_z()
-            .with_variable("tree", version_setsum)
-            .with_variable("mani", mani_setsum);
+            .with_info("tree", version_setsum)
+            .with_info("mani", mani_setsum);
         }
         let stall = Condvar::new();
         let compact = Condvar::new();
@@ -1438,7 +1438,7 @@ impl LsmTree {
             };
             remove_dir_all(&compaction_dir)
                 .as_z()
-                .with_variable("dir", &compaction_dir)?;
+                .with_info("dir", &compaction_dir)?;
         }
         create_dir(&compaction_dir)?;
         Ok((acc, MergingCursor::new(cursors)?, compaction_dir))
@@ -1471,8 +1471,8 @@ impl LsmTree {
                 err @ Err(_) => {
                     return err
                         .as_z()
-                        .with_variable("src", path)
-                        .with_variable("dst", &new_path);
+                        .with_info("src", path)
+                        .with_info("dst", &new_path);
                 }
             };
             outputs.push(metadata);
@@ -1482,18 +1482,18 @@ impl LsmTree {
                 core: ErrorCore::default(),
                 context: "setsum does not balance input = output + discard".to_string(),
             }
-            .with_variable("input_setsum", input_setsum.hexdigest())
-            .with_variable("output_setsum", output_setsum.hexdigest())
-            .with_variable("discard_setsum", discard_setsum.hexdigest()));
+            .with_info("input_setsum", input_setsum.hexdigest())
+            .with_info("output_setsum", output_setsum.hexdigest())
+            .with_info("discard_setsum", discard_setsum.hexdigest()));
         }
         let ret = self.apply_manifest_compaction(compaction, discard_setsum, mani_edit, outputs);
         for path in paths.into_iter() {
             COMPACTION_REMOVE.click();
-            remove_file(&path).as_z().with_variable("path", &path)?;
+            remove_file(&path).as_z().with_info("path", &path)?;
         }
         remove_dir(&compaction_dir)
             .as_z()
-            .with_variable("dir", &compaction_dir)?;
+            .with_info("dir", &compaction_dir)?;
         ret
     }
 

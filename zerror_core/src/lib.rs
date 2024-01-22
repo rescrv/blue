@@ -56,6 +56,14 @@ struct Variable {
 }
 
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+struct Info {
+    #[prototk(1, string)]
+    name: String,
+    #[prototk(2, string)]
+    value: String,
+}
+
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 struct Internals {
     // reserved 1: email
     // reserved 2: short
@@ -67,6 +75,8 @@ struct Internals {
     urls: Vec<Url>,
     #[prototk(6, message)]
     vars: Vec<Variable>,
+    #[prototk(7, message)]
+    info: Vec<Info>,
 }
 
 /// [ErrorCore] implements 100% of Z for easy error reporting.  It's intended that people will wrap
@@ -83,11 +93,13 @@ impl ErrorCore {
     pub fn new(counter: &'static Counter) -> Self {
         counter.click();
         let backtrace = format!("{}", Backtrace::force_capture());
+        #[allow(deprecated)]
         let internals = Internals {
             backtrace,
             toks: Vec::new(),
             urls: Vec::new(),
             vars: Vec::new(),
+            info: Vec::new(),
         };
         Self {
             internals: Box::new(internals),
@@ -97,19 +109,29 @@ impl ErrorCore {
     /// Print the long-form of the error.
     pub fn long_form(&self) -> String {
         let mut s = String::default();
+        #[allow(deprecated)]
         for token in self.internals.toks.iter() {
             s += &format!("\n{}: {}", token.identifier, token.value);
         }
+        #[allow(deprecated)]
         if !self.internals.urls.is_empty() {
             s += "\n";
+            #[allow(deprecated)]
             for url in self.internals.urls.iter() {
                 s += &format!("\n{}: {}", url.identifier, url.url);
             }
         }
+        #[allow(deprecated)]
         if !self.internals.vars.is_empty() {
             s += "\n";
+            #[allow(deprecated)]
             for variable in self.internals.vars.iter() {
                 s += &format!("\n{} = {}", variable.identifier, variable.value);
+            }
+        }
+        if !self.internals.info.is_empty() {
+            for info in self.internals.info.iter() {
+                s += &format!("\n{} = {}", info.name, info.value);
             }
         }
         s += &format!("\n\nbacktrace:\n{}", self.internals.backtrace);
@@ -117,7 +139,9 @@ impl ErrorCore {
     }
 
     /// Set the token associated with identifier.
+    #[deprecated(since="0.5.0", note="use set_info instead")]
     pub fn set_token(&mut self, identifier: &str, value: &str) {
+        #[allow(deprecated)]
         self.internals.toks.push(Token {
             identifier: identifier.to_owned(),
             value: value.to_owned(),
@@ -125,7 +149,9 @@ impl ErrorCore {
     }
 
     /// Sets a URL under an identifier.
+    #[deprecated(since="0.5.0", note="use set_info instead")]
     pub fn set_url(&mut self, identifier: &str, url: &str) {
+        #[allow(deprecated)]
         self.internals.urls.push(Url {
             identifier: identifier.to_owned(),
             url: url.to_owned(),
@@ -133,12 +159,30 @@ impl ErrorCore {
     }
 
     /// Sets a variable that's debug-printable.
+    #[deprecated(since="0.5.0", note="use set_info instead")]
     pub fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
+        #[allow(deprecated)]
         self.internals.vars.push(Variable {
             identifier: variable.to_owned(),
             value: format!("{:?}", x),
         });
     }
+
+     /// Add debug formatting of a local variable.
+     pub fn set_info<X: Debug>(&mut self, name: &str, value: X) {
+        self.internals.info.push(Info {
+            name: name.to_owned(),
+            value: format!("{:?}", value),
+        });
+     }
+
+     /// Add debug formatting using a closure.
+     pub fn set_lazy_info<F: FnOnce() -> String>(&mut self, name: &str, value: F) {
+        self.internals.info.push(Info {
+            name: name.to_owned(),
+            value: value(),
+        });
+     }
 }
 
 impl Default for ErrorCore {
@@ -226,15 +270,9 @@ mod tests {
         let mut error_core = ErrorCore::new(&TEST_COUNTER2);
         assert_eq!(1, TEST_COUNTER2.read());
         error_core.internals.backtrace = "SOME-BACKTRACE\n".to_owned();
-        error_core.set_token("PATH", "/bin:/usr/bin");
-        error_core.set_url("URL", "http://example.org");
-        error_core.set_variable("VAR", 42);
+        error_core.set_info("VAR", 42);
         assert_eq!(
-            "PATH: /bin:/usr/bin
-
-URL: http://example.org
-
-VAR = 42
+            "VAR = 42
 
 backtrace:
 SOME-BACKTRACE

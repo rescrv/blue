@@ -64,7 +64,7 @@ impl FileHandle {
                 core: ErrorCore::default(),
                 context: "FileManager has broken names->files pointer".to_string(),
             }
-            .with_variable("fd", self.file.as_raw_fd());
+            .with_info("fd", self.file.as_raw_fd());
             Err(err)
         }
     }
@@ -74,9 +74,9 @@ impl FileHandle {
         self.file
             .read_exact_at(buf, offset)
             .as_z()
-            .with_variable("fd", self.file.as_raw_fd())
-            .with_variable("offset", offset)
-            .with_variable("amount", buf.len())
+            .with_info("fd", self.file.as_raw_fd())
+            .with_info("offset", offset)
+            .with_info("amount", buf.len())
     }
 
     /// return the size of the file.
@@ -165,8 +165,8 @@ impl FileManager {
                         core: ErrorCore::default(),
                         context: "FileManager has fd that exists outside open_files".to_string(),
                     }
-                    .with_variable("fd", *fd)
-                    .with_variable("state.files.len()", state.files.len());
+                    .with_info("fd", *fd)
+                    .with_info("state.files.len()", state.files.len());
                     return Err(err);
                 };
                 // Check that we haven't violated internal invariants.
@@ -181,7 +181,7 @@ impl FileManager {
                         core: ErrorCore::default(),
                         context: "FileManager has broken names->files pointer".to_string(),
                     }
-                    .with_variable("fd", *fd);
+                    .with_info("fd", *fd);
                     return Err(err);
                 };
             };
@@ -193,8 +193,8 @@ impl FileManager {
                     core: ErrorCore::default(),
                     limit: self.max_open_files,
                 }
-                .with_variable("max_open_files", self.max_open_files)
-                .with_variable("open_files", state.opening.len() + state.names.len());
+                .with_info("max_open_files", self.max_open_files)
+                .with_info("open_files", state.opening.len() + state.names.len());
                 return Err(err);
             }
             state.opening.insert(path.as_ref().to_path_buf());
@@ -250,7 +250,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
             core: ErrorCore::default(),
             context: "valid file's file descriptor is negative".to_string(),
         }
-        .with_variable("fd", fd);
+        .with_info("fd", fd);
         return Err(err);
     }
     Ok(fd as usize)
@@ -268,7 +268,7 @@ fn open(path: PathBuf) -> Result<File, Error> {
                 core: ErrorCore::default(),
                 what: format!("{:?}", e),
             }
-            .with_variable("path", path.to_string_lossy());
+            .with_info("path", path.to_string_lossy());
             return Err(err);
         }
     };

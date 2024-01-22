@@ -14,11 +14,19 @@ pub trait Z {
     fn long_form(&self) -> String;
 
     /// Add a token.
+    #[deprecated(since="0.4.0", note="use with_info instead")]
     fn with_token(self, identifier: &str, value: &str) -> Self::Error;
     /// Add a URL.
+    #[deprecated(since="0.4.0", note="use with_info instead")]
     fn with_url(self, identifier: &str, url: &str) -> Self::Error;
     /// Add debug formatting of a local variable.
+    #[deprecated(since="0.4.0", note="use with_info instead")]
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
+
+    /// Add debug formatting of a local variable.
+    fn with_info<X: Debug>(self, name: &str, value: X) -> Self::Error;
+    /// Add debug formatting using a closure.
+    fn with_lazy_info<F: FnOnce() -> String>(self, name: &str, value: F) -> Self::Error;
 }
 
 impl<T, E: Z<Error = E>> Z for Result<T, E> {
@@ -33,6 +41,7 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
         }
     }
 
+    #[allow(deprecated)]
     fn with_token(self, identifier: &str, value: &str) -> Self::Error {
         match self {
             Ok(_) => self,
@@ -40,6 +49,7 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
         }
     }
 
+    #[allow(deprecated)]
     fn with_url(self, identifier: &str, url: &str) -> Self::Error {
         match self {
             Ok(_) => self,
@@ -47,10 +57,25 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
         }
     }
 
+    #[allow(deprecated)]
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error {
         match self {
             Ok(_) => self,
             Err(e) => Err(e.with_variable(variable, x)),
+        }
+    }
+
+    fn with_info<X: Debug>(self, name: &str, value: X) -> Self::Error {
+        match self {
+            Ok(_) => self,
+            Err(e) => Err(e.with_info(name, value)),
+        }
+    }
+
+    fn with_lazy_info<F: FnOnce() -> String>(self, name: &str, value: F) -> Self::Error {
+        match self {
+            Ok(_) => self,
+            Err(e) => Err(e.with_info(name, value())),
         }
     }
 }
@@ -66,6 +91,7 @@ macro_rules! iotoz {
             $error: Z,
         {
             /// Convert the error into the result type.
+            #[allow(clippy::wrong_self_convention)]
             fn as_z(self) -> Result<T, $error>;
             /// A pretty unwrap method.
             fn pretty_unwrap(self) -> T;

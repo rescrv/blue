@@ -480,8 +480,8 @@ impl BlockCursor {
                 core: ErrorCore::default(),
                 context: "restart_idx exceeds num_restarts".to_string(),
             }
-            .with_variable("restart_idx", restart_idx)
-            .with_variable("num_restarts", self.block.num_restarts);
+            .with_info("restart_idx", restart_idx)
+            .with_info("num_restarts", self.block.num_restarts);
             return Err(err);
         }
         let offset = self.block.restart_point(restart_idx);
@@ -491,8 +491,8 @@ impl BlockCursor {
                 core: ErrorCore::default(),
                 context: "offset exceeds restarts_boundary".to_string(),
             }
-            .with_variable("offset", offset)
-            .with_variable("restarts_boundary", self.block.restarts_boundary);
+            .with_info("offset", offset)
+            .with_info("restarts_boundary", self.block.restarts_boundary);
             return Err(err);
         }
 
@@ -556,7 +556,7 @@ impl BlockCursor {
                 error: e,
                 context: "could not unpack key-value pair at offset".to_string(),
             }
-            .with_variable("offset", offset)
+            .with_info("offset", offset)
         })?;
         let next_offset = block.restarts_boundary - up.remain().len();
         let restart_idx = block.restart_for_offset(offset);
@@ -611,7 +611,7 @@ impl Cursor for BlockCursor {
                         core: ErrorCore::default(),
                         context: "restart point returned no key-value pair".to_string(),
                     }
-                    .with_variable("restart_point", mid);
+                    .with_info("restart_point", mid);
                     return Err(err);
                 }
             };
@@ -644,8 +644,8 @@ impl Cursor for BlockCursor {
                 core: ErrorCore::default(),
                 context: "binary_search left != right".to_string(),
             }
-            .with_variable("left", left)
-            .with_variable("right", right);
+            .with_info("left", left)
+            .with_info("right", right);
             return Err(err);
         }
 
@@ -661,7 +661,7 @@ impl Cursor for BlockCursor {
                     core: ErrorCore::default(),
                     context: "restart point returned no key-value pair".to_string(),
                 }
-                .with_variable("restart_point", left);
+                .with_info("restart_point", left);
                 return Err(err);
             }
         };
@@ -723,10 +723,10 @@ impl Cursor for BlockCursor {
 
         // Seek and scan.
         self.seek_restart(restart_idx)
-            .with_variable("restart_idx", restart_idx)?;
+            .with_info("restart_idx", restart_idx)?;
         while self.next_offset() < target_next_offset {
             self.next()
-                .with_variable("target_next_offset", target_next_offset)?;
+                .with_info("target_next_offset", target_next_offset)?;
         }
         Ok(())
     }
@@ -783,7 +783,7 @@ impl Cursor for BlockCursor {
 
         // Setup the position correctly and return what we see.
         self.position = BlockCursor::extract_key(&self.block, offset, prev_key)
-            .with_variable("offset", offset)?;
+            .with_info("offset", offset)?;
         Ok(())
     }
 

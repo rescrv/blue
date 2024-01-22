@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use std::cmp::Reverse;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 
 use buffertk::{v64, Packable, Unpackable};
 
@@ -20,7 +20,7 @@ use iter7::Iterate7BitChunks;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Message, zerror_derive::Z)]
 pub enum Error {
     #[prototk(311296, message)]
     Success {
@@ -67,63 +67,10 @@ pub enum Error {
     },
 }
 
-impl Error {
-    fn core(&self) -> &ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::CouldNotExtend { core, .. } => core,
-            Error::UnpackError { core, .. } => core,
-            Error::NotValidUtf8 { core, .. } => core,
-            Error::InvalidTag { core, .. } => core,
-            Error::SchemaIncompatibility { core, .. } => core,
-            Error::Corruption { core, .. } => core,
-        }
-    }
-
-    fn core_mut(&mut self) -> &mut ErrorCore {
-        match self {
-            Error::Success { core, .. } => core,
-            Error::CouldNotExtend { core, .. } => core,
-            Error::UnpackError { core, .. } => core,
-            Error::NotValidUtf8 { core, .. } => core,
-            Error::InvalidTag { core, .. } => core,
-            Error::SchemaIncompatibility { core, .. } => core,
-            Error::Corruption { core, .. } => core,
-        }
-    }
-}
-
 impl Default for Error {
     fn default() -> Error {
         Error::Success {
             core: ErrorCore::default(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Error::Success { core: _ } => fmt.debug_struct("Success").finish(),
-            Error::CouldNotExtend {
-                core: _,
-                field_number,
-            } => fmt
-                .debug_struct("CouldNotExtend")
-                .field("field_number", field_number)
-                .finish(),
-            Error::UnpackError { core: _, err } => {
-                fmt.debug_struct("UnpackError").field("err", err).finish()
-            }
-            Error::NotValidUtf8 { core: _ } => fmt.debug_struct("NotValidUtf8").finish(),
-            Error::InvalidTag { core: _ } => fmt.debug_struct("InvalidTag").finish(),
-            Error::SchemaIncompatibility { core: _, what } => fmt
-                .debug_struct("SchemaIncompatibility")
-                .field("what", what)
-                .finish(),
-            Error::Corruption { core: _, what } => {
-                fmt.debug_struct("Corruption").field("what", what).finish()
-            }
         }
     }
 }
@@ -141,84 +88,6 @@ impl From<prototk::Error> for Error {
             core: ErrorCore::default(),
             err,
         }
-    }
-}
-
-impl PartialEq for Error {
-    fn eq(&self, other: &Error) -> bool {
-        match (self, other) {
-            (Error::Success { core: _ }, Error::Success { core: _ }) => true,
-            (
-                Error::CouldNotExtend {
-                    core: _,
-                    field_number: lhs_field_number,
-                },
-                Error::CouldNotExtend {
-                    core: _,
-                    field_number: rhs_field_number,
-                },
-            ) => lhs_field_number == rhs_field_number,
-            (
-                Error::UnpackError {
-                    core: _,
-                    err: lhs_error,
-                },
-                Error::UnpackError {
-                    core: _,
-                    err: rhs_error,
-                },
-            ) => lhs_error == rhs_error,
-            (Error::NotValidUtf8 { core: _ }, Error::NotValidUtf8 { core: _ }) => true,
-            (Error::InvalidTag { core: _ }, Error::InvalidTag { core: _ }) => true,
-            (
-                Error::SchemaIncompatibility {
-                    core: _,
-                    what: lhs_what,
-                },
-                Error::SchemaIncompatibility {
-                    core: _,
-                    what: rhs_what,
-                },
-            ) => lhs_what == rhs_what,
-            (
-                Error::Corruption {
-                    core: _,
-                    what: lhs_what,
-                },
-                Error::Corruption {
-                    core: _,
-                    what: rhs_what,
-                },
-            ) => lhs_what == rhs_what,
-            _ => false,
-        }
-    }
-}
-
-impl Z for Error {
-    type Error = Self;
-
-    fn long_form(&self) -> String {
-        // TODO(rescrv): put a one-line error as first line.
-        self.core().long_form()
-    }
-
-    fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-        self.core_mut().set_token(identifier, value);
-        self
-    }
-
-    fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-        self.core_mut().set_url(identifier, url);
-        self
-    }
-
-    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error
-    where
-        X: Debug,
-    {
-        self.core_mut().set_variable(variable, x);
-        self
     }
 }
 
@@ -437,7 +306,7 @@ impl TupleKey {
                 what: "invalid field number".to_owned(),
             })
             .as_z()
-            .with_variable("x", x);
+            .with_info("x", x);
         }
         let f = FieldNumber::new((x >> 4) as u32)?;
         let v = match DataType::from_discriminant(x & 15) {
@@ -448,7 +317,7 @@ impl TupleKey {
                     what: "invalid discriminant".to_owned(),
                 })
                 .as_z()
-                .with_variable("discriminant", x & 15);
+                .with_info("discriminant", x & 15);
             }
         };
         Ok((f, v))
@@ -991,11 +860,11 @@ impl SchemaEntry {
                     what: "field number same; type different".to_owned(),
                 })
                 .as_z()
-                .with_variable("index", idx)
-                .with_variable("lhs.number", lhs.number)
-                .with_variable("rhs.number", rhs.number)
-                .with_variable("lhs.ty", lhs.ty)
-                .with_variable("rhs.ty", rhs.ty);
+                .with_info("index", idx)
+                .with_info("lhs.number", lhs.number)
+                .with_info("rhs.number", rhs.number)
+                .with_info("lhs.ty", lhs.ty)
+                .with_info("rhs.ty", rhs.ty);
             }
             if lhs.number != rhs.number {
                 breaked = true;
@@ -1009,7 +878,7 @@ impl SchemaEntry {
                     what: "lhs has non-message type and is prefix of rhs".to_owned(),
                 })
                 .as_z()
-                .with_variable("lhs.ty", self.value);
+                .with_info("lhs.ty", self.value);
             }
             if self.key.fields.len() > other.key.fields.len() && other.value != DataType::message {
                 return Err(Error::SchemaIncompatibility {
@@ -1017,7 +886,7 @@ impl SchemaEntry {
                     what: "rhs has non-message type and is prefix of lhs".to_owned(),
                 })
                 .as_z()
-                .with_variable("rhs.ty", other.value);
+                .with_info("rhs.ty", other.value);
             }
             if self.key.fields == other.key.fields && self.value != other.value {
                 return Err(Error::SchemaIncompatibility {
@@ -1025,8 +894,8 @@ impl SchemaEntry {
                     what: "lhs and rhs have same fields, but different values".to_owned(),
                 })
                 .as_z()
-                .with_variable("lhs.value", self.value)
-                .with_variable("rhs.value", other.value);
+                .with_info("lhs.value", self.value)
+                .with_info("rhs.value", other.value);
             }
         }
         Ok(())

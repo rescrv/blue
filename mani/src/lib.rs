@@ -16,7 +16,6 @@ use utilz::lockfile::Lockfile;
 
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
-use zerror_derive::ZerrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -94,7 +93,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error for the manifest.
-#[derive(Clone, Message, ZerrorCore)]
+#[derive(Clone, Message, zerror_derive::Z)]
 pub enum Error {
     /// The default error.  Should never be constructed, but necessary for protobuf support.
     #[prototk(376832, message)]
@@ -268,17 +267,17 @@ impl Manifest {
         } else if !root.is_dir() {
             create_dir(&root)
                 .as_z()
-                .with_variable("root", root.to_string_lossy())?;
+                .with_info("root", root.to_string_lossy())?;
         }
         // Deal with the lockfile first.
         let lockfile = if options.fail_if_locked {
             Lockfile::lock(LOCKFILE(&root))
                 .as_z()
-                .with_variable("root", root.to_string_lossy())?
+                .with_info("root", root.to_string_lossy())?
         } else {
             Lockfile::wait(LOCKFILE(&root))
                 .as_z()
-                .with_variable("root", root.to_string_lossy())?
+                .with_info("root", root.to_string_lossy())?
         };
         match lockfile {
             Some(_lockfile) => {

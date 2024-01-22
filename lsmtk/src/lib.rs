@@ -11,7 +11,6 @@ use sst::SstOptions;
 use utilz::fmt;
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
-use zerror_derive::ZerrorCore;
 
 mod kvs;
 mod reference_counter;
@@ -127,7 +126,7 @@ fn parse_log_file<P: AsRef<Path>>(path: P) -> Option<u64> {
 
 fn ensure_dir(path: PathBuf, commentary: &str) -> Result<(), Error> {
     if !path.is_dir() {
-        Ok(create_dir(&path).as_z().with_variable(commentary, path)?)
+        Ok(create_dir(&path).as_z().with_info(commentary, path)?)
     } else {
         Ok(())
     }
@@ -145,7 +144,7 @@ fn make_all_dirs<P: AsRef<Path>>(root: P) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, ZerrorCore)]
+#[derive(Clone, zerror_derive::Z)]
 pub enum Error {
     Success {
         core: ErrorCore,

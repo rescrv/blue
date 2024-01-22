@@ -21,7 +21,6 @@ use keyvalint::{compare_bytes, compare_key, Cursor, KeyRef, KeyValueRef};
 use tatl::{HeyListen, Stationary};
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
-use zerror_derive::ZerrorCore;
 
 pub mod block;
 pub mod bounds_cursor;
@@ -193,7 +192,7 @@ pub fn check_table_size(size: usize) -> Result<(), Error> {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// The sst Error type.
-#[derive(Clone, Message, ZerrorCore)]
+#[derive(Clone, Message, zerror_derive::Z)]
 pub enum Error {
     /// Success.  Used for Message default.  Should not be constructed otherwise.
     #[prototk(442368, message)]
@@ -543,8 +542,8 @@ impl BlockMetadata {
                 core: ErrorCore::default(),
                 context: "block_metadata.start >= block_metadata.limit".to_string(),
             }
-            .with_variable("self.start", self.start)
-            .with_variable("self.limit", self.limit);
+            .with_info("self.start", self.start)
+            .with_info("self.limit", self.limit);
             return Err(err);
         }
         Ok(())
@@ -685,7 +684,7 @@ impl Sst {
                 core: ErrorCore::default(),
                 context: "file has fewer than eight bytes".to_string(),
             })
-            .with_variable(
+            .with_info(
                 "path",
                 handle.path().unwrap_or(PathBuf::from("<not available>")),
             );
@@ -710,8 +709,8 @@ impl Sst {
                 core: ErrorCore::default(),
                 context: "final block offset is larger than file size".to_string(),
             }
-            .with_variable("final_block_offset", final_block_offset)
-            .with_variable("file_size", file_size);
+            .with_info("final_block_offset", final_block_offset)
+            .with_info("file_size", file_size);
             return Err(err);
         }
         let size_of_final_block = position + 8 - (final_block_offset);
@@ -735,8 +734,8 @@ impl Sst {
                 core: ErrorCore::default(),
                 context: "index_block runs past filter_block.start".to_string(),
             }
-            .with_variable("filter_block_start", final_block.filter_block.start)
-            .with_variable("index_block_limit", final_block.index_block.limit);
+            .with_info("filter_block_start", final_block.filter_block.start)
+            .with_info("index_block_limit", final_block.index_block.limit);
             return Err(err);
         }
         // Check that the final block's metadata is sane.
@@ -746,8 +745,8 @@ impl Sst {
                 core: ErrorCore::default(),
                 context: "filter_block runs past final_block_offset".to_string(),
             }
-            .with_variable("final_block_offset", final_block_offset)
-            .with_variable("filter_block_limit", final_block.filter_block.limit);
+            .with_info("final_block_offset", final_block_offset)
+            .with_info("filter_block_limit", final_block.filter_block.limit);
             return Err(err);
         }
         let index_block = Sst::load_block(&handle, &final_block.index_block)?;
@@ -1163,7 +1162,7 @@ impl SstBuilder {
             .write(true)
             .open(path.as_ref())
             .as_z()
-            .with_variable("open", path.as_ref().to_string_lossy())?;
+            .with_info("open", path.as_ref().to_string_lossy())?;
         Ok(SstBuilder {
             options,
             last_key: Vec::new(),
