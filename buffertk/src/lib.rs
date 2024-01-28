@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+use std::fmt::Debug;
+
 mod varint;
 
 pub use varint::v64;
@@ -42,6 +44,12 @@ pub enum Error {
         /// Discriminant that's not known.
         discriminant: u32,
     },
+    /// NotAChar indicates that the prescribed value was tried to unpack as a char, but it's not a
+    /// char.
+    NotAChar {
+        /// Value that's not a char.
+        value: u32,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -70,6 +78,10 @@ impl std::fmt::Display for Error {
             Error::UnknownDiscriminant { discriminant } => fmt
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
+                .finish(),
+            Error::NotAChar { value } => fmt
+                .debug_struct("NotAChar")
+                .field("value", value)
                 .finish(),
         }
     }
@@ -129,7 +141,7 @@ pub trait Packable {
 /// `T:Packable`.
 pub trait Unpackable<'a>: Sized {
     /// Type of error this unpackable returns.
-    type Error;
+    type Error: Debug;
 
     /// `unpack` attempts to return an Unpackable object stored in a prefix of `buf`.  The method
     /// returns the result and remaining unused buffer.
@@ -386,6 +398,33 @@ macro_rules! packable_with_to_bits_to_le_bytes {
 packable_with_to_bits_to_le_bytes!(f32, u32);
 packable_with_to_bits_to_le_bytes!(f64, u64);
 
+//////////////////////////////////////// Packable/Unpackable ///////////////////////////////////////
+
+impl Packable for char {
+    fn pack_sz(&self) -> usize {
+        (*self as u32).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        (*self as u32).pack(out)
+    }
+}
+
+impl<'a> Unpackable<'a> for char {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(char, &'b [u8]), Error> {
+        let (c, buf) = u32::unpack(buf)?;
+        if let Some(c) = char::from_u32(c) {
+            Ok((c, buf))
+        } else {
+            Err(Error::NotAChar {
+                value: c,
+            })
+        }
+    }
+}
+
 //////////////////////////////////////////// length_free ///////////////////////////////////////////
 
 /// Pack a byte slice without a length prefix.  The resulting format is equivalent to concatenating
@@ -513,7 +552,7 @@ macro_rules! impl_pack_unpack_tuple {
         }
 
         #[allow(non_snake_case)]
-        impl<'a, ER, $($name: Unpackable<'a, Error=ER> + 'a),+> Unpackable<'a> for ($($name,)+) {
+        impl<'a, ER: Debug, $($name: Unpackable<'a, Error=ER> + 'a),+> Unpackable<'a> for ($($name,)+) {
             type Error = ER;
 
             fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
@@ -593,6 +632,7 @@ impl<'a, T, E> Unpackable<'a> for Result<T, E>
 where
     T: Unpackable<'a>,
     E: Unpackable<'a>
+        + Debug
         + From<Error>
         + From<<T as Unpackable<'a>>::Error>
         + From<<E as Unpackable<'a>>::Error>,

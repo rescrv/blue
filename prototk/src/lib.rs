@@ -73,6 +73,12 @@ pub enum Error {
         /// The discriminant that's not handled by this process.
         discriminant: u32,
     },
+    /// NotAChar indicates that the prescribed value was tried to unpack as a char, but it's not a
+    /// char.
+    NotAChar {
+        /// Value that's not a char.
+        value: u32,
+    },
 }
 
 impl Display for Error {
@@ -118,6 +124,10 @@ impl Display for Error {
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
                 .finish(),
+            Error::NotAChar { value } => fmt
+                .debug_struct("NotAChar")
+                .field("value", value)
+                .finish(),
         }
     }
 }
@@ -135,6 +145,7 @@ impl From<buffertk::Error> for Error {
             buffertk::Error::UnknownDiscriminant { discriminant } => {
                 Error::UnknownDiscriminant { discriminant }
             }
+            buffertk::Error::NotAChar { value } => Error::NotAChar { value },
         }
     }
 }
@@ -278,6 +289,19 @@ impl Packable for Error {
                 .pack(pa.length_prefixed())
                 .pack_sz()
             }
+            Error::NotAChar { value } => {
+                let pa = stack_pack(());
+                let pa = pa.pack(field_types::uint32::field_packer(
+                    FieldNumber::must(1),
+                    value,
+                ));
+                stack_pack(Tag {
+                    field_number: FieldNumber::must(262155),
+                    wire_type: WireType::LengthDelimited,
+                })
+                .pack(pa.length_prefixed())
+                .pack_sz()
+            }
         }
     }
 
@@ -414,6 +438,19 @@ impl Packable for Error {
                 ));
                 stack_pack(Tag {
                     field_number: FieldNumber::must(262154),
+                    wire_type: WireType::LengthDelimited,
+                })
+                .pack(pa.length_prefixed())
+                .into_slice(buf);
+            }
+            Error::NotAChar { value } => {
+                let pa = stack_pack(());
+                let pa = pa.pack(field_types::uint32::field_packer(
+                    FieldNumber::must(1),
+                    value,
+                ));
+                stack_pack(Tag {
+                    field_number: FieldNumber::must(262155),
                     wire_type: WireType::LengthDelimited,
                 })
                 .pack(pa.length_prefixed())
@@ -669,6 +706,29 @@ impl<'a> Unpackable<'a> for Error {
                 }
                 let ret = Error::UnknownDiscriminant {
                     discriminant: prototk_field_discriminant.into(),
+                };
+                Ok((ret, up.remain()))
+            }
+            (262155, WireType::LengthDelimited) => {
+                let length: v64 = up.unpack()?;
+                let mut error: Option<Error> = None;
+                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
+                up.advance(length.into());
+                let fields = FieldIterator::new(local_buf, &mut error);
+                let mut prototk_field_value: field_types::uint32 = field_types::uint32::default();
+                for (tag, buf) in fields {
+                    let num: u32 = tag.field_number.into();
+                    match (num, tag.wire_type) {
+                        (1, field_types::uint32::WIRE_TYPE) => {
+                            (prototk_field_value, _) = Unpackable::unpack(buf)?;
+                        }
+                        (_, _) => {
+                            return Err(Error::UnknownDiscriminant { discriminant: num });
+                        }
+                    }
+                }
+                let ret = Error::NotAChar {
+                    value: prototk_field_value.into(),
                 };
                 Ok((ret, up.remain()))
             }
