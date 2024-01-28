@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::{Collector, Counter};
-use indicio::clue;
 use keyvalint::{compare_bytes, Cursor, KeyRef};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
@@ -23,8 +22,8 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, TreeLogKey, TreeLogValue,
-    COMPACTION_DIR, LSM_TREE_LOG, MANI_ROOT, SST_FILE, TRASH_SST,
+    ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, COMPACTION_DIR, MANI_ROOT, SST_FILE,
+    TRASH_SST,
 };
 use crate::reference_counter::ReferenceCounter;
 use crate::verifier;
@@ -170,6 +169,7 @@ struct LevelSlice<'a> {
 
 #[derive(Debug)]
 struct CompactionCore {
+    #[allow(dead_code)]
     compaction_id: CompactionID,
     lower_level: usize,
     upper_level: usize,
@@ -201,6 +201,7 @@ pub struct Compaction {
 }
 
 impl Compaction {
+    #[allow(dead_code)]
     pub fn compaction_id(&self) -> CompactionID {
         self.core.compaction_id
     }
@@ -256,13 +257,6 @@ impl Version {
 
     fn ingest(&self, to_add: SstMetadata) -> Result<Self, Error> {
         // TODO(rescrv):  Put it at the highest level with a hole.
-        clue! { LSM_TREE_LOG, TreeLogKey::BySetsum {
-                setsum: to_add.setsum
-            } => TreeLogValue::Ingest {
-                level: 0,
-                cardinality: self.levels[0].ssts.len() + 1,
-            }
-        };
         let mut new_tree = self.clone();
         new_tree.levels[0].ssts.push(Arc::new(to_add));
         Ok(new_tree)
@@ -560,12 +554,6 @@ impl Version {
         compaction: Arc<CompactionCore>,
         outputs: Vec<SstMetadata>,
     ) -> Result<Self, Error> {
-        clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                compaction_id: compaction.compaction_id,
-            } => TreeLogValue::ApplyCompaction {
-                outputs: outputs.iter().map(|x| x.setsum).collect(),
-            }
-        };
         let mut new_tree = self.clone();
         // NOTE(rescrv): Intentionally do not include upper level.
         for level in compaction.lower_level..compaction.upper_level {
@@ -574,14 +562,6 @@ impl Version {
             new_level
                 .ssts
                 .retain(|x| !compaction.inputs.contains(&Setsum::from_digest(x.setsum)));
-            clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                    compaction_id: compaction.compaction_id,
-                } => TreeLogValue::CompactLevel {
-                    level,
-                    before: this_level.ssts.iter().map(|x| x.setsum).collect(),
-                    after: new_level.ssts.iter().map(|x| x.setsum).collect(),
-                }
-            };
             new_tree.levels[level] = new_level;
         }
         let upper_level = &new_tree.levels[compaction.upper_level];
@@ -600,22 +580,6 @@ impl Version {
         new_level
             .ssts
             .extend_from_slice(&upper_level.ssts[upper_bound..]);
-        clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                compaction_id: compaction.compaction_id,
-            } => TreeLogValue::CompactLevel {
-                level: compaction.upper_level,
-                before: upper_level.ssts.iter().map(|x| x.setsum).collect(),
-                after: new_level.ssts.iter().map(|x| x.setsum).collect(),
-            }
-        };
-        clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                compaction_id: compaction.compaction_id,
-            } => TreeLogValue::CompactUpperLevelBounds {
-                level: compaction.upper_level,
-                lower_bound,
-                upper_bound,
-            }
-        };
         new_tree.levels[compaction.upper_level] = new_level;
         Ok(new_tree)
     }
@@ -928,21 +892,10 @@ impl Version {
 
     fn emit_compaction(
         &self,
-        compaction_id: CompactionID,
+        _compaction_id: CompactionID,
         compaction: Compaction,
-        score: i64,
+        _score: i64,
     ) -> Option<Compaction> {
-        clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                compaction_id,
-            } => TreeLogValue::CandidateCompaction {
-                score,
-                lower_level: compaction.core.lower_level,
-                upper_level: compaction.core.upper_level,
-                first_key: compaction.core.first_key.clone(),
-                last_key: compaction.core.last_key.clone(),
-                inputs: compaction.core.inputs.iter().map(|x| x.digest()).collect(),
-            }
-        };
         self.ongoing
             .lock()
             .unwrap()
@@ -1421,21 +1374,10 @@ impl LsmTree {
             cursors.push(sst.cursor());
             acc += input;
             COMPACTION_NEW_CURSOR.click();
-            clue! { LSM_TREE_LOG, TreeLogKey::BySetsum {
-                    setsum: input.digest(),
-                } => TreeLogValue::GatherInput {
-                }
-            };
         }
         // Setup the compaction output directory.
         let compaction_dir = COMPACTION_DIR(&self.root, acc);
         if compaction_dir.exists() {
-            clue! { LSM_TREE_LOG, TreeLogKey::ByCompactionID {
-                    compaction_id: compaction.compaction_id(),
-                } => TreeLogValue::RemoveCompactionDir {
-                    dir: compaction_dir.to_string_lossy().to_string(),
-                }
-            };
             remove_dir_all(&compaction_dir)
                 .as_z()
                 .with_info("dir", &compaction_dir)?;

@@ -1,45 +1,23 @@
-use std::fmt::{Display, Formatter};
+#![allow(clippy::excessive_precision)]
+#![allow(clippy::approx_constant)]
 
-use indicio::{clue, Collector, PrintlnEmitter};
+use indicio::{clue, Collector};
 
-#[derive(Clone, Debug, Default, prototk_derive::Message)]
-struct ExampleKey {
-    #[prototk(1, string)]
-    first_key_field: String,
-    #[prototk(2, uint64)]
-    second_key_field: u64,
-}
-
-impl Display for ExampleKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Clone, Debug, Default, prototk_derive::Message)]
-struct ExampleValue {
-    #[prototk(1, string)]
-    first_value_field: String,
-    #[prototk(2, uint64)]
-    second_value_field: u64,
-}
-
-impl Display for ExampleValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
-    }
-}
-
-static EXAMPLE_COLLECTOR: Collector<ExampleKey, ExampleValue> = Collector::new();
+static TEST_COLLECTOR: Collector = Collector::new();
 
 fn main() {
-    EXAMPLE_COLLECTOR.register(PrintlnEmitter::new());
-    clue! { EXAMPLE_COLLECTOR, ExampleKey {
-            first_key_field: "my key".to_string(),
-            second_key_field: 42,
-        } => ExampleValue {
-            first_value_field: "hello world".to_string(),
-            second_value_field: u64::MAX,
-        }
-    };
+    clue!(TEST_COLLECTOR, {
+        hello: "world",
+        consts: [
+            2.71828182845904523536028747135266250_f64,
+            3.14159265358979323846264338327950288_f64,
+        ],
+        recursive: {
+            hello: "world",
+            consts: [
+                2.71828182845904523536028747135266250_f64,
+                3.14159265358979323846264338327950288_f64,
+            ],
+        },
+    });
 }

@@ -35,16 +35,6 @@ zerror_core = { path = "../zerror_core", version = "0.4" }
 zerror_derive = { path = "../zerror_derive", version = "0.2" }
 
 [[bin]]
-name = "lsmtk-debugger"
-path = "src/bin/lsmtk-debugger.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "lsmtk-describe-compaction"
-path = "src/bin/lsmtk-describe-compaction.rs"
-required-features = ["binaries"]
-
-[[bin]]
 name = "lsmtk-init"
 path = "src/bin/lsmtk-init.rs"
 required-features = ["binaries"]
@@ -52,11 +42,6 @@ required-features = ["binaries"]
 [[bin]]
 name = "lsmtk-options"
 path = "src/bin/lsmtk-options.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "lsmtk-search-for-known-compaction-bugs"
-path = "src/bin/lsmtk-search-for-known-compaction-bugs.rs"
 required-features = ["binaries"]
 
 [[bin]]
