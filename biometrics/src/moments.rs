@@ -6,7 +6,7 @@
 ///
 /// The type itelf is algebraic.  Take two readings separated by time and subtract them to get
 /// perfectly recorded moments for the interval between the points.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct Moments {
     /// The number of observations.
     pub n: u64,

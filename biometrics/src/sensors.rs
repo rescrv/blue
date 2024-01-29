@@ -126,7 +126,7 @@ impl Sensor for Moments {
     #[inline(always)]
     fn read(&'static self) -> moments::Moments {
         let value = self.value.lock().unwrap();
-        value.clone()
+        *value
     }
 }
 
