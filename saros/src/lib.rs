@@ -87,7 +87,11 @@ impl<S: AsRef<str>> From<S> for Label {
 pub struct Tags(Vec<String>);
 
 impl Tags {
-    /// True if every tag in [other] is in [self].
+    /// Create a new set of tags.
+    pub fn new<S: AsRef<str>>(tags: &[S]) -> Self {
+        Self(tags.iter().map(|s| s.as_ref().to_string()).collect())
+    }
+
     fn contains(&self, other: &Tags) -> bool {
         other.0.iter().all(|t| self.0.contains(t))
     }
