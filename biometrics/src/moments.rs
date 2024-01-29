@@ -1,5 +1,7 @@
 //! Statistical moments.
 
+use std::ops::{Add, Sub};
+
 /// Moments are the statistical moments of mean (m1), standard deviation (m2), skewness (m3) and
 /// kurtosis (m4).  When a distribution goes long tailed, skewness and kurtosis blow up, so the
 /// hope is that this type will be good for monitoring general "no bad tail" insights.
@@ -131,6 +133,22 @@ impl Moments {
             m3,
             m4,
         }
+    }
+}
+
+impl Add<Moments> for Moments {
+    type Output = Self;
+
+    fn add(self, other: Moments) -> Self {
+        Self::add(&self, &other)
+    }
+}
+
+impl Sub<Moments> for Moments {
+    type Output = Self;
+
+    fn sub(self, other: Moments) -> Self {
+        Self::sub(&self, &other)
     }
 }
 
