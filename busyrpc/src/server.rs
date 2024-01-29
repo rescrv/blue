@@ -82,7 +82,7 @@ pub struct ServerOptions {
     #[cfg_attr(feature = "binaries", arrrg(required, "Port to bind to."))]
     pub bind_to_port: u16,
     /// Number of threads to spawn.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Number of threads to spawn."))]
+    #[cfg_attr(feature = "binaries", arrrg(optional, "Number of threads to spawn."))]
     pub thread_pool_size: u16,
     /// Send-buffer size.
     // Buffering preferences.
