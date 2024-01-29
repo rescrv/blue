@@ -3,7 +3,7 @@
 use std::fmt::Display;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use biometrics::Counter;
 use tatl::{HeyListen, Stationary};
@@ -357,9 +357,19 @@ macro_rules! value_internal {
 /// An emitter for indicio tha temits key-value pairs.
 pub trait Emitter: Send {
     /// Emit the provided key-value pair at the specified file/line.
-    fn emit(&mut self, file: &'static str, line: u32, value: Value);
+    fn emit(&self, file: &'static str, line: u32, value: Value);
     /// Flush the emitter with whatever semantics the emitter chooses.
-    fn flush(&mut self) {}
+    fn flush(&self) {}
+}
+
+impl<E: Emitter + Sync> Emitter for Arc<E> {
+    fn emit(&self, file: &'static str, line: u32, value: Value) {
+        <E as Emitter>::emit(self, file, line, value)
+    }
+
+    fn flush(&self) {
+        <E as Emitter>::flush(self)
+    }
 }
 
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
