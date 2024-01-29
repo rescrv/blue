@@ -1,6 +1,7 @@
 use std::fs::{read_dir, remove_file, File};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use arrrg::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
@@ -22,7 +23,8 @@ fn main() {
         let fout = File::create("/dev/stdout").unwrap();
         let mut emit = PlainTextEmitter::new(fout);
         loop {
-            if let Err(e) = collector.emit(&mut emit) {
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+            if let Err(e) = collector.emit(&mut emit, now) {
                 eprintln!("collector error: {}", e);
             }
             std::thread::sleep(std::time::Duration::from_millis(249));

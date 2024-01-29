@@ -4,8 +4,6 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
 
-use utilz::time::now;
-
 pub mod moments;
 mod sensors;
 
@@ -67,7 +65,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         &self,
         emitter: &mut EM,
         emit: &dyn Fn(&mut EM, &'static S, u64) -> Result<(), ERR>,
-        now: &dyn Fn() -> u64,
+        now: u64,
     ) -> Result<(), ERR> {
         let num_sensors = { self.sensors.lock().unwrap().len() };
         let mut sensors: Vec<&'static S> = Vec::with_capacity(num_sensors);
@@ -79,7 +77,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
         }
         let mut result = Ok(());
         for sensor in sensors {
-            match emit(emitter, sensor, now()) {
+            match emit(emitter, sensor, now) {
                 Ok(_) => self.emit.click(),
                 Err(e) => {
                     if let Ok(()) = result {
@@ -164,18 +162,12 @@ impl Collector {
     pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(
         &self,
         emitter: &mut EM,
+        now: u64,
     ) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(
-            self.counters
-                .emit(emitter, &EM::emit_counter, &Self::now_ms),
-        );
-        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, &Self::now_ms));
-        result.and(self.moments.emit(emitter, &EM::emit_moments, &Self::now_ms))
-    }
-
-    fn now_ms() -> u64 {
-        now::millis()
+        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, now));
+        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, now));
+        result.and(self.moments.emit(emitter, &EM::emit_moments, now))
     }
 }
 

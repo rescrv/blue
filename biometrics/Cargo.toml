@@ -7,4 +7,3 @@ description = "Biometrics provide the vitals of a process in the form of counter
 license = "Apache-2.0"
 
 [dependencies]
-utilz = { path = "../utilz", version = "0.3" }

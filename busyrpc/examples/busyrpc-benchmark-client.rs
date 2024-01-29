@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
@@ -51,7 +52,8 @@ fn main() {
         let fout = File::create("/dev/stdout").unwrap();
         let mut emit = PlainTextEmitter::new(fout);
         loop {
-            if let Err(e) = collector.emit(&mut emit) {
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+            if let Err(e) = collector.emit(&mut emit, now) {
                 eprintln!("collector error: {}", e);
             }
             std::thread::sleep(std::time::Duration::from_millis(249));

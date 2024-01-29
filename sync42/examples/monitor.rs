@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, MutexGuard};
+use std::time::SystemTime;
 
 use biometrics::{Collector, Counter};
 
@@ -127,7 +128,8 @@ fn main() {
         let fout = std::fs::File::create("/dev/stdout").unwrap();
         let mut emit = biometrics::PlainTextEmitter::new(fout);
         loop {
-            if let Err(e) = collector.emit(&mut emit) {
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+            if let Err(e) = collector.emit(&mut emit, now) {
                 eprintln!("collector error: {}", e);
             }
             std::thread::sleep(std::time::Duration::from_millis(250));

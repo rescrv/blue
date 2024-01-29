@@ -7,7 +7,7 @@ use std::fs::File;
 use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use armnod::{Armnod, ArmnodOptions};
 use biometrics::{Collector, Counter, Moments};
@@ -295,7 +295,8 @@ impl<KVS: KeyValueStore + 'static> WorkloadTrait<KVS> for Workload<KVS> {
         let collector = Collector::new();
         register_biometrics(&collector);
         kvs.register_biometrics(&collector);
-        if let Err(e) = collector.emit(&mut metrics) {
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+        if let Err(e) = collector.emit(&mut metrics, now) {
             eprintln!("collector error: {}", e);
         }
         // Spawn the worker threads.
@@ -330,7 +331,8 @@ impl<KVS: KeyValueStore + 'static> WorkloadTrait<KVS> for Workload<KVS> {
             && state.stopped.load(Ordering::Relaxed) < self.options.worker_threads
         {
             std::thread::sleep(std::time::Duration::from_millis(1000));
-            if let Err(e) = collector.emit(&mut metrics) {
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+            if let Err(e) = collector.emit(&mut metrics, now) {
                 eprintln!("collector error: {}", e);
             }
         }
