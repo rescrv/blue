@@ -57,6 +57,15 @@ impl Plot {
             writeln!(out, "{:>label_width$}", self.label)?;
         }
         for series in series {
+            let label = if once {
+                self.label.clone()
+            } else {
+                series.label_with_tags()
+            };
+            if series.series.is_empty() {
+                writeln!(out, "{label:>label_width$} no data")?;
+                continue;
+            }
             let y_min = self.y_min.unwrap_or(0.0);
             let y_max = self.y_max.unwrap_or(series.series.points.iter().map(|(_, p)| *p).max_by(f64::total_cmp).unwrap());
             let mut graph = String::new();
@@ -71,11 +80,6 @@ impl Plot {
                 };
                 graph.push(c);
             }
-            let label = if once {
-                self.label.clone()
-            } else {
-                series.label_with_tags()
-            };
             writeln!(out, "{label:>label_width$} {graph:>graph_width$}")?;
         }
         Ok(())
