@@ -189,26 +189,6 @@ impl<P: Point> Series<P> {
         Self { points }
     }
 
-    /// Downsample the series to the prescribed number of buckets.
-    pub fn buckets(&self, window: Window, buckets: usize) -> Self {
-        let delta = Time((window.1 - window.0).0 / buckets as i64);
-        let mut thresh = window.0;
-        let mut points = vec![];
-        for (t, p) in self.points.iter() {
-            if thresh > *t && !points.is_empty() {
-                points.pop();
-            }
-            points.push((*t, *p));
-            if thresh <= *t {
-                thresh = thresh + delta;
-            }
-        }
-        while points.len() > buckets {
-            points.pop();
-        }
-        Self { points }
-    }
-
     /// Merge two series according to the point-wise merge function.
     pub fn merge<F: FnMut(P, P) -> P>(lhs: &Self, rhs: &Self, mut f: F) -> Self {
         let mut points = vec![];
@@ -267,6 +247,35 @@ impl Series<i64> {
             points,
         }
     }
+
+    fn rate(&self, window: Window, buckets: usize) -> Series<f64> {
+        let delta = Time((window.1 - window.0).0 / buckets as i64);
+        let mut thresh = window.0;
+        let mut points = vec![];
+        let mut prev = None;
+        for (t, p) in self.points.iter() {
+            // TODO(rescrv): This is broken in two ways:
+            // - Handling of prev doesn't take into account popped values
+            // - If the series is too short...
+            if thresh > *t && !points.is_empty() {
+                points.pop();
+            }
+            let val = if let Some(prev) = prev {
+                *p - prev
+            } else {
+                *p
+            };
+            points.push((*t, val));
+            prev = Some(*p);
+            if thresh <= *t {
+                thresh = thresh + delta;
+            }
+        }
+        while points.len() > buckets {
+            points.pop();
+        }
+        Self { points }.as_f64()
+    }
 }
 
 impl Series<f64> {
@@ -274,11 +283,49 @@ impl Series<f64> {
     fn as_f64(&self) -> Series<f64> {
         self.clone()
     }
+
+    fn gauge(&self, window: Window, buckets: usize) -> Series<f64> {
+        let delta = Time((window.1 - window.0).0 / buckets as i64);
+        let mut thresh = window.0;
+        let mut points = vec![];
+        for (t, p) in self.points.iter() {
+            // TODO(rescrv): This is broken if the series is too short...
+            if thresh > *t && !points.is_empty() {
+                points.pop();
+            }
+            points.push((*t, *p));
+            if thresh <= *t {
+                thresh = thresh + delta;
+            }
+        }
+        while points.len() > buckets {
+            points.pop();
+        }
+        Self { points }.as_f64()
+    }
 }
 
 impl Series<Moments> {
-    /// Convert the series to a series of f64 points.
-    fn as_f64(&self) -> Series<f64> {
+    /// Convert the series to a series of f64 points using the mean.
+    fn count_as_i64(&self) -> Series<i64> {
+        let points = self.points.iter().map(|(t, p)| (*t, p.n() as i64)).collect();
+        Series {
+            points,
+        }
+    }
+
+    /// Convert the series to a series of f64 points using the mean.
+    #[allow(dead_code)]
+    fn mean_as_f64(&self) -> Series<f64> {
+        let points = self.points.iter().map(|(t, p)| (*t, p.mean())).collect();
+        Series {
+            points,
+        }
+    }
+
+    /// Convert the series to a series of f64 points using the sum.
+    #[allow(dead_code)]
+    fn sum_as_f64(&self) -> Series<f64> {
         let points = self.points.iter().map(|(t, p)| (*t, p.n() as f64 * p.mean())).collect();
         Series {
             points,
@@ -322,7 +369,8 @@ impl LabeledSeries {
 /// A Query represents a logical set of time series to be retrieved and arranged.
 #[derive(Clone, Debug)]
 pub enum Query {
-    Simple(Label, Tags),
+    Rate(Label, Tags),
+    Gauge(Label, Tags),
     Union(Vec<Query>),
 }
 
@@ -459,8 +507,18 @@ impl QueryEngine {
     /// buckets.
     pub fn query(&self, q: &Query, window: Window, buckets: usize) -> Result<Vec<LabeledSeries>, Error> {
         match q {
-            Query::Simple(label, tags) => {
-                let series = self.series_for_label(label, tags, window, buckets)?;
+            Query::Rate(label, tags) => {
+                let series = self.rate_for_label(label, tags, window, buckets)?;
+                Ok(vec![
+                    LabeledSeries {
+                        label: label.clone(),
+                        tags: tags.clone(),
+                        series,
+                    }
+                ])
+            }
+            Query::Gauge(label, tags) => {
+                let series = self.gauge_for_label(label, tags, window, buckets)?;
                 Ok(vec![
                     LabeledSeries {
                         label: label.clone(),
@@ -479,7 +537,30 @@ impl QueryEngine {
         }
     }
 
-    fn series_for_label(
+    fn rate_for_label(
+        &self,
+        label: &Label,
+        tags: &Tags,
+        window: Window,
+        buckets: usize,
+    ) -> Result<Series<f64>, Error> {
+        let mut agg: Series<i64> = Series::default();
+        for biometrics in self.biometrics.iter() {
+            let counters = biometrics.metrics_by_label(MetricType::Counter, label, tags, window)?;
+            for counter in counters {
+                let series = biometrics.counter_by_metric_id(counter, window)?;
+                agg = agg + series;
+            }
+            let moments = biometrics.metrics_by_label(MetricType::Moments, label, tags, window)?;
+            for moments in moments {
+                let series = biometrics.moments_by_metric_id(moments, window)?.count_as_i64();
+                agg = agg + series;
+            }
+        }
+        Ok(agg.rate(window, buckets))
+    }
+
+    fn gauge_for_label(
         &self,
         label: &Label,
         tags: &Tags,
@@ -488,22 +569,12 @@ impl QueryEngine {
     ) -> Result<Series<f64>, Error> {
         let mut agg: Series<f64> = Series::default();
         for biometrics in self.biometrics.iter() {
-            let counters = biometrics.metrics_by_label(MetricType::Counter, label, tags, window)?;
-            for counter in counters {
-                let series = biometrics.counter_by_metric_id(counter, window)?.as_f64();
-                agg = agg + series;
-            }
             let gauges = biometrics.metrics_by_label(MetricType::Gauge, label, tags, window)?;
             for gauge in gauges {
-                let series = biometrics.gauge_by_metric_id(gauge, window)?.as_f64();
-                agg = agg + series;
-            }
-            let moments = biometrics.metrics_by_label(MetricType::Moments, label, tags, window)?;
-            for moments in moments {
-                let series = biometrics.moments_by_metric_id(moments, window)?.as_f64();
+                let series = biometrics.gauge_by_metric_id(gauge, window)?;
                 agg = agg + series;
             }
         }
-        Ok(agg.buckets(window, buckets))
+        Ok(agg.gauge(window, buckets))
     }
 }

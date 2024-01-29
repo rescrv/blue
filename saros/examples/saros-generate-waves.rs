@@ -84,16 +84,16 @@ fn main() {
         COUNTER_2.click();
         store.push_counter(&COUNTER_2.label().into(), &tags, Time::from_secs(i), COUNTER_2.read());
     }
-    let plot10 = Plot::new("λ = 10", Query::Simple("waves.sin.10".into(), tags.clone()))
+    let plot10 = Plot::new("λ = 10", Query::Gauge("waves.sin.10".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot60 = Plot::new("λ = 60", Query::Simple("waves.sin.60".into(), tags.clone()))
+    let plot60 = Plot::new("λ = 60", Query::Gauge("waves.sin.60".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot1200 = Plot::new("λ = 1200", Query::Simple("waves.sin.1200".into(), tags.clone()))
+    let plot1200 = Plot::new("λ = 1200", Query::Gauge("waves.sin.1200".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot3600 = Plot::new("λ = 3600", Query::Simple("waves.sin.3600".into(), tags.clone()))
+    let plot3600 = Plot::new("λ = 3600", Query::Gauge("waves.sin.3600".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
     let panel1 = Panel::new("sin waves")
@@ -101,16 +101,16 @@ fn main() {
         .with_plot(plot60)
         .with_plot(plot1200)
         .with_plot(plot3600);
-    let plot10 = Plot::new("λ = 10", Query::Simple("waves.cos.10".into(), tags.clone()))
+    let plot10 = Plot::new("λ = 10", Query::Gauge("waves.cos.10".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot60 = Plot::new("λ = 60", Query::Simple("waves.cos.60".into(), tags.clone()))
+    let plot60 = Plot::new("λ = 60", Query::Gauge("waves.cos.60".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot1200 = Plot::new("λ = 1200", Query::Simple("waves.cos.1200".into(), tags.clone()))
+    let plot1200 = Plot::new("λ = 1200", Query::Gauge("waves.cos.1200".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
-    let plot3600 = Plot::new("λ = 3600", Query::Simple("waves.cos.3600".into(), tags.clone()))
+    let plot3600 = Plot::new("λ = 3600", Query::Gauge("waves.cos.3600".into(), tags.clone()))
         .with_y_min(0.0)
         .with_y_max(1.0);
     let panel2 = Panel::new("cos waves")
@@ -118,7 +118,7 @@ fn main() {
         .with_plot(plot60)
         .with_plot(plot1200)
         .with_plot(plot3600);
-    let plot = Plot::new("zero", Query::Union(vec![Query::Simple("waves.sin.1200".into(), tags.clone()), Query::Simple("waves.neg_sin.1200".into(), tags.clone())]))
+    let plot = Plot::new("zero", Query::Union(vec![Query::Gauge("waves.sin.1200".into(), tags.clone()), Query::Gauge("waves.neg_sin.1200".into(), tags.clone())]))
         .with_y_min(-1.0)
         .with_y_max(1.0);
     let panel3 = Panel::new("matched sin waves")
