@@ -1,12 +1,12 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::approx_constant)]
 
-use indicio::{clue, Collector};
+use indicio::{clue, Collector, ALWAYS};
 
 static TEST_COLLECTOR: Collector = Collector::new();
 
 fn main() {
-    clue!(TEST_COLLECTOR, {
+    clue!(TEST_COLLECTOR, ALWAYS, {
         hello: "world",
         consts: [
             2.71828182845904523536028747135266250_f64,

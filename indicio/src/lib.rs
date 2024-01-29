@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use biometrics::Counter;
@@ -11,6 +11,15 @@ use tatl::{HeyListen, Stationary};
 mod parser;
 
 use parser::ParseError;
+
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
+pub const ALWAYS: u64 = 0;
+pub const ERROR: u64 = 3;
+pub const WARNING: u64 = 6;
+pub const INFO: u64 = 9;
+pub const DEBUG: u64 = 12;
+pub const TRACING: u64 = 15;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -357,14 +366,14 @@ macro_rules! value_internal {
 /// An emitter for indicio tha temits key-value pairs.
 pub trait Emitter: Send {
     /// Emit the provided key-value pair at the specified file/line.
-    fn emit(&self, file: &'static str, line: u32, value: Value);
+    fn emit(&self, file: &'static str, line: u32, level: u64, value: Value);
     /// Flush the emitter with whatever semantics the emitter chooses.
     fn flush(&self) {}
 }
 
 impl<E: Emitter + Sync> Emitter for Arc<E> {
-    fn emit(&self, file: &'static str, line: u32, value: Value) {
-        <E as Emitter>::emit(self, file, line, value)
+    fn emit(&self, file: &'static str, line: u32, level: u64, value: Value) {
+        <E as Emitter>::emit(self, file, line, level, value)
     }
 
     fn flush(&self) {
@@ -377,6 +386,7 @@ impl<E: Emitter + Sync> Emitter for Arc<E> {
 /// A collector is meant to be a static singleton that conditionally logs.
 pub struct Collector {
     should_log: AtomicBool,
+    verbosity: AtomicU64,
     emitter: Mutex<Option<Box<dyn Emitter>>>,
 }
 
@@ -385,6 +395,7 @@ impl Collector {
     pub const fn new() -> Self {
         Self {
             should_log: AtomicBool::new(false),
+            verbosity: AtomicU64::new(0),
             emitter: Mutex::new(None),
         }
     }
@@ -394,13 +405,23 @@ impl Collector {
         self.should_log.load(Ordering::Relaxed)
     }
 
+    /// The verbosity of the log.  0 is least verbose, N is N levels of verbosity.
+    pub fn verbosity(&self) -> u64 {
+        self.verbosity.load(Ordering::Relaxed)
+    }
+
+    /// Set the verbosity of the log.
+    pub fn set_verbosity(&self, verbosity: u64) {
+        self.verbosity.store(verbosity, Ordering::Relaxed);
+    }
+
     /// Emit the key-value pair via the collector if and only if it is logging and has an emitter
     /// configured.
-    pub fn emit(&self, file: &'static str, line: u32, value: Value) {
+    pub fn emit(&self, file: &'static str, line: u32, level: u64, value: Value) {
         if self.is_logging() {
             let mut emitter = self.emitter.lock().unwrap();
             if let Some(emitter) = emitter.as_deref_mut() {
-                emitter.emit(file, line, value);
+                emitter.emit(file, line, level, value);
             }
         }
     }
@@ -436,9 +457,9 @@ impl Collector {
 /// This will be lazy, and only evaluate the key-value pair if the collector is logging.
 #[macro_export]
 macro_rules! clue {
-    ($collector:ident, { $($value:tt)* }) => {
-        if $collector.is_logging() {
-            $collector.emit(file!(), line!(), $crate::value!({ $($value)* }));
+    ($collector:ident, $level:expr, { $($value:tt)* }) => {
+        if $collector.is_logging() && $collector.verbosity() >= $level {
+            $collector.emit(file!(), line!(), $level, $crate::value!({ $($value)* }));
         }
     };
 }
