@@ -23,6 +23,7 @@ members = [
     "prototk",
     "prototk_derive",
     "rpc_pb",
+    "saros",
     "scrunch",
     "setsum",
     "skipfree",
