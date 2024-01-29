@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 use std::ops::{Add, Bound, RangeBounds, Sub};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use biometrics::moments::Moments;
 use biometrics::Counter;
@@ -391,6 +391,42 @@ impl<B: BiometricsStore> BiometricsStore for Arc<B> {
         window: Window,
     ) -> Result<Series<Moments>, Error> {
         <B as BiometricsStore>::moments_by_metric_id(self, metric_id, window)
+    }
+}
+
+impl<B: BiometricsStore> BiometricsStore for Mutex<B> {
+    fn metrics_by_label(
+        &self,
+        metric_type: MetricType,
+        label: &Label,
+        tags: &Tags,
+        window: Window,
+    ) -> Result<Vec<MetricID>, Error> {
+        <B as BiometricsStore>::metrics_by_label(&self.lock().unwrap(), metric_type, label, tags, window)
+    }
+
+    fn counter_by_metric_id(
+        &self,
+        metric_id: MetricID,
+        window: Window,
+    ) -> Result<Series<i64>, Error> {
+        <B as BiometricsStore>::counter_by_metric_id(&self.lock().unwrap(), metric_id, window)
+    }
+
+    fn gauge_by_metric_id(
+        &self,
+        metric_id: MetricID,
+        window: Window,
+    ) -> Result<Series<f64>, Error> {
+        <B as BiometricsStore>::gauge_by_metric_id(&self.lock().unwrap(), metric_id, window)
+    }
+
+    fn moments_by_metric_id(
+        &self,
+        metric_id: MetricID,
+        window: Window,
+    ) -> Result<Series<Moments>, Error> {
+        <B as BiometricsStore>::moments_by_metric_id(&self.lock().unwrap(), metric_id, window)
     }
 }
 
