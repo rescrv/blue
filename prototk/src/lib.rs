@@ -1261,6 +1261,13 @@ impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
                     }
                 };
                 let sz: usize = x.into();
+                if buf.len() < x.pack_sz() + sz {
+                    *self.err = Some(Error::BufferTooShort {
+                        required: sz,
+                        had: buf.len(),
+                    });
+                    return None;
+                }
                 self.up.advance(sz);
                 Some((tag, &buf[0..x.pack_sz() + sz]))
             }
