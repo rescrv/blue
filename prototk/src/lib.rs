@@ -886,7 +886,7 @@ impl std::cmp::PartialEq<u32> for FieldNumber {
 //////////////////////////////////////////////// Tag ///////////////////////////////////////////////
 
 /// A protobuf tag has two parts:  A `field_number` and a `wire_type`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Tag {
     /// The field number of this tag.
     pub field_number: FieldNumber,
