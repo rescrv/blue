@@ -1,0 +1,225 @@
+TableSet {
+    tables: [
+        Table {
+            ident: Identifier(User),
+            number: FieldNumber {
+                field_number: 1,
+            },
+            key: [
+                Key {
+                    ident: Identifier(user_id),
+                    number: FieldNumber {
+                        field_number: 1,
+                    },
+                    ty: string,
+                    dir: Forward,
+                },
+            ],
+            fields: [
+                Field(
+                    Field {
+                        ident: Identifier(registered),
+                        number: FieldNumber {
+                            field_number: 2,
+                        },
+                        ty: uint64,
+                        breakout: false,
+                    },
+                ),
+                Object(
+                    Object {
+                        ident: Identifier(password),
+                        number: FieldNumber {
+                            field_number: 3,
+                        },
+                        fields: [
+                            Field(
+                                Field {
+                                    ident: Identifier(algo),
+                                    number: FieldNumber {
+                                        field_number: 1,
+                                    },
+                                    ty: string,
+                                    breakout: false,
+                                },
+                            ),
+                            Field(
+                                Field {
+                                    ident: Identifier(salt),
+                                    number: FieldNumber {
+                                        field_number: 2,
+                                    },
+                                    ty: bytes,
+                                    breakout: false,
+                                },
+                            ),
+                            Field(
+                                Field {
+                                    ident: Identifier(hash),
+                                    number: FieldNumber {
+                                        field_number: 3,
+                                    },
+                                    ty: bytes,
+                                    breakout: false,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                Map(
+                    Map {
+                        key: Key {
+                            ident: Identifier(threads),
+                            number: FieldNumber {
+                                field_number: 4,
+                            },
+                            ty: string,
+                            dir: Forward,
+                        },
+                        fields: [
+                            Join(
+                                Join {
+                                    ident: Identifier(thread),
+                                    number: FieldNumber {
+                                        field_number: 1,
+                                    },
+                                    join_table: Identifier(Thread),
+                                    join_keys: [
+                                        Identifier(threads),
+                                    ],
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                Map(
+                    Map {
+                        key: Key {
+                            ident: Identifier(sessions),
+                            number: FieldNumber {
+                                field_number: 5,
+                            },
+                            ty: string,
+                            dir: Forward,
+                        },
+                        fields: [
+                            Field(
+                                Field {
+                                    ident: Identifier(expires_us),
+                                    number: FieldNumber {
+                                        field_number: 1,
+                                    },
+                                    ty: uint64,
+                                    breakout: true,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        },
+        Table {
+            ident: Identifier(Thread),
+            number: FieldNumber {
+                field_number: 2,
+            },
+            key: [
+                Key {
+                    ident: Identifier(thread_id),
+                    number: FieldNumber {
+                        field_number: 1,
+                    },
+                    ty: string,
+                    dir: Forward,
+                },
+            ],
+            fields: [
+                Field(
+                    Field {
+                        ident: Identifier(posted_us),
+                        number: FieldNumber {
+                            field_number: 2,
+                        },
+                        ty: uint64,
+                        breakout: false,
+                    },
+                ),
+                Field(
+                    Field {
+                        ident: Identifier(parent),
+                        number: FieldNumber {
+                            field_number: 3,
+                        },
+                        ty: string,
+                        breakout: false,
+                    },
+                ),
+                Field(
+                    Field {
+                        ident: Identifier(body),
+                        number: FieldNumber {
+                            field_number: 4,
+                        },
+                        ty: string,
+                        breakout: false,
+                    },
+                ),
+                Map(
+                    Map {
+                        key: Key {
+                            ident: Identifier(upvotes),
+                            number: FieldNumber {
+                                field_number: 5,
+                            },
+                            ty: string,
+                            dir: Forward,
+                        },
+                        fields: [
+                            Field(
+                                Field {
+                                    ident: Identifier(time_us),
+                                    number: FieldNumber {
+                                        field_number: 1,
+                                    },
+                                    ty: uint64,
+                                    breakout: false,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        },
+        Table {
+            ident: Identifier(Inbox),
+            number: FieldNumber {
+                field_number: 3,
+            },
+            key: [
+                Key {
+                    ident: Identifier(user_id),
+                    number: FieldNumber {
+                        field_number: 1,
+                    },
+                    ty: string,
+                    dir: Forward,
+                },
+            ],
+            fields: [
+                Map(
+                    Map {
+                        key: Key {
+                            ident: Identifier(messages),
+                            number: FieldNumber {
+                                field_number: 2,
+                            },
+                            ty: sfixed64,
+                            dir: Forward,
+                        },
+                        fields: [],
+                    },
+                ),
+            ],
+        },
+    ],
+}

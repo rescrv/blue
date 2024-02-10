@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ddfd9e5f3ca7851466b16beecddacf0941d3357427229f71cf36d9110272bd41 # shrinks to data_type = bytes16
+cc bd99f0c4e4e13a73b2ce771e32234dc3848b0bb5d20611b3ed34846d1913674f # shrinks to data_type = Bool
+cc 20b1633d78da0a691ca5f18532a2f61495ce3d48025558254e5bb8029291de78 # shrinks to field = Field { ident: Identifier(a), number: FieldNumber { field_number: 1 }, ty: unit, breakout: true }
+cc a4a6fdf0d94ce28b3a4d4fbd59ce413af729029b3d210a79e28812ad6427885c # shrinks to fd = Map(Map { key: Field { ident: Identifier(a), number: FieldNumber { field_number: 1 }, ty: fixed32, breakout: false }, fields: [Map(Map { key: Field { ident: Identifier(a), number: FieldNumber { field_number: 1 }, ty: fixed32, breakout: false }, fields: [Object(Object { ident: Identifier(R), number: FieldNumber { field_number: 1 }, fields: [] }), Map(Map { key: Field { ident: Identifier(R), number: FieldNumber { field_number: 1 }, ty: fixed32, breakout: false }, fields: [] })] })] })

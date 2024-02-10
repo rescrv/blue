@@ -1,0 +1,28 @@
+table User (string user_id = 1) @ 1 {
+    uint64 registered = 2;
+    object password = 3 {
+        string algo = 1;
+        bytes salt = 2;
+        bytes hash = 3;
+    };
+    map string threads = 4 {
+        join thread = 1 on Thread(threads);
+    };
+    map string sessions = 5 {
+        breakout uint64 expires_us = 1;
+    };
+}
+
+table Thread (string thread_id = 1) @ 2 {
+    uint64 posted_us = 2;
+    string parent = 3;
+    string body = 4;
+    map string upvotes = 5 {
+        uint64 time_us = 1;
+    };
+}
+
+table Inbox (string user_id = 1) @ 3 {
+    map sfixed64 messages = 2 {
+    };
+}

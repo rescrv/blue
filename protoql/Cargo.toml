@@ -1,0 +1,48 @@
+[package]
+name = "protoql"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "ProtoQL is the protobuf query language."
+license = "Apache-2.0"
+
+[features]
+default = ["binaries"]
+
+binaries = []
+
+[dependencies]
+nom = "7.1"
+
+buffertk = { path = "../buffertk", version = "0.5" }
+keyvalint = { path = "../keyvalint", version = "0.2" }
+prototk = { path = "../prototk", version = "0.5" }
+prototk_derive = { path = "../prototk_derive", version = "0.5" }
+tuple_key = { path = "../tuple_key", version = "0.4" }
+tuple_key_derive = { path = "../tuple_key_derive", version = "0.4" }
+zerror = { path = "../zerror", version = "0.3" }
+zerror_core = { path = "../zerror_core", version = "0.4" }
+zerror_derive = { path = "../zerror_derive", version = "0.2" }
+
+[dev-dependencies]
+proptest = "1.0"
+
+[[bin]]
+name = "protoql-schema-to-protobuf"
+path = "src/bin/protoql-schema-to-protobuf.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "protoql-explain-schema"
+path = "src/bin/protoql-explain-schema.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "protoql-describe-keys"
+path = "src/bin/protoql-describe-keys.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "protoql-explain-query"
+path = "src/bin/protoql-explain-query.rs"
+required-features=["binaries"]

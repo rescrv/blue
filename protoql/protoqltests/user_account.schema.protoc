@@ -1,0 +1,38 @@
+syntax = "proto2";
+
+message User {
+    optional string user_id = 1;
+    optional uint64 registered = 2;
+    message Password {
+        optional string algo = 1;
+        optional bytes salt = 2;
+        optional bytes hash = 3;
+    };
+    optional Password password = 3;
+    message ThreadsValue {
+        optional Thread thread = 1;
+    }
+    map<string, ThreadsValue> threads = 4;
+    message SessionsValue {
+        optional uint64 expires_us = 1;
+    }
+    map<string, SessionsValue> sessions = 5;
+}
+
+message Thread {
+    optional string thread_id = 1;
+    optional uint64 posted_us = 2;
+    optional string parent = 3;
+    optional string body = 4;
+    message UpvotesValue {
+        optional uint64 time_us = 1;
+    }
+    map<string, UpvotesValue> upvotes = 5;
+}
+
+message Inbox {
+    optional string user_id = 1;
+    message MessagesValue {
+    }
+    map<sfixed64, MessagesValue> messages = 2;
+}
