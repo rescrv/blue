@@ -35,7 +35,6 @@ members = [
     "tatl",
     "texttale",
     "tiny_lfu",
-    "tuple_db",
     "tuple_key",
     "tuple_key_derive",
     "utilz",
