@@ -45,7 +45,7 @@ impl MemTable {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, sst::Error> {
         let mut cursor = self.skiplist.iter();
         // TODO(rescrv): Make it so I can use a KeyRef on the iterator.
         cursor.seek(&Key {
@@ -65,7 +65,7 @@ impl MemTable {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MemTableCursor, Error> {
+    ) -> Result<MemTableCursor, sst::Error> {
         let iter = self.skiplist.iter();
         let wrapper = SkipListIteratorWrapper { iter };
         let cursor = PruningCursor::new(wrapper, timestamp)?;

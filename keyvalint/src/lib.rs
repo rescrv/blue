@@ -515,7 +515,7 @@ pub trait KeyValueLoad {
     /// The type of error returned by this KeyValueLoad.
     type Error: Debug;
     /// The type of cursor returned from [range_scan].
-    type RangeScan<'a>: Cursor
+    type RangeScan<'a>: Cursor<Error=Self::Error>
     where
         Self: 'a;
 

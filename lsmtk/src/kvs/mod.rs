@@ -401,7 +401,7 @@ impl keyvalint::KeyValueStore for KeyValueStore {
 }
 
 impl keyvalint::KeyValueLoad for KeyValueStore {
-    type Error = Error;
+    type Error = sst::Error;
     type RangeScan<'a> = BoundsCursor<
         PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>,
         sst::Error,

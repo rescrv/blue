@@ -290,7 +290,7 @@ impl Version {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, sst::Error> {
         *is_tombstone = false;
         let mut level0 = self.levels[0].ssts.clone();
         level0.sort_by_key(|md| md.biggest_timestamp);
@@ -321,7 +321,7 @@ impl Version {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, sst::Error> {
         let setsum = Setsum::from_digest(md.setsum);
         let sst = if let Some(sst) = sc.lookup(setsum) {
             sst.ptr
@@ -337,7 +337,7 @@ impl Version {
             );
             sst
         };
-        Ok(sst.load(key, timestamp, is_tombstone)?)
+        sst.load(key, timestamp, is_tombstone)
     }
 
     fn range_scan<T: AsRef<[u8]>>(
@@ -347,7 +347,7 @@ impl Version {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, sst::Error> {
         fn lazy_cursor(
             fm: &FileManager,
             sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
@@ -418,7 +418,7 @@ impl Version {
                 cursors.push(Box::new(ConcatenatingCursor::new(this_level_cursors)?));
             }
         }
-        Ok(MergingCursor::new(cursors)?)
+        MergingCursor::new(cursors)
     }
 
     fn next_compaction(&self) -> Option<Compaction> {
@@ -1009,7 +1009,7 @@ impl<'a> VersionRef<'a> {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, sst::Error> {
         self.version.load(
             &self.tree.file_manager,
             &self.tree.sst_cache,
@@ -1024,7 +1024,7 @@ impl<'a> VersionRef<'a> {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, sst::Error> {
         self.version.range_scan(
             &self.tree.file_manager,
             &self.tree.sst_cache,
@@ -1574,7 +1574,7 @@ impl LsmTree {
 }
 
 impl keyvalint::KeyValueLoad for LsmTree {
-    type Error = Error;
+    type Error = sst::Error;
     type RangeScan<'a> = BoundsCursor<PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>, sst::Error>;
 
     fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
