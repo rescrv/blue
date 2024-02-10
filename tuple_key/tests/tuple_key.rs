@@ -206,10 +206,10 @@ impl TestElement {
 fn arb_element() -> impl Strategy<Value = TestElement> {
     proptest::prop_oneof! {
         (0..1).prop_map(|_| TestElement::Unit),
-        any::<i32>().prop_map(|e| TestElement::I32(e)),
-        any::<u32>().prop_map(|e| TestElement::U32(e)),
-        any::<i64>().prop_map(|e| TestElement::I64(e)),
-        any::<u64>().prop_map(|e| TestElement::U64(e)),
+        any::<i32>().prop_map(TestElement::I32),
+        any::<u32>().prop_map(TestElement::U32),
+        any::<i64>().prop_map(TestElement::I64),
+        any::<u64>().prop_map(TestElement::U64),
         ".*".prop_map(|e| TestElement::String(e.to_string())),
     }
 }
