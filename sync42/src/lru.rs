@@ -3,7 +3,7 @@
 //! marries a map with a linked list.
 //!
 //! Values for the LeastRecentlyUsedCache must be clonable.  It's expected to put them within an
-//! Arc<V> for fast cloning for types that require more than a simple set of allocations.  The
+//! `Arc<V>` for fast cloning for types that require more than a simple set of allocations.  The
 //! clone happens under a lock, so it's on the person caring about performance to consider the cost
 //! of the clone.
 
