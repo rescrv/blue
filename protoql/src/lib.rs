@@ -7,8 +7,8 @@ use zerror_core::ErrorCore;
 pub use prototk::{FieldNumber, WireType};
 pub use tuple_key::{Direction, KeyDataType, TupleKey, TupleKeyIterator};
 
-pub mod parser;
 pub mod object_builder;
+pub mod parser;
 
 pub use parser::ParseError;
 

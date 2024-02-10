@@ -25,7 +25,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
 
 /// Derive ZerrorCore for an error.  This assumes a type has a core, and makes the with_* methods
 /// for it.
-#[deprecated(since="0.3.0", note="derive Z instead")]
+#[deprecated(since = "0.3.0", note = "derive Z instead")]
 #[proc_macro_derive(ZerrorCore, attributes())]
 pub fn derive_command_line_old(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

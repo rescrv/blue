@@ -40,8 +40,15 @@ pub struct BiometricsStore {
 impl BiometricsStore {
     /// Update the series associated with the counter to have the prescribed reading.
     pub fn push_counter(&mut self, label: &Label, tags: &Tags, now: Time, reading: u64) {
-        if let Some(metric_id) = self.metric_id_for_type_label_tags(MetricType::Counter, label, tags) {
-            Self::push_collection(&mut self.counters_by_metric_id, metric_id, now, reading as i64)
+        if let Some(metric_id) =
+            self.metric_id_for_type_label_tags(MetricType::Counter, label, tags)
+        {
+            Self::push_collection(
+                &mut self.counters_by_metric_id,
+                metric_id,
+                now,
+                reading as i64,
+            )
         } else {
             super::DROPPED_METRICS.click();
         }
@@ -49,7 +56,8 @@ impl BiometricsStore {
 
     /// Update the series associated with the gauge to have the prescribed reading.
     pub fn push_gauge(&mut self, label: &Label, tags: &Tags, now: Time, reading: f64) {
-        if let Some(metric_id) = self.metric_id_for_type_label_tags(MetricType::Gauge, label, tags) {
+        if let Some(metric_id) = self.metric_id_for_type_label_tags(MetricType::Gauge, label, tags)
+        {
             Self::push_collection(&mut self.gauges_by_metric_id, metric_id, now, reading)
         } else {
             super::DROPPED_METRICS.click();
@@ -58,25 +66,35 @@ impl BiometricsStore {
 
     /// Update the series associated with the moments to have the prescribed reading.
     pub fn push_moments(&mut self, label: &Label, tags: &Tags, now: Time, reading: Moments) {
-        if let Some(metric_id) = self.metric_id_for_type_label_tags(MetricType::Moments, label, tags) {
+        if let Some(metric_id) =
+            self.metric_id_for_type_label_tags(MetricType::Moments, label, tags)
+        {
             Self::push_collection(&mut self.moments_by_metric_id, metric_id, now, reading)
         } else {
             super::DROPPED_METRICS.click();
         }
     }
 
-    fn metric_id_for_type_label_tags(&mut self, metric_type: MetricType, label: &Label, tags: &Tags) -> Option<MetricID> {
+    fn metric_id_for_type_label_tags(
+        &mut self,
+        metric_type: MetricType,
+        label: &Label,
+        tags: &Tags,
+    ) -> Option<MetricID> {
         for (metric_key, metric_id) in self.metrics_by_key.iter() {
             if metric_key.is(metric_type, label, tags) {
                 return Some(*metric_id);
             }
         }
         let metric_id = MetricID::generate()?;
-        self.metrics_by_key.push((MetricKey {
-            metric_type,
-            label: label.clone(),
-            tags: tags.clone(),
-        }, metric_id));
+        self.metrics_by_key.push((
+            MetricKey {
+                metric_type,
+                label: label.clone(),
+                tags: tags.clone(),
+            },
+            metric_id,
+        ));
         Some(metric_id)
     }
 
@@ -84,7 +102,7 @@ impl BiometricsStore {
         collection: &mut HashMap<MetricID, Series<P>>,
         metric_id: MetricID,
         now: Time,
-        reading: P
+        reading: P,
     ) {
         let series = collection.entry(metric_id).or_default();
         if !series.points.is_empty() && series.points[series.points.len() - 1].0 > now {

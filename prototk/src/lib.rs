@@ -124,10 +124,9 @@ impl Display for Error {
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
                 .finish(),
-            Error::NotAChar { value } => fmt
-                .debug_struct("NotAChar")
-                .field("value", value)
-                .finish(),
+            Error::NotAChar { value } => {
+                fmt.debug_struct("NotAChar").field("value", value).finish()
+            }
         }
     }
 }

@@ -139,7 +139,7 @@ impl ErrorCore {
     }
 
     /// Set the token associated with identifier.
-    #[deprecated(since="0.5.0", note="use set_info instead")]
+    #[deprecated(since = "0.5.0", note = "use set_info instead")]
     pub fn set_token(&mut self, identifier: &str, value: &str) {
         #[allow(deprecated)]
         self.internals.toks.push(Token {
@@ -149,7 +149,7 @@ impl ErrorCore {
     }
 
     /// Sets a URL under an identifier.
-    #[deprecated(since="0.5.0", note="use set_info instead")]
+    #[deprecated(since = "0.5.0", note = "use set_info instead")]
     pub fn set_url(&mut self, identifier: &str, url: &str) {
         #[allow(deprecated)]
         self.internals.urls.push(Url {
@@ -159,7 +159,7 @@ impl ErrorCore {
     }
 
     /// Sets a variable that's debug-printable.
-    #[deprecated(since="0.5.0", note="use set_info instead")]
+    #[deprecated(since = "0.5.0", note = "use set_info instead")]
     pub fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
         #[allow(deprecated)]
         self.internals.vars.push(Variable {
@@ -168,21 +168,21 @@ impl ErrorCore {
         });
     }
 
-     /// Add debug formatting of a local variable.
-     pub fn set_info<X: Debug>(&mut self, name: &str, value: X) {
+    /// Add debug formatting of a local variable.
+    pub fn set_info<X: Debug>(&mut self, name: &str, value: X) {
         self.internals.info.push(Info {
             name: name.to_owned(),
             value: format!("{:?}", value),
         });
-     }
+    }
 
-     /// Add debug formatting using a closure.
-     pub fn set_lazy_info<F: FnOnce() -> String>(&mut self, name: &str, value: F) {
+    /// Add debug formatting using a closure.
+    pub fn set_lazy_info<F: FnOnce() -> String>(&mut self, name: &str, value: F) {
         self.internals.info.push(Info {
             name: name.to_owned(),
             value: value(),
         });
-     }
+    }
 }
 
 impl Default for ErrorCore {

@@ -14,13 +14,13 @@ pub trait Z {
     fn long_form(&self) -> String;
 
     /// Add a token.
-    #[deprecated(since="0.4.0", note="use with_info instead")]
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
     fn with_token(self, identifier: &str, value: &str) -> Self::Error;
     /// Add a URL.
-    #[deprecated(since="0.4.0", note="use with_info instead")]
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
     fn with_url(self, identifier: &str, url: &str) -> Self::Error;
     /// Add debug formatting of a local variable.
-    #[deprecated(since="0.4.0", note="use with_info instead")]
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
     fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
 
     /// Add debug formatting of a local variable.

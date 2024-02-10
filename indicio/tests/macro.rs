@@ -37,14 +37,20 @@ fn value_string() {
 fn value_array() {
     assert_eq!(Value::Array(vec![].into()), value!([]));
     assert_eq!(
-        Value::Array(vec![
-            Value::Bool(false),
-            Value::Bool(true),
-            Value::Array(vec![
-                Value::String("hello".to_string()),
-                Value::String("world".to_string())
-            ].into())
-        ].into()),
+        Value::Array(
+            vec![
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Array(
+                    vec![
+                        Value::String("hello".to_string()),
+                        Value::String("world".to_string())
+                    ]
+                    .into()
+                )
+            ]
+            .into()
+        ),
         value!([false, true, ["hello", "world"]])
     );
 }
@@ -55,31 +61,27 @@ fn value_object() {
     assert_eq!(
         Value::Object(
             vec![
-                (
-                    "hello".to_string(),
-                    Value::String("world".to_string())
-                ),
+                ("hello".to_string(), Value::String("world".to_string())),
                 (
                     "consts".to_string(),
-                    Value::Array(vec![
-                        Value::F64(2.718281828459045),
-                        Value::F64(3.141592653589793)
-                    ].into())
+                    Value::Array(
+                        vec![Value::F64(2.718281828459045), Value::F64(3.141592653589793)].into()
+                    )
                 ),
                 (
                     "recursive".to_string(),
                     Value::Object(
                         vec![
-                            (
-                                "hello".to_string(),
-                                Value::String("world".to_string())
-                            ),
+                            ("hello".to_string(), Value::String("world".to_string())),
                             (
                                 "consts".to_string(),
-                                Value::Array(vec![
-                                    Value::F64(2.718281828459045),
-                                    Value::F64(3.141592653589793)
-                                ].into())
+                                Value::Array(
+                                    vec![
+                                        Value::F64(2.718281828459045),
+                                        Value::F64(3.141592653589793)
+                                    ]
+                                    .into()
+                                )
                             ),
                         ]
                         .into_iter()

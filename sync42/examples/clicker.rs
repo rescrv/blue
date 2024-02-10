@@ -181,7 +181,12 @@ fn main() {
         let fout = std::fs::File::create("/dev/stdout").unwrap();
         let mut emit = biometrics::PlainTextEmitter::new(fout);
         loop {
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("clock should never fail").as_millis().try_into().expect("millis since epoch should fit u64");
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock should never fail")
+                .as_millis()
+                .try_into()
+                .expect("millis since epoch should fit u64");
             if let Err(e) = collector.emit(&mut emit, now) {
                 eprintln!("collector error: {}", e);
             }

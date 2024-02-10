@@ -782,8 +782,8 @@ impl Cursor for BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)
-            .with_info("offset", offset)?;
+        self.position =
+            BlockCursor::extract_key(&self.block, offset, prev_key).with_info("offset", offset)?;
         Ok(())
     }
 

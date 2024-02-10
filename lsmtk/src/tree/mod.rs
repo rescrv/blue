@@ -1182,7 +1182,11 @@ impl LsmTree {
         self._ingest(sst_path, None)
     }
 
-    pub(crate) fn _ingest<P: AsRef<Path>>(&self, sst_path: P, log_num: Option<u64>) -> Result<(), Error> {
+    pub(crate) fn _ingest<P: AsRef<Path>>(
+        &self,
+        sst_path: P,
+        log_num: Option<u64>,
+    ) -> Result<(), Error> {
         // For each SST, hardlink it into the ingest root.
         let mut edit = Edit::default();
         let mut acc = Setsum::default();
@@ -1575,7 +1579,10 @@ impl LsmTree {
 
 impl keyvalint::KeyValueLoad for LsmTree {
     type Error = sst::Error;
-    type RangeScan<'a> = BoundsCursor<PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>, sst::Error>;
+    type RangeScan<'a> = BoundsCursor<
+        PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>,
+        sst::Error,
+    >;
 
     fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
         let version = self.take_snapshot();

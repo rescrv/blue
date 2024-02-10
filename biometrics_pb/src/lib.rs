@@ -32,13 +32,13 @@ impl Display for SensorReading {
             SensorReading::Zero => write!(f, "_"),
             SensorReading::Counter(counter) => {
                 write!(f, "{}", counter.count)
-            },
+            }
             SensorReading::Gauge(gauge) => {
                 write!(f, "{}", gauge.value)
-            },
+            }
             SensorReading::Moments(moments) => {
                 write!(f, "{}, ...", moments.n)
-            },
+            }
         }
     }
 }
@@ -101,13 +101,7 @@ pub struct MomentsPb {
 
 impl MomentsPb {
     pub const fn new(n: u64, m1: f64, m2: f64, m3: f64, m4: f64) -> Self {
-        Self {
-            n,
-            m1,
-            m2,
-            m3,
-            m4,
-        }
+        Self { n, m1, m2, m3, m4 }
     }
 
     pub fn into_moments(self) -> biometrics::moments::Moments {

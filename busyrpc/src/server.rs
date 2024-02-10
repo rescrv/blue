@@ -96,9 +96,7 @@ impl ServerOptions {
         // Setup our SSL preferences.
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         if let Some(ca_file) = self.ca_file.as_ref() {
-            acceptor
-                .set_ca_file(ca_file)
-                .expect("invalid ca file");
+            acceptor.set_ca_file(ca_file).expect("invalid ca file");
         }
         acceptor
             .set_private_key_file(&self.private_key_file, SslFiletype::PEM)

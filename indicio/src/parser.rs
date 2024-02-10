@@ -471,16 +471,22 @@ mod test {
             interpret_error_for_test(cut(complete(all_consuming(array_literal))))("[]").unwrap()
         );
         assert_eq!(
-            Value::Array(vec![
-                Value::Bool(true),
-                Value::I64(i64::MIN),
-                Value::F64(std::f64::consts::PI),
-                Value::String("hello world".to_string()),
-                Value::Array(vec![
-                    Value::String("hello".to_string()),
-                    Value::String("world".to_string()),
-                ].into()),
-            ].into()),
+            Value::Array(
+                vec![
+                    Value::Bool(true),
+                    Value::I64(i64::MIN),
+                    Value::F64(std::f64::consts::PI),
+                    Value::String("hello world".to_string()),
+                    Value::Array(
+                        vec![
+                            Value::String("hello".to_string()),
+                            Value::String("world".to_string()),
+                        ]
+                        .into()
+                    ),
+                ]
+                .into()
+            ),
             interpret_error_for_test(cut(complete(all_consuming(array_literal))))(
                 r#"[
                     true,
@@ -507,10 +513,13 @@ mod test {
                     ("pi".to_string(), Value::F64(std::f64::consts::PI)),
                     (
                         "hello_world".to_string(),
-                        Value::Array(vec![
-                            Value::String("hello".to_string()),
-                            Value::String("world".to_string()),
-                        ].into())
+                        Value::Array(
+                            vec![
+                                Value::String("hello".to_string()),
+                                Value::String("world".to_string()),
+                            ]
+                            .into()
+                        )
                     ),
                 ]
                 .into_iter()

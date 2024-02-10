@@ -19,7 +19,8 @@ pub mod memory;
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static DROPPED_METRICS: Counter = Counter::new("saros.dropped_metrics");
-static DROPPED_METRICS_MONITOR: Stationary = Stationary::new("saros.dropped_metrics", &DROPPED_METRICS);
+static DROPPED_METRICS_MONITOR: Stationary =
+    Stationary::new("saros.dropped_metrics", &DROPPED_METRICS);
 
 static TIME_TRAVEL: Counter = Counter::new("saros.time_travel");
 static TIME_TRAVEL_MONITOR: Stationary = Stationary::new("saros.time_travel", &TIME_TRAVEL);
@@ -42,10 +43,7 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 #[derive(Clone, zerror_derive::Z)]
 pub enum Error {
     /// A system error was encountered (usually std::io::Error).
-    SystemError {
-        core: ErrorCore,
-        what: String,
-    },
+    SystemError { core: ErrorCore, what: String },
     /// The query engine requested an unknown metric ID.
     UnknownMetric {
         core: ErrorCore,
@@ -146,7 +144,10 @@ pub struct Window(pub Time, pub Time);
 
 /// A Point is an algebraic type that supports Add and Sub on itself.  Implemented for each metric
 /// type.
-pub trait Point: Copy + Default + Add<Self, Output = Self> + Sub<Self, Output = Self> + Sized {}
+pub trait Point:
+    Copy + Default + Add<Self, Output = Self> + Sub<Self, Output = Self> + Sized
+{
+}
 
 impl Point for i64 {}
 impl Point for f64 {}
@@ -243,9 +244,7 @@ impl Series<i64> {
     /// Convert the series to a series of f64 points.
     fn as_f64(&self) -> Series<f64> {
         let points = self.points.iter().map(|(t, p)| (*t, *p as f64)).collect();
-        Series {
-            points,
-        }
+        Series { points }
     }
 
     fn rate(&self, window: Window, buckets: usize) -> Series<f64> {
@@ -260,11 +259,7 @@ impl Series<i64> {
             if thresh > *t && !points.is_empty() {
                 points.pop();
             }
-            let val = if let Some(prev) = prev {
-                *p - prev
-            } else {
-                *p
-            };
+            let val = if let Some(prev) = prev { *p - prev } else { *p };
             points.push((*t, val));
             prev = Some(*p);
             if thresh <= *t {
@@ -308,28 +303,30 @@ impl Series<f64> {
 impl Series<Moments> {
     /// Convert the series to a series of f64 points using the mean.
     fn count_as_i64(&self) -> Series<i64> {
-        let points = self.points.iter().map(|(t, p)| (*t, p.n() as i64)).collect();
-        Series {
-            points,
-        }
+        let points = self
+            .points
+            .iter()
+            .map(|(t, p)| (*t, p.n() as i64))
+            .collect();
+        Series { points }
     }
 
     /// Convert the series to a series of f64 points using the mean.
     #[allow(dead_code)]
     fn mean_as_f64(&self) -> Series<f64> {
         let points = self.points.iter().map(|(t, p)| (*t, p.mean())).collect();
-        Series {
-            points,
-        }
+        Series { points }
     }
 
     /// Convert the series to a series of f64 points using the sum.
     #[allow(dead_code)]
     fn sum_as_f64(&self) -> Series<f64> {
-        let points = self.points.iter().map(|(t, p)| (*t, p.n() as f64 * p.mean())).collect();
-        Series {
-            points,
-        }
+        let points = self
+            .points
+            .iter()
+            .map(|(t, p)| (*t, p.n() as f64 * p.mean()))
+            .collect();
+        Series { points }
     }
 }
 
@@ -360,7 +357,9 @@ pub struct LabeledSeries {
 
 impl LabeledSeries {
     fn label_with_tags(&self) -> String {
-        format!("{} {}", self.label.0, self.tags.0.join("|")).trim().to_string()
+        format!("{} {}", self.label.0, self.tags.0.join("|"))
+            .trim()
+            .to_string()
     }
 }
 
@@ -396,11 +395,8 @@ pub trait BiometricsStore {
     ) -> Result<Series<i64>, Error>;
 
     /// Return a single time series for a gauge.
-    fn gauge_by_metric_id(
-        &self,
-        metric_id: MetricID,
-        window: Window,
-    ) -> Result<Series<f64>, Error>;
+    fn gauge_by_metric_id(&self, metric_id: MetricID, window: Window)
+        -> Result<Series<f64>, Error>;
 
     /// Return a single time series for moments.
     fn moments_by_metric_id(
@@ -454,7 +450,13 @@ impl<B: BiometricsStore> BiometricsStore for Mutex<B> {
         tags: &Tags,
         window: Window,
     ) -> Result<Vec<MetricID>, Error> {
-        <B as BiometricsStore>::metrics_by_label(&self.lock().unwrap(), metric_type, label, tags, window)
+        <B as BiometricsStore>::metrics_by_label(
+            &self.lock().unwrap(),
+            metric_type,
+            label,
+            tags,
+            window,
+        )
     }
 
     fn counter_by_metric_id(
@@ -492,9 +494,7 @@ pub struct QueryEngine {
 impl QueryEngine {
     /// Create a new QueryEngine.
     pub const fn new() -> Self {
-        Self {
-            biometrics: vec![],
-        }
+        Self { biometrics: vec![] }
     }
 
     /// Add a BiometricsStore to this query engine.
@@ -505,27 +505,28 @@ impl QueryEngine {
 
     /// Execute the query against the store, restricting it to the provided window and number of
     /// buckets.
-    pub fn query(&self, q: &Query, window: Window, buckets: usize) -> Result<Vec<LabeledSeries>, Error> {
+    pub fn query(
+        &self,
+        q: &Query,
+        window: Window,
+        buckets: usize,
+    ) -> Result<Vec<LabeledSeries>, Error> {
         match q {
             Query::Rate(label, tags) => {
                 let series = self.rate_for_label(label, tags, window, buckets)?;
-                Ok(vec![
-                    LabeledSeries {
-                        label: label.clone(),
-                        tags: tags.clone(),
-                        series,
-                    }
-                ])
+                Ok(vec![LabeledSeries {
+                    label: label.clone(),
+                    tags: tags.clone(),
+                    series,
+                }])
             }
             Query::Gauge(label, tags) => {
                 let series = self.gauge_for_label(label, tags, window, buckets)?;
-                Ok(vec![
-                    LabeledSeries {
-                        label: label.clone(),
-                        tags: tags.clone(),
-                        series,
-                    }
-                ])
+                Ok(vec![LabeledSeries {
+                    label: label.clone(),
+                    tags: tags.clone(),
+                    series,
+                }])
             }
             Query::Union(queries) => {
                 let mut series = vec![];
@@ -553,7 +554,9 @@ impl QueryEngine {
             }
             let moments = biometrics.metrics_by_label(MetricType::Moments, label, tags, window)?;
             for moments in moments {
-                let series = biometrics.moments_by_metric_id(moments, window)?.count_as_i64();
+                let series = biometrics
+                    .moments_by_metric_id(moments, window)?
+                    .count_as_i64();
                 agg = agg + series;
             }
         }

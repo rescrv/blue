@@ -48,7 +48,14 @@ impl Plot {
 
     /// Plot this plot using the provided dashboard, panel, query engine, window, and output
     /// stream.
-    pub fn plot<W: Write>(&self, dash: &Dashboard, panel: &Panel, qe: &QueryEngine, window: Window, out: &mut W) -> Result<(), Error> {
+    pub fn plot<W: Write>(
+        &self,
+        dash: &Dashboard,
+        panel: &Panel,
+        qe: &QueryEngine,
+        window: Window,
+        out: &mut W,
+    ) -> Result<(), Error> {
         let label_width = panel.label_width.unwrap_or(dash.label_width);
         let graph_width = panel.graph_width.unwrap_or(dash.graph_width);
         let series = qe.query(&self.query, window, graph_width)?;
@@ -67,7 +74,15 @@ impl Plot {
                 continue;
             }
             let y_min = self.y_min.unwrap_or(0.0);
-            let y_max = self.y_max.unwrap_or(series.series.points.iter().map(|(_, p)| *p).max_by(f64::total_cmp).unwrap());
+            let y_max = self.y_max.unwrap_or(
+                series
+                    .series
+                    .points
+                    .iter()
+                    .map(|(_, p)| *p)
+                    .max_by(f64::total_cmp)
+                    .unwrap(),
+            );
             let mut graph = String::new();
             for point in series.series.points.iter() {
                 let c = if point.1 < y_min {
@@ -126,7 +141,13 @@ impl Panel {
     }
 
     /// Plot this panel using the provided dashboard, query engine, window, and output stream.
-    pub fn plot<W: Write>(&self, dash: &Dashboard, qe: &QueryEngine, window: Window, out: &mut W) -> Result<(), Error> {
+    pub fn plot<W: Write>(
+        &self,
+        dash: &Dashboard,
+        qe: &QueryEngine,
+        window: Window,
+        out: &mut W,
+    ) -> Result<(), Error> {
         let label_width = self.label_width.unwrap_or(dash.label_width);
         let graph_width = self.graph_width.unwrap_or(dash.graph_width);
         let width = label_width + graph_width;
@@ -180,7 +201,12 @@ impl Dashboard {
     }
 
     /// Plot the dashboard using the provided query engine, window, and output stream.
-    pub fn plot<W: Write>(&self, qe: &QueryEngine, window: Window, out: &mut W) -> Result<(), Error> {
+    pub fn plot<W: Write>(
+        &self,
+        qe: &QueryEngine,
+        window: Window,
+        out: &mut W,
+    ) -> Result<(), Error> {
         let width = self.label_width + self.graph_width;
         writeln!(out, "{:^width$}", self.label)?;
         writeln!(out, "{:^width$}", fill('━', self.label.len()))?;
@@ -217,10 +243,7 @@ impl<W: Write> RewindWriter<W> {
 
 impl<W: Write> From<W> for RewindWriter<W> {
     fn from(write: W) -> Self {
-        Self {
-            write,
-            count: 0,
-        }
+        Self { write, count: 0 }
     }
 }
 

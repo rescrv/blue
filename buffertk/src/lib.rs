@@ -79,10 +79,9 @@ impl std::fmt::Display for Error {
                 .debug_struct("UnknownDiscriminant")
                 .field("discriminant", discriminant)
                 .finish(),
-            Error::NotAChar { value } => fmt
-                .debug_struct("NotAChar")
-                .field("value", value)
-                .finish(),
+            Error::NotAChar { value } => {
+                fmt.debug_struct("NotAChar").field("value", value).finish()
+            }
         }
     }
 }
@@ -418,9 +417,7 @@ impl<'a> Unpackable<'a> for char {
         if let Some(c) = char::from_u32(c) {
             Ok((c, buf))
         } else {
-            Err(Error::NotAChar {
-                value: c,
-            })
+            Err(Error::NotAChar { value: c })
         }
     }
 }
