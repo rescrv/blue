@@ -821,7 +821,7 @@ pub const FIRST_RESERVED_FIELD_NUMBER: u32 = 19000;
 pub const LAST_RESERVED_FIELD_NUMBER: u32 = 19999;
 
 /// [FieldNumber] wraps a u32 and guards it against reserved or invalid field numbers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct FieldNumber {
     field_number: u32,
 }
@@ -863,6 +863,12 @@ impl FieldNumber {
     /// Return the field number as a u32.
     pub fn get(&self) -> u32 {
         self.field_number
+    }
+}
+
+impl Display for FieldNumber {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(fmt, "{}", self.field_number)
     }
 }
 
