@@ -17,3 +17,8 @@ tatl = { path = "../tatl", version = "0.4" }
 zerror = { path = "../zerror", version = "0.3" }
 zerror_core = { path = "../zerror_core", version = "0.4" }
 zerror_derive = { path = "../zerror_derive", version = "0.2" }
+
+[[example]]
+name = "saros-generate-waves"
+path = "examples/saros-generate-waves.rs"
+required-features=["binaries"]
