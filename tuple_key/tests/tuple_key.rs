@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 
-use tuple_key::{TupleKey, TypedTupleKey};
+use prototk::FieldNumber;
+
+use tuple_key::{Direction, KeyDataType, TupleKey, TupleKeyParser, TypedTupleKey};
 use tuple_key_derive::TypedTupleKey;
 
 //////////////////////////////////////////// test helper ///////////////////////////////////////////
@@ -40,12 +42,6 @@ struct AllTypesTupleKey {
     #[tuple_key(1)]
     sfixed_64: i64,
     #[tuple_key(1)]
-    bytes: Vec<u8>,
-    #[tuple_key(1)]
-    bytes_16: [u8; 16],
-    #[tuple_key(1)]
-    bytes_32: [u8; 32],
-    #[tuple_key(1)]
     string: String,
 }
 
@@ -58,28 +54,60 @@ fn all_types_tuple_key() {
             fixed_64: 0xc0ffee00c0ffee00u64,
             sfixed_32: 0x1eaff00di32,
             sfixed_64: 0xc0ffee00c0ffee00u64 as i64,
-            bytes: vec![0, 1, 2, 3],
-            bytes_16: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-            bytes_32: [
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31,
-            ],
             string: "hello world".to_owned(),
         },
         &[
-            32, 0, // unit
-            34, 31, 87, 253, 1, 208, // fixed32
-            36, 193, 127, 251, 193, 13, 7, 255, 221, 1, 0, // fixed32
-            38, 159, 87, 253, 1, 208, // sfixed32
-            40, 65, 127, 251, 193, 13, 7, 255, 221, 1, 0, // sfixed64
-            42, 1, 1, 65, 65, 48, // bytes
-            44, 1, 1, 65, 65, 49, 33, 21, 13, 7, 133, 3, 33, 161, 89, 49, 27, 15, 7,
-            192, // bytes16
-            46, 1, 1, 65, 65, 49, 33, 21, 13, 7, 133, 3, 33, 161, 89, 49, 27, 15, 7,
-            197, // bytes32
-            3, 17, 145, 77, 41, 21, 139, 133, 227, 129, 201, 105, 55, 29, 15, 71, 195,
-            240, // bytes32 cont'd
-            48, 105, 51, 91, 141, 199, 121, 129, 239, 111, 185, 155, 141, 64, // string
+            34, 0, // unit
+            36, 31, 87, 253, 1, 208, // fixed32
+            38, 193, 127, 251, 193, 13, 7, 255, 221, 1, 0, // fixed32
+            40, 159, 87, 253, 1, 208, // sfixed32
+            42, 65, 127, 251, 193, 13, 7, 255, 221, 1, 0, // sfixed64
+            44, 105, 51, 91, 141, 199, 121, 129, 239, 111, 185, 155, 141, 64, // string
+        ],
+    );
+}
+
+///////////////////////////////////////// AllTypesTupleKey /////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq, TypedTupleKey)]
+struct AllTypesTupleKeyReverse {
+    #[tuple_key(1)]
+    unit: (),
+    #[tuple_key(1)]
+    #[reverse]
+    fixed_32: u32,
+    #[tuple_key(1)]
+    #[reverse]
+    fixed_64: u64,
+    #[tuple_key(1)]
+    #[reverse]
+    sfixed_32: i32,
+    #[tuple_key(1)]
+    #[reverse]
+    sfixed_64: i64,
+    #[tuple_key(1)]
+    #[reverse]
+    string: String,
+}
+
+#[test]
+fn all_types_tuple_key_reverse() {
+    test_helper(
+        AllTypesTupleKeyReverse {
+            unit: (),
+            fixed_32: 0x1eaff00du32,
+            fixed_64: 0xc0ffee00c0ffee00u64,
+            sfixed_32: 0x1eaff00di32,
+            sfixed_64: 0xc0ffee00c0ffee00u64 as i64,
+            string: "hello world".to_owned(),
+        },
+        &[
+            34, 0, // unit
+            52, 225, 169, 3, 255, 46, // fixed32
+            54, 63, 129, 5, 63, 243, 249, 1, 35, 255, 254, // fixed64
+            56, 97, 169, 3, 255, 46, // sfixed32
+            58, 191, 129, 5, 63, 243, 249, 1, 35, 255, 254, // sfixed64
+            60, 151, 205, 165, 115, 57, 135, 127, 17, 145, 71, 101, 115, 190, // string
         ],
     );
 }
@@ -101,6 +129,108 @@ fn with_unit_types() {
             unit1: (),
             unit2: (),
         },
-        &[32, 0, 64, 0],
+        &[34, 0, 66, 0],
     );
+}
+
+///////////////////////////////////////////// proptest /////////////////////////////////////////////
+
+use proptest::prelude::{any, Strategy};
+
+fn arb_key_data_type() -> impl Strategy<Value = KeyDataType> {
+    use proptest::prelude::Just;
+    proptest::prop_oneof! {
+        Just(KeyDataType::unit),
+        Just(KeyDataType::fixed32),
+        Just(KeyDataType::fixed64),
+        Just(KeyDataType::sfixed32),
+        Just(KeyDataType::sfixed64),
+        Just(KeyDataType::string),
+    }
+}
+
+fn arb_direction() -> impl Strategy<Value = Direction> {
+    use proptest::prelude::Just;
+    proptest::prop_oneof! {
+        Just(Direction::Forward),
+        Just(Direction::Reverse),
+    }
+}
+
+fn arb_field_number() -> impl Strategy<Value = FieldNumber> {
+    proptest::prop_oneof! {
+        (1u32..19000).prop_map(FieldNumber::must),
+        (20000u32..(1<<29)).prop_map(FieldNumber::must),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TestElement {
+    Unit,
+    I32(i32),
+    U32(u32),
+    I64(i64),
+    U64(u64),
+    String(String),
+}
+
+impl TestElement {
+    fn extend(&self, f: FieldNumber, d: Direction, key: &mut TupleKey) {
+        match self {
+            TestElement::Unit => key.extend(f),
+            TestElement::I32(e) => key.extend_with_key(f, *e, d),
+            TestElement::U32(e) => key.extend_with_key(f, *e, d),
+            TestElement::I64(e) => key.extend_with_key(f, *e, d),
+            TestElement::U64(e) => key.extend_with_key(f, *e, d),
+            TestElement::String(e) => key.extend_with_key(f, e.clone(), d),
+        }
+    }
+
+    fn parse(&self, f: FieldNumber, d: Direction, key: &mut TupleKeyParser) {
+        match self {
+            TestElement::Unit => {
+                assert_eq!(Direction::Forward, d);
+                key.parse_next(f, d).unwrap()
+            }
+            TestElement::I32(e) => assert_eq!(*e, key.parse_next_with_key(f, d).unwrap()),
+            TestElement::U32(e) => assert_eq!(*e, key.parse_next_with_key(f, d).unwrap()),
+            TestElement::I64(e) => assert_eq!(*e, key.parse_next_with_key(f, d).unwrap()),
+            TestElement::U64(e) => assert_eq!(*e, key.parse_next_with_key(f, d).unwrap()),
+            TestElement::String(e) => {
+                assert_eq!(e, &key.parse_next_with_key::<String>(f, d).unwrap())
+            }
+        }
+    }
+}
+
+fn arb_element() -> impl Strategy<Value = TestElement> {
+    proptest::prop_oneof! {
+        (0..1).prop_map(|_| TestElement::Unit),
+        any::<i32>().prop_map(|e| TestElement::I32(e)),
+        any::<u32>().prop_map(|e| TestElement::U32(e)),
+        any::<i64>().prop_map(|e| TestElement::I64(e)),
+        any::<u64>().prop_map(|e| TestElement::U64(e)),
+        ".*".prop_map(|e| TestElement::String(e.to_string())),
+    }
+}
+
+proptest::proptest! {
+    #[test]
+    fn discriminant(ty in arb_key_data_type(), dir in arb_direction()) {
+        let d = tuple_key::to_discriminant(ty, dir);
+        assert_eq!(Some((ty, dir)), tuple_key::from_discriminant(d))
+    }
+
+    #[test]
+    fn tuple_key_proptest(elements in proptest::collection::vec((arb_field_number(), arb_direction(), arb_element()), 0..32)
+                              .prop_filter("reverse unit", |v| v.iter().all(|e| (e.1 != Direction::Reverse || e.2 != TestElement::Unit)))) {
+        let mut key = TupleKey::default();
+        for (field_number, direction, element) in elements.iter() {
+            element.extend(*field_number, *direction, &mut key);
+        }
+        let mut parser = TupleKeyParser::new(&key);
+        for (field_number, direction, element) in elements.iter() {
+            element.parse(*field_number, *direction, &mut parser);
+        }
+    }
 }

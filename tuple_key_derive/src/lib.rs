@@ -13,7 +13,7 @@ use syn::{parse_macro_input, DeriveInput};
 ///////////////////////////////////// #[derive(TypedTupleKey)] /////////////////////////////////////
 
 /// Derive a TypedTupleKey.
-#[proc_macro_derive(TypedTupleKey, attributes(tuple_key))]
+#[proc_macro_derive(TypedTupleKey, attributes(tuple_key, reverse))]
 pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     // `ty_name` holds the type's identifier.
@@ -70,9 +70,8 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
     let mut sum: TokenStream = quote! {};
     let mut field_names: TokenStream = quote! {};
     for (idx, field) in fields.iter().enumerate() {
-        let num = parse_attributes(&field.attrs);
-        let num = match num {
-            Some(num) => num,
+        let (num, dir) = match parse_attributes(&field.attrs) {
+            Some((num, dir)) => (num, dir),
             None => {
                 continue;
             }
@@ -82,7 +81,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
         let line = if field_type.to_token_stream().to_string() == "()" {
             quote! {
                 #sum
-                match tkp.extend(::prototk::FieldNumber::must(#num)) {
+                match tkp.parse_next(::prototk::FieldNumber::must(#num), #dir) {
                     Ok(x) => x,
                     Err(e) => {
                         return Err(::tuple_key::Error::CouldNotExtend {
@@ -96,7 +95,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
         } else {
             quote! {
                 #sum
-                let #field_name = match tkp.extend_with_key(::prototk::FieldNumber::must(#num)) {
+                let #field_name = match tkp.parse_next_with_key(::prototk::FieldNumber::must(#num), #dir) {
                     Ok(x) => x,
                     Err(e) => {
                         return Err(::tuple_key::Error::CouldNotExtend {
@@ -129,9 +128,8 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
 fn generate_into(fields: &[syn::Field]) -> TokenStream {
     let mut sum: TokenStream = quote! {};
     for field in fields.iter() {
-        let num = parse_attributes(&field.attrs);
-        let num = match num {
-            Some(num) => num,
+        let (num, dir) = match parse_attributes(&field.attrs) {
+            Some((num, dir)) => (num, dir),
             None => {
                 continue;
             }
@@ -145,7 +143,7 @@ fn generate_into(fields: &[syn::Field]) -> TokenStream {
         } else {
             quote! {
                 #sum
-                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name);
+                tk.extend_with_key(::prototk::FieldNumber::must(#num), self.#field_name, #dir);
             }
         };
         sum = line;
@@ -160,11 +158,10 @@ fn generate_into(fields: &[syn::Field]) -> TokenStream {
 //////////////////////////////////////////// attributes ////////////////////////////////////////////
 
 const USAGE: &str = "must provide attributes of the form `tuple_key(field_number, field_type?)`";
-const META_PATH: &str = "tuple_key";
 
-fn parse_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
+fn parse_field_number_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
     let meta = &attr.parse_meta().unwrap();
-    if meta.path().clone().into_token_stream().to_string() != META_PATH {
+    if meta.path().clone().into_token_stream().to_string() != "tuple_key" {
         return None;
     }
     let meta_list = match meta {
@@ -189,13 +186,37 @@ fn parse_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
     }
 }
 
-fn parse_attributes(attrs: &[syn::Attribute]) -> Option<syn::LitInt> {
-    for attr in attrs.iter() {
-        if let Some(field_number) = parse_attribute(attr) {
-            return Some(field_number);
+fn parse_reverse_attribute(attr: &syn::Attribute) -> Option<TokenStream> {
+    let meta = &attr.parse_meta().unwrap();
+    if meta.path().clone().into_token_stream().to_string() != "reverse" {
+        return None;
+    }
+    match meta {
+        syn::Meta::Path(_) => {
+            // TODO(rescrv):  I assume all paths are #[reverse]
+            Some(quote! { ::tuple_key::Direction::Reverse })
+        }
+        syn::Meta::List(_) => {
+            panic!("{}:{} {}", file!(), line!(), USAGE);
+        }
+        syn::Meta::NameValue(_) => {
+            panic!("{}:{} {}", file!(), line!(), USAGE);
         }
     }
-    None
+}
+
+fn parse_attributes(attrs: &[syn::Attribute]) -> Option<(syn::LitInt, TokenStream)> {
+    let mut field_number = None;
+    let mut direction = quote! { ::tuple_key::Direction::Forward };
+    for attr in attrs.iter() {
+        if let Some(f) = parse_field_number_attribute(attr) {
+            field_number = Some(f);
+        }
+        if let Some(d) = parse_reverse_attribute(attr) {
+            direction = d;
+        }
+    }
+    field_number.map(|f| (f, direction))
 }
 
 ////////////////////////////////////// protobuf field numbers //////////////////////////////////////
