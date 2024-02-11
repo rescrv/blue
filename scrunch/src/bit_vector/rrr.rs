@@ -45,6 +45,22 @@ impl u63 {
             Some(idx)
         }
     }
+
+    fn select0(&self, x: usize, remain: usize) -> Option<usize> {
+        let mut idx = 0;
+        let mut rank = 0;
+        let mut w = self.0;
+        while idx < remain && rank < x {
+            rank += if (w & 1) == 0 { 1 } else { 0 };
+            w >>= 1;
+            idx += 1;
+        }
+        if rank < x {
+            None
+        } else {
+            Some(idx)
+        }
+    }
 }
 
 impl Display for u63 {
@@ -1883,6 +1899,9 @@ impl<'a> super::BitVector for BitVector<'a> {
         if x == 0 {
             return Some(0);
         }
+        if x > self.len() {
+            return None;
+        }
         let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| {
             // SAFETY(rescrv):  binary search should never go outside the specified len
             self.r.load(mid * 32, 32).unwrap() < x as u64
@@ -1908,6 +1927,55 @@ impl<'a> super::BitVector for BitVector<'a> {
                 return Some(idx + w.select(x - rank)?);
             } else {
                 rank += c;
+            }
+            c_offset += 6;
+            o_offset += o_bits;
+            idx += 63;
+        }
+        None
+    }
+
+    fn select0(&self, x: usize) -> Option<usize> {
+        if x == 0 {
+            return Some(0);
+        }
+        if x > self.len() {
+            return None;
+        }
+        let load_rank0 = |idx: usize| {
+            // SAFETY(rescrv):  binary search should never go outside the specified len.  When
+            // considering the last p_offset we'll hit this case, but the tests say that's OK.
+            idx as u64 * self.word as u64 * 63 - self.r.load(idx * 32, 32).unwrap_or(u64::MIN)
+        };
+        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| {
+            load_rank0(mid) < x as u64
+        });
+        // TODO(rescrv):  We really need a different partition_by function that does the greatest
+        // true, not first false.
+        while p_offset > 0 && load_rank0(p_offset) >= x as u64 {
+            p_offset -= 1;
+        }
+        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        let mut rank: usize = load_rank0(p_offset) as usize;
+        let mut idx: usize = p_offset * self.word as usize * 63;
+        for _ in 0..self.word as usize {
+            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
+                return if rank >= x {
+                    Some(idx)
+                } else {
+                    None
+                };
+            };
+            if rank + 63 - c >= x {
+                let remain = self.len() - idx;
+                return if x - rank <= remain {
+                    Some(idx + w.select0(x - rank, remain)?)
+                } else {
+                    None
+                }
+            } else {
+                rank += 63 - c;
             }
             c_offset += 6;
             o_offset += o_bits;
