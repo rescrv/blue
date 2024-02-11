@@ -444,7 +444,7 @@ macro_rules! benchmark {
                 )*
                 $crate::increment_indices(&mut indices, &limits);
                 if let Some(filter) = filter.as_ref() {
-                    if !params.parameter_string().contains(filter) {
+                    if !params.parameter_string().contains(filter) && !(stringify!($name)).contains(filter) {
                         continue;
                     }
                 }
