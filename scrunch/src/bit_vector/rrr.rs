@@ -1,30 +1,24 @@
-/*
-#![allow(non_snake_case)]
+use std::fmt::Display;
 
 use buffertk::Unpackable;
 
-use prototk_derive::Message;
-
-use zerror_core::ErrorCore;
-
-use super::super::bit_array::BitArray;
-use super::super::bit_vector::BitVector;
-use super::super::Error;
+use crate::binary_search::partition_by;
+use crate::bit_array::{BitArray, Builder as BitArrayBuilder};
+use crate::builder::{Builder, Helper};
+use crate::Error;
 
 //////////////////////////////////////////////// u63 ///////////////////////////////////////////////
 
-#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct u63 {
-    x: u64,
-}
+#[allow(non_camel_case_types)]
+pub struct u63(u64);
 
 impl u63 {
     const fn must(x: u64) -> Self {
         match Self::new(x) {
             Some(x) => x,
             None => {
-                panic!("`must` called with invalid word");
+                panic!("`must` called with invalid 64-bit word");
             }
         }
     }
@@ -33,23 +27,42 @@ impl u63 {
         if x & (1u64 << 63) != 0 {
             return None;
         }
-        Some(Self { x })
+        Some(Self(x))
+    }
+
+    fn select(&self, x: usize) -> Option<usize> {
+        let mut idx = 0;
+        let mut rank = 0;
+        let mut w = self.0;
+        while w != 0 && rank < x {
+            rank += (w & 1) as usize;
+            w >>= 1;
+            idx += 1;
+        }
+        if rank < x {
+            None
+        } else {
+            Some(idx)
+        }
+    }
+}
+
+impl Display for u63 {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 
 //////////////////////////////////////// SixtyThreeBitWords ////////////////////////////////////////
 
 pub struct SixtyThreeBitWords<'a> {
-    bytes: BitArray<'a>,
+    bits: &'a [bool],
     index: usize,
 }
 
 impl<'a> SixtyThreeBitWords<'a> {
-    pub fn new(buf: &'a [u8]) -> Self {
-        Self {
-            bytes: BitArray::new(buf),
-            index: 0,
-        }
+    pub fn new(bits: &'a [bool]) -> Self {
+        Self { bits, index: 0 }
     }
 }
 
@@ -57,16 +70,20 @@ impl<'a> Iterator for SixtyThreeBitWords<'a> {
     type Item = u63;
 
     fn next(&mut self) -> Option<u63> {
-        let bits = self.bytes.bits();
-        if bits > self.index {
-            let amt = if self.index + 63 > bits {
-                bits - self.index
+        if self.index < self.bits.len() {
+            let amt = if self.index + 63 > self.bits.len() {
+                self.bits.len() - self.index
             } else {
                 63
             };
-            let answer = u63::must(self.bytes.load(self.index, amt));
+            let mut answer = 0u64;
+            for i in 0..amt {
+                if self.bits[self.index + i] {
+                    answer |= 1 << i;
+                }
+            }
             self.index += amt;
-            Some(answer)
+            Some(u63::must(answer))
         } else {
             None
         }
@@ -76,9 +93,9 @@ impl<'a> Iterator for SixtyThreeBitWords<'a> {
 ///////////////////////////////////////////// Binomials ////////////////////////////////////////////
 
 const L: &[usize] = &[
-    0, 6, 11, 16, 20, 23, 27, 30, 32, 35, 37, 40, 42, 44, 46, 47, 49, 50, 52, 53, 54, 55, 56, 57,
-    58, 58, 59, 59, 60, 60, 60, 60, 60, 60, 60, 60, 59, 59, 58, 58, 57, 56, 55, 54, 53, 52, 50, 49,
-    47, 46, 44, 42, 40, 37, 35, 32, 30, 27, 23, 20, 16, 11, 6, 0,
+    0, 6, 11, 16, 20, 23, 27, 30, 33, 35, 38, 40, 42, 44, 46, 48, 49, 51, 52, 53, 55, 56, 57, 58,
+    58, 59, 60, 60, 60, 61, 61, 61, 61, 61, 61, 61, 60, 60, 60, 59, 58, 58, 57, 56, 55, 53, 52, 51,
+    49, 48, 46, 44, 42, 40, 38, 35, 33, 30, 27, 23, 20, 16, 11, 0,
 ];
 
 const K: &[&[u64]] = &[
@@ -1639,32 +1656,265 @@ const K: &[&[u64]] = &[
 ];
 
 fn encode(decoded: u63) -> (u64, usize) {
-    let c = decoded.x.count_ones();
-    let mut o = 0;
-    let mut c_p = c;
-    let mut j = 0;
-    while 0 < c_p && c_p <= 63 - j {
-        if decoded.x & (1u64 << j) != 0 {
-            o = o + K[(63 - j) as usize][c_p as usize];
-            c_p -= 1;
+    let c: usize = decoded
+        .0
+        .count_ones()
+        .try_into()
+        .expect("number of bits should fit usize");
+    let mut o = 0u64;
+    let mut bits_remain = c;
+    for bit in 0..63 {
+        if decoded.0 & (1u64 << (63 - bit - 1)) != 0 {
+            let skip = K[63 - bit][bits_remain];
+            bits_remain -= 1;
+            o += skip;
         }
-        j += 1;
     }
-    (o, c as usize)
+    o -= c as u64;
+    (o, c)
 }
 
-fn decode(mut o: u64, mut c: usize) -> u63 {
-    let mut B = 0u64;
-    let mut j = 0;
-    while c > 0 {
-        if o >= K[63 - j][c] {
-            B |= 1u64 << j;
-            o -= K[63 - j][c];
+fn decode(mut o: u64, mut c: usize) -> Option<u63> {
+    let mut word = 0u64;
+    o += c as u64;
+    for bit in 0..63 {
+        let skip = *K.get(63 - bit)?.get(c)?;
+        if o >= skip {
+            word |= 1u64 << (63 - bit - 1);
+            o -= skip;
             c -= 1;
         }
-        j += 1;
     }
-    u63::must(B)
+    Some(u63::must(word))
+}
+
+/////////////////////////////////////////// BitVectorStub //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+struct BitVectorStub<'a> {
+    #[prototk(1, uint32)]
+    word: u32,
+    #[prototk(2, uint64)]
+    bits: u64,
+    #[prototk(3, bytes)]
+    p: &'a [u8],
+    #[prototk(4, bytes)]
+    c: &'a [u8],
+    #[prototk(5, bytes)]
+    o: &'a [u8],
+    #[prototk(6, bytes)]
+    r: &'a [u8],
+}
+
+impl<'a> From<&'a BitVector<'a>> for BitVectorStub<'a> {
+    fn from(bv: &'a BitVector<'a>) -> Self {
+        Self {
+            word: bv.word as u32,
+            bits: bv.bits as u64,
+            p: bv.p.as_ref(),
+            c: bv.c.as_ref(),
+            o: bv.o.as_ref(),
+            r: bv.r.as_ref(),
+        }
+    }
+}
+
+impl<'a> TryFrom<BitVectorStub<'a>> for BitVector<'a> {
+    type Error = Error;
+
+    fn try_from(bvs: BitVectorStub<'a>) -> Result<Self, Self::Error> {
+        Ok(BitVector {
+            word: bvs.word.try_into()?,
+            bits: bvs.bits.try_into()?,
+            p: BitArray::new(bvs.p),
+            c: BitArray::new(bvs.c),
+            o: BitArray::new(bvs.o),
+            r: BitArray::new(bvs.r),
+        })
+    }
+}
+
+///////////////////////////////////////////// BitVector ////////////////////////////////////////////
+
+pub struct BitVector<'a> {
+    word: u8,
+    bits: usize,
+    p: BitArray<'a>,
+    c: BitArray<'a>,
+    o: BitArray<'a>,
+    r: BitArray<'a>,
+}
+
+impl<'a> BitVector<'a> {
+    fn load_c_o(&self, c_offset: usize, o_offset: usize) -> Option<(usize, usize, u63)> {
+        let c: usize = self.c.load(c_offset, 6)? as usize;
+        let o_bits = *L.get(c)?;
+        let o: u64 = self.o.load(o_offset, o_bits)?;
+        let w = decode(o, c)?;
+        Some((c, o_bits, w))
+    }
+}
+
+impl<'a> super::BitVector for BitVector<'a> {
+    type Output<'b> = BitVector<'b>;
+
+    fn construct<H: Helper>(
+        bits: &[bool],
+        builder: &mut Builder<'_, H>,
+    ) -> Result<(), Error> {
+        const WORD: usize = 8;
+        let mut build_p = BitArrayBuilder::with_capacity(bits.len());
+        let mut build_c = BitArrayBuilder::with_capacity(bits.len());
+        let mut build_o = BitArrayBuilder::with_capacity(bits.len());
+        let mut build_r = BitArrayBuilder::with_capacity(bits.len());
+        let mut o_len = 0u64;
+        let mut rank = 0u64;
+        for (idx, word) in SixtyThreeBitWords::new(bits).enumerate() {
+            if idx % WORD == 0 {
+                // TODO(rescrv): parameterize this to be more than 32 or less than 32 bits.
+                build_p.push_word(o_len, 32);
+                build_r.push_word(rank, 32);
+            }
+            let (o, c) = encode(word);
+            assert!(c <= 63);
+            if L[c] > 0 {
+                build_o.push_word(o, L[c]);
+                o_len += L[c] as u64;
+            }
+            rank += c as u64;
+            build_c.push_word(c as u64, 6);
+        }
+        let buf_p = build_p.seal();
+        let buf_c = build_c.seal();
+        let buf_o = build_o.seal();
+        let buf_r = build_r.seal();
+        builder.append_raw_packable(&BitVectorStub {
+            word: WORD.try_into().expect("WORD must always fit a u8"),
+            bits: bits.len() as u64,
+            p: &buf_p,
+            c: &buf_c,
+            o: &buf_o,
+            r: &buf_r,
+        });
+        Ok(())
+    }
+
+    fn parse<'b, 'c: 'b>(buf: &'c [u8]) -> Result<(Self::Output<'b>, &'c [u8]), Error> {
+        let (bvs, buf) =
+            <BitVectorStub as Unpackable>::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
+        Ok((bvs.try_into()?, buf))
+    }
+
+    fn len(&self) -> usize {
+        self.bits
+    }
+
+    fn access(&self, mut index: usize) -> Option<bool> {
+        if index >= self.len() {
+            return None;
+        }
+        // P strides by self.word * 63 bits at a time.
+        let stride: usize = self.word as usize * 63;
+        // The offset into P.
+        let p_offset = index / stride;
+        // The offset into O.
+        let mut o_offset: usize = self
+            .p
+            .load(p_offset * 32, 32)?
+            .try_into()
+            .expect("32 bits should fit a usize");
+        // The offset into C
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        // Adjust index to account for our jump through P.
+        index -= p_offset * stride;
+        // Step through the words until we have fewer than 63 bits left.
+        while index >= 63 {
+            let (_, o_bits, _w) = self.load_c_o(c_offset, o_offset)?;
+            index -= 63;
+            c_offset += 6;
+            o_offset += o_bits;
+        }
+        let (_, _, w) = self.load_c_o(c_offset, o_offset)?;
+        Some(w.0 & (1 << index) != 0)
+    }
+
+    fn rank(&self, mut index: usize) -> Option<usize> {
+        if index > self.len() {
+            return None;
+        }
+        let mut add_one = false;
+        if index == self.len() {
+            if index == 0 {
+                return Some(0);
+            } else {
+                index -= 1;
+                add_one = true;
+            }
+        }
+        // P strides by self.word * 63 bits at a time.
+        let stride: usize = self.word as usize * 63;
+        // The offset into P.
+        let p_offset = index / stride;
+        // The offset into O.
+        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
+        // The offset into C
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        // Our base rank is the number of ones before our p_offset.
+        let mut rank: usize = self.r.load(p_offset * 32, 32)? as usize;
+        // Adjust index to account for our jump through P.
+        index -= p_offset * stride;
+        // Step through the words until we have fewer than 63 bits left.
+        while index >= 63 {
+            let (c, o_bits, _) = self.load_c_o(c_offset, o_offset)?;
+            index -= 63;
+            c_offset += 6;
+            o_offset += o_bits;
+            rank += c;
+        }
+        let (_, _, w) = self.load_c_o(c_offset, o_offset)?;
+        rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
+        if add_one && (w.0 & (1 << index) != 0) {
+            rank += 1;
+        }
+        Some(rank)
+    }
+
+    fn select(&self, x: usize) -> Option<usize> {
+        if x == 0 {
+            return Some(0);
+        }
+        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| {
+            // SAFETY(rescrv):  binary search should never go outside the specified len
+            self.r.load(mid * 32, 32).unwrap() < x as u64
+        });
+        // TODO(rescrv):  We really need a different partition_by function that does the greatest
+        // true, not first false.
+        while p_offset > 0 && self.r.load(p_offset * 32, 32).unwrap_or(u64::MAX) >= x as u64 {
+            p_offset -= 1;
+        }
+        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        let mut rank: usize = self.r.load(p_offset * 32, 32)? as usize;
+        let mut idx: usize = p_offset * self.word as usize * 63;
+        for _ in 0..self.word as usize {
+            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
+                return if rank >= x {
+                    Some(idx)
+                } else {
+                    None
+                };
+            };
+            if rank + c >= x {
+                return Some(idx + w.select(x - rank)?);
+            } else {
+                rank += c;
+            }
+            c_offset += 6;
+            o_offset += o_bits;
+            idx += 63;
+        }
+        None
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -1672,11 +1922,6 @@ fn decode(mut o: u64, mut c: usize) -> u63 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn usize_is_u64() {
-        assert_eq!(usize::BITS, 64);
-    }
 
     #[test]
     fn sixty_three_new_works() {
@@ -1691,167 +1936,63 @@ mod tests {
     }
 
     #[test]
-    fn sixty_three_must() {
-        let x = u63::must((1u64 << 63) - 1);
-        assert_eq!((1u64 << 63) - 1, x.x);
+    fn encode_decode() {
+        fn check(expect: u64, word: u63) {
+            let (o, c) = encode(word);
+            assert_eq!(expect, o);
+            assert_eq!(word, decode(o, c).unwrap());
+        }
+        check(0, u63::must(0));
+        check(0, u63::must(1u64 << 0));
+        check(61, u63::must(1u64 << 61));
+        check(62, u63::must(1u64 << 62));
     }
 
+    #[allow(non_snake_case)]
     #[test]
-    fn sixty_three_bit_words() {
-        // s = ''
-        // for i in range(128):
-        //     s += ''.join(reversed(bin(i)[2:].rjust(63, '0')))
-        //
-        // while s:
-        //     byte = int(''.join(reversed(s[0:8])), 2)
-        //     print('{},'.format(hex(byte)))
-        //     s = s[8:]
-        let bytes: &[u8] = &[
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x28, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x18, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x8, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x80, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x60, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x68, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x38, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1e,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x8, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x2, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x40, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa8, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x58, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2e, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x18, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0xc, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x80, 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0,
-            0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xe8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x78, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x20, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x80, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x8, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x60, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x2, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x28, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x98, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x4e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x28, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80,
-            0x14, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0xa, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x5,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x68, 0x1, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0xb8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x5e, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x30, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x18, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x80, 0xc, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x6, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x40, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa8, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0xd8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x6e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x38,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x1c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0xe, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x3, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xe8, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xf8, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x7e, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x80, 0x20, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x60, 0x8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x28, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x18, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x8e,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x48, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x24, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x12, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x9, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xc0, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x68, 0x2, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x38, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x9e, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x50, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x28, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x80, 0x14, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0xa, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x40, 0x5, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa8, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x58,
-            0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xae, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x58, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x2c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x16, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x5, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xe8, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x78, 0x1, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0xbe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x80, 0x30, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x18, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x60, 0xc, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x28, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x98, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xce,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x68, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x34, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x1a, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0xd, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xc0, 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x68, 0x3, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0xb8, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xde, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x70, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x38, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x80, 0x1c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0xe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-            0x40, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa8, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xd8,
-            0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xee, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x78, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x3c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x1e, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0x0, 0x60, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x7, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0x0, 0xe8, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xf8, 0x1, 0x0, 0x0, 0x0,
-            0x0, 0x0, 0x0, 0xfe, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-        ];
-        for (exp, word) in SixtyThreeBitWords::new(bytes).enumerate() {
-            assert_eq!(u63::must(exp as u64), word, "exp={}", exp);
+    fn check_L() {
+        for i in 1..=63 {
+            let word = u63::must(((1u64 << i) - 1) << (63 - i));
+            let (o, c) = encode(word);
+            assert_eq!(word, decode(o, c).unwrap());
+            assert!(o < (1u64 << L[c]));
         }
     }
 
-    const BINOMIAL_ONE_BIT_TESTS: &[((u64, usize), u63)] = &[
-        ((0, 0), u63::must(0)),
-        ((63, 1), u63::must(1u64 << 0)),
-        ((62, 1), u63::must(1u64 << 1)),
-        ((61, 1), u63::must(1u64 << 2)),
-        ((60, 1), u63::must(1u64 << 3)),
-        ((59, 1), u63::must(1u64 << 4)),
-        ((58, 1), u63::must(1u64 << 5)),
-        ((57, 1), u63::must(1u64 << 6)),
-        ((56, 1), u63::must(1u64 << 7)),
-        ((55, 1), u63::must(1u64 << 8)),
-        ((54, 1), u63::must(1u64 << 9)),
-        ((53, 1), u63::must(1u64 << 10)),
-        ((52, 1), u63::must(1u64 << 11)),
-        ((51, 1), u63::must(1u64 << 12)),
-        ((50, 1), u63::must(1u64 << 13)),
-        ((49, 1), u63::must(1u64 << 14)),
-        ((48, 1), u63::must(1u64 << 15)),
-        ((47, 1), u63::must(1u64 << 16)),
-        ((46, 1), u63::must(1u64 << 17)),
-        ((45, 1), u63::must(1u64 << 18)),
-        ((44, 1), u63::must(1u64 << 19)),
-        ((43, 1), u63::must(1u64 << 20)),
-        ((42, 1), u63::must(1u64 << 21)),
-        ((41, 1), u63::must(1u64 << 22)),
-        ((40, 1), u63::must(1u64 << 23)),
-        ((39, 1), u63::must(1u64 << 24)),
-        ((38, 1), u63::must(1u64 << 25)),
-        ((37, 1), u63::must(1u64 << 26)),
-        ((36, 1), u63::must(1u64 << 27)),
-        ((35, 1), u63::must(1u64 << 28)),
-        ((34, 1), u63::must(1u64 << 29)),
-        ((33, 1), u63::must(1u64 << 30)),
-        ((32, 1), u63::must(1u64 << 31)),
-        ((31, 1), u63::must(1u64 << 32)),
-        ((30, 1), u63::must(1u64 << 33)),
-        ((29, 1), u63::must(1u64 << 34)),
-        ((28, 1), u63::must(1u64 << 35)),
-        ((27, 1), u63::must(1u64 << 36)),
-        ((26, 1), u63::must(1u64 << 37)),
-        ((25, 1), u63::must(1u64 << 38)),
-        ((24, 1), u63::must(1u64 << 39)),
-        ((23, 1), u63::must(1u64 << 40)),
-        ((22, 1), u63::must(1u64 << 41)),
-        ((21, 1), u63::must(1u64 << 42)),
-        ((20, 1), u63::must(1u64 << 43)),
-        ((19, 1), u63::must(1u64 << 44)),
-        ((18, 1), u63::must(1u64 << 45)),
-        ((17, 1), u63::must(1u64 << 46)),
-        ((16, 1), u63::must(1u64 << 47)),
-        ((15, 1), u63::must(1u64 << 48)),
-        ((14, 1), u63::must(1u64 << 49)),
-        ((13, 1), u63::must(1u64 << 50)),
-        ((12, 1), u63::must(1u64 << 51)),
-        ((11, 1), u63::must(1u64 << 52)),
-        ((10, 1), u63::must(1u64 << 53)),
-        ((9, 1), u63::must(1u64 << 54)),
-        ((8, 1), u63::must(1u64 << 55)),
-        ((7, 1), u63::must(1u64 << 56)),
-        ((6, 1), u63::must(1u64 << 57)),
-        ((5, 1), u63::must(1u64 << 58)),
-        ((4, 1), u63::must(1u64 << 59)),
-        ((3, 1), u63::must(1u64 << 60)),
-        ((2, 1), u63::must(1u64 << 61)),
-        ((1, 1), u63::must(1u64 << 62)),
-    ];
-
-    #[test]
-    fn binomials_encode1() {
-        for ((c, o), input) in BINOMIAL_ONE_BIT_TESTS.iter().copied() {
-            assert_eq!((c, o), encode(input));
+    proptest::prop_compose! {
+        pub fn arb_words()(words in proptest::collection::vec(0u64..(1u64<<63), 0..65536)) -> Vec<u64> {
+            words
         }
     }
 
-    #[test]
-    fn binomials_decode1() {
-        for ((c, o), input) in BINOMIAL_ONE_BIT_TESTS.iter().copied() {
-            assert_eq!(input, decode(c, o));
+    proptest::proptest! {
+        #[test]
+        fn sixty_three_bit_words(words in arb_words()) {
+            let mut builder = BitArrayBuilder::with_capacity(words.len() * 63);
+            for word in words.iter() {
+                builder.push_word(*word, 63);
+            }
+            let buf = builder.seal();
+            let bv = BitArray::new(&buf);
+            let mut bools = Vec::with_capacity(words.len() * 63);
+            for i in 0..words.len() * 63 {
+                bools.push(bv.get(i).unwrap());
+            }
+            let mut sixty_three_iter = SixtyThreeBitWords::new(&bools);
+            for word in words.iter() {
+                assert_eq!(Some(u63::must(*word)), sixty_three_iter.next());
+            }
+            assert_eq!(None, sixty_three_iter.next());
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn binomials(word in 0..(u64::MAX >> 1)) {
+            let word = u63::must(word);
+            let (o, c) = encode(word);
+            assert_eq!(Some(word), decode(o, c));
+            assert!(o < ((1u64 << L[c])));
         }
     }
 }
-*/

@@ -1,62 +1,255 @@
-use std::hash::Hash;
+use std::collections::{BinaryHeap, HashSet};
+use std::num::TryFromIntError;
 
-use zerror_core::ErrorCore;
+use buffertk::Unpackable;
+use prototk::FieldNumber;
 
+pub mod binary_search;
 pub mod bit_array;
 pub mod bit_vector;
-pub mod dictionary;
+pub mod builder;
+pub mod encoder;
+pub mod isa;
 pub mod psi;
-pub mod reference;
+pub mod sa;
 pub mod sais;
+pub mod sampled;
 pub mod sigma;
 pub mod wavelet_tree;
 
+use crate::bit_vector::BitVector;
+use crate::builder::{Builder, Helper};
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Error {
-    UnpackError {
-        core: ErrorCore,
-        error: prototk::Error,
-        context: String,
-    },
-    MissingField {
-        core: ErrorCore,
-        structure: String,
-        field: String,
-    },
+    IntoUsize,
+    Unparseable,
+    TextTooLong,
+    BadSearch,
+    BadTextOffset,
+    BadRecordOffset,
+    CouldNotConstructBitVector,
+    InvalidEncoder,
+    InvalidBitVector,
+    InvalidWaveletTree,
+    InvalidSigma,
+    InvalidSuffixArray,
+    InvalidInverseSuffixArray,
+    InvalidPsi,
+    InvalidDocument,
+    BadRank(usize),
+    BadSelect(usize),
+    BadIndex(usize),
+    LogicError(&'static str),
 }
 
-/////////////////////////////////////////////// Index //////////////////////////////////////////////
-
-pub trait Index {
-    type Item;
-
-    fn length(&self) -> usize;
-    fn extract<'a>(
-        &'a self,
-        idx: usize,
-        count: usize,
-    ) -> Option<Box<dyn Iterator<Item = Self::Item> + 'a>>;
-    fn search<'a>(&'a self, needle: &'a [Self::Item]) -> Box<dyn Iterator<Item = usize> + 'a>;
-    // Count the number of times needle appears in the original text.
-    //
-    // In a simple implementation this could be implemented as self.search(needle).count(), but it
-    // is explicitly part of the API as certain structures can perform count much more efficiently
-    // than search.
-    fn count(&self, needle: &[Self::Item]) -> usize;
+impl From<TryFromIntError> for Error {
+    fn from(_: TryFromIntError) -> Self {
+        Self::IntoUsize
+    }
 }
 
-pub struct SearchIndex<T, SA, ISA, C, P>
+////////////////////////////////////////////// Offset //////////////////////////////////////////////
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct TextOffset(pub usize);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RecordOffset(pub usize);
+
+///////////////////////////////////////////// Document /////////////////////////////////////////////
+
+pub trait Document {
+    type Search: Iterator<Item = TextOffset>;
+
+    fn construct<H: Helper>(
+        text: Vec<u32>,
+        record_boundaries: Vec<usize>,
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error>;
+
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn records(&self) -> usize;
+
+    fn search(&self, needle: &[u32]) -> Result<Self::Search, Error>;
+    fn count(&self, needle: &[u32]) -> Result<usize, Error>;
+
+    fn lookup(&self, offset: TextOffset) -> Result<RecordOffset, Error>;
+    fn retrieve(&self, record: RecordOffset) -> Result<Vec<u32>, Error>;
+    fn offset_of(&self, record: RecordOffset) -> Result<TextOffset, Error>;
+}
+
+/////////////////////////////////////// ReferenceDocumentStub //////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+struct ReferenceDocumentStub {
+    #[prototk(1, uint32)]
+    text: Vec<u32>,
+    #[prototk(2, uint64)]
+    record_boundaries: Vec<u64>,
+}
+
+impl From<ReferenceDocument> for ReferenceDocumentStub {
+    fn from(rd: ReferenceDocument) -> Self {
+        let ReferenceDocument {
+            text,
+            record_boundaries,
+        } = rd;
+        let record_boundaries = record_boundaries.into_iter().map(|x| x as u64).collect();
+        Self {
+            text,
+            record_boundaries,
+        }
+    }
+}
+
+impl TryFrom<ReferenceDocumentStub> for ReferenceDocument {
+    type Error = Error;
+
+    fn try_from(rds: ReferenceDocumentStub) -> Result<Self, Self::Error> {
+        let ReferenceDocumentStub {
+            text,
+            record_boundaries,
+        } = rds;
+        if record_boundaries.iter().any(|x| *x > usize::MAX as u64) {
+            return Err(Error::IntoUsize);
+        }
+        let record_boundaries = record_boundaries.into_iter().map(|x| x as usize).collect();
+        Ok(ReferenceDocument {
+            text,
+            record_boundaries,
+        })
+    }
+}
+
+///////////////////////////////////////// ReferenceDocument ////////////////////////////////////////
+
+pub struct ReferenceDocument {
+    text: Vec<u32>,
+    record_boundaries: Vec<usize>,
+}
+
+impl Document for ReferenceDocument {
+    type Search = std::vec::IntoIter<TextOffset>;
+
+    fn construct<H: Helper>(
+        text: Vec<u32>,
+        record_boundaries: Vec<usize>,
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        check_record_boundaries(&text, &record_boundaries)?;
+        builder.append_vec_u32(FieldNumber::must(1), &text);
+        builder.append_vec_usize(FieldNumber::must(2), &record_boundaries);
+        Ok(())
+    }
+
+    fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    fn records(&self) -> usize {
+        self.record_boundaries.len()
+    }
+
+    fn search(&self, needle: &[u32]) -> Result<Self::Search, Error> {
+        let offsets: Vec<TextOffset> = if needle.is_empty() {
+            (0..self.len()).map(TextOffset).collect()
+        } else {
+            let mut offsets = vec![];
+            for (idx, candidate) in self.text.windows(needle.len()).enumerate() {
+                if candidate == needle {
+                    offsets.push(TextOffset(idx));
+                }
+            }
+            offsets
+        };
+        Ok(offsets.into_iter())
+    }
+
+    fn count(&self, needle: &[u32]) -> Result<usize, Error> {
+        Ok(self.search(needle)?.count())
+    }
+
+    fn lookup(&self, offset: TextOffset) -> Result<RecordOffset, Error> {
+        let partition_point = self.record_boundaries.partition_point(|b| *b < offset.0);
+        if partition_point >= self.record_boundaries.len() && !self.record_boundaries.is_empty() {
+            Ok(RecordOffset(self.record_boundaries.len() - 1))
+        } else if partition_point >= self.record_boundaries.len() {
+            Err(Error::BadTextOffset)
+        } else if self.record_boundaries[partition_point] <= offset.0 {
+            Ok(RecordOffset(partition_point))
+        } else {
+            Ok(RecordOffset(partition_point - 1))
+        }
+    }
+
+    fn retrieve(&self, record: RecordOffset) -> Result<Vec<u32>, Error> {
+        if record.0 >= self.record_boundaries.len() {
+            return Err(Error::BadRecordOffset);
+        }
+        let record_start = self.record_boundaries[record.0];
+        let record_limit = if record.0 + 1 >= self.record_boundaries.len() {
+            self.text.len()
+        } else {
+            self.record_boundaries[record.0 + 1]
+        };
+        Ok(Vec::from(&self.text[record_start..record_limit]))
+    }
+
+    fn offset_of(&self, record: RecordOffset) -> Result<TextOffset, Error> {
+        if record.0 >= self.record_boundaries.len() {
+            return Err(Error::BadRecordOffset);
+        }
+        Ok(TextOffset(self.record_boundaries[record.0]))
+    }
+}
+
+impl<'a> Unpackable<'a> for ReferenceDocument {
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let (rds, buf) = <ReferenceDocumentStub as Unpackable>::unpack(buf)
+            .map_err(|_| Error::InvalidDocument)?;
+        Ok((rds.try_into()?, buf))
+    }
+}
+
+////////////////////////////////////////// PsiDocumentStub /////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+struct PsiDocumentStub<'a> {
+    #[prototk(1, bytes)]
+    record_boundaries: &'a [u8],
+    #[prototk(2, bytes)]
+    sigma: &'a [u8],
+    #[prototk(3, bytes)]
+    sa: &'a [u8],
+    #[prototk(4, bytes)]
+    isa: &'a [u8],
+    #[prototk(5, bytes)]
+    psi: &'a [u8],
+}
+
+//////////////////////////////////////////// PsiDocument ///////////////////////////////////////////
+
+pub struct PsiDocument<'a, SA, ISA, PSI>
 where
-    T: Copy + Clone + Eq + Hash + Ord,
-    SA: SuffixArray,
-    ISA: InverseSuffixArray,
-    C: bit_vector::OldBitVector,
-    P: psi::Psi,
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
 {
+    // Record boundaries, where select(i) returns the offset of the i'th record in text.
+    record_boundaries: bit_vector::sparse::BitVector<'a>,
+
     // Translate indices to characters.
-    sigma: Sigma<T, C>,
+    sigma: sigma::Sigma<'a>,
 
     // Sorted array of all suffixes of the original text.
     //
@@ -64,9 +257,7 @@ where
     // i'th prefix begins.  Compactly: i<j => text[sa[i]..] < text[sa[j]..].
     sa: SA,
 
-    // Inverse suffix array.
-    //
-    // Each entry isa[i] tells the position of text[i..] in the suffix array.
+    // Inverse of `sa`.  This maps a location in the text to its location in the suffix array.
     isa: ISA,
 
     // Psi is the successor function applied to the suffix array.
@@ -75,176 +266,355 @@ where
     // psi[idx] = isa[sa[idx] + 1]
     //
     // See [DGA] for a more thorough understanding.
-    psi: P,
+    psi: PSI,
 }
 
-// XXX document
-pub trait SuffixArray {
-    fn new(sa: &[usize]) -> Self;
-    fn lookup(&self, idx: usize) -> usize;
-}
-
-// XXX document
-pub trait InverseSuffixArray {
-    fn new(isa: &[usize]) -> Self;
-    fn lookup(&self, idx: usize) -> usize;
-}
-
-pub struct UncompressedSuffixArray {
-    sa: Vec<usize>,
-}
-
-impl SuffixArray for UncompressedSuffixArray {
-    fn new(sa: &[usize]) -> Self {
-        Self { sa: sa.to_vec() }
-    }
-
-    fn lookup(&self, idx: usize) -> usize {
-        self.sa[idx]
-    }
-}
-
-pub struct UncompressedInverseSuffixArray {
-    isa: Vec<usize>,
-}
-
-impl InverseSuffixArray for UncompressedInverseSuffixArray {
-    fn new(isa: &[usize]) -> Self {
-        Self { isa: isa.to_vec() }
-    }
-
-    fn lookup(&self, idx: usize) -> usize {
-        self.isa[idx]
-    }
-}
-
-impl<T, SA, ISA, SIG, PSI> SearchIndex<T, SA, ISA, SIG, PSI>
+impl<'a, SA, ISA, PSI> PsiDocument<'a, SA, ISA, PSI>
 where
-    T: Copy + Clone + Eq + Hash + Ord,
-    SA: SuffixArray,
-    ISA: InverseSuffixArray,
-    SIG: bit_vector::OldBitVector,
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
     PSI: psi::Psi,
 {
-    pub fn new(input: &[T]) -> SearchIndex<T, SA, ISA, SIG, PSI> {
-        let sigma: Sigma<T, SIG> = Sigma::from(input);
-
-        // convert the text into a compacted alphabet
-        let (text, _) = sigma::to_compact_alphabet(input);
-        let text: &[usize] = &text;
-        // compute the suffix array
-        let mut sa: Vec<usize> = Vec::with_capacity(text.len());
-        sa.resize(text.len(), 0);
-        sais::sais(&sigma, &text, &mut sa);
-        let sa: &[usize] = &sa;
-        // compute the inverse suffix array
-        let isa: &[usize] = &inverse(sa);
-        // compute the successor array, psi
-        let mut psi: Vec<usize> = Vec::with_capacity(text.len());
-        psi.resize(text.len(), 0);
-        psi[isa[isa.len() - 1]] = isa[0];
-        for i in 1..isa.len() {
-            psi[isa[i - 1]] = isa[i];
+    pub fn exemplars(&self, starts: &[u32], ends: &[u32]) -> Exemplars<SA, ISA, PSI> {
+        let mut heap = BinaryHeap::new();
+        for seed in ends.iter() {
+            let Ok(range) = self.sigma.sa_range_for(*seed) else {
+                continue;
+            };
+            if range.0 > range.1 {
+                continue;
+            }
+            heap.push(Exemplar {
+                count: range.1 - range.0 + 1,
+                needle: vec![*seed],
+                range,
+            })
         }
-        let psi: &[usize] = &psi;
-        // create the overall search index
-        let sa = SA::new(sa);
-        let isa = ISA::new(isa);
-        let psi = PSI::new(&sigma, psi);
-        SearchIndex {
-            sigma,
-            sa,
-            isa,
-            psi,
+        let doc = self;
+        let starts: HashSet<u32> = starts.iter().copied().collect();
+        Exemplars {
+            doc,
+            heap,
+            starts,
         }
     }
 
-    fn backwards_search(&self, needle: &[T]) -> (usize, usize) {
-        // If there's no needle, we should return everything except the artificial end marker.
-        if needle.len() == 0 {
-            return (1, self.psi.len());
-        }
-        let mut range = (0, self.psi.len());
-        // This performs backwards search as described in [AB].  It's not immediately obviously
-        // that this will actually search for what we want to find, but :shrug:.
-        // TODO(rescrv): shrug?
-        for i in (0..needle.len()).rev() {
+    fn backwards_search(&self, needle: &[u32]) -> Result<(usize, usize), Error> {
+        let mut needle = needle.iter().rev();
+        let mut range = if let Some(t) = needle.next() {
+            self.sigma.sa_range_for(*t)?
+        } else {
+            // If there's no needle, we should return everything except the artificial end marker.
+            return Ok((1usize, self.psi.len() - 1));
+        };
+        // This performs backwards search.
+        for t in needle {
             range = self
                 .psi
-                .constrain(&self.sigma, self.sigma.sa_range_for(needle[i]), range);
+                .constrain(&self.sigma, self.sigma.sa_range_for(*t)?, range)?;
         }
-        range
+        Ok(range)
     }
 }
 
-impl<T, SA, ISA, C, P> Index for SearchIndex<T, SA, ISA, C, P>
+impl<'a, SA, ISA, PSI> Document for PsiDocument<'a, SA, ISA, PSI>
 where
-    T: Copy + Clone + Eq + Hash + Ord,
-    SA: SuffixArray,
-    ISA: InverseSuffixArray,
-    C: bit_vector::OldBitVector,
-    P: psi::Psi,
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
 {
-    type Item = T;
+    type Search = std::vec::IntoIter<TextOffset>;
 
-    fn length(&self) -> usize {
+    fn construct<H: Helper>(
+        text: Vec<u32>,
+        record_boundaries: Vec<usize>,
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        check_record_boundaries(&text, &record_boundaries)?;
+        // compute the record boundaries
+        let sparse_boundaries: Vec<usize> = record_boundaries[1..].iter().map(|rb| rb - 1).collect();
+        bit_vector::sparse::BitVector::from_indices(
+            64,
+            text.len(),
+            &sparse_boundaries,
+            &mut builder.sub(FieldNumber::must(1)),
+        )
+        .ok_or(Error::InvalidBitVector)?;
+        // compute sigma
+        let mut sigma_builder = builder.sub(FieldNumber::must(2));
+        sigma::Sigma::construct(text.iter().copied(), &mut sigma_builder)?;
+        let sigma_buf = sigma_builder.relative_bytes(0).to_vec();
+        let sigma = sigma::Sigma::unpack(&sigma_buf)?.0;
+        drop(sigma_builder);
+        // convert the text into a compacted alphabet
+        let mut s = Vec::with_capacity(text.len() + 1);
+        for t in text.iter().copied() {
+            s.push(sigma.char_to_sigma(t).ok_or(Error::LogicError(
+                "freshly constructed sigma cannot translate text",
+            ))?);
+        }
+        s.push(0);
+        // compute the suffix array
+        let mut sa = vec![0usize; s.len()];
+        sais::sais(&sigma, &s, &mut sa)?;
+        // compute the inverse suffix array
+        let isa = inverse(&sa);
+        // compute the successor array, psi
+        let psi = psi::compute(&isa);
+        // Now build them.
+        // TODO(rescrv): parameterize
+        SA::construct(3, &sa, &mut builder.sub(FieldNumber::must(3)))?;
+        ISA::construct(&isa, &record_boundaries, &mut builder.sub(FieldNumber::must(4)))?;
+        PSI::construct(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
+        Ok(())
+    }
+
+    fn len(&self) -> usize {
         // psi always includes an implicit end character that we strip
         self.psi.len() - 1
     }
 
-    fn extract<'a>(
-        &'a self,
-        idx: usize,
-        count: usize,
-    ) -> Option<Box<dyn Iterator<Item = Self::Item> + 'a>> {
-        if idx > self.length() || idx + count > self.length() {
-            return None;
-        }
-        let mut idx = self.isa.lookup(idx);
-        let mut result = Vec::with_capacity(count);
-        for _ in 0..count {
-            match self.sigma.sa_index_to_t(idx) {
-                Some(x) => result.push(x),
-                None => panic!("XXX"),
+    fn records(&self) -> usize {
+        // TODO(rescrv): better error handling; requires modifying Document trait.
+        self.record_boundaries
+            .rank(self.record_boundaries.len())
+            .unwrap_or(0)
+            + 1
+    }
+
+    fn search(&self, needle: &[u32]) -> Result<Self::Search, Error> {
+        let range = self.backwards_search(needle)?;
+        if range.0 > range.1 {
+            Ok(vec![].into_iter())
+        } else {
+            let mut result = Vec::with_capacity(range.1 - range.0 + 1);
+            for offset in range.0..=range.1 {
+                result.push(TextOffset(self.sa.lookup(&self.sigma, &self.psi, offset)?));
             }
-            idx = self.psi.lookup(&self.sigma, idx);
+            result.sort();
+            Ok(result.into_iter())
         }
-        // XXX make it lazy
-        Some(Box::new(result.into_iter()))
     }
 
-    fn search<'a>(&'a self, needle: &'a [Self::Item]) -> Box<dyn Iterator<Item = usize> + 'a> {
-        let range = self.backwards_search(needle);
-        let mut result = Vec::with_capacity(range.1 - range.0);
-        for offset in range.0..range.1 {
-            result.push(self.sa.lookup(offset));
+    fn count(&self, needle: &[u32]) -> Result<usize, Error> {
+        let range = self.backwards_search(needle)?;
+        if range.0 > range.1 {
+            Ok(0)
+        } else {
+            Ok(range.1 - range.0 + 1)
         }
-        result.sort_unstable();
-        Box::new(result.into_iter())
     }
 
-    fn count(&self, needle: &[Self::Item]) -> usize {
-        let range = self.backwards_search(needle);
-        range.1 - range.0
+    fn lookup(&self, offset: TextOffset) -> Result<RecordOffset, Error> {
+        Ok(RecordOffset(
+            self.record_boundaries
+                .rank(offset.0)
+                .ok_or(Error::BadRank(offset.0))?,
+        ))
+    }
+
+    fn offset_of(&self, record: RecordOffset) -> Result<TextOffset, Error> {
+        Ok(TextOffset(
+            self.record_boundaries
+                .select(record.0)
+                .ok_or(Error::BadSelect(record.0))?,
+        ))
+    }
+
+    fn retrieve(&self, record: RecordOffset) -> Result<Vec<u32>, Error> {
+        let start: usize = self
+            .record_boundaries
+            .select(record.0)
+            .ok_or(Error::BadSelect(record.0))?;
+        // TODO(rescrv):  This treats an error as if it's end.  Need to change the bit_vector API.
+        let limit: usize = self
+            .record_boundaries
+            .select(record.0 + 1)
+            .unwrap_or(self.len());
+        if start > limit {
+            return Err(Error::BadRecordOffset);
+        }
+        let mut idx = self.isa.lookup(start)?;
+        let mut result = Vec::with_capacity(limit - start);
+        for _ in start..limit {
+            result.push(
+                self.sigma
+                    .sa_index_to_t(idx)
+                    .ok_or(Error::InvalidSigma)?,
+            );
+            idx = self.psi.lookup(&self.sigma, idx)?;
+        }
+        Ok(result)
     }
 }
 
+impl<'a, SA, ISA, PSI> Unpackable<'a> for PsiDocument<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray + Unpackable<'a>,
+    ISA: isa::InverseSuffixArray + Unpackable<'a>,
+    PSI: psi::Psi + Unpackable<'a>,
+    Error: From<<SA as Unpackable<'a>>::Error> + From<<ISA as Unpackable<'a>>::Error> + From<<PSI as Unpackable<'a>>::Error>,
+{
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let (stub, buf) = <PsiDocumentStub as Unpackable>::unpack(buf)
+            .map_err(|_| Error::InvalidBitVector)?;
+        let record_boundaries = bit_vector::sparse::BitVector::new(stub.record_boundaries)
+            .ok_or(Error::InvalidBitVector)?;
+        let sigma = sigma::Sigma::unpack(stub.sigma)?.0;
+        let sa = SA::unpack(stub.sa)?.0;
+        let isa = ISA::unpack(stub.isa)?.0;
+        let psi = PSI::unpack(stub.psi)?.0;
+        Ok((PsiDocument {
+            record_boundaries,
+            sigma,
+            sa,
+            isa,
+            psi,
+        }, buf))
+    }
+}
+
+// TODO(rescrv):  Use Huffman codes.
+pub type CompressedDocument<'a> = PsiDocument::<'a, sa::SampledSuffixArray<'a>, isa::SampledInverseSuffixArray<'a>, psi::wavelet_tree::WaveletTreePsi<'a, wavelet_tree::prefix::WaveletTree<'a, encoder::FixedWidthEncoder>>>;
+
+///////////////////////////////////////////// Exemplars ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Exemplar {
+    count: usize,
+    needle: Vec<u32>,
+    range: (usize, usize),
+}
+
+impl Exemplar {
+    pub fn text(&self) -> &[u32] {
+        &self.needle
+    }
+}
+
+pub struct Exemplars<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    doc: &'a PsiDocument<'a, SA, ISA, PSI>,
+    heap: BinaryHeap<Exemplar>,
+    starts: HashSet<u32>,
+}
+
+impl<'a, SA, ISA, PSI> Iterator for Exemplars<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    type Item = Exemplar;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(mut exemplar) = self.heap.pop() {
+            if self.starts.contains(&exemplar.needle[exemplar.needle.len() - 1]) {
+                exemplar.needle.reverse();
+                return Some(exemplar);
+            }
+            for i in 1..=self.doc.sigma.K() as u32 {
+                let Some(t) = self.doc.sigma.sigma_to_char(i) else {
+                    // TODO(rescrv): Metrics because this should never happen.
+                    continue;
+                };
+                let Ok(range) = self.doc.sigma.sa_range_for_sigma(i) else {
+                    // TODO(rescrv): Metrics because this should never happen.
+                    continue;
+                };
+                if range.0 > range.1 {
+                    // TODO(rescrv): Metrics because this should never happen.
+                    continue;
+                }
+                let Ok(range) = self
+                    .doc
+                    .psi
+                    .constrain(&self.doc.sigma, range, exemplar.range) else {
+                    // TODO(rescrv): Metrics because this should never happen.
+                    continue;
+                };
+                let mut needle = exemplar.needle.clone();
+                needle.push(t);
+                self.heap.push(Exemplar {
+                    count: range.1 - range.0 + 1,
+                    needle,
+                    range,
+                })
+            }
+        }
+        None
+    }
+}
+
+////////////////////////////////////////////// inverse /////////////////////////////////////////////
+
 fn inverse(x: &[usize]) -> Vec<usize> {
-    let mut ix: Vec<usize> = Vec::with_capacity(x.len());
-    ix.resize(x.len(), 0);
+    let mut ix = vec![0usize; x.len()];
     for i in 0..x.len() {
         ix[x[i]] = i
     }
     ix
 }
 
-pub type Sigma<T, B> = crate::sigma::Sigma<T, B>;
+////////////////////////////////////// check_record_boundaries /////////////////////////////////////
+
+fn check_record_boundaries(text: &[u32], record_boundaries: &[usize]) -> Result<(), Error> {
+    if record_boundaries.is_empty() {
+        return Err(Error::BadRecordOffset);
+    }
+    for (lhs, rhs) in std::iter::zip(record_boundaries.iter(), record_boundaries[1..].iter()) {
+        if lhs >= rhs {
+            return Err(Error::BadRecordOffset);
+        }
+    }
+    if record_boundaries[0] != 0 {
+        return Err(Error::BadRecordOffset);
+    }
+    if record_boundaries[record_boundaries.len() - 1] >= text.len() {
+        return Err(Error::BadRecordOffset);
+    }
+    Ok(())
+}
+
+///////////////////////////////////////////// test_util ////////////////////////////////////////////
 
 #[cfg(test)]
-pub mod testutil {
-    use crate::bit_vector::ReferenceOldBitVector;
+pub mod test_util {
+    use crate::builder::Builder;
+    use crate::sigma::Sigma;
 
     use super::*;
+
+    #[macro_export]
+    macro_rules! assert_eq_with_ctx {
+        (@inner [$($elems:tt)*] , $($rem:tt)*) => {
+            format!("{} = {:?}; {}", stringify!($($elems)*), $($elems)*, assert_eq_with_ctx!(@inner [] $($rem)*))
+        };
+
+        (@inner [$($elems:tt)*] $e:tt $($rem:tt)*) => {
+            assert_eq_with_ctx!(@inner [$($elems)* $e] $($rem)*)
+        };
+
+        (@inner [$($elems:tt)*]) => {
+            format!("{} = {:?}", stringify!($($elems)*), $($elems)*)
+        };
+
+        ($lhs:expr, $rhs:expr, $($rem:expr),+) => {
+            assert_eq!($lhs, $rhs, "{} == {}; {}", stringify!($lhs), stringify!($rhs), assert_eq_with_ctx!(@inner [] $($rem),*));
+        };
+
+        ($lhs:expr, $rhs:expr) => {
+            assert_eq!($lhs, $rhs, "{} == {}", stringify!($lhs), stringify!($rhs));
+        };
+    }
+
+    pub(crate) use assert_eq_with_ctx;
 
     // NOTE(rescrv):  Verbose, possibly duplicating information, so that there's a canonical place
     // to look for the examples of different representations.  Also serves as a human cross-check.
@@ -257,18 +627,29 @@ pub mod testutil {
         pub sigma2text: &'static [char],
         pub boundaries: &'static [usize],
         pub not_in_str: &'static [char],
-        pub S: &'static [usize],
+        pub S: &'static [u32],
         pub SA: &'static [usize],
+        pub ISA: &'static [usize],
+        pub PSI: &'static [usize],
         pub bucket_starts: &'static [usize],
         pub bucket_limits: &'static [usize],
-        pub deref_SA: &'static [usize],
+        pub deref_SA: &'static [u32],
         pub lstype: &'static str,
         pub lmspos: &'static str,
+        pub searches: &'static [(&'static str, &'static [usize])],
+        pub table: &'static str,
+        #[allow(clippy::type_complexity)]
+        pub constrain: &'static [((usize, usize), (usize, usize), (usize, usize))],
     }
 
     impl TestCase {
-        pub fn sigma(&self) -> Sigma<char, ReferenceOldBitVector> {
-            self.text.chars().collect()
+        pub fn sigma(&self) -> Vec<u8> {
+            let mut buf = Vec::new();
+            let mut builder = Builder::new(&mut buf);
+            Sigma::construct(self.text.chars().map(|c| c as u32), &mut builder)
+                .expect("test case should construct");
+            drop(builder);
+            buf
         }
     }
 
@@ -279,11 +660,33 @@ pub mod testutil {
         not_in_str: &['C', 'D', 'E'],
         S: &[2, 1, 3, 1, 3, 1, 0],
         SA: &[6, 5, 3, 1, 0, 4, 2],
+        ISA: &[4, 3, 6, 2, 5, 1, 0],
+        PSI: &[4, 0, 5, 6, 3, 1, 2],
         bucket_starts: &[0, 1, 4, 5],
         bucket_limits: &[1, 4, 5, 7],
         deref_SA: &[0, 1, 1, 1, 2, 3, 3],
         lstype: "LSLSLLS",
         lmspos: " * *  *",
+        searches: &[("AN", &[1, 3]), ("NA", &[2, 4])],
+        table: "
+    A      B   N
+[]  [0]    []  [] 
+[]  []     []  [1]
+[]  []     [3] [2]
+[4] []     []  [] 
+[]  [5, 6] []  [] 
+",
+        constrain: &[
+            // Backwards search of AN
+            ((5, 6), (0, 7), (5, 6)),
+            ((1, 3), (5, 6), (2, 3)),
+
+            // Backwards search of BANA
+            ((1, 3), (0, 7), (1, 3)),
+            ((5, 6), (1, 3), (5, 6)),
+            ((1, 3), (5, 6), (2, 3)),
+            ((4, 4), (2, 3), (4, 4)),
+        ],
     };
 
     pub const MISSISSIPPI: &TestCase = &TestCase {
@@ -293,11 +696,35 @@ pub mod testutil {
         not_in_str: &['A', 'B', 'N'],
         S: &[2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0],
         SA: &[11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2],
+        ISA: &[5, 4, 11, 9, 3, 10, 8, 2, 7, 6, 1, 0],
+        PSI: &[5, 0, 7, 10, 11, 4, 1, 6, 2, 3, 8, 9],
         bucket_starts: &[0, 1, 5, 6, 8],
         bucket_limits: &[1, 5, 6, 8, 12],
         deref_SA: &[0, 1, 1, 1, 1, 2, 3, 3, 4, 4, 4, 4],
         lstype: "LSLLSLLSLLLS",
         lmspos: " *  *  *   *",
+        searches: &[("ISS", &[1, 4])],
+        table: "
+    I        M   P   S
+[]  [0]      []  []  []
+[]  []       []  [1] []
+[]  []       []  []  [2]
+[]  []       [4] []  [3]
+[5] []       []  []  []
+[]  []       []  [6] []
+[]  [7]      []  []  []
+[]  []       []  []  [8, 9]
+[]  [10, 11] []  []  []
+",
+        constrain: &[
+            ((8, 11), (8, 11), (10, 11)),
+            ((8, 11), (1, 4), (8, 9)),
+            ((1, 4), (8, 11), (3, 4)),
+            ((1, 4), (0, 0), (1, 1)),
+            ((1, 4), (6, 7), (2, 2)),
+            ((5, 5), (1, 4), (5, 5)),
+            ((6, 7), (6, 7), (7, 7)),
+        ],
     };
 
     pub const MISSISSIPPI_BANANA: &TestCase = &TestCase {
@@ -307,11 +734,31 @@ pub mod testutil {
         not_in_str: &['C', 'D', 'E'],
         S: &[4, 3, 7, 7, 3, 7, 7, 3, 6, 6, 3, 2, 1, 5, 1, 5, 1, 0],
         SA: &[17, 16, 14, 12, 11, 10, 7, 4, 1, 0, 15, 13, 9, 8, 6, 3, 5, 2],
+        ISA: &[9, 8, 17, 15, 7, 16, 14, 6, 13, 12, 5, 4, 3, 11, 2, 10, 1, 0],
+        PSI: &[9, 0, 10, 11, 3, 4, 13, 16, 17, 8, 1, 2, 5, 12, 6, 7, 14, 15],
         bucket_starts: &[0, 1, 4, 5, 9, 10, 12, 14],
         bucket_limits: &[1, 4, 5, 9, 10, 12, 14, 18],
         deref_SA: &[0, 1, 1, 1, 2, 3, 3, 3, 3, 4, 5, 5, 6, 6, 7, 7, 7, 7],
         lstype: "LSLLSLLSLLLLSLSLLS",
         lmspos: " *  *  *    * *  *",
+        searches: &[("ISS", &[1, 4])],
+        table: "
+    A        B   I        M   N   P    S
+[]  [0]      []  []       []  []  []   []
+[]  []       []  []       []  [1] []   []
+[]  []       [3] []       []  [2] []   []
+[]  []       []  [4]      []  []  []   []
+[]  []       []  []       []  []  [5]  []
+[]  []       []  []       []  []  []   [6]
+[]  []       []  []       [8] []  []   [7]
+[9] []       []  []       []  []  []   []
+[]  [10, 11] []  []       []  []  []   []
+[]  []       []  []       []  []  [12] []
+[]  []       []  [13]     []  []  []   []
+[]  []       []  []       []  []  []   [14, 15]
+[]  []       []  [16, 17] []  []  []   []
+",
+        constrain: &[],
     };
 
     pub const MIISSISSISSIPPI: &TestCase = &TestCase {
@@ -321,11 +768,28 @@ pub mod testutil {
         not_in_str: &['A', 'B', 'N'],
         S: &[2, 1, 1, 4, 4, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 0],
         SA: &[15, 14, 1, 11, 8, 5, 2, 0, 13, 12, 10, 7, 4, 9, 6, 3],
+        ISA: &[7, 2, 6, 15, 12, 5, 14, 11, 4, 13, 10, 3, 9, 8, 1, 0],
+        PSI: &[7, 0, 6, 9, 13, 14, 15, 2, 1, 8, 3, 4, 5, 10, 11, 12],
         bucket_starts: &[0, 1, 7, 8, 10],
         bucket_limits: &[1, 7, 8, 10, 16],
         deref_SA: &[0, 1, 1, 1, 1, 1, 1, 2, 3, 3, 4, 4, 4, 4, 4, 4],
         lstype: "LSSLLSLLSLLSLLLS",
         lmspos: " *   *  *  *   *",
+        searches: &[("ISS", &[2, 5, 8])],
+        table: "
+    I            M   P   S
+[]  [0]          []  []  []
+[]  []           []  [1] []
+[]  []           [2] []  []
+[]  []           []  []  [3]
+[]  [6]          []  []  [4, 5]
+[7] []           []  []  []
+[]  []           []  [8] []
+[]  [9]          []  []  []
+[]  []           []  []  [10, 11, 12]
+[]  [13, 14, 15] []  []  []
+",
+        constrain: &[],
     };
 
     // Thist test case was found in early prototype of sais.  It has survived a language rewrite
@@ -345,6 +809,12 @@ pub mod testutil {
         SA: &[
             22, 21, 4, 15, 0, 9, 6, 17, 2, 11, 8, 19, 13, 20, 3, 14, 5, 16, 1, 10, 7, 18, 12,
         ],
+        ISA: &[
+            4, 18, 8, 14, 2, 16, 6, 20, 10, 5, 19, 9, 22, 12, 15, 3, 17, 7, 21, 11, 13, 1, 0,
+        ],
+        PSI: &[
+            4, 0, 16, 17, 18, 19, 20, 21, 14, 22, 5, 13, 15, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12,
+        ],
         bucket_starts: &[0, 1, 8, 10, 13],
         bucket_limits: &[1, 8, 10, 13, 23],
         deref_SA: &[
@@ -352,6 +822,20 @@ pub mod testutil {
         ],
         lstype: "SLSLSLSLLSLSLSLSLSLSLLS",
         lmspos: "  * * *  * * * * * *  *",
+        searches: &[("AN", &[0, 4, 6, 9, 15, 17])],
+        table: "
+    A        B    C        N
+[]  [0]      []   []       []
+[]  []       []   []       [1]
+[4] []       []   [5]      [2, 3, 6, 7]
+[]  []       []   []       [8, 9]
+[]  []       []   []       [10]
+[]  []       []   []       [11, 12]
+[]  [16, 17] [14] [13, 15] []
+[]  [18, 19] []   []       []
+[]  [20, 21] [22] []       []
+",
+        constrain: &[],
     };
 
     pub const SAIS_EXAMPLE: &TestCase = &TestCase {
@@ -361,180 +845,308 @@ pub mod testutil {
         not_in_str: &['c', 'd', 'e'],
         S: &[2, 1, 1, 2, 1, 2, 1, 2, 2, 1, 2, 0],
         SA: &[11, 1, 9, 2, 4, 6, 10, 0, 8, 3, 5, 7],
+        ISA: &[7, 1, 3, 9, 4, 10, 5, 11, 8, 2, 6, 0],
+        PSI: &[7, 3, 6, 9, 10, 11, 0, 1, 2, 4, 5, 8],
         bucket_starts: &[0, 1, 6],
         bucket_limits: &[1, 6, 12],
         deref_SA: &[0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
         lstype: "LSSLSLSLLSLS",
         lmspos: " *  * *  * *",
+        searches: &[("b", &[0, 3, 5, 7, 8, 10])],
+        table: "
+    a       b
+[]  []      [0]
+[]  []      [1]
+[]  [3]     [2, 4, 5]
+[]  [6]     []
+[7] [9, 10] [8]
+[]  [11]    []
+",
+        constrain: &[],
+    };
+
+    pub const BAD_CASE_1: &TestCase = &TestCase {
+        text: "1111111111112111",
+        sigma2text: &['1', '2'],
+        boundaries: &[1, 16, 17],
+        not_in_str: &['3'],
+        S: &[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 0],
+        SA: &[16, 15, 14, 13, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        ISA: &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 3, 2, 1, 0],
+        PSI: &[4, 0, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 3],
+        bucket_starts: &[0, 1, 16],
+        bucket_limits: &[1, 16, 17],
+        deref_SA: &[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2],
+        lstype: "SSSSSSSSSSSSLLLLS",
+        lmspos: "                *",
+        searches: &[],
+        table: "
+    1                                      2
+[]  [0]                                    []
+[]  [1]                                    []
+[4] [2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] [3]
+[]  [15]                                   []
+[]  [16]                                   []
+",
+        constrain: &[
+            ((1, 15), (16, 16), (15, 15)),
+        ],
+    };
+
+    pub const BAD_CASE_2: &TestCase = &TestCase {
+        text: "2121221211111132",
+        sigma2text: &['1', '2', '3'],
+        boundaries: &[1, 10, 16, 17],
+        not_in_str: &['4'],
+        S: &[2, 1, 2, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1, 1, 3, 2, 0],
+        SA: &[16, 8, 9, 10, 11, 12, 6, 1, 3, 13, 15, 7, 5, 0, 2, 4, 14],
+        ISA: &[13, 7, 14, 8, 15, 12, 6, 11, 1, 2, 3, 4, 5, 9, 16, 10, 0],
+        PSI: &[13, 2, 3, 4, 5, 9, 11, 14, 15, 16, 0, 1, 6, 7, 8, 12, 10],
+        bucket_starts: &[0, 1, 10, 16],
+        bucket_limits: &[1, 10, 16, 17],
+        deref_SA: &[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3],
+        lstype: "LSLSLLSLSSSSSSLLS",
+        lmspos: " * *  * *       *",
+        searches: &[],
+        table: "
+     1            2         3
+[]   []           [0]       []
+[]   [2, 3, 4, 5] [1]       []
+[]   []           [6, 7, 8] []
+[]   [9]          []        []
+[]   []           []        [10]
+[13] [11, 14]     [12]      []
+[]   [15]         []        []
+[]   [16]         []        []
+",
+        constrain: &[
+            ((16, 16), (1, 9), (16, 15)),
+        ],
+    };
+
+    pub const BAD_CASE_3: &TestCase = &TestCase {
+        text: "2121221212121222",
+        sigma2text: &['1', '2'],
+        boundaries: &[1, 7, 17],
+        not_in_str: &['3'],
+        S: &[2, 1, 2, 1, 2, 2, 1, 2, 1, 2, 1, 2, 1, 2, 2, 2, 0],
+        SA: &[16, 6, 8, 1, 10, 3, 12, 15, 5, 7, 0, 9, 2, 11, 14, 4, 13],
+        ISA: &[10, 3, 12, 5, 15, 8, 1, 9, 2, 11, 4, 13, 6, 16, 14, 7, 0],
+        PSI: &[10, 9, 11, 12, 13, 15, 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 14],
+        bucket_starts: &[0, 1, 7],
+        bucket_limits: &[1, 7, 17],
+        deref_SA: &[0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+        lstype: "LSLSLLSLSLSLSLLLS",
+        lmspos: " * *  * * * *   *",
+        searches: &[],
+        table: "
+     1               2
+[]   []              [0]
+[]   []              [1, 2, 3, 4, 5, 6]
+[]   []              [7]
+[10] [9, 11, 12, 13] [8]
+[]   [15, 16]        [14]
+",
+        constrain: &[
+            ((1, 6), (1, 6), (1, 0)),
+        ],
+    };
+
+    pub const BAD_CASE_4: &TestCase = &TestCase {
+        text: "12224122231222312222122221222212221122211222112221",
+        sigma2text: &['1', '2', '3', '4'],
+        boundaries: &[1, 15, 48, 50, 51],
+        not_in_str: &['5'],
+        S: &[1, 2, 2, 2, 4, 1, 2, 2, 2, 3, 1, 2, 2, 2, 3, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 1, 1, 2, 2, 2, 1, 1, 2, 2, 2, 1, 1, 2, 2, 2, 1, 0],
+        SA: &[50, 49, 44, 39, 34, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0, 48, 43, 38, 33, 29, 24, 19, 47, 42, 37, 32, 28, 23, 18, 46, 41, 36, 31, 27, 22, 17, 26, 21, 16, 11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4],
+        ISA: &[14, 41, 44, 47, 50, 13, 40, 43, 46, 49, 12, 39, 42, 45, 48, 11, 38, 35, 28, 21, 10, 37, 34, 27, 20, 9, 36, 33, 26, 19, 8, 32, 25, 18, 4, 7, 31, 24, 17, 3, 6, 30, 23, 16, 2, 5, 29, 22, 15, 1, 0],
+        PSI: &[14, 0, 5, 6, 7, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 1, 2, 3, 4, 8, 9, 10, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 33, 34, 35, 42, 43, 44, 45, 46, 47, 48, 49, 50, 11, 12, 13],
+        bucket_starts: &[0, 1, 15, 48, 50],
+        bucket_limits: &[1, 15, 48, 50, 51],
+        deref_SA: &[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 4],
+        lstype: "SSSSLSSSSLSSSSLSLLLLSLLLLSLLLLSLLLSSLLLSSLLLSSLLLLS",
+        lmspos: "     *    *    *    *    *    *   *    *    *     *",
+        searches: &[],
+        table: "
+     1                                        2                                                    3        4
+[]   [0]                                      []                                                   []       []
+[]   []                                       [1]                                                  []       []
+[]   []                                       [2, 3, 4]                                            []       []
+[14] [5, 6, 7]                                [8, 9, 10]                                           [11, 12] [13]
+[]   []                                       [15, 16, 17, 18, 19, 20, 21]                         []       []
+[]   [29, 30, 31, 32, 36, 37, 38, 39, 40, 41] [22, 23, 24, 25, 26, 27, 28, 33, 34, 35, 42, 43, 44] []       []
+[]   []                                       [45, 46]                                             []       []
+[]   []                                       [47]                                                 []       []
+[]   []                                       [48, 49]                                             []       []
+[]   []                                       [50]                                                 []       []
+",
+        constrain: &[
+            ((15, 47), (48, 49), (45, 46)),
+            ((15, 47), (45, 46), (42, 43)),
+            ((15, 47), (42, 43), (39, 40)),
+            ((15, 47), (50, 50), (47, 47)),
+            ((15, 47), (47, 47), (44, 44)),
+        ],
     };
 
     #[macro_export]
     macro_rules! test_cases_for {
         ($name:ident, $check:path) => {
-            pub mod $name {
+            mod $name {
                 #[test]
                 fn banana() {
-                    $check($crate::testutil::BANANA);
+                    $check($crate::test_util::BANANA);
                 }
 
                 #[test]
                 fn mississippi() {
-                    $check($crate::testutil::MISSISSIPPI);
+                    $check($crate::test_util::MISSISSIPPI);
                 }
 
                 #[test]
                 fn mississippi_banana() {
-                    $check($crate::testutil::MISSISSIPPI_BANANA);
+                    $check($crate::test_util::MISSISSIPPI_BANANA);
                 }
 
                 #[test]
                 fn miissississippi() {
-                    $check($crate::testutil::MIISSISSISSIPPI);
+                    $check($crate::test_util::MIISSISSISSIPPI);
                 }
 
                 #[test]
                 fn mutant_banana() {
-                    $check($crate::testutil::MUTANT_BANANA);
+                    $check($crate::test_util::MUTANT_BANANA);
                 }
 
                 #[test]
                 fn sais_example() {
-                    $check($crate::testutil::SAIS_EXAMPLE);
+                    $check($crate::test_util::SAIS_EXAMPLE);
+                }
+
+                #[test]
+                fn bad_case1() {
+                    $check($crate::test_util::BAD_CASE_1);
+                }
+
+                #[test]
+                fn bad_case2() {
+                    $check($crate::test_util::BAD_CASE_2);
+                }
+
+                #[test]
+                fn bad_case3() {
+                    $check($crate::test_util::BAD_CASE_3);
+                }
+
+                #[test]
+                fn bad_case4() {
+                    $check($crate::test_util::BAD_CASE_4);
                 }
             }
         };
     }
 
-    pub const STRING_BANANA: &str = "banana";
-    pub const STRING_MISSISSIPPI: &str = "mississippi";
-    pub const STRING_MISSISSIPPIBANANA: &str = "mississippibanana";
-    pub const STRING_MIISSISSISSIPPI: &str = "miissississippi";
-    pub const STRING_MUTANT_BANANA: &str = "anbnanancanbncnanancna";
+    pub(crate) use test_cases_for;
 
-    pub struct SearchResult<'a> {
-        pub input: &'a str,
-        pub needle: &'a str,
-        pub offsets: &'a [usize],
-    }
+    #[macro_export]
+    macro_rules! search_cases_for {
+        ($name:ident, $check:path) => {
+            mod $name {
+                use super::*;
 
-    impl<'a> SearchResult<'a> {
-        pub fn check_length<I>(&self, f: fn(&[char]) -> I)
-        where
-            I: Index<Item = char>,
-        {
-            let s = self.input();
-            let index = f(&s);
-            assert_eq!(s.len(), index.length());
-        }
-
-        pub fn check_extract<I>(&self, f: fn(&[char]) -> I)
-        where
-            I: Index<Item = char>,
-        {
-            let s = self.input();
-            let index = f(&s);
-            for i in 0..s.len() {
-                for j in i..s.len() {
-                    let expected: Vec<char> = s[i..j].iter().cloned().collect();
-                    let returned: Vec<char> = index.extract(i, j - i).unwrap().collect();
-                    assert_eq!(expected, returned);
+                fn build(t: &TestCase) -> Vec<u8> {
+                    let text: Vec<u32> = t.text.chars().map(|c| c as u32).collect();
+                    let record_boundaries = vec![0usize];
+                    let mut buf = Vec::new();
+                    let mut builder = Builder::new(&mut buf);
+                    <$check>::construct(text, record_boundaries, &mut builder)
+                        .expect("test case should index");
+                    drop(builder);
+                    buf
                 }
+
+                fn check_len(t: &TestCase) {
+                    let doc = build(t);
+                    let (doc, _) =
+                        <$check>::unpack(&doc).expect("freshly created document should unpack");
+                    assert_eq!(t.text.chars().count(), doc.len());
+                }
+
+                test_cases_for! {len, super::check_len}
+
+                fn check_retrieve(t: &TestCase) {
+                    let text: Vec<u32> = t.text.chars().map(|c| c as u32).collect();
+                    let doc = build(t);
+                    let (doc, _) =
+                        <$check>::unpack(&doc).expect("freshly created document should unpack");
+                    assert_eq!(
+                        text,
+                        doc.retrieve(RecordOffset(0))
+                            .expect("retrieve should succeed")
+                    );
+                }
+
+                test_cases_for! {retrieve, super::check_retrieve}
+
+                fn check_search(t: &TestCase) {
+                    let doc = build(t);
+                    let (doc, _) =
+                        <$check>::unpack(&doc).expect("freshly created document should unpack");
+                    for (needle, offsets) in t.searches.iter() {
+                        let expected: Vec<TextOffset> =
+                            offsets.iter().map(|x| TextOffset(*x)).collect();
+                        let needle_u32: Vec<u32> = needle.chars().map(|c| c as u32).collect();
+                        let mut returned: Vec<TextOffset> = doc
+                            .search(&needle_u32)
+                            .expect("search should succeed")
+                            .collect();
+                        returned.sort();
+                        assert_eq_with_ctx!(expected, returned, needle);
+                    }
+                    // TODO(rescrv): Check empty search.
+                }
+
+                test_cases_for! {search, super::check_search}
+
+                fn check_count(t: &TestCase) {
+                    let doc = build(t);
+                    let (doc, _) =
+                        <$check>::unpack(&doc).expect("freshly created document should unpack");
+                    for (needle, offsets) in t.searches.iter() {
+                        let needle_u32: Vec<u32> = needle.chars().map(|c| c as u32).collect();
+                        let count: usize = doc.count(&needle_u32).expect("count should succeed");
+                        assert_eq_with_ctx!(offsets.len(), count, needle);
+                    }
+                }
+
+                test_cases_for! {count, super::check_count}
             }
-        }
-
-        pub fn check_empty_search<I>(&self, f: fn(&[char]) -> I)
-        where
-            I: Index<Item = char>,
-        {
-            let s = self.input();
-            let index = f(&s);
-            let expected: Vec<usize> = (0..s.len()).collect();
-            let mut returned: Vec<usize> = index.search(&[]).collect();
-            returned.sort_unstable();
-            assert_eq!(&expected, &returned);
-        }
-
-        pub fn check_search<I>(&self, f: fn(&[char]) -> I)
-        where
-            I: Index<Item = char>,
-        {
-            let s = self.input();
-            let n: Vec<char> = self.needle();
-            let index = f(&s);
-            let mut returned: Vec<usize> = index.search(&n).collect();
-            returned.sort_unstable();
-            assert_eq!(self.offsets, returned.as_slice());
-        }
-
-        pub fn check_count<I>(&self, f: fn(&[char]) -> I)
-        where
-            I: Index<Item = char>,
-        {
-            let s = self.input();
-            let n: Vec<char> = self.needle();
-            let index = f(&s);
-            assert_eq!(self.offsets.len(), index.count(&n));
-        }
-
-        fn input(&self) -> Vec<char> {
-            self.input.chars().into_iter().collect()
-        }
-
-        fn needle(&self) -> Vec<char> {
-            self.needle.chars().into_iter().collect()
-        }
+        };
     }
 
-    pub const BANANA_AN: SearchResult = SearchResult {
-        input: STRING_BANANA,
-        needle: "an",
-        offsets: &[1, 3],
-    };
-
-    pub const BANANA_NA: SearchResult = SearchResult {
-        input: STRING_BANANA,
-        needle: "na",
-        offsets: &[2, 4],
-    };
-
-    pub const MISSISSIPPI_ISS: SearchResult = SearchResult {
-        input: STRING_MISSISSIPPI,
-        needle: "iss",
-        offsets: &[1, 4],
-    };
-
-    pub const MISSISSIPPIBANANA_ISS: SearchResult = SearchResult {
-        input: STRING_MISSISSIPPIBANANA,
-        needle: "iss",
-        offsets: &[1, 4],
-    };
-
-    pub const MIISSISSISSIPPI_ISS: SearchResult = SearchResult {
-        input: STRING_MIISSISSISSIPPI,
-        needle: "iss",
-        offsets: &[2, 5, 8],
-    };
-
-    pub const MUTANT_BANANA_AN: SearchResult = SearchResult {
-        input: STRING_MUTANT_BANANA,
-        needle: "an",
-        offsets: &[0, 4, 6, 9, 15, 17],
-    };
-
-    pub const SEARCHES: &[SearchResult] = &[
-        BANANA_AN,
-        BANANA_NA,
-        MISSISSIPPI_ISS,
-        MISSISSIPPIBANANA_ISS,
-        MIISSISSISSIPPI_ISS,
-        MUTANT_BANANA_AN,
-    ];
+    pub(crate) use search_cases_for;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::testutil::*;
+    use crate::sa::SuffixArray;
+    use crate::isa::InverseSuffixArray;
+
+    use super::psi::Psi;
+    use super::test_util::*;
     use super::*;
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn u32_as_usize() {
+        assert!(u32::BITS <= usize::BITS);
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn usize_as_u64() {
+        assert!(usize::BITS <= u64::BITS);
+    }
 
     #[test]
     fn inverse() {
@@ -546,60 +1158,52 @@ mod tests {
         assert_eq!(x, returned);
     }
 
-    macro_rules! searches_tests {
-        ($($name:ident: $value:expr,)*) => {
-        $(
-            mod $name {
-                #[allow(unused_imports)]
-                use super::*;
+    fn check_string(t: &TestCase) {
+        let sigma = t.sigma();
+        let sigma = sigma::Sigma::unpack(&sigma).expect("test should unpack").0;
+        let mut s: Vec<u32> = t.text.chars().map(|x| sigma.char_to_sigma(x as u32).unwrap()).collect();
+        s.push(0);
+        assert_eq!(t.S, s);
+    }
 
-                #[test]
-                fn length() {
-                    for search in super::SEARCHES {
-                        search.check_length($value);
-                    }
-                }
+    test_cases_for! {string, super::check_string}
 
-                #[test]
-                fn extract() {
-                    for search in super::SEARCHES {
-                        search.check_extract($value);
-                    }
-                }
+    fn check_isa(t: &TestCase) {
+        let returned = super::inverse(t.SA);
+        assert_eq_with_ctx!(t.ISA, returned);
+    }
 
-                #[test]
-                fn search() {
-                    for search in super::SEARCHES {
-                        search.check_search($value);
-                        search.check_empty_search($value);
-                    }
-                }
+    test_cases_for! {isa, super::check_isa}
 
-                #[test]
-                fn count() {
-                    for search in super::SEARCHES {
-                        search.check_count($value);
-                    }
-                }
-            }
-        )*
+    fn check_unpack_psi_document(t: &TestCase) {
+        let text: Vec<u32> = t.text.chars().map(|c| c as u32).collect();
+        let record_boundaries = vec![0usize];
+        let mut buf = Vec::new();
+        let mut builder = Builder::new(&mut buf);
+        type Document<'a> = super::PsiDocument::<'a, super::sa::ReferenceSuffixArray, super::isa::ReferenceInverseSuffixArray, super::psi::ReferencePsi>;
+        Document::construct(text, record_boundaries, &mut builder)
+            .expect("test case should index");
+        drop(builder);
+        let doc = Document::unpack(&buf).expect("document should unpack").0;
+
+        for (idx, sa) in t.SA.iter().enumerate() {
+            assert_eq_with_ctx!(*sa, doc.sa.lookup(&doc.sigma, &doc.psi, idx).unwrap(), idx);
+        }
+
+        for (idx, isa) in t.ISA.iter().enumerate() {
+            assert_eq_with_ctx!(*isa, doc.isa.lookup(idx).unwrap(), idx);
+        }
+
+        assert_eq!(t.PSI.len(), doc.psi.len());
+        for (idx, psi) in t.PSI.iter().enumerate() {
+            assert_eq_with_ctx!(*psi, doc.psi.lookup(&doc.sigma, idx).unwrap(), idx);
         }
     }
 
-    fn simple_new(
-        text: &[char],
-    ) -> SearchIndex<
-        char,
-        UncompressedSuffixArray,
-        UncompressedInverseSuffixArray,
-        bit_vector::ReferenceOldBitVector,
-        psi::ReferencePsi,
-    > {
-        SearchIndex::new(text)
-    }
+    test_cases_for!{unpack_psi_document, super::check_unpack_psi_document}
 
-    searches_tests! {
-        reference: crate::reference::ReferenceIndex::new,
-        simple_new: simple_new,
-    }
+    search_cases_for! {reference, crate::ReferenceDocument}
+    search_cases_for! {psi_with_all_reference, crate::PsiDocument::<crate::sa::ReferenceSuffixArray, crate::isa::ReferenceInverseSuffixArray, psi::ReferencePsi>}
+    search_cases_for! {psi_with_wavelet_psi, crate::PsiDocument::<crate::sa::ReferenceSuffixArray, crate::isa::ReferenceInverseSuffixArray, psi::wavelet_tree::WaveletTreePsi<wavelet_tree::ReferenceWaveletTree>>}
+    search_cases_for! {compressed_document, crate::CompressedDocument}
 }

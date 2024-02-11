@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use toml::Table;
 
-const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb", "scrunch", "tuple_db"];
+const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb"];
 
-const EXCLUDE_DIRS: &[&str] = &[".git", "target", "napkins", "statslicer"];
+const EXCLUDE_DIRS: &[&str] = &[".git", "target", "napkins"];
 
 fn workspace_members() -> Vec<String> {
     let workspace_text = read_to_string("Cargo.toml").expect("reading workspace toml");

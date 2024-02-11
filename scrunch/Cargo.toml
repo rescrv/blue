@@ -10,4 +10,18 @@ license = "Apache-2.0"
 buffertk = { path = "../buffertk", version = "0.5" }
 prototk = { path = "../prototk", version = "0.5" }
 prototk_derive = { path = "../prototk_derive", version = "0.5" }
-zerror_core = { path = "../zerror_core", version = "0.4" }
+
+[dev-dependencies]
+proptest = "1.0"
+
+arrrg = { path = "../arrrg", version = "0.3" }
+guacamole = { path = "../guacamole", version = "0.6" }
+statslicer = { path = "../statslicer", version = "0.1" }
+
+[[bench]]
+name = "sparse_bit_vector"
+harness = false
+
+[[bench]]
+name = "rrr_bit_vector"
+harness = false

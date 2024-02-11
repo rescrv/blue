@@ -1,124 +1,325 @@
+use buffertk::Unpackable;
+use prototk::FieldNumber;
+
+use crate::binary_search::partition_by;
+use crate::bit_vector::sparse::BitVector;
+use crate::bit_vector::BitVector as BitVectorTrait;
+use crate::builder::{Builder, Helper};
 use crate::psi::Psi;
-use std::hash::Hash;
+use crate::sigma::Sigma;
+use crate::wavelet_tree::WaveletTree as WaveletTree;
+use crate::{inverse, Error};
 
-const CTX: usize = 1;
+///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
-pub struct WaveletTreePsi<D, WT>
-where
-    D: crate::dictionary::Dictionary<(usize, usize)>,
-    WT: crate::wavelet_tree::WaveletTree,
-{
-    cells: D,
-    table: Vec<Context<WT>>,
+const CTX_MAX: usize = 2;
+
+const CONTEXT_FIELD_NUMBER: u32 = 2;
+const Y_KEY_FIELD_NUMBER: u32 = 3;
+const Y_VALUE_FIELD_NUMBER: u32 = 4;
+
+//////////////////////////////////////////// ContextStub ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+struct ContextStub<'a> {
+    #[prototk(1, uint32)]
+    ctx: Vec<u32>,
+    #[prototk(2, uint64)]
+    start: u64,
+    #[prototk(3, bytes)]
+    tree: &'a [u8],
 }
+
+impl<'a, WT> TryFrom<ContextStub<'a>> for Context<WT>
+where
+    WT: WaveletTree + Unpackable<'a, Error=Error>
+{
+    type Error = Error;
+
+    fn try_from(stub: ContextStub<'a>) -> Result<Self, Self::Error> {
+        let ContextStub {
+            ctx,
+            start,
+            tree,
+        } = stub;
+        if ctx.len() > CTX_MAX {
+            return Err(Error::InvalidWaveletTree);
+        }
+        if start > usize::MAX as u64 {
+            return Err(Error::IntoUsize);
+        }
+        let start = start as usize;
+        let ctx_vec = ctx;
+        let mut ctx = [0u32; CTX_MAX];
+        ctx[..ctx_vec.len()].copy_from_slice(&ctx_vec);
+        let tree = WT::unpack(tree)?.0;
+        Ok(Context {
+            ctx,
+            start,
+            tree,
+        })
+    }
+}
+
+////////////////////////////////////////////// Context /////////////////////////////////////////////
 
 struct Context<WT>
 where
-    WT: crate::wavelet_tree::WaveletTree,
+    WT: WaveletTree,
 {
-    _ctx: Vec<usize>,
+    #[allow(dead_code)]
+    ctx: [u32; CTX_MAX],
     start: usize,
     tree: WT,
 }
 
-impl<D, WT> super::Psi for WaveletTreePsi<D, WT>
-where
-    D: crate::dictionary::Dictionary<(usize, usize)>,
-    WT: crate::wavelet_tree::WaveletTree,
-{
-    fn new<T, B>(sigma: &crate::Sigma<T, B>, psi: &[usize]) -> Self
-    where
-        T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::OldBitVector,
-    {
-        let mut ctx: [usize; CTX] = [0; CTX];
-        // compute the inverse of psi so that we can bounce around the columns in order
-        let ipsi = crate::inverse(psi);
-        // rows in the column/row breakdown of psi
-        let mut table: Vec<Context<WT>> = Vec::new();
-        // string for the wavelet tree
-        let mut wt: Vec<usize> = Vec::new();
-        // track the index into psi where the current context began
-        let mut start = 0;
-        // now iterate
-        for i in 0..ipsi.len() {
-            // This was not immediately intuitive to me and took awhile to discover.
+impl<WT: WaveletTree> Context<WT> {
+    fn lookup(&self, sigma: u32, idx: usize) -> Result<usize, Error> {
+        if idx >= self.tree.len() {
+            return Err(Error::BadIndex(idx));
+        }
+        let to_select = idx + 1;
+        let select = self.tree.select_q(sigma, to_select).ok_or(Error::BadIndex(idx))? - 1;
+        Ok(self.start + select)
+    }
+}
+
+/////////////////////////////////////////// BuildContext ///////////////////////////////////////////
+
+#[derive(Debug)]
+struct BuildContext {
+    ctx: [u32; CTX_MAX],
+    start: usize,
+    tree: Vec<u32>,
+}
+
+/////////////////////////////////////////////// Table //////////////////////////////////////////////
+
+fn compute_table(sigma: &Sigma, ctx_sz: usize, psi: &[usize]) -> Result<Vec<BuildContext>, Error> {
+    let mut ctx = [0u32; CTX_MAX];
+    // compute the inverse of psi so that we can bounce around the columns in order
+    let ipsi = inverse(psi);
+    // rows in the column/row breakdown of psi
+    let mut table: Vec<BuildContext> = Vec::new();
+    // string for the wavelet tree
+    let mut wt: Vec<u32> = Vec::new();
+    // track the index into psi where the current context began
+    let mut start = 0;
+    // now iterate
+    for (i, ipsi) in ipsi.iter().enumerate() {
+        // This was not immediately intuitive to me and took awhile to discover.
+        //
+        // We are going to use psi to figure out the contex for the point and use ipsi to
+        // figure out the character for the wavelet tree.
+        let mut tmp = ctx;
+        let mut idx = i;
+        for t in tmp.iter_mut().take(ctx_sz) {
+            *t = sigma.sa_index_to_sigma(idx).ok_or(Error::InvalidSigma)?;
+            idx = psi[idx];
+        }
+        // if this is the start of a new context
+        if ctx != tmp {
+            // on the first iteration of the loop, there's definitely no context to push
             //
-            // We are going to use psi to figure out the contex for the point and use ipsi to
-            // figure out the character for the wavelet tree.
-            let mut tmp = ctx.clone();
-            let mut idx = i;
-            for j in 0..CTX {
-                tmp[j] = sigma.columns().rank(idx);
-                idx = psi[idx];
+            // skipping here allows one initialization point
+            if i > 0 {
+                let tree = std::mem::take(&mut wt);
+                table.push(BuildContext {
+                    ctx,
+                    start,
+                    tree,
+                });
             }
-            // if this is the start of a new context
-            if ctx != tmp {
-                // on the first iteration of the loop, there's definitely no context to push
-                //
-                // skipping here allows one initialization point
-                if i > 0 {
-                    table.push(Context {
-                        _ctx: ctx.to_vec(),
-                        tree: WT::new(&wt),
-                        start,
-                    });
-                }
-                // reset for next row
-                wt.clear();
-                ctx = tmp;
-                start = i;
-            }
-            // use ipsi to figure out which character is at this position in the string
-            let s = match sigma.sa_index_to_sigma(ipsi[i]) {
-                Some(x) => x,
-                None => panic!("XXX"),
-            };
-            wt.push(s);
+            // reset for next row
+            wt.clear();
+            ctx = tmp;
+            start = i;
         }
-        // push one last context
-        table.push(Context {
-            _ctx: ctx.to_vec(),
-            tree: WT::new(&wt),
-            start,
+        // use ipsi to figure out which character is at this position in the string
+        let s = sigma.sa_index_to_sigma(*ipsi).ok_or(Error::InvalidSigma)?;
+        wt.push(s);
+    }
+    // push one last context
+    let tree = std::mem::take(&mut wt);
+    table.push(BuildContext {
+        ctx,
+        start,
+        tree,
+    });
+    Ok(table)
+}
+
+#[cfg(test)]
+pub fn draw_table(sigma: &Sigma, psi: &[usize]) -> String {
+    let table = compute_table(sigma, 2, psi).expect("table should construct");
+    let mut printed = "".to_string();
+    let mut rows = vec![];
+    for row in table.iter() {
+        let mut columns = vec![vec![]; sigma.K()];
+        for (idx, c) in row.tree.iter().enumerate() {
+            columns[*c as usize].push(row.start + idx);
+        }
+        let mut row = vec![];
+        for column in columns.into_iter() {
+            row.push(format!("{column:?}"));
+        }
+        rows.push(row);
+    }
+    let mut widths = vec![0usize; sigma.K()];
+    for row in rows.iter() {
+        for (idx, cell) in row.iter().enumerate() {
+            widths[idx] = std::cmp::max(widths[idx], cell.len() + 1);
+        }
+    }
+    for (idx, width) in widths.iter().enumerate() {
+        let c = sigma.sigma_to_char(idx as u32 + 1);
+        let c = char::from_u32(c.unwrap_or(0)).unwrap_or(' ');
+        printed += &format!("{c:<width$}");
+    }
+    printed += "\n";
+    for row in rows.iter() {
+        for (idx, cell) in row.iter().enumerate() {
+            let width = widths[idx];
+            printed += &format!("{cell:<width$}");
+        }
+        printed += "\n";
+    }
+    printed
+}
+
+//////////////////////////////////////// WaveletTreePsiStub ////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+pub struct WaveletTreePsiStub<'a> {
+    #[prototk(2, message)]
+    table: Vec<ContextStub<'a>>,
+    #[prototk(3, bytes)]
+    y_key: &'a [u8],
+    #[prototk(4, uint64)]
+    y_value: Vec<u64>,
+}
+
+////////////////////////////////////////// WaveletTreePsi //////////////////////////////////////////
+
+pub struct WaveletTreePsi<'a, WT>
+where
+    WT: WaveletTree,
+{
+    table: Vec<Context<WT>>,
+    y_key: BitVector<'a>,
+    y_value: Vec<usize>,
+}
+
+impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
+    // Find the lowest index of psi in the range [into.0, into.1] s.t. psi[idx] >= point.
+    //
+    // Requires that into be a closed range.
+    fn lower_bound(
+        &self,
+        sigma: &Sigma,
+        point: usize,
+        into: (usize, usize),
+    ) -> Result<usize, Error> {
+        assert!(!self.table.is_empty());
+        assert!(into.0 <= into.1);
+        assert!(into.1 <= self.len());
+        // Empty range case.
+        if into.0 > into.1 {
+            return Ok(into.0);
+        }
+        // Empty character case
+        if into.0 == 0 {
+            return Err(Error::BadSearch);
+        }
+        // This transforms from [) to ambiguous [)/[] intervals.
+        let first_cell = self.y_key.rank(into.0).ok_or(Error::BadRank(into.0))?;
+        let last_cell = self.y_key.rank(into.1).ok_or(Error::BadRank(into.1))?;
+        let mut cell = partition_by(first_cell, last_cell, |cell| { self.table[self.y_value[cell]].start < point });
+        if cell > first_cell && self.table[self.y_value[cell]].start > point {
+            cell -= 1;
+        }
+        let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
+        let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
+        let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
+        let index = partition_by(start_of_cell, end_of_cell + 1, |index| {
+            self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) < point
         });
-        // cleanup and make the pieces we care about immutable
-        let table = table;
-        // now form the rest of what we need to be able to lookup in the wt
-        // starting with a bit vector tracking non-empty cells
-        let mut cells: Vec<(usize, (usize, usize))> = Vec::new();
+        Ok(index)
+    }
+
+    // Find the highest index of psi in the range [into.0, into.1] s.t. psi[idx] <= point.
+    //
+    // Requires that into be a closed range.
+    fn upper_bound(
+        &self,
+        sigma: &Sigma,
+        point: usize,
+        into: (usize, usize),
+    ) -> Result<usize, Error> {
+        assert!(!self.table.is_empty());
+        assert!(into.0 <= into.1);
+        assert!(into.1 <= self.len());
+        // Empty range case.
+        if into.0 > into.1 {
+            return Ok(into.0);
+        }
+        // Empty character case
+        if into.0 == 0 {
+            return Err(Error::BadSearch);
+        }
+        // This transforms from [) to ambiguous [)/[] intervals.
+        let first_cell = self.y_key.rank(into.0).ok_or(Error::BadRank(into.0))?;
+        let last_cell = self.y_key.rank(into.1).ok_or(Error::BadRank(into.1))?;
+        let mut cell = partition_by(first_cell, last_cell, |cell| { self.table[self.y_value[cell]].start < point });
+        if cell > first_cell && self.table[self.y_value[cell]].start > point {
+            cell -= 1;
+        }
+        let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
+        let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
+        let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
+        let mut index = partition_by(start_of_cell, end_of_cell, |index| {
+            self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) < point
+        });
+        if self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) > point {
+            index -= 1;
+        }
+        Ok(index)
+    }
+}
+
+impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
+    fn construct<H: Helper>(sigma: &Sigma, psi: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+        const CTX_SZ: usize = 2;
+        let table = compute_table(sigma, CTX_SZ, psi)?;
+        let mut y_value = vec![];
+        let mut y_key = vec![];
         let mut sum = 0;
-        // for each column
         for i in 0..sigma.K() {
-            // for each row
-            for j in 0..table.len() {
-                // figure out the total number of characters in this cell
-                let in_cell = table[j].tree.rank_q(table[j].tree.len(), i);
+            for (idx, t) in table.iter().enumerate() {
+                let in_cell = t.tree.iter().filter(|x| **x as usize == i).count();
                 if in_cell > 0 {
-                    cells.push((sum, (sum, j)));
+                    if sum > 0 {
+                        y_key.push(sum - 1);
+                    }
+                    y_value.push(idx);
+                    sum += in_cell;
                 }
-                sum += in_cell;
             }
         }
-        cells.push((psi.len(), (0, 0)));
-        // contexts
-        let mut contexts: Vec<usize> = Vec::new();
-        let mut sum = 0;
-        // for each context
-        for i in 0..table.len() {
-            contexts.push(sum);
-            // figure out the total number of characters in this tree
-            sum += table[i].tree.len();
+        for t in table.iter() {
+            let mut builder = builder.sub(FieldNumber::must(CONTEXT_FIELD_NUMBER));
+            builder.append_vec_u32(FieldNumber::must(1), &t.ctx[..CTX_SZ]);
+            builder.append_u64(FieldNumber::must(2), t.start as u64);
+            WT::construct(&t.tree, &mut builder.sub(FieldNumber::must(3)))?;
         }
-        contexts.push(sum);
-        Self {
-            table,
-            cells: D::new(&cells),
-        }
+        y_key.push(sum - 1);
+        BitVector::from_indices(16, sum, &y_key, &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER))).ok_or(Error::InvalidBitVector)?;
+        builder.append_vec_usize(FieldNumber::must(Y_VALUE_FIELD_NUMBER), &y_value);
+        Ok(())
     }
 
     fn len(&self) -> usize {
-        if self.table.len() == 0 {
+        if self.table.is_empty() {
             0
         } else {
             let last = &self.table[self.table.len() - 1];
@@ -126,115 +327,63 @@ where
         }
     }
 
-    fn lookup<T, B>(&self, sigma: &crate::Sigma<T, B>, idx: usize) -> usize
-    where
-        T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::OldBitVector,
-    {
-        assert!(idx == 0 || self.table.len() > 0);
-        // empty table case
-        if self.table.len() == 0 {
-            return 0;
-        }
-        // use the cells dictionary to figure out the right context
-        let (start_of_cell, context) = *self.cells.lookup(idx);
-        let column: usize = sigma.sa_index_to_sigma(idx).unwrap();
-        // answer
-        self.table[context].start
-            + self.table[context]
-                .tree
-                .select_q(idx - start_of_cell, column)
+    fn lookup(&self, sigma: &Sigma, idx: usize) -> Result<usize, Error> {
+        let y_rank = self.y_key.rank(idx).ok_or(Error::BadRank(idx))?;
+        let y = self.y_value[y_rank];
+        let start_of_cell = self.y_key.select(y_rank).ok_or(Error::BadSelect(idx))?;
+        let sigma = sigma.sa_index_to_sigma(idx).ok_or(Error::InvalidSigma)?;
+        self.table[y].lookup(sigma, idx - start_of_cell)
     }
 
-    fn constrain<T, B>(
+    fn constrain(
         &self,
-        sigma: &crate::Sigma<T, B>,
+        sigma: &Sigma,
         range: (usize, usize),
         into: (usize, usize),
-    ) -> (usize, usize)
-    where
-        T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::OldBitVector,
-    {
-        assert!(range.0 <= range.1);
-        assert!(range.1 <= self.len());
-        assert!(into.0 <= into.1);
-        assert!(into.1 <= self.len());
+    ) -> Result<(usize, usize), Error> {
+        if range.0 > range.1 {
+            return Ok(range);
+        }
+        if into.0 > into.1 {
+            return Ok((range.0, range.0 - 1));
+        }
         // empty table case
-        if self.table.len() == 0 {
-            // XXX test
-            return (0, 0);
+        if self.table.is_empty() {
+            return Ok((1, 0));
         }
         // empty range case
-        if into.0 >= into.1 {
-            return into;
+        if into.0 > into.1 {
+            return Ok(into);
         }
-        let lower = self.binary_search(sigma, into.0, range);
-        let upper = self.binary_search(sigma, into.1, range);
-        (lower, upper)
+        let lower = self.lower_bound(sigma, into.0, range)?;
+        let upper = self.upper_bound(sigma, into.1, range)?;
+        Ok((lower, upper))
     }
 }
 
-impl<D, WT> WaveletTreePsi<D, WT>
+impl<'a, WT> Unpackable<'a> for WaveletTreePsi<'a, WT>
 where
-    D: crate::dictionary::Dictionary<(usize, usize)>,
-    WT: crate::wavelet_tree::WaveletTree,
+    WT: WaveletTree + Unpackable<'a, Error=Error>,
 {
-    // find the highest index of psi in the range [into.0, into.1) s.t. psi[idx] <= point
-    fn binary_search<T, B>(
-        &self,
-        sigma: &crate::Sigma<T, B>,
-        point: usize,
-        into: (usize, usize),
-    ) -> usize
-    where
-        T: Copy + Clone + Eq + Hash + Ord,
-        B: crate::bit_vector::OldBitVector,
-    {
-        assert!(self.table.len() > 0);
-        assert!(into.0 <= into.1);
-        assert!(into.1 <= self.len());
-        // empty range case
-        if into.0 >= into.1 {
-            return into.0;
+    type Error = Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let (WaveletTreePsiStub {
+            table: contexts,
+            y_key,
+            y_value,
+        }, buf) = WaveletTreePsiStub::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
+        let mut table: Vec<Context<WT>> = vec![];
+        for t in contexts.into_iter() {
+            table.push(t.try_into()?);
         }
-        // this transforms from [) to ambiguous [)/[] intervals
-        let mut cells = (self.cells.rank(into.0), self.cells.rank(into.1));
-        // correct it to a closed [] interval
-        if self.cells.select(cells.1) == into.1 {
-            cells.1 -= 1;
-        }
-        // find the cell that contains the answer
-        let cell = loop {
-            let mid = cells.0 + (cells.1 - cells.0) / 2;
-            // [] interval of psi that corresponds to the cell `mid`
-            // closed interval is necessary to cover case when mid is last cell of column
-            let psi_mid_lower = self.lookup(sigma, self.cells.select(mid));
-            let psi_mid_upper = self.lookup(sigma, self.cells.select(mid + 1) - 1);
-            if psi_mid_lower > point && mid < cells.1 {
-                cells.1 = mid - 1;
-            } else if psi_mid_upper < point && cells.0 < mid {
-                cells.0 = mid + 1;
-            } else {
-                break mid;
-            }
-        };
-        let (x, (start_of_cell, context)) = self.cells.selectup(cell);
-        assert_eq!(x, *start_of_cell);
-        let column: usize = sigma.sa_index_to_sigma(*start_of_cell).unwrap();
-        let wt = &self.table[*context].tree;
-        start_of_cell + wt.rank_q(point - self.table[*context].start, column)
+        let y_key = BitVector::parse(y_key)?.0;
+        // TODO(rescrv): error if doesn't fit
+        let y_value: Vec<usize> = y_value.iter().map(|x| *x as usize).collect();
+        Ok((Self {
+            table,
+            y_key,
+            y_value,
+        }, buf))
     }
 }
-
-/////////////////////////////////////////////// tests //////////////////////////////////////////////
-
-// TODO(rescrv): Uncomment
-//#[cfg(test)]
-//super::tests::test_Psi!(
-//    tests,
-//    super::WaveletTreePsi::<
-//        ReferenceDictionary<ReferenceOldBitVector, (usize, usize)>,
-//        ReferenceWaveletTree,
-//    >
-//);
