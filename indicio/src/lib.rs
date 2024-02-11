@@ -184,7 +184,7 @@ impl Display for Value {
                 let values = values
                     .entries
                     .iter()
-                    .map(|entry| format!("{}: {}", entry.key, entry.value))
+                    .map(|entry| format!("\"{}\": {}", entry.key, entry.value))
                     .collect::<Vec<_>>();
                 write!(f, "{{{}}}", values.join(", "))
             }
