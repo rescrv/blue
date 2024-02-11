@@ -1902,7 +1902,7 @@ impl<'a> super::BitVector for BitVector<'a> {
         if x > self.len() {
             return None;
         }
-        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| {
+        let mut p_offset = partition_by(0, self.r.bits() / 32 - 1, |mid| {
             // SAFETY(rescrv):  binary search should never go outside the specified len
             self.r.load(mid * 32, 32).unwrap() < x as u64
         });
@@ -1960,6 +1960,9 @@ impl<'a> super::BitVector for BitVector<'a> {
         let mut rank: usize = load_rank0(p_offset) as usize;
         let mut idx: usize = p_offset * self.word as usize * 63;
         for _ in 0..self.word as usize {
+            if idx >= self.len() {
+                break;
+            }
             let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
                 return if rank >= x {
                     Some(idx)

@@ -13,23 +13,19 @@ impl<'a> BitArray<'a> {
     }
 
     pub fn load(&self, index: usize, mut bits: usize) -> Option<u64> {
-        let mut byte_index = index >> 3;
-        let mut bit_index = index & 7;
         assert!(bits <= 64);
-        let mut x = 0u64;
-        let mut xlen = 0usize;
-        while bits > 0 {
-            // We take the highest order bits from this byte.
-            let mut byte: u64 = (self.bytes.get(byte_index)? >> bit_index).into();
-            let bits_from_this_byte = std::cmp::min(8 - bit_index, bits);
-            byte &= (1u64 << bits_from_this_byte) - 1;
-            x |= byte << xlen;
-            xlen += bits_from_this_byte;
-            bits -= bits_from_this_byte;
-            byte_index += 1;
-            bit_index = 0;
+        let byte_index = index >> 3;
+        if byte_index > self.bytes.len() {
+            return None;
         }
-        Some(x)
+        let bit_index = index & 7;
+        let mut buf = [0u8; 16];
+        let sz = std::cmp::min(16, self.bytes.len() - byte_index);
+        buf[..sz].copy_from_slice(&self.bytes[byte_index..byte_index+sz]);
+        let mut val = u128::from_le_bytes(buf);
+        val >>= bit_index;
+        val &= (1u128 << bits) - 1;
+        Some(val as u64)
     }
 
     pub fn get(&self, index: usize) -> Option<bool> {
