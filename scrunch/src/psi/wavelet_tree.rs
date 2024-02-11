@@ -278,13 +278,19 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
         let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
         let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
         let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
-        let mut index = partition_by(start_of_cell, end_of_cell, |index| {
-            self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) < point
-        });
-        if self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) > point {
-            index -= 1;
+        if point >= self.table[self.y_value[cell]].start {
+            if let Some(rank) = self.table[self.y_value[cell]].tree.rank_q(column, point - self.table[self.y_value[cell]].start) {
+                if self.table[self.y_value[cell]].lookup(column, rank).unwrap_or(point + 1) > point {
+                    Ok(rank + start_of_cell - 1)
+                } else {
+                    Ok(rank + start_of_cell)
+                }
+            } else {
+                Ok(end_of_cell)
+            }
+        } else {
+            Ok(start_of_cell - 1)
         }
-        Ok(index)
     }
 }
 
