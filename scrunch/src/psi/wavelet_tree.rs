@@ -241,10 +241,11 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
         let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
         let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
         let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
-        let index = partition_by(start_of_cell, end_of_cell + 1, |index| {
-            self.table[self.y_value[cell]].lookup(column, index - start_of_cell).unwrap_or(point + 1) < point
-        });
-        Ok(index)
+        if point >= self.table[self.y_value[cell]].start {
+            Ok(self.table[self.y_value[cell]].tree.rank_q(column, point - self.table[self.y_value[cell]].start).unwrap_or(end_of_cell - start_of_cell + 1) + start_of_cell)
+        } else {
+            Ok(start_of_cell)
+        }
     }
 
     // Find the highest index of psi in the range [into.0, into.1] s.t. psi[idx] <= point.
