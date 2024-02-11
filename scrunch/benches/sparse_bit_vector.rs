@@ -34,7 +34,7 @@ impl Parameters for SparseBitVectorParameters {
 fn generate_bit_vector(params: &SparseBitVectorParameters, guac: &mut Guacamole) -> Vec<usize> {
     let mut bits = HashSet::new();
     while bits.len() < params.bits_set {
-        bits.insert(any::<usize>(guac) & ((1 << 56) -1));
+        bits.insert(any::<u32>(guac) as usize);
     }
     let mut bits: Vec<usize> = bits.into_iter().collect();
     bits.sort();
