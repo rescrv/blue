@@ -91,6 +91,7 @@ struct BuildContext {
     ctx: [u32; CTX_MAX],
     start: usize,
     tree: Vec<u32>,
+    sums: Vec<usize>,
 }
 
 /////////////////////////////////////////////// Table //////////////////////////////////////////////
@@ -102,7 +103,8 @@ fn compute_table(sigma: &Sigma, ctx_sz: usize, psi: &[usize]) -> Result<Vec<Buil
     // rows in the column/row breakdown of psi
     let mut table: Vec<BuildContext> = Vec::new();
     // string for the wavelet tree
-    let mut wt: Vec<u32> = Vec::new();
+    let mut tree: Vec<u32> = Vec::new();
+    let mut sums: Vec<usize> = Vec::new();
     // track the index into psi where the current context began
     let mut start = 0;
     // now iterate
@@ -123,28 +125,36 @@ fn compute_table(sigma: &Sigma, ctx_sz: usize, psi: &[usize]) -> Result<Vec<Buil
             //
             // skipping here allows one initialization point
             if i > 0 {
-                let tree = std::mem::take(&mut wt);
+                let tree = std::mem::take(&mut tree);
+                let sums = std::mem::take(&mut sums);
                 table.push(BuildContext {
                     ctx,
                     start,
                     tree,
+                    sums,
                 });
             }
             // reset for next row
-            wt.clear();
+            tree.clear();
             ctx = tmp;
             start = i;
         }
         // use ipsi to figure out which character is at this position in the string
         let s = sigma.sa_index_to_sigma(*ipsi).ok_or(Error::InvalidSigma)?;
-        wt.push(s);
+        tree.push(s);
+        if sums.len() <= s as usize {
+            sums.resize(s as usize + 1, 0);
+        }
+        sums[s as usize] += 1;
     }
     // push one last context
-    let tree = std::mem::take(&mut wt);
+    let tree = std::mem::take(&mut tree);
+    let sums = std::mem::take(&mut sums);
     table.push(BuildContext {
         ctx,
         start,
         tree,
+        sums,
     });
     Ok(table)
 }
@@ -303,7 +313,7 @@ impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
         let mut sum = 0;
         for i in 0..sigma.K() {
             for (idx, t) in table.iter().enumerate() {
-                let in_cell = t.tree.iter().filter(|x| **x as usize == i).count();
+                let in_cell = t.sums.get(i).copied().unwrap_or(0);
                 if in_cell > 0 {
                     if sum > 0 {
                         y_key.push(sum - 1);
