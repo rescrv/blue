@@ -1672,11 +1672,7 @@ const K: &[&[u64]] = &[
 ];
 
 fn encode(decoded: u63) -> (u64, usize) {
-    let c: usize = decoded
-        .0
-        .count_ones()
-        .try_into()
-        .expect("number of bits should fit usize");
+    let c: usize = decoded.0.count_ones() as usize;
     let mut o = 0u64;
     let mut bits_remain = c;
     for bit in 0..63 {
