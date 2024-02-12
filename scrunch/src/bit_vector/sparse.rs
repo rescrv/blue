@@ -9,7 +9,7 @@ use crate::Error;
 
 ///////////////////////////////////////////// Internals ////////////////////////////////////////////
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Root {
     node: u64,
     levels: u8,
@@ -192,6 +192,8 @@ pub struct BitVector<'a> {
     length: usize,
     branch: usize,
     bytes: &'a [u8],
+    root: Root,
+    skip_factors: Vec<usize>
 }
 
 impl<'a> BitVector<'a> {
@@ -205,11 +207,25 @@ impl<'a> BitVector<'a> {
             let (branch, _) = u8::unpack(bytes).ok()?;
             let branch = branch as usize;
             let bytes = orig_bytes;
-            Some(Self {
+            let root = Root::default();
+            let skip_factors = vec![];
+            let mut this = Self {
                 length,
                 branch,
                 bytes,
-            })
+                root,
+                skip_factors,
+            };
+            this.root = this.load_root()?;
+            if this.root.levels > 0 {
+                this.skip_factors = vec![this.branch.pow(this.root.levels as u32 - 1)];
+                while this.skip_factors[this.skip_factors.len() - 1] > 1 {
+                    let next = this.skip_factors[this.skip_factors.len() - 1] / this.branch;
+                    this.skip_factors.push(next);
+                }
+                this.skip_factors.pop();
+            }
+            Some(this)
         }
     }
 
@@ -331,23 +347,20 @@ impl<'a> BitVector<'a> {
         if x > self.len() {
             return None;
         }
-        let root = self.load_root()?;
-        if root.levels == 0 {
+        if self.root.levels == 0 {
             if x <= self.len() {
                 Some((false, 0))
             } else {
                 None
             }
         } else {
-            let mut skip_factor = self.branch.pow(root.levels as u32 - 1);
-            let mut node_offset = root.node;
+            let mut node_offset = self.root.node;
             let mut cumulative_rank = 0;
-            while skip_factor > 1 {
+            for skip_factor in self.skip_factors.iter() {
                 let node = self.load_internal(node_offset as usize)?;
                 let (offset, pointer) = node.position(x)?;
                 node_offset = pointer;
-                cumulative_rank += offset * skip_factor;
-                skip_factor /= self.branch;
+                cumulative_rank += offset * *skip_factor;
             }
             let leaf = self.load_leaf(node_offset as usize)?;
             let (a, r) = leaf.access_rank(x)?;
@@ -406,22 +419,19 @@ impl<'a> BitVectorTrait for BitVector<'a> {
         if x == 0 {
             return Some(0);
         }
-        let root = self.load_root()?;
-        if root.levels == 0 {
+        if self.root.levels == 0 {
             None
         } else {
             x -= 1;
-            let mut skip_factor = self.branch.pow(root.levels as u32 - 1);
-            let mut node_offset = root.node;
-            while skip_factor > 1 {
+            let mut node_offset = self.root.node;
+            for skip_factor in self.skip_factors.iter() {
                 let node = self.load_internal(node_offset as usize)?;
                 let mut index = 0;
-                while x >= skip_factor {
+                while x >= *skip_factor {
                     index += 1;
-                    x -= skip_factor;
+                    x -= *skip_factor;
                 }
                 node_offset = node.pointer(index)?;
-                skip_factor /= self.branch;
             }
             let leaf = self.load_leaf(node_offset as usize)?;
             leaf.select(x)
