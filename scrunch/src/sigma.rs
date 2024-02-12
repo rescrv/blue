@@ -60,7 +60,7 @@ impl<'a> Sigma<'a> {
         // Or at least tune it by something other than intuition.
         builder.append_vec_u32(FieldNumber::must(1), &sigma_to_char);
         let mut columns_builder = builder.sub(FieldNumber::must(2));
-        BitVector::from_indices(16, columns_len + 1, &buckets, &mut columns_builder)
+        BitVector::from_indices(8, columns_len + 1, &buckets, &mut columns_builder)
             .ok_or(Error::CouldNotConstructBitVector)?;
         Ok(())
     }
