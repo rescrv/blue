@@ -468,7 +468,11 @@ pub fn benchmark_main<P: Parameters, F: FnMut(&P, &mut Bencher)>(
     params: &P,
     mut f: F,
 ) {
-    let output = options.output_prefix.clone() + name + ":" + &params.parameter_string() + ".dat";
+    let output = if options.added_params.is_empty() {
+        options.output_prefix.clone() + name + ":" + &params.parameter_string() + ".dat"
+    } else {
+        options.output_prefix.clone() + name + ":" + &params.parameter_string() + "," + &options.added_params + ".dat"
+    };
     let output = PathBuf::from(output);
     let parent = output
         .parent()
@@ -628,6 +632,9 @@ pub struct BenchmarkOptions {
     /// Number of significant figures to use in the output.
     #[arrrg(optional, "Significant figures to use.")]
     pub sig_figs: i32,
+    /// Added parameters.
+    #[arrrg(optional, "Added parameters.")]
+    pub added_params: String,
     /// The output prefix for the benchmark.  Will be joined with
     /// "{benchmark_name}:{untyped_parameters}".
     #[arrrg(optional, "Output prefix for histograms.")]
@@ -645,6 +652,7 @@ impl Default for BenchmarkOptions {
             target_time: 100,
             iterations: 1000,
             sig_figs: 3,
+            added_params: "".to_string(),
             output_prefix: "exp/".to_string(),
         }
     }
