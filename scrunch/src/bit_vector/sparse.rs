@@ -1,7 +1,9 @@
+use std::cmp::Ordering;
 use std::iter::zip;
 
 use buffertk::{stack_pack, v64, Unpackable};
 
+use crate::binary_search::binary_search_by;
 use crate::bit_array::BitArray;
 use crate::bit_vector::BitVector as BitVectorTrait;
 use crate::builder::{Builder, Helper};
@@ -25,22 +27,26 @@ struct Leaf<'a> {
 
 impl<'a> Leaf<'a> {
     fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
-        let mut word = self.base;
-        if word >= x as u64 {
-            return Some((word == x as u64, 0));
-        }
-        for idx in 0..self.branch - 1 {
-            let delta = self
-                .words
-                .load(idx * self.bits as usize, self.bits as usize)?;
-            word = self.base + delta;
-            if word >= x as u64 {
-                return Some((word == x as u64, idx + 1));
-            } else if delta == 0 {
-                return Some((false, idx + 1));
+        if self.base >= x as u64 {
+            Some((self.base == x as u64, 0))
+        } else {
+            let x = x as u64;
+            let idx = binary_search_by(0, self.branch - 1, |mid| {
+                // SAFETY(rescrv):  words is parsed to be equal to self.bits.len() * branch - 1.
+                let load = self.words.load(mid * self.bits as usize, self.bits as usize).unwrap();
+                if load == 0 {
+                    Ordering::Greater
+                } else {
+                    (self.base + load).cmp(&x)
+                }
+            });
+            let word = self.base + self.words.load(idx * self.bits as usize, self.bits as usize)?;
+            if word == self.base {
+                Some((false, idx + 1))
+            } else {
+                Some((word == x, idx + 1))
             }
         }
-        Some((false, self.branch))
     }
 
     fn select(&self, index: usize) -> Option<usize> {
