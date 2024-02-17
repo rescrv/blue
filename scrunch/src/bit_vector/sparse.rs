@@ -40,12 +40,8 @@ impl<'a> Leaf<'a> {
                     (self.base + load).cmp(&x)
                 }
             });
-            let word = self.base + self.words.load(idx * self.bits as usize, self.bits as usize)?;
-            if word == self.base {
-                Some((false, idx + 1))
-            } else {
-                Some((word == x, idx + 1))
-            }
+            let word = self.base + self.words.load(idx * self.bits as usize, self.bits as usize).unwrap_or(0);
+            Some((word == x, idx + 1))
         }
     }
 
@@ -77,29 +73,22 @@ struct Internal<'a> {
 
 impl<'a> Internal<'a> {
     fn position(&self, x: usize) -> Option<(usize, u64)> {
-        let mut pointer = self.pointer_base;
-        let divider = self.divider_base;
-        if divider >= x as u64 {
-            return Some((0, pointer));
+        if self.divider_base >= x as u64 {
+            Some((0, self.pointer_base))
+        } else {
+            let x = x as u64;
+            let idx = binary_search_by(0, self.branch - 2, |mid| {
+                // SAFETY(rescrv):  words is parsed to be equal to self.bits.len() * branch - 1.
+                let load = self.dividers.load(mid * self.divider_bits as usize, self.divider_bits as usize).unwrap();
+                if load == 0 {
+                    Ordering::Greater
+                } else {
+                    (self.divider_base + load).cmp(&x)
+                }
+            });
+            let pointer = self.pointer_base + self.pointers.load(idx * self.pointer_bits as usize, self.pointer_bits as usize)?;
+            Some((idx + 1, pointer))
         }
-        for i in 0..self.branch - 2 {
-            let divider_delta = self
-                .dividers
-                .load(i * self.divider_bits as usize, self.divider_bits as usize)?;
-            let pointer_delta = self
-                .pointers
-                .load(i * self.pointer_bits as usize, self.pointer_bits as usize)?;
-            let divider = self.divider_base + divider_delta;
-            let pointer = self.pointer_base + pointer_delta;
-            if divider >= x as u64 || divider_delta == 0 {
-                return Some((i + 1, pointer));
-            }
-        }
-        pointer = self.pointer_base + self.pointers.load(
-            (self.branch - 2) * self.pointer_bits as usize,
-            self.pointer_bits as usize,
-        )?;
-        Some((self.branch - 1, pointer))
     }
 
     fn pointer(&self, index: usize) -> Option<u64> {
