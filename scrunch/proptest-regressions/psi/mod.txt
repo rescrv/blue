@@ -7,3 +7,4 @@
 cc 45459310f3fd307ee05a088ad52f4b1be6b12f6eddc47584bc446d452245a56a # shrinks to text = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 cc 820b54fda36e810ff055c5f4d8d27a726ac4fd13249f6ca7dbd256cfab70030a # shrinks to text = [2, 1, 2, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1, 1, 3, 2]
 cc cdb72f2b0a4f5db78fc0cd2cbb1338435893360aa93bfd895b69091e3a5b274d # shrinks to text = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2]
+cc 945aab283d693e2b1fbaaf462e12bd2563a6930e1d1fa8a4d9b7c36c7a62eaea # shrinks to text = [2, 1, 3, 2, 3, 1, 3, 2, 3, 2, 3, 2, 1, 2, 1, 1, 2, 1, 1, 3, 1, 2, 2, 1, 2]
