@@ -195,14 +195,8 @@ impl Packable for v64 {
     }
 }
 
-impl<'a> Unpackable<'a> for v64 {
-    type Error = Error;
-
-    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
-    where
-        'b: 'a,
-    {
-        assert!(buf.len() > 0);
+impl v64 {
+    fn unpack_slow(buf: &[u8]) -> Result<(Self, &[u8]), Error> {
         let bytes: usize = if buf.len() < 10 { buf.len() } else { 10 };
         let mut ret = 0u64;
         let mut idx = 0;
@@ -212,13 +206,60 @@ impl<'a> Unpackable<'a> for v64 {
             idx += 1;
             shl += 7;
         }
-        if buf[idx] & 128 == 0 {
+        if !buf.is_empty() && buf[idx] & 128 == 0 {
             ret |= (buf[idx] as u64 & 127) << shl;
             idx += 1;
             let ret: v64 = ret.into();
             Ok((ret, &buf[idx..]))
         } else {
             Err(Error::VarintOverflow { bytes })
+        }
+    }
+
+    fn unpack_size<const SZ: usize>(buf: &[u8]) -> Result<(Self, &[u8]), Error> {
+        let mut result = (buf[SZ - 1] as u64) << (7 * (SZ - 1));
+        let mut offset = 0;
+        for b in buf.iter().take(SZ - 1) {
+            result += (*b as u64 - 0x80) << offset;
+            offset += 7;
+        }
+        Ok((v64::from(result), &buf[SZ..]))
+    }
+}
+
+impl<'a> Unpackable<'a> for v64 {
+    type Error = Error;
+
+    #[inline(always)]
+    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
+    where
+        'b: 'a,
+    {
+        if buf.len() < 10 {
+            return Self::unpack_slow(buf);
+        }
+        if buf[0] < 128 {
+            Self::unpack_size::<1>(buf)
+        } else if buf[1] < 128 {
+            Self::unpack_size::<2>(buf)
+        } else if buf[2] < 128 {
+            Self::unpack_size::<3>(buf)
+        } else if buf[3] < 128 {
+            Self::unpack_size::<4>(buf)
+        } else if buf[4] < 128 {
+            Self::unpack_size::<5>(buf)
+        } else if buf[5] < 128 {
+            Self::unpack_size::<6>(buf)
+        } else if buf[6] < 128 {
+            Self::unpack_size::<7>(buf)
+        } else if buf[7] < 128 {
+            Self::unpack_size::<8>(buf)
+        } else if buf[8] < 128 {
+            Self::unpack_size::<9>(buf)
+        } else if buf[9] < 128 {
+            Self::unpack_size::<10>(buf)
+        } else {
+            Err(Error::VarintOverflow { bytes: buf.len() })
         }
     }
 }
