@@ -44,17 +44,17 @@ impl<'a> Leaf<'a> {
     }
 
     fn select(&self, index: usize) -> Option<usize> {
-        let mut word = self.base;
-        for idx in 0..index {
-            let delta = self
-                .words
-                .load(idx * self.bits as usize, self.bits as usize)?;
-            if delta == 0 {
-                return None;
+        if index == 0 {
+            (self.base + 1).try_into().ok()
+        } else {
+            let i = index - 1;
+            let delta = self.words.load(i * self.bits as usize, self.bits as usize)?;
+            if delta > 0 {
+                (self.base + delta + 1).try_into().ok()
+            } else {
+                None
             }
-            word = self.base + delta;
         }
-        (word + 1).try_into().ok()
     }
 }
 
@@ -72,7 +72,7 @@ struct Internal<'a> {
 impl<'a> Internal<'a> {
     fn position(&self, x: usize) -> Option<(usize, u64)> {
         let mut pointer = self.pointer_base;
-        let mut divider = self.divider_base;
+        let divider = self.divider_base;
         if divider >= x as u64 {
             return Some((0, pointer));
         }
@@ -97,17 +97,19 @@ impl<'a> Internal<'a> {
     }
 
     fn pointer(&self, index: usize) -> Option<u64> {
-        let mut pointer = self.pointer_base;
-        for i in 0..index {
+        if index == 0 {
+            Some(self.pointer_base)
+        } else {
+            let i = index - 1;
             let pointer_delta = self
                 .pointers
                 .load(i * self.pointer_bits as usize, self.pointer_bits as usize)?;
-            if pointer_delta == 0 {
-                return None;
+            if pointer_delta > 0 {
+                Some(self.pointer_base + pointer_delta)
+            } else {
+                None
             }
-            pointer = self.pointer_base + pointer_delta;
         }
-        Some(pointer)
     }
 }
 
@@ -142,7 +144,7 @@ fn push_slice_u64(bytes: &mut Vec<u8>, branch: usize, values: &[u64]) {
         bytes.push(0);
         return;
     }
-    let mut base = values[0];
+    let base = values[0];
     stack_pack(v64::from(base)).append_to_vec(bytes);
     let bits = bits_required(values);
     bytes.push(bits);
