@@ -311,13 +311,13 @@ impl Manifest {
     }
 
     /// Iterate over the log's contents (in-memory).
-    pub fn strs(&self) -> impl Iterator<Item = &String> {
-        self.strs.iter()
+    pub fn strs(&self) -> impl Iterator<Item = &str> {
+        self.strs.iter().map(|s| s.as_str())
     }
 
     /// Get the provided info field.
-    pub fn info(&self, c: char) -> Option<&String> {
-        self.info.get(&c)
+    pub fn info(&self, c: char) -> Option<&str> {
+        self.info.get(&c).map(|s| s.as_str())
     }
 
     /// Number of bytes used for this log.
