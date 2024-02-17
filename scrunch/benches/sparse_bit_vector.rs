@@ -147,8 +147,9 @@ fn bench_bit_vector_select(params: &SparseBitVectorParameters, b: &mut Bencher) 
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut selects = Vec::with_capacity(b.size());
+    let max_rank = vector.rank(vector.len()).unwrap();
     for _ in 0..b.size() {
-        selects.push(vector.rank(range_to(vector.len())(&mut guac)).unwrap());
+        selects.push(range_to(max_rank + 1)(&mut guac));
     }
     fn select(bv: &BitVector, selects: &[usize]) {
         for select in selects {
