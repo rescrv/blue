@@ -12,7 +12,7 @@ impl<'a> BitArray<'a> {
         Self { bytes }
     }
 
-    pub fn load(&self, index: usize, mut bits: usize) -> Option<u64> {
+    pub fn load(&self, index: usize, bits: usize) -> Option<u64> {
         assert!(bits <= 64);
         let byte_index = index >> 3;
         if byte_index > self.bytes.len() {
