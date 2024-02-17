@@ -5,11 +5,9 @@ set -x
 
 N=100000000
 
-BINDIR=/home/rescrv/src/blue/target/release
-
 # Generate keys and values separately using armnod
-$BINDIR/armnod --chooser-mode set-once --cardinality $N --length-mode uniform --min-length 8 --max-length 16 --charset alnum > keys
-$BINDIR/armnod --chooser-mode random --length-mode uniform --min-length 512 --max-length 1536 | head -$N> values
+cargo run --release -p armnod --bin armnod -- --chooser-mode set-once --cardinality $N --length-mode uniform --min-length 8 --max-length 16 --charset alnum > keys
+cargo run --release -p armnod --bin armnod -- --chooser-mode random --length-mode uniform --min-length 512 --max-length 1536 | head -$N> values
 
 # Combine the keys and values into "{} {}\n" format.
 paste keys values > key-value-pairs
@@ -24,6 +22,6 @@ for table in table*.txt
 do
     LC_ALL=C sort -S 256M -o $table $table
     rm -f ${table:r}.sst
-    $BINDIR/sst-from-plaintext --plaintext ${table} --output ${table:r}.sst --timestamp
+    cargo run --release -p sst --bin sst-from-plaintext -- --plaintext ${table} --output ${table:r}.sst --timestamp
     rm ${table}
 done
