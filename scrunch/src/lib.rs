@@ -22,7 +22,7 @@ use crate::builder::{Builder, Helper};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
     IntoUsize,
     Unparseable,
