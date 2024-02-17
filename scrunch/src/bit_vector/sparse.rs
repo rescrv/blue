@@ -33,7 +33,7 @@ impl<'a> Leaf<'a> {
             let delta = self
                 .words
                 .load(idx * self.bits as usize, self.bits as usize)?;
-            word += delta;
+            word = self.base + delta;
             if word >= x as u64 {
                 return Some((word == x as u64, idx + 1));
             } else if delta == 0 {
@@ -52,7 +52,7 @@ impl<'a> Leaf<'a> {
             if delta == 0 {
                 return None;
             }
-            word += delta;
+            word = self.base + delta;
         }
         (word + 1).try_into().ok()
     }
@@ -83,13 +83,13 @@ impl<'a> Internal<'a> {
             let pointer_delta = self
                 .pointers
                 .load(i * self.pointer_bits as usize, self.pointer_bits as usize)?;
-            divider += divider_delta;
-            pointer += pointer_delta;
+            let divider = self.divider_base + divider_delta;
+            let pointer = self.pointer_base + pointer_delta;
             if divider >= x as u64 || divider_delta == 0 {
                 return Some((i + 1, pointer));
             }
         }
-        pointer += self.pointers.load(
+        pointer = self.pointer_base + self.pointers.load(
             (self.branch - 2) * self.pointer_bits as usize,
             self.pointer_bits as usize,
         )?;
@@ -105,7 +105,7 @@ impl<'a> Internal<'a> {
             if pointer_delta == 0 {
                 return None;
             }
-            pointer += pointer_delta;
+            pointer = self.pointer_base + pointer_delta;
         }
         Some(pointer)
     }
@@ -130,9 +130,8 @@ fn trim_to_length(bytes: &[u8], offset: usize) -> Option<&[u8]> {
 fn push_slice_u64(bytes: &mut Vec<u8>, branch: usize, values: &[u64]) {
     fn bits_required(values: &[u64]) -> u8 {
         let mut max = 2;
-        for (lhs, rhs) in zip(values[..values.len() - 1].iter(), values[1..].iter()) {
-            assert!(rhs > lhs);
-            max = std::cmp::max(max, rhs - lhs + 1);
+        for value in &values[1..] {
+            max = std::cmp::max(max, value + 1 - values[0]);
         }
         let max = max.next_power_of_two();
         let bits = max.ilog2() as u8;
@@ -143,15 +142,14 @@ fn push_slice_u64(bytes: &mut Vec<u8>, branch: usize, values: &[u64]) {
         bytes.push(0);
         return;
     }
-    let mut prev = values[0];
-    stack_pack(v64::from(prev)).append_to_vec(bytes);
+    let mut base = values[0];
+    stack_pack(v64::from(base)).append_to_vec(bytes);
     let bits = bits_required(values);
     bytes.push(bits);
     let mut scratch = 0u64;
     let mut scratch_sz = 0u8;
     for value in values[1..].iter() {
-        push_bits(bytes, *value - prev, bits, &mut scratch, &mut scratch_sz);
-        prev = *value;
+        push_bits(bytes, *value - base, bits, &mut scratch, &mut scratch_sz);
     }
     for _ in values.len()..branch {
         push_bits(bytes, 0, bits, &mut scratch, &mut scratch_sz);
