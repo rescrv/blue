@@ -331,17 +331,20 @@ where
             ))?);
         }
         s.push(0);
+        drop(text);
         // compute the suffix array
         let mut sa = vec![0usize; s.len()];
         sais::sais(&sigma, &s, &mut sa)?;
+        drop(s);
+        // TODO(rescrv): parameterize
+        SA::construct(6, &sa, &mut builder.sub(FieldNumber::must(3)))?;
         // compute the inverse suffix array
         let isa = inverse(&sa);
+        drop(sa);
+        ISA::construct(&isa, &record_boundaries, &mut builder.sub(FieldNumber::must(4)))?;
         // compute the successor array, psi
         let psi = psi::compute(&isa);
-        // Now build them.
-        // TODO(rescrv): parameterize
-        SA::construct(3, &sa, &mut builder.sub(FieldNumber::must(3)))?;
-        ISA::construct(&isa, &record_boundaries, &mut builder.sub(FieldNumber::must(4)))?;
+        drop(isa);
         PSI::construct(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
         Ok(())
     }
