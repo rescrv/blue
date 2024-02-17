@@ -443,13 +443,14 @@ macro_rules! benchmark {
                     count += 1;
                 )*
                 $crate::increment_indices(&mut indices, &limits);
+                let benchmark_name = format!("{}:{}", stringify!($name), params.parameter_string());
                 if let Some(filter) = filter.as_ref() {
-                    if !params.parameter_string().contains(filter) && !(stringify!($name)).contains(filter) {
+                    if !benchmark_name.contains(filter) {
                         continue;
                     }
                 }
                 if !options.quiet {
-                    eprintln!("executing {}:{}", stringify!($name), params.parameter_string());
+                    eprintln!("executing {}", benchmark_name);
                 }
                 $crate::benchmark_main(stringify!($name), options, &params, $bench);
             }
