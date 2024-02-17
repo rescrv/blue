@@ -14,6 +14,11 @@ binaries = []
 
 [dependencies]
 
+[dev-dependencies]
+arrrg = { path = "../arrrg", version = "0.3" }
+guacamole = { path = "../guacamole", version = "0.6" }
+statslicer = { path = "../statslicer", version = "0.2" }
+
 [[bin]]
 name = "unvarint"
 path = "src/bin/unvarint.rs"
@@ -23,3 +28,7 @@ required-features=["binaries"]
 name = "varint"
 path = "src/bin/varint.rs"
 required-features=["binaries"]
+
+[[bench]]
+name = "varint"
+harness = false
