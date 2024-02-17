@@ -167,7 +167,11 @@ fn push_slice_u64(bytes: &mut Vec<u8>, branch: usize, values: &[u64]) {
 fn parse_slice_u64(branch: usize, bytes: &[u8]) -> Option<(u64, u8, BitArray<'_>, &[u8])> {
     let (base, bytes) = v64::unpack(bytes).ok()?;
     let base: u64 = base.into();
-    let (bits, bytes) = u8::unpack(bytes).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let bits = bytes[0];
+    let bytes = &bytes[1..];
     let values_bytes = ((branch - 1) * bits as usize + 7) / 8;
     let values = trim_to_length(bytes, values_bytes)?;
     let values = BitArray::new(values);
