@@ -1,0 +1,8 @@
+# wildcards
+**/*.rs.bk
+events*
+# specific files
+/Cargo.lock
+/github
+/ndjson
+/target/
