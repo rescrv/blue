@@ -8,9 +8,7 @@ use scrunch::bit_vector::sparse::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
 use scrunch::builder::Builder;
 
-const BITS_SET: &[usize] = &[
-    256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456,
-];
+const BITS_SET: &[usize] = &[4096];
 
 const BRANCH: &[usize] = &[4, 8, 16, 32, 64, 128];
 
