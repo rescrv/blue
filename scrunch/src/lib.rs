@@ -476,8 +476,7 @@ where
     }
 }
 
-// TODO(rescrv):  Use Huffman codes.
-pub type CompressedDocument<'a> = PsiDocument::<'a, sa::SampledSuffixArray<'a>, isa::SampledInverseSuffixArray<'a>, psi::wavelet_tree::WaveletTreePsi<'a, wavelet_tree::prefix::WaveletTree<'a, encoder::FixedWidthEncoder>>>;
+pub type CompressedDocument<'a> = PsiDocument::<'a, sa::SampledSuffixArray<'a>, isa::SampledInverseSuffixArray<'a>, psi::wavelet_tree::WaveletTreePsi<'a, wavelet_tree::prefix::WaveletTree<'a, encoder::HuffmanEncoder>>>;
 
 ///////////////////////////////////////////// Exemplars ////////////////////////////////////////////
 
