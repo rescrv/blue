@@ -330,7 +330,7 @@ impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
             WT::construct(&t.tree, &mut builder.sub(FieldNumber::must(3)))?;
         }
         y_key.push(sum - 1);
-        BitVector::from_indices(16, sum, &y_key, &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER))).ok_or(Error::InvalidBitVector)?;
+        BitVector::from_indices(128, sum, &y_key, &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER))).ok_or(Error::InvalidBitVector)?;
         builder.append_vec_usize(FieldNumber::must(Y_VALUE_FIELD_NUMBER), &y_value);
         Ok(())
     }

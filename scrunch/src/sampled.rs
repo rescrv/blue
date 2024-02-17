@@ -46,7 +46,7 @@ impl<'a> SampledArray<'a> {
             bitwords.push_word(*value as u64, bits as usize);
         }
         builder.append_u32(FieldNumber::must(1), bits as u32);
-        BitVector::from_indices(16, values[values.len() - 1].0 + 1, &sparse, &mut builder.sub(FieldNumber::must(3)));
+        BitVector::from_indices(128, values[values.len() - 1].0 + 1, &sparse, &mut builder.sub(FieldNumber::must(3)));
         let bitwords = bitwords.seal();
         builder.append_bytes(FieldNumber::must(2), &bitwords);
         Ok(())
