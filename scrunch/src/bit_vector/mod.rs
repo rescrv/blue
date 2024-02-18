@@ -46,7 +46,7 @@ pub trait BitVector {
     /// Computes `rank_0[x]`, the number of bits unset at i < x.
     ///
     /// Note that bit vectors may not implement this efficiently, so a default implementation that
-    /// uses x - rank[x] is provided.
+    /// uses `x - rank[x]` is provided.
     fn rank0(&self, x: usize) -> Option<usize> {
         Some(x - self.rank(x)?)
     }

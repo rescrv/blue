@@ -126,7 +126,7 @@ impl<'a> Sigma<'a> {
 
     /// sa_range_for returns the lower and upper bounds on indices in the suffix array that begin
     /// with the provided character.  For example a return value of (lower, upper) means that all
-    /// indices idx, lower <= idx < upper will have SA[idx] be a prefix beginning with T.
+    /// indices idx, lower <= idx < upper will have `SA[idx]` be a prefix beginning with T.
     pub fn sa_range_for(&self, t: u32) -> Result<(usize, usize), Error> {
         match self.char_to_sigma(t) {
             Some(idx) => self.sa_range_for_sigma(idx),
