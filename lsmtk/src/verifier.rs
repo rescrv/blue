@@ -511,7 +511,7 @@ fn setsum_from_info(info: char, value: Option<&String>) -> Result<Setsum, Error>
     }
 }
 
-fn setsum_from_info_default(info: char, value: Option<&String>) -> Result<Setsum, Error> {
+fn setsum_from_info_default(info: char, value: Option<&str>) -> Result<Setsum, Error> {
     let hex_digest = match value {
         Some(hex_digest) => hex_digest,
         None => {

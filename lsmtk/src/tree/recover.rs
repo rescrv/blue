@@ -213,7 +213,7 @@ struct TarjanVertex {
 }
 
 // The Tarjan strongly connected components algorithm unrolled to not be recursive.
-fn tarjan_scc(vertices: &mut Vec<Vertex>, adj_list: &BTreeSet<(usize, usize)>) {
+fn tarjan_scc(vertices: &mut [Vertex], adj_list: &BTreeSet<(usize, usize)>) {
     let mut state = Vec::with_capacity(vertices.len());
     state.resize(
         vertices.len(),

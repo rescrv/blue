@@ -201,7 +201,7 @@ impl KeyValueStore {
         if !mani.strs().any(|d| *d == setsum.hexdigest()) {
             let input = mani
                 .info('O')
-                .and_then(|h| Setsum::from_hexdigest(h))
+                .and_then(Setsum::from_hexdigest)
                 .unwrap_or_default();
             let discard = Setsum::default() - setsum;
             let output = input - discard;
