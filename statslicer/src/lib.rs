@@ -407,7 +407,7 @@ pub fn black_box<T>(dummy: T) -> T {
 
 ///////////////////////////////////////// increment_indices ////////////////////////////////////////
 
-pub fn increment_indices(indices: &mut Vec<usize>, limits: &[usize]) {
+pub fn increment_indices(indices: &mut [usize], limits: &[usize]) {
     assert_eq!(indices.len(), limits.len());
     for ((x, index), limit) in
         std::iter::zip(indices.iter_mut().enumerate().rev(), limits.iter().rev())
