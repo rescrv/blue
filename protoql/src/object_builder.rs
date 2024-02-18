@@ -533,7 +533,7 @@ mod tests {
             field_number: FieldNumber::must(7),
             wire_type: WireType::LengthDelimited,
         };
-        let begin = pb.begin_map_with_message(tag.clone(), &[&key_tag1, &key_buf1, &value_tag1]);
+        let begin = pb.begin_map_with_message(tag, &[&key_tag1, &key_buf1, &value_tag1]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf1);
         // Finish the message
