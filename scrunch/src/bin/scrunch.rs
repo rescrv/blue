@@ -8,7 +8,6 @@ pub fn load_file(file: &str) -> (Vec<u32>, Vec<usize>) {
         .expect("file should read to string")
         .chars()
         .map(|c| c as u32)
-        .into_iter()
         .collect();
     let mut record_boundaries = vec![0usize];
     for (idx, _) in text.iter().enumerate().filter(|(_, t)| **t == '\n' as u32) {

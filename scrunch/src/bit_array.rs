@@ -227,8 +227,8 @@ mod tests {
             }
             let buf = builder.seal();
             let ba = BitArray::new(&buf);
-            for i in 0..bv.len() {
-                assert_eq!(Some(bv[i]), ba.get(i))
+            for (i, b) in bv.iter().enumerate() {
+                assert_eq!(Some(*b), ba.get(i))
             }
             assert_eq!(None, bv.get(bv.len()));
         }

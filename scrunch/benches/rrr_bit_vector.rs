@@ -51,7 +51,7 @@ fn bench_bit_vector_new(params: &RrrBitVectorParameters, b: &mut Bencher) {
     fn construct(bits: &[bool]) -> Vec<u8> {
         let mut buf = vec![];
         let mut builder = Builder::new(&mut buf);
-        BitVector::construct(&bits, &mut builder).unwrap();
+        BitVector::construct(bits, &mut builder).unwrap();
         drop(builder);
         black_box(buf)
     }

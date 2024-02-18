@@ -146,8 +146,7 @@ fn push_slice_u64(bytes: &mut Vec<u8>, branch: usize, values: &[u64]) {
             max = std::cmp::max(max, value + 1 - values[0]);
         }
         let max = max.next_power_of_two();
-        let bits = max.ilog2() as u8;
-        bits
+        max.ilog2() as u8
     }
     if values.is_empty() {
         stack_pack(v64::from(u64::MAX)).append_to_vec(bytes);

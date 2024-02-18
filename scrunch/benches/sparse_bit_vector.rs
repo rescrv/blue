@@ -50,7 +50,7 @@ fn bench_bit_vector_new(params: &SparseBitVectorParameters, b: &mut Bencher) {
     fn construct(params: &SparseBitVectorParameters, bits: &[usize]) -> Vec<u8> {
         let mut buf = vec![];
         let mut builder = Builder::new(&mut buf);
-        BitVector::from_indices(params.branch, bits[bits.len() - 1] + 1, &bits, &mut builder);
+        BitVector::from_indices(params.branch, bits[bits.len() - 1] + 1, bits, &mut builder);
         drop(builder);
         black_box(buf)
     }

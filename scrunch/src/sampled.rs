@@ -126,8 +126,8 @@ mod tests {
                 SampledArray::construct(&sampling, &mut builder).expect("sampled array should construct");
                 drop(builder);
                 let sampled = SampledArray::parse(&buf).expect("sampled array should parse").0;
-                for i in 0..sampling.len() {
-                    assert_eq!(Some(values[i]), sampled.lookup(i * gap));
+                for (i, value) in values.iter().enumerate().take(sampling.len()) {
+                    assert_eq!(Some(*value), sampled.lookup(i * gap));
                     for j in 1..gap {
                         assert_eq!(None, sampled.lookup(i * gap + j));
                     }

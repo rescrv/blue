@@ -500,8 +500,8 @@ impl From<CorrelateState> for Exemplar {
         Self {
             count: cs
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add),
             needle: cs.needle,
         }
@@ -514,8 +514,8 @@ impl From<ExemplarState> for Exemplar {
         Self {
             count: es
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add),
             needle: es.needle,
         }
@@ -542,23 +542,23 @@ impl Ord for CorrelateState {
         } else {
             let numer_lhs = self
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add);
             let numer_rhs = other
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add);
             let denom_lhs = self
                 .docs
-                .iter()
-                .map(|(_, d)| d.range.1 + 1 - d.range.0)
+                .values()
+                .map(|d| d.range.1 + 1 - d.range.0)
                 .fold(0, usize::saturating_add);
             let denom_rhs = other
                 .docs
-                .iter()
-                .map(|(_, d)| d.range.1 + 1 - d.range.0)
+                .values()
+                .map(|d| d.range.1 + 1 - d.range.0)
                 .fold(0, usize::saturating_add);
             if denom_lhs == 0 && denom_rhs == 0 {
                 Ordering::Equal
@@ -734,13 +734,13 @@ impl Ord for ExemplarState {
         } else {
             let numer_lhs = self
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add);
             let numer_rhs = other
                 .docs
-                .iter()
-                .map(|(_, d)| d.numer)
+                .values()
+                .map(|d| d.numer)
                 .fold(0, usize::saturating_add);
             numer_lhs.cmp(&numer_rhs)
         }

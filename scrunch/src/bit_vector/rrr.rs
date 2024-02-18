@@ -2046,7 +2046,7 @@ mod tests {
             let word = u63::must(word);
             let (o, c) = encode(word);
             assert_eq!(Some(word), decode(o, c));
-            assert!(o < ((1u64 << L[c])));
+            assert!(o < (1u64 << L[c]));
         }
     }
 }

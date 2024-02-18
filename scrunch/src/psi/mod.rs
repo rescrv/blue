@@ -180,10 +180,9 @@ pub mod tests {
                 .filter(|c| c.is_ascii_punctuation() || c.is_ascii_alphanumeric())
                 .collect::<String>()
                 .trim()
-                .replace(' ', "")
-                .replace('\n', "")
+                .replace([' ', '\n'], "")
         }
-        let expected = regularize(&t.table);
+        let expected = regularize(t.table);
         let returned = regularize(&table);
         if expected != returned {
             println!("expected:\n{}", t.table);
@@ -198,7 +197,7 @@ pub mod tests {
         let sigma = t.sigma();
         let sigma = Sigma::unpack(&sigma).expect("test should unpack").0;
         let mut psi_builder = Builder::new(psi_buf);
-        PSI::construct(&sigma, &t.PSI, &mut psi_builder).expect("psi should construct");
+        PSI::construct(&sigma, t.PSI, &mut psi_builder).expect("psi should construct");
         drop(psi_builder);
         let psi = PSI::unpack(psi_buf).expect("psi should parse").0;
         for (idx, expected) in t.PSI.iter().enumerate() {

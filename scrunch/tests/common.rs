@@ -71,7 +71,6 @@ pub fn load_gutenberg(which: &str) -> (Vec<u32>, Vec<usize>) {
         .unwrap()
         .chars()
         .map(|c| c as u32)
-        .into_iter()
         .collect();
     let mut record_boundaries = vec![0usize];
     for (idx, _) in text.iter().enumerate().filter(|(_, t)| **t == '\n' as u32) {
@@ -91,6 +90,8 @@ macro_rules! gutenberg_tests {
 
             use ::scrunch::Document;
 
+            // NOTE(rescrv):  Allowed for some invocations of the macro.
+            #[allow(clippy::needless_lifetimes)]
             fn construct<'a, 'b>(
                 input: &str,
                 buf1: &'a mut Vec<u8>,
