@@ -472,7 +472,13 @@ pub fn benchmark_main<P: Parameters, F: FnMut(&P, &mut Bencher)>(
     let output = if options.added_params.is_empty() {
         options.output_prefix.clone() + name + ":" + &params.parameter_string() + ".dat"
     } else {
-        options.output_prefix.clone() + name + ":" + &params.parameter_string() + "," + &options.added_params + ".dat"
+        options.output_prefix.clone()
+            + name
+            + ":"
+            + &params.parameter_string()
+            + ","
+            + &options.added_params
+            + ".dat"
     };
     let output = PathBuf::from(output);
     let parent = output
