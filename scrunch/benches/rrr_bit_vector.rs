@@ -21,7 +21,10 @@ struct RrrBitVectorParameters {
 impl Parameters for RrrBitVectorParameters {
     fn params(&self) -> Vec<(&'static str, Parameter)> {
         vec![
-            ("vector_length", Parameter::Integer(self.vector_length as u64)),
+            (
+                "vector_length",
+                Parameter::Integer(self.vector_length as u64),
+            ),
             ("probability", Parameter::Float(self.probability as f64)),
         ]
     }

@@ -1,6 +1,6 @@
 use buffertk::Unpackable;
 
-use crate::builder::{Helper, Builder};
+use crate::builder::{Builder, Helper};
 use crate::sigma::Sigma;
 use crate::Error;
 
@@ -10,7 +10,11 @@ pub mod wavelet_tree;
 
 pub trait Psi {
     /// Append the byte-representation of the Psi to buf.
-    fn construct<H: Helper>(sigma: &Sigma, psi: &[usize], builder: &mut Builder<H>) -> Result<(), Error>;
+    fn construct<H: Helper>(
+        sigma: &Sigma,
+        psi: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error>;
 
     /// The length of the psi.  Should be the same as the number of symbols in the text +
     /// terminating symbol.
@@ -84,14 +88,16 @@ pub struct ReferencePsi {
 
 impl ReferencePsi {
     pub fn new(psi: &[usize]) -> Self {
-        Self {
-            psi: psi.to_vec(),
-        }
+        Self { psi: psi.to_vec() }
     }
 }
 
 impl Psi for ReferencePsi {
-    fn construct<H: Helper>(_: &Sigma, psi: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+    fn construct<H: Helper>(
+        _: &Sigma,
+        psi: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         let stub = ReferencePsiStub::from(psi);
         builder.append_raw_packable(&stub);
         Ok(())
@@ -115,14 +121,11 @@ impl Psi for ReferencePsi {
             Ok(x) => x + range.0,
             Err(x) => x + range.0,
         };
-        let limit = match self.psi[range.0..=range.1].binary_search_by(|probe| probe.cmp(&(into.1 + 1))) {
-            Ok(x) => {
-                x + range.0 - 1
-            }
-            Err(x) => {
-                x + range.0 - 1
-            }
-        };
+        let limit =
+            match self.psi[range.0..=range.1].binary_search_by(|probe| probe.cmp(&(into.1 + 1))) {
+                Ok(x) => x + range.0 - 1,
+                Err(x) => x + range.0 - 1,
+            };
         assert!(start > limit || sigma.sa_index_to_sigma(start) == sigma.sa_index_to_sigma(limit));
         Ok((start, limit))
     }
@@ -132,8 +135,8 @@ impl<'a> Unpackable<'a> for ReferencePsi {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (rpsi, buf) = <ReferencePsiStub as Unpackable>::unpack(buf)
-            .map_err(|_| Error::InvalidPsi)?;
+        let (rpsi, buf) =
+            <ReferencePsiStub as Unpackable>::unpack(buf).map_err(|_| Error::InvalidPsi)?;
         Ok((rpsi.try_into()?, buf))
     }
 }
@@ -173,7 +176,12 @@ pub mod tests {
         let sigma = Sigma::unpack(&sigma).expect("test should unpack").0;
         let table = wavelet_tree::draw_table(&sigma, t.PSI);
         fn regularize(s: &str) -> String {
-            s.chars().filter(|c| c.is_ascii_punctuation() || c.is_ascii_alphanumeric()).collect::<String>().trim().replace(' ', "").replace('\n', "")
+            s.chars()
+                .filter(|c| c.is_ascii_punctuation() || c.is_ascii_alphanumeric())
+                .collect::<String>()
+                .trim()
+                .replace(' ', "")
+                .replace('\n', "")
         }
         let expected = regularize(&t.table);
         let returned = regularize(&table);
@@ -184,7 +192,7 @@ pub mod tests {
         }
     }
 
-    test_cases_for!{table, super::check_table}
+    test_cases_for! {table, super::check_table}
 
     fn check_psi<'a, PSI: Psi + Unpackable<'a>>(t: &TestCase, psi_buf: &'a mut Vec<u8>) {
         let sigma = t.sigma();
@@ -194,10 +202,19 @@ pub mod tests {
         drop(psi_builder);
         let psi = PSI::unpack(psi_buf).expect("psi should parse").0;
         for (idx, expected) in t.PSI.iter().enumerate() {
-            assert_eq!(*expected, psi.lookup(&sigma, idx).expect("lookup should succeed"));
+            assert_eq!(
+                *expected,
+                psi.lookup(&sigma, idx).expect("lookup should succeed")
+            );
         }
         for (range, into, answer) in t.constrain.iter() {
-            assert_eq_with_ctx!(*answer, psi.constrain(&sigma, *range, *into).unwrap(), *range, *into, *answer);
+            assert_eq_with_ctx!(
+                *answer,
+                psi.constrain(&sigma, *range, *into).unwrap(),
+                *range,
+                *into,
+                *answer
+            );
         }
     }
 
@@ -206,21 +223,30 @@ pub mod tests {
         check_psi::<ReferencePsi>(t, &mut psi_buf);
     }
 
-    test_cases_for!{wavelet_psi_reference, super::check_reference_psi}
+    test_cases_for! {wavelet_psi_reference, super::check_reference_psi}
 
     fn check_wavelet_psi_with_reference(t: &TestCase) {
         let mut psi_buf = vec![];
-        check_psi::<wavelet_tree::WaveletTreePsi<super::super::wavelet_tree::ReferenceWaveletTree>>(t, &mut psi_buf);
+        check_psi::<wavelet_tree::WaveletTreePsi<super::super::wavelet_tree::ReferenceWaveletTree>>(
+            t,
+            &mut psi_buf,
+        );
     }
 
-    test_cases_for!{wavelet_psi_wavelet_reference, super::check_wavelet_psi_with_reference}
+    test_cases_for! {wavelet_psi_wavelet_reference, super::check_wavelet_psi_with_reference}
 
     fn check_wavelet_psi_with_wavelet_tree(t: &TestCase) {
         let mut psi_buf = vec![];
-        check_psi::<wavelet_tree::WaveletTreePsi<super::super::wavelet_tree::prefix::WaveletTree<super::super::encoder::FixedWidthEncoder>>>(t, &mut psi_buf);
+        check_psi::<
+            wavelet_tree::WaveletTreePsi<
+                super::super::wavelet_tree::prefix::WaveletTree<
+                    super::super::encoder::FixedWidthEncoder,
+                >,
+            >,
+        >(t, &mut psi_buf);
     }
 
-    test_cases_for!{wavelet_psi_wavelet_tree, super::check_wavelet_psi_with_wavelet_tree}
+    test_cases_for! {wavelet_psi_wavelet_tree, super::check_wavelet_psi_with_wavelet_tree}
 
     proptest::prop_compose! {
         pub fn arb_text()(text in proptest::collection::vec(1u32..4u32, 16..64)) -> Vec<u32> {
@@ -228,7 +254,10 @@ pub mod tests {
         }
     }
 
-    fn validate_against_reference_impl<'a, PSI: Psi + Unpackable<'a>>(text: &[u32], psi_buf: &'a mut Vec<u8>) {
+    fn validate_against_reference_impl<'a, PSI: Psi + Unpackable<'a>>(
+        text: &[u32],
+        psi_buf: &'a mut Vec<u8>,
+    ) {
         let mut sigma_buf = vec![];
         let mut sigma_builder = Builder::new(&mut sigma_buf);
         Sigma::construct(text.iter().copied(), &mut sigma_builder).expect("sigma should construct");

@@ -28,7 +28,10 @@ pub struct SampledArray<'a> {
 }
 
 impl<'a> SampledArray<'a> {
-    pub fn construct<H: Helper>(values: &[(usize, usize)], builder: &mut Builder<H>) -> Result<(), Error> {
+    pub fn construct<H: Helper>(
+        values: &[(usize, usize)],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         fn bits_required(values: &[(usize, usize)]) -> u8 {
             let mut max = 1;
             for (_, val) in values.iter() {
@@ -46,29 +49,40 @@ impl<'a> SampledArray<'a> {
             bitwords.push_word(*value as u64, bits as usize);
         }
         builder.append_u32(FieldNumber::must(1), bits as u32);
-        BitVector::from_indices(128, values[values.len() - 1].0 + 1, &sparse, &mut builder.sub(FieldNumber::must(3)));
+        BitVector::from_indices(
+            128,
+            values[values.len() - 1].0 + 1,
+            &sparse,
+            &mut builder.sub(FieldNumber::must(3)),
+        );
         let bitwords = bitwords.seal();
         builder.append_bytes(FieldNumber::must(2), &bitwords);
         Ok(())
     }
 
     pub fn parse<'b, 'c: 'b>(buf: &'c [u8]) -> Result<(SampledArray<'b>, &'c [u8]), Error> {
-        let (SampledArrayStub {
-            bits,
-            values,
-            present,
-        }, buf) = SampledArrayStub::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
+        let (
+            SampledArrayStub {
+                bits,
+                values,
+                present,
+            },
+            buf,
+        ) = SampledArrayStub::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
         if bits > 64 {
             return Err(Error::InvalidSuffixArray);
         }
         let bits = bits as u8;
         let values = BitArray::new(values);
         let present = BitVector::parse(present)?.0;
-        Ok((SampledArray {
-            bits,
-            values,
-            present,
-        }, buf))
+        Ok((
+            SampledArray {
+                bits,
+                values,
+                present,
+            },
+            buf,
+        ))
     }
 
     pub fn lookup(&self, x: usize) -> Option<usize> {

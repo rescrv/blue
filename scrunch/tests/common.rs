@@ -95,10 +95,7 @@ macro_rules! gutenberg_tests {
                 input: &str,
                 buf1: &'a mut Vec<u8>,
                 buf2: &'b mut Vec<u8>,
-            ) -> (
-                ::scrunch::ReferenceDocument,
-                Box<$document>,
-            ) {
+            ) -> (::scrunch::ReferenceDocument, Box<$document>) {
                 buf1.clear();
                 let (text, record_boundaries) = $crate::common::load_gutenberg(input);
                 let mut builder = ::scrunch::builder::Builder::new(buf1);
@@ -110,15 +107,15 @@ macro_rules! gutenberg_tests {
                 .expect("should construct document");
                 drop(builder);
                 let reference = ::scrunch::ReferenceDocument::unpack(&buf1)
-                    .expect("should parse document").0;
+                    .expect("should parse document")
+                    .0;
 
                 buf2.clear();
                 let mut builder = ::scrunch::builder::Builder::new(buf2);
                 <$document>::construct(text, record_boundaries, &mut builder)
                     .expect("should construct document");
                 drop(builder);
-                let under_test = <$document>::unpack(buf2)
-                    .expect("should parse document").0;
+                let under_test = <$document>::unpack(buf2).expect("should parse document").0;
                 (reference, Box::new(under_test))
             }
 

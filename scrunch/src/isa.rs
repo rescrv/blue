@@ -1,15 +1,19 @@
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use super::Builder;
-use super::Helper;
-use super::Error;
 use super::sampled::SampledArray;
+use super::Builder;
+use super::Error;
+use super::Helper;
 
 //////////////////////////////////////// InverseSuffixArray ////////////////////////////////////////
 
 pub trait InverseSuffixArray {
-    fn construct<H: Helper>(isa: &[usize], to_sample: &[usize], builder: &mut Builder<H>) -> Result<(), Error>;
+    fn construct<H: Helper>(
+        isa: &[usize],
+        to_sample: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error>;
     fn lookup(&self, idx: usize) -> Result<usize, Error>;
 }
 
@@ -55,7 +59,11 @@ pub struct ReferenceInverseSuffixArray {
 }
 
 impl InverseSuffixArray for ReferenceInverseSuffixArray {
-    fn construct<H: Helper>(isa: &[usize], _: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+    fn construct<H: Helper>(
+        isa: &[usize],
+        _: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         let stub = ReferenceInverseSuffixArrayStub::from(isa);
         builder.append_raw_packable(&stub);
         Ok(())
@@ -101,10 +109,16 @@ pub struct SampledInverseSuffixArray<'a> {
 }
 
 impl<'a> InverseSuffixArray for SampledInverseSuffixArray<'a> {
-    fn construct<H: Helper>(isa: &[usize], to_sample: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+    fn construct<H: Helper>(
+        isa: &[usize],
+        to_sample: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         let mut values: Vec<(usize, usize)> = vec![];
         for sampled in to_sample.iter() {
-            if *sampled >= isa.len() || (!values.is_empty() && values[values.len() - 1].0 >= *sampled) {
+            if *sampled >= isa.len()
+                || (!values.is_empty() && values[values.len() - 1].0 >= *sampled)
+            {
                 return Err(Error::InvalidInverseSuffixArray);
             }
             values.push((*sampled, isa[*sampled]));
@@ -122,9 +136,13 @@ impl<'a> Unpackable<'a> for SampledInverseSuffixArray<'a> {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (stub, buf) = SampledInverseSuffixArrayStub::unpack(buf).map_err(|_| Error::InvalidInverseSuffixArray)?;
-        Ok((Self {
-            sampled: SampledArray::parse(stub.sampled)?.0,
-        }, buf))
+        let (stub, buf) = SampledInverseSuffixArrayStub::unpack(buf)
+            .map_err(|_| Error::InvalidInverseSuffixArray)?;
+        Ok((
+            Self {
+                sampled: SampledArray::parse(stub.sampled)?.0,
+            },
+            buf,
+        ))
     }
 }

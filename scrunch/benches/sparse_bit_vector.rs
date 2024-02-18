@@ -15,7 +15,7 @@ const BRANCH: &[usize] = &[4, 8, 16, 32, 64, 128];
 #[derive(Debug, Default, Eq, PartialEq)]
 struct SparseBitVectorParameters {
     bits_set: usize,
-    branch: usize
+    branch: usize,
 }
 
 impl Parameters for SparseBitVectorParameters {
@@ -77,7 +77,13 @@ fn bench_bit_vector_access(params: &SparseBitVectorParameters, b: &mut Bencher) 
     let mut buf = vec![];
     let mut builder = Builder::new(&mut buf);
     let vector = generate_bit_vector(params, &mut guac);
-    BitVector::from_indices(params.branch, vector[vector.len() - 1] + 1, &vector, &mut builder).unwrap();
+    BitVector::from_indices(
+        params.branch,
+        vector[vector.len() - 1] + 1,
+        &vector,
+        &mut builder,
+    )
+    .unwrap();
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut accesses = Vec::with_capacity(b.size());
@@ -110,7 +116,13 @@ fn bench_bit_vector_rank(params: &SparseBitVectorParameters, b: &mut Bencher) {
     let mut buf = vec![];
     let mut builder = Builder::new(&mut buf);
     let vector = generate_bit_vector(params, &mut guac);
-    BitVector::from_indices(params.branch, vector[vector.len() - 1] + 1, &vector, &mut builder).unwrap();
+    BitVector::from_indices(
+        params.branch,
+        vector[vector.len() - 1] + 1,
+        &vector,
+        &mut builder,
+    )
+    .unwrap();
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut ranks = Vec::with_capacity(b.size());
@@ -143,7 +155,13 @@ fn bench_bit_vector_select(params: &SparseBitVectorParameters, b: &mut Bencher) 
     let mut buf = vec![];
     let mut builder = Builder::new(&mut buf);
     let vector = generate_bit_vector(params, &mut guac);
-    BitVector::from_indices(params.branch, vector[vector.len() - 1] + 1, &vector, &mut builder).unwrap();
+    BitVector::from_indices(
+        params.branch,
+        vector[vector.len() - 1] + 1,
+        &vector,
+        &mut builder,
+    )
+    .unwrap();
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut selects = Vec::with_capacity(b.size());

@@ -9,10 +9,7 @@ pub mod prefix;
 
 pub trait WaveletTree {
     /// Construct in the builder a byte-wise representation of the wavelet tree.
-    fn construct<H: Helper>(
-        text: &[u32],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error>;
+    fn construct<H: Helper>(text: &[u32], builder: &mut Builder<'_, H>) -> Result<(), Error>;
 
     /// The length of this [WaveletTree].  Always the number of symbols.
     fn len(&self) -> usize;
@@ -44,10 +41,7 @@ pub struct ReferenceWaveletTree {
 }
 
 impl WaveletTree for ReferenceWaveletTree {
-    fn construct<H: Helper>(
-        text: &[u32],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error> {
+    fn construct<H: Helper>(text: &[u32], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         let this = ReferenceWaveletTreeStub {
             text: text.to_vec(),
         };
@@ -102,10 +96,9 @@ impl<'a> Unpackable<'a> for ReferenceWaveletTree {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (stub, buf) = ReferenceWaveletTreeStub::unpack(buf).map_err(|_| Error::InvalidWaveletTree)?;
-        Ok((Self {
-            text: stub.text,
-        }, buf))
+        let (stub, buf) =
+            ReferenceWaveletTreeStub::unpack(buf).map_err(|_| Error::InvalidWaveletTree)?;
+        Ok((Self { text: stub.text }, buf))
     }
 }
 

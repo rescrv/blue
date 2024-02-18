@@ -2,7 +2,11 @@ use std::cmp::Ordering;
 
 /// Binary search over the inclusive range [first, last] and return the index of the first element
 /// for which search returns ordering of greater or equal.
-pub fn binary_search_by<F: FnMut(usize) -> Ordering>(first: usize, last: usize, mut search: F) -> usize {
+pub fn binary_search_by<F: FnMut(usize) -> Ordering>(
+    first: usize,
+    last: usize,
+    mut search: F,
+) -> usize {
     let mut left = first;
     let mut right = last;
     while left < right {
@@ -22,7 +26,13 @@ pub fn binary_search_by<F: FnMut(usize) -> Ordering>(first: usize, last: usize, 
 /// Return the first index in [first, last] for which the first element returns false.  Assumes
 /// that the list is partitioned such that the first n elements are true and the last are false.
 pub fn partition_by<F: FnMut(usize) -> bool>(first: usize, last: usize, mut search: F) -> usize {
-    binary_search_by(first, last, move |probe| if search(probe) { Ordering::Less } else { Ordering::Greater })
+    binary_search_by(first, last, move |probe| {
+        if search(probe) {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    })
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////

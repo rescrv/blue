@@ -242,10 +242,7 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
 }
 
 impl<'a, E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'a, E> {
-    fn construct<H: Helper>(
-        symbols: &[u32],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error> {
+    fn construct<H: Helper>(symbols: &[u32], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         let mut builder = builder.sub(FieldNumber::must(CONTAINER_TAG));
         // Construct an encoder.
         let enc = E::construct(symbols);

@@ -142,7 +142,8 @@ impl<'a> Sigma<'a> {
             self.columns.select(idx).ok_or(Error::BadSelect(idx))?,
             self.columns
                 .select(idx + 1)
-                .ok_or(Error::BadSelect(idx + 1))? - 1,
+                .ok_or(Error::BadSelect(idx + 1))?
+                - 1,
         ))
     }
 }

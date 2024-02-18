@@ -1770,10 +1770,7 @@ impl<'a> BitVector<'a> {
 impl<'a> super::BitVector for BitVector<'a> {
     type Output<'b> = BitVector<'b>;
 
-    fn construct<H: Helper>(
-        bits: &[bool],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error> {
+    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         const WORD: usize = 8;
         let mut build_p = BitArrayBuilder::with_capacity(bits.len());
         let mut build_c = BitArrayBuilder::with_capacity(bits.len());
@@ -1913,11 +1910,7 @@ impl<'a> super::BitVector for BitVector<'a> {
         let mut idx: usize = p_offset * self.word as usize * 63;
         for _ in 0..self.word as usize {
             let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
-                return if rank >= x {
-                    Some(idx)
-                } else {
-                    None
-                };
+                return if rank >= x { Some(idx) } else { None };
             };
             if rank + c >= x {
                 return Some(idx + w.select(x - rank)?);
@@ -1943,9 +1936,7 @@ impl<'a> super::BitVector for BitVector<'a> {
             // considering the last p_offset we'll hit this case, but the tests say that's OK.
             idx as u64 * self.word as u64 * 63 - self.r.load(idx * 32, 32).unwrap_or(u64::MIN)
         };
-        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| {
-            load_rank0(mid) < x as u64
-        });
+        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| load_rank0(mid) < x as u64);
         // TODO(rescrv):  We really need a different partition_by function that does the greatest
         // true, not first false.
         while p_offset > 0 && load_rank0(p_offset) >= x as u64 {
@@ -1960,11 +1951,7 @@ impl<'a> super::BitVector for BitVector<'a> {
                 break;
             }
             let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
-                return if rank >= x {
-                    Some(idx)
-                } else {
-                    None
-                };
+                return if rank >= x { Some(idx) } else { None };
             };
             if rank + 63 - c >= x {
                 let remain = self.len() - idx;
@@ -1972,7 +1959,7 @@ impl<'a> super::BitVector for BitVector<'a> {
                     Some(idx + w.select0(x - rank, remain)?)
                 } else {
                     None
-                }
+                };
             } else {
                 rank += 63 - c;
             }

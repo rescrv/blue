@@ -33,14 +33,21 @@ impl<'a> Leaf<'a> {
             let x = x as u64;
             let idx = binary_search_by(0, self.branch - 1, |mid| {
                 // SAFETY(rescrv):  words is parsed to be equal to self.bits.len() * branch - 1.
-                let load = self.words.load(mid * self.bits as usize, self.bits as usize).unwrap();
+                let load = self
+                    .words
+                    .load(mid * self.bits as usize, self.bits as usize)
+                    .unwrap();
                 if load == 0 {
                     Ordering::Greater
                 } else {
                     (self.base + load).cmp(&x)
                 }
             });
-            let word = self.base + self.words.load(idx * self.bits as usize, self.bits as usize).unwrap_or(0);
+            let word = self.base
+                + self
+                    .words
+                    .load(idx * self.bits as usize, self.bits as usize)
+                    .unwrap_or(0);
             Some((word == x, idx + 1))
         }
     }
@@ -50,7 +57,9 @@ impl<'a> Leaf<'a> {
             (self.base + 1).try_into().ok()
         } else {
             let i = index - 1;
-            let delta = self.words.load(i * self.bits as usize, self.bits as usize)?;
+            let delta = self
+                .words
+                .load(i * self.bits as usize, self.bits as usize)?;
             if delta > 0 {
                 (self.base + delta + 1).try_into().ok()
             } else {
@@ -79,14 +88,20 @@ impl<'a> Internal<'a> {
             let x = x as u64;
             let idx = binary_search_by(0, self.branch - 2, |mid| {
                 // SAFETY(rescrv):  words is parsed to be equal to self.bits.len() * branch - 1.
-                let load = self.dividers.load(mid * self.divider_bits as usize, self.divider_bits as usize).unwrap();
+                let load = self
+                    .dividers
+                    .load(mid * self.divider_bits as usize, self.divider_bits as usize)
+                    .unwrap();
                 if load == 0 {
                     Ordering::Greater
                 } else {
                     (self.divider_base + load).cmp(&x)
                 }
             });
-            let pointer = self.pointer_base + self.pointers.load(idx * self.pointer_bits as usize, self.pointer_bits as usize)?;
+            let pointer = self.pointer_base
+                + self
+                    .pointers
+                    .load(idx * self.pointer_bits as usize, self.pointer_bits as usize)?;
             Some((idx + 1, pointer))
         }
     }
@@ -192,7 +207,7 @@ pub struct BitVector<'a> {
     branch: usize,
     bytes: &'a [u8],
     root: Root,
-    skip_factors: Vec<usize>
+    skip_factors: Vec<usize>,
 }
 
 impl<'a> BitVector<'a> {
@@ -371,10 +386,7 @@ impl<'a> BitVector<'a> {
 impl<'a> BitVectorTrait for BitVector<'a> {
     type Output<'b> = BitVector<'b>;
 
-    fn construct<H: Helper>(
-        bits: &[bool],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error> {
+    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         let mut indices = vec![];
         for (idx, bit) in bits.iter().enumerate() {
             if *bit {

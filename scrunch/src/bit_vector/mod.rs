@@ -1,10 +1,10 @@
 use buffertk::Unpackable;
 
-use crate::binary_search::partition_by;
-use crate::builder::{Builder, Helper};
 use super::bit_array::BitArray;
 use super::bit_array::Builder as BitArrayBuilder;
 use super::Error;
+use crate::binary_search::partition_by;
+use crate::builder::{Builder, Helper};
 
 pub mod rrr;
 pub mod sparse;
@@ -15,10 +15,7 @@ pub trait BitVector {
     type Output<'a>: BitVector;
 
     /// Append the byte-representation of the bit vector to buf.
-    fn construct<H: Helper>(
-        bits: &[bool],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error>;
+    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error>;
     /// Parse the byte-representation of the buffer.
     fn parse<'a, 'b: 'a>(buf: &'b [u8]) -> Result<(Self::Output<'a>, &'b [u8]), Error>;
 
@@ -93,10 +90,7 @@ pub struct ReferenceBitVector<'a> {
 impl<'a> BitVector for ReferenceBitVector<'a> {
     type Output<'b> = ReferenceBitVector<'b>;
 
-    fn construct<H: Helper>(
-        bits: &[bool],
-        builder: &mut Builder<'_, H>,
-    ) -> Result<(), Error> {
+    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         let length: u64 = bits.len() as u64;
         let mut bit_builder = BitArrayBuilder::with_capacity(bits.len());
         for bit in bits {
@@ -1723,7 +1717,6 @@ pub mod tests {
             90, 91, 92, 93, 94,
         ],
     };
-
 
     const BAD_TREE_NODE_6: &TestCase = &TestCase {
         bits: &[

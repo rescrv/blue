@@ -1,18 +1,22 @@
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use super::Builder;
-use super::Helper;
-use super::Error;
 use super::psi;
 use super::sampled::SampledArray;
 use super::sigma::Sigma;
+use super::Builder;
+use super::Error;
+use super::Helper;
 
 //////////////////////////////////////////// SuffixArray ///////////////////////////////////////////
 
 pub trait SuffixArray {
     // TODO(rescrv): Make it an associated type to have parameters.
-    fn construct<H: Helper>(sampling: usize, sa: &[usize], builder: &mut Builder<H>) -> Result<(), Error>;
+    fn construct<H: Helper>(
+        sampling: usize,
+        sa: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error>;
     fn lookup<PSI: psi::Psi>(&self, sigma: &Sigma, psi: &PSI, idx: usize) -> Result<usize, Error>;
 }
 
@@ -95,9 +99,17 @@ impl<'a> TryFrom<&'a SampledSuffixArrayStub<'a>> for SampledSuffixArray<'a> {
     type Error = Error;
 
     fn try_from(ssas: &'a SampledSuffixArrayStub) -> Result<Self, Self::Error> {
-        let SampledSuffixArrayStub { sampling, zero, sampled } = ssas;
+        let SampledSuffixArrayStub {
+            sampling,
+            zero,
+            sampled,
+        } = ssas;
         let (sampled, _) = SampledArray::parse(sampled)?;
-        Ok(SampledSuffixArray { sampling: *sampling, zero: *zero, sampled })
+        Ok(SampledSuffixArray {
+            sampling: *sampling,
+            zero: *zero,
+            sampled,
+        })
     }
 }
 
@@ -110,7 +122,11 @@ pub struct SampledSuffixArray<'a> {
 }
 
 impl<'a> SuffixArray for SampledSuffixArray<'a> {
-    fn construct<H: Helper>(sampling: usize, sa: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+    fn construct<H: Helper>(
+        sampling: usize,
+        sa: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         if sampling > 63 {
             return Err(Error::InvalidSuffixArray);
         }
@@ -126,7 +142,12 @@ impl<'a> SuffixArray for SampledSuffixArray<'a> {
         Ok(())
     }
 
-    fn lookup<PSI: psi::Psi>(&self, sigma: &Sigma, psi: &PSI, mut idx: usize) -> Result<usize, Error> {
+    fn lookup<PSI: psi::Psi>(
+        &self,
+        sigma: &Sigma,
+        psi: &PSI,
+        mut idx: usize,
+    ) -> Result<usize, Error> {
         let mut k = 0usize;
         loop {
             if idx == 0 {
@@ -146,12 +167,16 @@ impl<'a> Unpackable<'a> for SampledSuffixArray<'a> {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (stub, buf) = SampledSuffixArrayStub::unpack(buf).map_err(|_| Error::InvalidSuffixArray)?;
-        Ok((Self {
-            sampling: stub.sampling,
-            zero: stub.zero,
-            sampled: SampledArray::parse(stub.sampled)?.0,
-        }, buf))
+        let (stub, buf) =
+            SampledSuffixArrayStub::unpack(buf).map_err(|_| Error::InvalidSuffixArray)?;
+        Ok((
+            Self {
+                sampling: stub.sampling,
+                zero: stub.zero,
+                sampled: SampledArray::parse(stub.sampled)?.0,
+            },
+            buf,
+        ))
     }
 }
 
@@ -160,8 +185,8 @@ impl<'a> Unpackable<'a> for SampledSuffixArray<'a> {
 #[cfg(test)]
 mod tests {
     use crate::psi::ReferencePsi;
-    use crate::test_util::TestCase;
     use crate::test_cases_for;
+    use crate::test_util::TestCase;
 
     use super::*;
 

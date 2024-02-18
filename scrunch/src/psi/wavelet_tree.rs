@@ -7,7 +7,7 @@ use crate::bit_vector::BitVector as BitVectorTrait;
 use crate::builder::{Builder, Helper};
 use crate::psi::Psi;
 use crate::sigma::Sigma;
-use crate::wavelet_tree::WaveletTree as WaveletTree;
+use crate::wavelet_tree::WaveletTree;
 use crate::{inverse, Error};
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -32,16 +32,12 @@ struct ContextStub<'a> {
 
 impl<'a, WT> TryFrom<ContextStub<'a>> for Context<WT>
 where
-    WT: WaveletTree + Unpackable<'a, Error=Error>
+    WT: WaveletTree + Unpackable<'a, Error = Error>,
 {
     type Error = Error;
 
     fn try_from(stub: ContextStub<'a>) -> Result<Self, Self::Error> {
-        let ContextStub {
-            ctx,
-            start,
-            tree,
-        } = stub;
+        let ContextStub { ctx, start, tree } = stub;
         if ctx.len() > CTX_MAX {
             return Err(Error::InvalidWaveletTree);
         }
@@ -53,11 +49,7 @@ where
         let mut ctx = [0u32; CTX_MAX];
         ctx[..ctx_vec.len()].copy_from_slice(&ctx_vec);
         let tree = WT::unpack(tree)?.0;
-        Ok(Context {
-            ctx,
-            start,
-            tree,
-        })
+        Ok(Context { ctx, start, tree })
     }
 }
 
@@ -79,7 +71,11 @@ impl<WT: WaveletTree> Context<WT> {
             return Err(Error::BadIndex(idx));
         }
         let to_select = idx + 1;
-        let select = self.tree.select_q(sigma, to_select).ok_or(Error::BadIndex(idx))? - 1;
+        let select = self
+            .tree
+            .select_q(sigma, to_select)
+            .ok_or(Error::BadIndex(idx))?
+            - 1;
         Ok(self.start + select)
     }
 }
@@ -244,15 +240,27 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
         // This transforms from [) to ambiguous [)/[] intervals.
         let first_cell = self.y_key.rank(into.0).ok_or(Error::BadRank(into.0))?;
         let last_cell = self.y_key.rank(into.1).ok_or(Error::BadRank(into.1))?;
-        let mut cell = partition_by(first_cell, last_cell, |cell| { self.table[self.y_value[cell]].start < point });
+        let mut cell = partition_by(first_cell, last_cell, |cell| {
+            self.table[self.y_value[cell]].start < point
+        });
         if cell > first_cell && self.table[self.y_value[cell]].start > point {
             cell -= 1;
         }
         let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
-        let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
-        let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
+        let end_of_cell = self
+            .y_key
+            .select(cell + 1)
+            .ok_or(Error::BadSelect(cell + 1))?
+            - 1;
+        let column = sigma
+            .sa_index_to_sigma(start_of_cell)
+            .ok_or(Error::InvalidSigma)?;
         if point >= self.table[self.y_value[cell]].start {
-            Ok(self.table[self.y_value[cell]].tree.rank_q(column, point - self.table[self.y_value[cell]].start).unwrap_or(end_of_cell - start_of_cell + 1) + start_of_cell)
+            Ok(self.table[self.y_value[cell]]
+                .tree
+                .rank_q(column, point - self.table[self.y_value[cell]].start)
+                .unwrap_or(end_of_cell - start_of_cell + 1)
+                + start_of_cell)
         } else {
             Ok(start_of_cell)
         }
@@ -281,16 +289,31 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
         // This transforms from [) to ambiguous [)/[] intervals.
         let first_cell = self.y_key.rank(into.0).ok_or(Error::BadRank(into.0))?;
         let last_cell = self.y_key.rank(into.1).ok_or(Error::BadRank(into.1))?;
-        let mut cell = partition_by(first_cell, last_cell, |cell| { self.table[self.y_value[cell]].start < point });
+        let mut cell = partition_by(first_cell, last_cell, |cell| {
+            self.table[self.y_value[cell]].start < point
+        });
         if cell > first_cell && self.table[self.y_value[cell]].start > point {
             cell -= 1;
         }
         let start_of_cell = self.y_key.select(cell).ok_or(Error::BadSelect(cell))?;
-        let end_of_cell = self.y_key.select(cell + 1).ok_or(Error::BadSelect(cell + 1))? - 1;
-        let column = sigma.sa_index_to_sigma(start_of_cell).ok_or(Error::InvalidSigma)?;
+        let end_of_cell = self
+            .y_key
+            .select(cell + 1)
+            .ok_or(Error::BadSelect(cell + 1))?
+            - 1;
+        let column = sigma
+            .sa_index_to_sigma(start_of_cell)
+            .ok_or(Error::InvalidSigma)?;
         if point >= self.table[self.y_value[cell]].start {
-            if let Some(rank) = self.table[self.y_value[cell]].tree.rank_q(column, point - self.table[self.y_value[cell]].start) {
-                if self.table[self.y_value[cell]].lookup(column, rank).unwrap_or(point + 1) > point {
+            if let Some(rank) = self.table[self.y_value[cell]]
+                .tree
+                .rank_q(column, point - self.table[self.y_value[cell]].start)
+            {
+                if self.table[self.y_value[cell]]
+                    .lookup(column, rank)
+                    .unwrap_or(point + 1)
+                    > point
+                {
                     Ok(rank + start_of_cell - 1)
                 } else {
                     Ok(rank + start_of_cell)
@@ -305,7 +328,11 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
 }
 
 impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
-    fn construct<H: Helper>(sigma: &Sigma, psi: &[usize], builder: &mut Builder<H>) -> Result<(), Error> {
+    fn construct<H: Helper>(
+        sigma: &Sigma,
+        psi: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
         const CTX_SZ: usize = 2;
         let table = compute_table(sigma, CTX_SZ, psi)?;
         let mut y_value = vec![];
@@ -330,7 +357,13 @@ impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
             WT::construct(&t.tree, &mut builder.sub(FieldNumber::must(3)))?;
         }
         y_key.push(sum - 1);
-        BitVector::from_indices(128, sum, &y_key, &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER))).ok_or(Error::InvalidBitVector)?;
+        BitVector::from_indices(
+            128,
+            sum,
+            &y_key,
+            &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER)),
+        )
+        .ok_or(Error::InvalidBitVector)?;
         builder.append_vec_usize(FieldNumber::must(Y_VALUE_FIELD_NUMBER), &y_value);
         Ok(())
     }
@@ -380,16 +413,19 @@ impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
 
 impl<'a, WT> Unpackable<'a> for WaveletTreePsi<'a, WT>
 where
-    WT: WaveletTree + Unpackable<'a, Error=Error>,
+    WT: WaveletTree + Unpackable<'a, Error = Error>,
 {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (WaveletTreePsiStub {
-            table: contexts,
-            y_key,
-            y_value,
-        }, buf) = WaveletTreePsiStub::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
+        let (
+            WaveletTreePsiStub {
+                table: contexts,
+                y_key,
+                y_value,
+            },
+            buf,
+        ) = WaveletTreePsiStub::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
         let mut table: Vec<Context<WT>> = vec![];
         for t in contexts.into_iter() {
             table.push(t.try_into()?);
@@ -397,10 +433,13 @@ where
         let y_key = BitVector::parse(y_key)?.0;
         // TODO(rescrv): error if doesn't fit
         let y_value: Vec<usize> = y_value.iter().map(|x| *x as usize).collect();
-        Ok((Self {
-            table,
-            y_key,
-            y_value,
-        }, buf))
+        Ok((
+            Self {
+                table,
+                y_key,
+                y_value,
+            },
+            buf,
+        ))
     }
 }

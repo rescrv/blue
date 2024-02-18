@@ -1,5 +1,5 @@
-use std::collections::{BinaryHeap, HashMap};
 use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, HashMap};
 
 use buffertk::{stack_pack, Packable, Unpackable};
 
@@ -87,8 +87,7 @@ impl Node {
     }
 }
 
-impl Eq for Node {
-}
+impl Eq for Node {}
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
@@ -199,10 +198,7 @@ impl Encoder for HuffmanEncoder {
             code += 1;
             prev_len = len;
         }
-        Self {
-            encode,
-            decode,
-        }
+        Self { encode, decode }
     }
 
     fn encode(&self, t: u32) -> Option<(u32, u8)> {
@@ -247,10 +243,7 @@ impl<'a> Unpackable<'a> for HuffmanEncoder {
             encode.insert(cbe.symbol, (cbe.code, len));
             decode.insert((cbe.code, len), cbe.symbol);
         }
-        let this = HuffmanEncoder {
-            encode,
-            decode,
-        };
+        let this = HuffmanEncoder { encode, decode };
         Ok((this, buf))
     }
 }
@@ -307,10 +300,7 @@ mod tests {
 
     #[test]
     fn huffman_chars() {
-        let chars: Vec<u32> = "BananaMississippi"
-            .chars()
-            .map(|c| c as u32)
-            .collect();
+        let chars: Vec<u32> = "BananaMississippi".chars().map(|c| c as u32).collect();
         let encoder = HuffmanEncoder::construct(&chars);
         assert_eq!((0, 2), encoder.encode('i' as u32).unwrap());
         assert_eq!((2, 2), encoder.encode('s' as u32).unwrap());

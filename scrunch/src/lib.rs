@@ -309,7 +309,8 @@ where
     ) -> Result<(), Error> {
         check_record_boundaries(&text, &record_boundaries)?;
         // compute the record boundaries
-        let sparse_boundaries: Vec<usize> = record_boundaries[1..].iter().map(|rb| rb - 1).collect();
+        let sparse_boundaries: Vec<usize> =
+            record_boundaries[1..].iter().map(|rb| rb - 1).collect();
         bit_vector::sparse::BitVector::from_indices(
             128,
             text.len(),
@@ -341,7 +342,11 @@ where
         // compute the inverse suffix array
         let isa = inverse(&sa);
         drop(sa);
-        ISA::construct(&isa, &record_boundaries, &mut builder.sub(FieldNumber::must(4)))?;
+        ISA::construct(
+            &isa,
+            &record_boundaries,
+            &mut builder.sub(FieldNumber::must(4)),
+        )?;
         // compute the successor array, psi
         let psi = psi::compute(&isa);
         drop(isa);
@@ -369,7 +374,11 @@ where
         } else {
             let mut result = Vec::with_capacity(range.1 - range.0 + 1);
             for offset in range.0..=range.1 {
-                result.push(TextOffset(self.sa.lookup(&self.sigma, &self.psi, offset)?));
+                result.push(TextOffset(self.sa.lookup(
+                    &self.sigma,
+                    &self.psi,
+                    offset,
+                )?));
             }
             result.sort();
             Ok(result.into_iter())
@@ -417,11 +426,7 @@ where
         let mut idx = self.isa.lookup(start)?;
         let mut result = Vec::with_capacity(limit - start);
         for _ in start..limit {
-            result.push(
-                self.sigma
-                    .sa_index_to_t(idx)
-                    .ok_or(Error::InvalidSigma)?,
-            );
+            result.push(self.sigma.sa_index_to_t(idx).ok_or(Error::InvalidSigma)?);
             idx = self.psi.lookup(&self.sigma, idx)?;
         }
         Ok(result)
@@ -433,30 +438,43 @@ where
     SA: sa::SuffixArray + Unpackable<'a>,
     ISA: isa::InverseSuffixArray + Unpackable<'a>,
     PSI: psi::Psi + Unpackable<'a>,
-    Error: From<<SA as Unpackable<'a>>::Error> + From<<ISA as Unpackable<'a>>::Error> + From<<PSI as Unpackable<'a>>::Error>,
+    Error: From<<SA as Unpackable<'a>>::Error>
+        + From<<ISA as Unpackable<'a>>::Error>
+        + From<<PSI as Unpackable<'a>>::Error>,
 {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (stub, buf) = <PsiDocumentStub as Unpackable>::unpack(buf)
-            .map_err(|_| Error::InvalidBitVector)?;
+        let (stub, buf) =
+            <PsiDocumentStub as Unpackable>::unpack(buf).map_err(|_| Error::InvalidBitVector)?;
         let record_boundaries = bit_vector::sparse::BitVector::new(stub.record_boundaries)
             .ok_or(Error::InvalidBitVector)?;
         let sigma = sigma::Sigma::unpack(stub.sigma)?.0;
         let sa = SA::unpack(stub.sa)?.0;
         let isa = ISA::unpack(stub.isa)?.0;
         let psi = PSI::unpack(stub.psi)?.0;
-        Ok((PsiDocument {
-            record_boundaries,
-            sigma,
-            sa,
-            isa,
-            psi,
-        }, buf))
+        Ok((
+            PsiDocument {
+                record_boundaries,
+                sigma,
+                sa,
+                isa,
+                psi,
+            },
+            buf,
+        ))
     }
 }
 
-pub type CompressedDocument<'a> = PsiDocument::<'a, sa::SampledSuffixArray<'a>, isa::SampledInverseSuffixArray<'a>, psi::wavelet_tree::WaveletTreePsi<'a, wavelet_tree::prefix::WaveletTree<'a, encoder::HuffmanEncoder>>>;
+pub type CompressedDocument<'a> = PsiDocument<
+    'a,
+    sa::SampledSuffixArray<'a>,
+    isa::SampledInverseSuffixArray<'a>,
+    psi::wavelet_tree::WaveletTreePsi<
+        'a,
+        wavelet_tree::prefix::WaveletTree<'a, encoder::HuffmanEncoder>,
+    >,
+>;
 
 ///////////////////////////////////////////// Correlate ////////////////////////////////////////////
 
@@ -480,7 +498,11 @@ impl From<CorrelateState> for Exemplar {
     fn from(mut cs: CorrelateState) -> Self {
         cs.needle.reverse();
         Self {
-            count: cs.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add),
+            count: cs
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add),
             needle: cs.needle,
         }
     }
@@ -490,7 +512,11 @@ impl From<ExemplarState> for Exemplar {
     fn from(mut es: ExemplarState) -> Self {
         es.needle.reverse();
         Self {
-            count: es.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add),
+            count: es
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add),
             needle: es.needle,
         }
     }
@@ -514,10 +540,26 @@ impl Ord for CorrelateState {
         if self == other {
             Ordering::Equal
         } else {
-            let numer_lhs = self.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add);
-            let numer_rhs = other.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add);
-            let denom_lhs = self.docs.iter().map(|(_, d)| d.range.1 + 1 - d.range.0).fold(0, usize::saturating_add);
-            let denom_rhs = other.docs.iter().map(|(_, d)| d.range.1 + 1 - d.range.0).fold(0, usize::saturating_add);
+            let numer_lhs = self
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add);
+            let numer_rhs = other
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add);
+            let denom_lhs = self
+                .docs
+                .iter()
+                .map(|(_, d)| d.range.1 + 1 - d.range.0)
+                .fold(0, usize::saturating_add);
+            let denom_rhs = other
+                .docs
+                .iter()
+                .map(|(_, d)| d.range.1 + 1 - d.range.0)
+                .fold(0, usize::saturating_add);
             if denom_lhs == 0 && denom_rhs == 0 {
                 Ordering::Equal
             } else if denom_lhs == 0 {
@@ -525,7 +567,8 @@ impl Ord for CorrelateState {
             } else if denom_rhs == 0 {
                 Ordering::Greater
             } else {
-                (numer_lhs as f64 / denom_lhs as f64).total_cmp(&(numer_rhs as f64 / denom_rhs as f64))
+                (numer_lhs as f64 / denom_lhs as f64)
+                    .total_cmp(&(numer_rhs as f64 / denom_rhs as f64))
             }
         }
     }
@@ -537,7 +580,11 @@ impl PartialOrd for CorrelateState {
     }
 }
 
-pub fn correlate<'a, SA, ISA, PSI, F>(docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>], boundaries: &[(u32, u32)], select: F) -> Correlate<'a, SA, ISA, PSI, F>
+pub fn correlate<'a, SA, ISA, PSI, F>(
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    boundaries: &[(u32, u32)],
+    select: F,
+) -> Correlate<'a, SA, ISA, PSI, F>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -574,21 +621,14 @@ where
                 }
             }
             if numer > 0 {
-                state.docs.insert(idx, CorrelateDocState {
-                    numer,
-                    range,
-                });
+                state.docs.insert(idx, CorrelateDocState { numer, range });
             }
         }
         if !state.docs.is_empty() {
             heap.push(state);
         }
     }
-    Correlate {
-        docs,
-        heap,
-        select,
-    }
+    Correlate { docs, heap, select }
 }
 
 pub struct Correlate<'a, SA, ISA, PSI, F>
@@ -642,9 +682,7 @@ where
                         // TODO(rescrv): Metrics because this should never happen.
                         continue;
                     }
-                    let Ok(range) = doc
-                        .psi
-                        .constrain(&doc.sigma, range, doc_state.range) else {
+                    let Ok(range) = doc.psi.constrain(&doc.sigma, range, doc_state.range) else {
                         // TODO(rescrv): Metrics because this should never happen.
                         continue;
                     };
@@ -666,10 +704,9 @@ where
                         }
                     }
                     if numer > 0 {
-                        new_correlate.docs.insert(*idx, CorrelateDocState {
-                            numer,
-                            range,
-                        });
+                        new_correlate
+                            .docs
+                            .insert(*idx, CorrelateDocState { numer, range });
                     }
                 }
             }
@@ -695,8 +732,16 @@ impl Ord for ExemplarState {
         if self == other {
             Ordering::Equal
         } else {
-            let numer_lhs = self.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add);
-            let numer_rhs = other.docs.iter().map(|(_, d)| d.numer).fold(0, usize::saturating_add);
+            let numer_lhs = self
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add);
+            let numer_rhs = other
+                .docs
+                .iter()
+                .map(|(_, d)| d.numer)
+                .fold(0, usize::saturating_add);
             numer_lhs.cmp(&numer_rhs)
         }
     }
@@ -708,7 +753,10 @@ impl PartialOrd for ExemplarState {
     }
 }
 
-pub fn exemplars<'a, SA, ISA, PSI>(docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>], boundaries: &[(u32, u32)]) -> Exemplars<'a, SA, ISA, PSI>
+pub fn exemplars<'a, SA, ISA, PSI>(
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    boundaries: &[(u32, u32)],
+) -> Exemplars<'a, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -730,19 +778,13 @@ where
                 continue;
             }
             let numer = range.1 - range.0 + 1;
-            state.docs.insert(idx, CorrelateDocState {
-                numer,
-                range,
-            });
+            state.docs.insert(idx, CorrelateDocState { numer, range });
         }
         if !state.docs.is_empty() {
             heap.push(state);
         }
     }
-    Exemplars {
-        docs,
-        heap,
-    }
+    Exemplars { docs, heap }
 }
 
 pub struct Exemplars<'a, SA, ISA, PSI>
@@ -793,9 +835,7 @@ where
                         // TODO(rescrv): Metrics because this should never happen.
                         continue;
                     }
-                    let Ok(range) = doc
-                        .psi
-                        .constrain(&doc.sigma, range, doc_state.range) else {
+                    let Ok(range) = doc.psi.constrain(&doc.sigma, range, doc_state.range) else {
                         // TODO(rescrv): Metrics because this should never happen.
                         continue;
                     };
@@ -803,10 +843,9 @@ where
                         continue;
                     }
                     let numer = range.1 - range.0 + 1;
-                    new_correlate.docs.insert(*idx, CorrelateDocState {
-                        numer,
-                        range,
-                    });
+                    new_correlate
+                        .docs
+                        .insert(*idx, CorrelateDocState { numer, range });
                 }
             }
             for (_, new_correlate) in new_correlates {
@@ -947,7 +986,6 @@ pub mod test_util {
             // Backwards search of AN
             ((5, 6), (0, 7), (5, 6)),
             ((1, 3), (5, 6), (2, 3)),
-
             // Backwards search of BANA
             ((1, 3), (0, 7), (1, 3)),
             ((5, 6), (1, 3), (5, 6)),
@@ -1155,9 +1193,7 @@ pub mod test_util {
 []  [15]                                   []
 []  [16]                                   []
 ",
-        constrain: &[
-            ((1, 15), (16, 16), (15, 15)),
-        ],
+        constrain: &[((1, 15), (16, 16), (15, 15))],
     };
 
     pub const BAD_CASE_2: &TestCase = &TestCase {
@@ -1186,9 +1222,7 @@ pub mod test_util {
 []   [15]         []        []
 []   [16]         []        []
 ",
-        constrain: &[
-            ((16, 16), (1, 9), (16, 15)),
-        ],
+        constrain: &[((16, 16), (1, 9), (16, 15))],
     };
 
     pub const BAD_CASE_3: &TestCase = &TestCase {
@@ -1214,9 +1248,7 @@ pub mod test_util {
 [10] [9, 11, 12, 13] [8]
 []   [15, 16]        [14]
 ",
-        constrain: &[
-            ((1, 6), (1, 6), (1, 0)),
-        ],
+        constrain: &[((1, 6), (1, 6), (1, 0))],
     };
 
     pub const BAD_CASE_4: &TestCase = &TestCase {
@@ -1396,8 +1428,8 @@ pub mod test_util {
 
 #[cfg(test)]
 mod tests {
-    use crate::sa::SuffixArray;
     use crate::isa::InverseSuffixArray;
+    use crate::sa::SuffixArray;
 
     use super::psi::Psi;
     use super::test_util::*;
@@ -1428,7 +1460,11 @@ mod tests {
     fn check_string(t: &TestCase) {
         let sigma = t.sigma();
         let sigma = sigma::Sigma::unpack(&sigma).expect("test should unpack").0;
-        let mut s: Vec<u32> = t.text.chars().map(|x| sigma.char_to_sigma(x as u32).unwrap()).collect();
+        let mut s: Vec<u32> = t
+            .text
+            .chars()
+            .map(|x| sigma.char_to_sigma(x as u32).unwrap())
+            .collect();
         s.push(0);
         assert_eq!(t.S, s);
     }
@@ -1447,9 +1483,13 @@ mod tests {
         let record_boundaries = vec![0usize];
         let mut buf = Vec::new();
         let mut builder = Builder::new(&mut buf);
-        type Document<'a> = super::PsiDocument::<'a, super::sa::ReferenceSuffixArray, super::isa::ReferenceInverseSuffixArray, super::psi::ReferencePsi>;
-        Document::construct(text, record_boundaries, &mut builder)
-            .expect("test case should index");
+        type Document<'a> = super::PsiDocument<
+            'a,
+            super::sa::ReferenceSuffixArray,
+            super::isa::ReferenceInverseSuffixArray,
+            super::psi::ReferencePsi,
+        >;
+        Document::construct(text, record_boundaries, &mut builder).expect("test case should index");
         drop(builder);
         let doc = Document::unpack(&buf).expect("document should unpack").0;
 
@@ -1467,7 +1507,7 @@ mod tests {
         }
     }
 
-    test_cases_for!{unpack_psi_document, super::check_unpack_psi_document}
+    test_cases_for! {unpack_psi_document, super::check_unpack_psi_document}
 
     search_cases_for! {reference, crate::ReferenceDocument}
     search_cases_for! {psi_with_all_reference, crate::PsiDocument::<crate::sa::ReferenceSuffixArray, crate::isa::ReferenceInverseSuffixArray, psi::ReferencePsi>}
