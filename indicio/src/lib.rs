@@ -349,9 +349,9 @@ macro_rules! value_internal {
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
-/// An emitter for indicio tha temits key-value pairs.
+/// An emitter for indicio that emits values.
 pub trait Emitter: Send {
-    /// Emit the provided key-value pair at the specified file/line.
+    /// Emit the provided value at the specified file/line.
     fn emit(&self, file: &'static str, line: u32, level: u64, value: Value);
     /// Flush the emitter with whatever semantics the emitter chooses.
     fn flush(&self) {}
@@ -401,7 +401,7 @@ impl Collector {
         self.verbosity.store(verbosity, Ordering::Relaxed);
     }
 
-    /// Emit the key-value pair via the collector if and only if it is logging and has an emitter
+    /// Emit the value via the collector if and only if it is logging and has an emitter
     /// configured.
     pub fn emit(&self, file: &'static str, line: u32, level: u64, value: Value) {
         if self.is_logging() {
@@ -438,7 +438,7 @@ impl Collector {
 
 ///////////////////////////////////////////// the macro ////////////////////////////////////////////
 
-/// Emit the specified key-value pair if and only if the collector is logging.
+/// Emit the specified value if and only if the collector is logging.
 ///
 /// This will be lazy, and only evaluate the key-value pair if the collector is logging.
 #[macro_export]
