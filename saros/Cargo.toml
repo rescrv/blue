@@ -7,6 +7,11 @@ description = "Saros is a terminal-based time series database."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.6" }
 buffertk = { path = "../buffertk", version = "0.6" }
