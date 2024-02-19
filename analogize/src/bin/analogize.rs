@@ -85,7 +85,7 @@ fn main() -> Result<()> {
                                 eprintln!("error: {}", err);
                             }
                         };
-                    },
+                    }
                     "exemplars" => {
                         let number = if let Some(number) = usize::from_str(remainder).ok() {
                             number
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
                                 eprintln!("error: {}", err);
                             }
                         };
-                    },
+                    }
                     command => {
                         eprintln!("unknown command: {}", command);
                     }

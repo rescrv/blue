@@ -358,7 +358,7 @@ impl SymbolTable {
                     }
                 }
                 result
-            },
+            }
             Query::Null => {
                 let symbol = symbol.to_string() + "n";
                 if let Some(sigma) = self.symbols.get(&symbol).copied() {
@@ -366,7 +366,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 }
-            },
+            }
             Query::True => {
                 let symbol = symbol.to_string() + "t";
                 if let Some(sigma) = self.symbols.get(&symbol).copied() {
@@ -374,7 +374,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 }
-            },
+            }
             Query::False => {
                 let symbol = symbol.to_string() + "f";
                 if let Some(sigma) = self.symbols.get(&symbol).copied() {
@@ -382,15 +382,15 @@ impl SymbolTable {
                 } else {
                     vec![]
                 }
-            },
-            Query::I64(_)|Query::U64(_)|Query::F64(_) => {
+            }
+            Query::I64(_) | Query::U64(_) | Query::F64(_) => {
                 let symbol = symbol.to_string() + "#";
                 if let Some(sigma) = self.symbols.get(&symbol).copied() {
                     vec![vec![sigma]]
                 } else {
                     vec![]
                 }
-            },
+            }
             Query::String(s) => {
                 let symbol = symbol.to_string() + "s";
                 if let Some(sigma) = self.symbols.get(&symbol).copied() {
@@ -403,7 +403,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 }
-            },
+            }
             Query::Array(a) => {
                 assert!(a.len() <= 1);
                 let symbol = symbol.to_string() + "a";
@@ -414,7 +414,7 @@ impl SymbolTable {
                 } else {
                     vec![]
                 }
-            },
+            }
             Query::Object(o) => {
                 assert!(o.len() <= 1);
                 if o.len() == 1 {
@@ -432,7 +432,7 @@ impl SymbolTable {
                 } else {
                     unreachable!();
                 }
-            },
+            }
             Query::Or(_) => {
                 todo!();
             }
@@ -672,10 +672,7 @@ impl<'a> Unpackable<'a> for AnalogizeDocument<'a> {
         })?;
         let document = CompressedDocument::unpack(stub.document)?.0;
         let timeline = BitVector::parse(stub.timeline)?.0;
-        Ok((AnalogizeDocument {
-            document,
-            timeline,
-        }, buf))
+        Ok((AnalogizeDocument { document, timeline }, buf))
     }
 }
 
@@ -709,40 +706,40 @@ impl Query {
     pub fn normalize(self) -> Query {
         match self {
             Query::Any
-                |Query::Null
-                |Query::True
-                |Query::False
-                |Query::I64(_)
-                |Query::U64(_)
-                |Query::F64(_)
-                |Query::String(_) => self,
-            Query::Array(subqueries) => {
-                Self::normalize_array(subqueries)
-            },
-            Query::Object(subqueries) => {
-                Self::normalize_object(subqueries)
-            },
-            Query::Or(subqueries) => {
-                Self::normalize_or(subqueries)
-            },
+            | Query::Null
+            | Query::True
+            | Query::False
+            | Query::I64(_)
+            | Query::U64(_)
+            | Query::F64(_)
+            | Query::String(_) => self,
+            Query::Array(subqueries) => Self::normalize_array(subqueries),
+            Query::Object(subqueries) => Self::normalize_object(subqueries),
+            Query::Or(subqueries) => Self::normalize_or(subqueries),
         }
     }
 
     pub fn conjunctions(self) -> impl Iterator<Item = Query> {
         let answer: Box<dyn Iterator<Item = Query>> = match self {
             Query::Any
-                |Query::Null
-                |Query::True
-                |Query::False
-                |Query::I64(_)
-                |Query::U64(_)
-                |Query::F64(_)
-                |Query::String(_) => Box::new(vec![self].into_iter()),
+            | Query::Null
+            | Query::True
+            | Query::False
+            | Query::I64(_)
+            | Query::U64(_)
+            | Query::F64(_)
+            | Query::String(_) => Box::new(vec![self].into_iter()),
             Query::Array(subqueries) => {
                 if subqueries.is_empty() {
                     Box::new(vec![Query::Array(vec![])].into_iter())
                 } else {
-                    Box::new(subqueries.into_iter().map(|q| q.conjunctions()).flatten().map(|q| Query::Array(vec![q])))
+                    Box::new(
+                        subqueries
+                            .into_iter()
+                            .map(|q| q.conjunctions())
+                            .flatten()
+                            .map(|q| Query::Array(vec![q])),
+                    )
                 }
             }
             Query::Object(subqueries) => {
@@ -757,11 +754,11 @@ impl Query {
                     }
                     Box::new(results.into_iter())
                 }
-            },
+            }
             Query::Or(_) => {
                 // TODO(rescrv): Do better here.
                 panic!("calling conjunctions on Or clause");
-            },
+            }
         };
         answer
     }
@@ -836,7 +833,8 @@ impl Query {
     fn normalize_or(mut subqueries: Vec<Query>) -> Query {
         subqueries.iter_mut().for_each(Query::normalize_mut);
         subqueries.sort_by_key(|x| if let Query::Or(_) = *x { 1 } else { 0 });
-        let partition = subqueries.partition_point(|x| if let Query::Or(_) = *x { false } else { true });
+        let partition =
+            subqueries.partition_point(|x| if let Query::Or(_) = *x { false } else { true });
         let disjunctions = subqueries.split_off(partition);
         for disjunction in disjunctions.into_iter() {
             if let Query::Or(mut subq) = disjunction {
@@ -880,9 +878,7 @@ struct DocumentMapping {
 impl DocumentMapping {
     fn doc(&self) -> Result<AnalogizeDocument, Error> {
         // SAFETY(rescrv):  We only ever refer to this region of memory as a slice of u8.
-        let buf = unsafe {
-            std::slice::from_raw_parts(self.data as *const u8, self.size)
-        };
+        let buf = unsafe { std::slice::from_raw_parts(self.data as *const u8, self.size) };
         Ok(AnalogizeDocument::unpack(buf)?.0)
     }
 }
@@ -988,7 +984,14 @@ impl State {
         }
         // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
         let mapping = unsafe {
-            libc::mmap64(std::ptr::null_mut(), md.len() as usize, libc::PROT_READ, libc::MAP_SHARED|libc::MAP_POPULATE, file.as_raw_fd(), 0)
+            libc::mmap64(
+                std::ptr::null_mut(),
+                md.len() as usize,
+                libc::PROT_READ,
+                libc::MAP_SHARED | libc::MAP_POPULATE,
+                file.as_raw_fd(),
+                0,
+            )
         };
         if mapping == libc::MAP_FAILED {
             panic!("TODO");
@@ -1165,9 +1168,7 @@ impl Analogize {
             let syms = self.state.syms.lock().unwrap();
             records.push(doc.query(&syms, query.clone())?);
         }
-        let select = move |doc: usize, record: RecordOffset| {
-            records[doc].contains(&record)
-        };
+        let select = move |doc: usize, record: RecordOffset| records[doc].contains(&record);
         let mut exemplars = vec![];
         for exemplar in scrunch::correlate(&docs_ref, &boundaries, select).take(num_results) {
             let syms = self.state.syms.lock().unwrap();
@@ -1568,58 +1569,139 @@ mod tests {
         assert_eq!(Query::I64(42), Query::I64(42).normalize());
         assert_eq!(Query::U64(42), Query::U64(42).normalize());
         assert_eq!(Query::F64(42.0), Query::F64(42.0).normalize());
-        assert_eq!(Query::String("Hello World".to_string()), Query::String("Hello World".to_string()).normalize());
+        assert_eq!(
+            Query::String("Hello World".to_string()),
+            Query::String("Hello World".to_string()).normalize()
+        );
     }
 
     #[test]
     fn query_normalize_array() {
         assert_eq!(Query::must("[]"), Query::must("[]").normalize());
-        assert_eq!(Query::must("[true, false, \"Hello World\"]"), Query::must("[true, false, \"Hello World\"]").normalize());
-        assert_eq!(Query::must("[true, \"Hello World\"] or [false, \"Hello World\"]"), Query::must("[true or false, \"Hello World\"]").normalize());
-        assert_eq!(Query::must("[true, false] or [true, \"Hello World\"]"), Query::must("[true, false or \"Hello World\"]").normalize());
+        assert_eq!(
+            Query::must("[true, false, \"Hello World\"]"),
+            Query::must("[true, false, \"Hello World\"]").normalize()
+        );
+        assert_eq!(
+            Query::must("[true, \"Hello World\"] or [false, \"Hello World\"]"),
+            Query::must("[true or false, \"Hello World\"]").normalize()
+        );
+        assert_eq!(
+            Query::must("[true, false] or [true, \"Hello World\"]"),
+            Query::must("[true, false or \"Hello World\"]").normalize()
+        );
     }
 
     #[test]
     fn query_normalize_object() {
         assert_eq!(Query::must("{}"), Query::must("{}").normalize());
-        assert_eq!(Query::must("{\"a\": true, \"b\": \"Hello World\"}"), Query::must("{\"a\": true, \"b\": \"Hello World\"}").normalize());
-        assert_eq!(Query::must("{\"a\": true, \"b\": \"Hello World\"} or {\"a\": false, \"b\": \"Hello World\"}"), Query::must("{\"a\": true or false, \"b\": \"Hello World\"}").normalize());
-        assert_eq!(Query::must("{\"a\": true, \"b\": \"Hello World\"} or {\"a\": true, \"b\": 42}"), Query::must("{\"a\": true, \"b\": \"Hello World\" or 42}").normalize());
+        assert_eq!(
+            Query::must("{\"a\": true, \"b\": \"Hello World\"}"),
+            Query::must("{\"a\": true, \"b\": \"Hello World\"}").normalize()
+        );
+        assert_eq!(
+            Query::must(
+                "{\"a\": true, \"b\": \"Hello World\"} or {\"a\": false, \"b\": \"Hello World\"}"
+            ),
+            Query::must("{\"a\": true or false, \"b\": \"Hello World\"}").normalize()
+        );
+        assert_eq!(
+            Query::must("{\"a\": true, \"b\": \"Hello World\"} or {\"a\": true, \"b\": 42}"),
+            Query::must("{\"a\": true, \"b\": \"Hello World\" or 42}").normalize()
+        );
     }
 
     #[test]
     fn query_normalize_nested() {
-        assert_eq!(Query::must("
+        assert_eq!(
+            Query::must(
+                "
             {\"a\": 42, \"b\": [\"Hello World\"]} or
             {\"a\": 42, \"b\": [13]} or
             {\"a\": 42, \"b\": [false]} or
             {\"a\": 42, \"b\": [[\"x\"]]} or
             {\"a\": 42, \"b\": [[\"y\"]]}
-        ".trim()), Query::must("{\"a\": 42, \"b\": [\"Hello World\" or 13] or [false or [\"x\" or \"y\"]]}").normalize());
+        "
+                .trim()
+            ),
+            Query::must(
+                "{\"a\": 42, \"b\": [\"Hello World\" or 13] or [false or [\"x\" or \"y\"]]}"
+            )
+            .normalize()
+        );
     }
 
     #[test]
     fn query_no_conjunctions() {
-        assert_eq!(vec![Query::Any], Query::Any.conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::Null], Query::Null.conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::True], Query::True.conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::False], Query::False.conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::I64(42)], Query::I64(42).conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::U64(42)], Query::U64(42).conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::F64(42.0)], Query::F64(42.0).conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::String("Hello World".to_string())], Query::String("Hello World".to_string()).conjunctions().collect::<Vec<_>>());
+        assert_eq!(
+            vec![Query::Any],
+            Query::Any.conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::Null],
+            Query::Null.conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::True],
+            Query::True.conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::False],
+            Query::False.conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::I64(42)],
+            Query::I64(42).conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::U64(42)],
+            Query::U64(42).conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::F64(42.0)],
+            Query::F64(42.0).conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![Query::String("Hello World".to_string())],
+            Query::String("Hello World".to_string())
+                .conjunctions()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn query_conjunctions_array() {
-        assert_eq!(vec![Query::must("[]")], Query::must("[]").conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::must("[true]"), Query::must("[false]"), Query::must("[\"Hello World\"]")], Query::must("[true, false, \"Hello World\"]").conjunctions().collect::<Vec<_>>());
+        assert_eq!(
+            vec![Query::must("[]")],
+            Query::must("[]").conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![
+                Query::must("[true]"),
+                Query::must("[false]"),
+                Query::must("[\"Hello World\"]")
+            ],
+            Query::must("[true, false, \"Hello World\"]")
+                .conjunctions()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn query_conjunctions_object() {
-        assert_eq!(vec![Query::must("{}")], Query::must("{}").conjunctions().collect::<Vec<_>>());
-        assert_eq!(vec![Query::must("{\"a\": true}"), Query::must("{\"b\": \"Hello World\"}")], Query::must("{\"a\": true, \"b\": \"Hello World\"}").conjunctions().collect::<Vec<_>>());
+        assert_eq!(
+            vec![Query::must("{}")],
+            Query::must("{}").conjunctions().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![
+                Query::must("{\"a\": true}"),
+                Query::must("{\"b\": \"Hello World\"}")
+            ],
+            Query::must("{\"a\": true, \"b\": \"Hello World\"}")
+                .conjunctions()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
