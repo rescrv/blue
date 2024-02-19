@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::hash::Hash;
 
 use buffertk::{v64, Unpackable};
