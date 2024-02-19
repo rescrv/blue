@@ -2,7 +2,7 @@ scrunch
 =======
 
 Scrunch provides full-text-searching compression.  This is a modified implementation of "High-Order Entropy-Compressed
-Text Indexes" by Grossi, Gupta, and Viter
+Text Indexes" by Grossi, Gupta, and Viter.
 
 Status
 ------
@@ -17,7 +17,7 @@ This should give everything necessary to take a document, compress it, and serve
 Warts
 -----
 
-- The code only implements reference types right now.
+None known at the moment.
 
 Documentation
 -------------
