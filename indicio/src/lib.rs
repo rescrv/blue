@@ -1,11 +1,17 @@
 #![doc = include_str!("../README.md")]
 
 use std::fmt::Display;
+use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use biometrics::Counter;
+use buffertk::stack_pack;
 use tatl::{HeyListen, Stationary};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
@@ -85,6 +91,10 @@ pub struct Map {
 impl Map {
     pub fn insert(&mut self, key: String, value: Value) {
         self.entries.push(MapEntry::from((key, value)));
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> + '_ {
+        self.entries.iter().map(|e| (e.key.as_str(), &e.value))
     }
 }
 
@@ -169,6 +179,12 @@ impl Display for Value {
 impl From<bool> for Value {
     fn from(x: bool) -> Self {
         Self::Bool(x)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(x: u32) -> Self {
+        Self::I64(x as i64)
     }
 }
 
@@ -352,13 +368,13 @@ macro_rules! value_internal {
 /// An emitter for indicio that emits values.
 pub trait Emitter: Send {
     /// Emit the provided value at the specified file/line.
-    fn emit(&self, file: &'static str, line: u32, level: u64, value: Value);
+    fn emit(&self, file: &str, line: u32, level: u64, value: Value);
     /// Flush the emitter with whatever semantics the emitter chooses.
     fn flush(&self) {}
 }
 
 impl<E: Emitter + Sync> Emitter for Arc<E> {
-    fn emit(&self, file: &'static str, line: u32, level: u64, value: Value) {
+    fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
         <E as Emitter>::emit(self, file, line, level, value)
     }
 
@@ -403,7 +419,7 @@ impl Collector {
 
     /// Emit the value via the collector if and only if it is logging and has an emitter
     /// configured.
-    pub fn emit(&self, file: &'static str, line: u32, level: u64, value: Value) {
+    pub fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
         if self.is_logging() {
             let mut emitter = self.emitter.lock().unwrap();
             if let Some(emitter) = emitter.as_deref_mut() {
@@ -433,6 +449,149 @@ impl Collector {
         let mut emitter = self.emitter.lock().unwrap();
         *emitter = None;
         self.should_log.store(false, Ordering::Relaxed);
+    }
+}
+
+/////////////////////////////////////////////// Clue ///////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+pub struct Clue {
+    #[prototk(1, string)]
+    pub file: String,
+    #[prototk(2, uint32)]
+    pub line: u32,
+    #[prototk(3, uint64)]
+    pub level: u64,
+    #[prototk(4, uint64)]
+    pub timestamp: u64,
+    #[prototk(5, message)]
+    pub value: Value,
+}
+
+///////////////////////////////////////////// ClueFrame ////////////////////////////////////////////
+
+#[derive(Default, prototk_derive::Message)]
+pub struct ClueFrame {
+    #[prototk(1, message)]
+    pub clue: Clue,
+}
+
+//////////////////////////////////////////// ClueVector ////////////////////////////////////////////
+
+#[derive(Default, prototk_derive::Message)]
+pub struct ClueVector {
+    #[prototk(1, message)]
+    pub clues: Vec<Clue>,
+}
+
+////////////////////////////////////////// ProtobufEmitter /////////////////////////////////////////
+
+struct ProtobufOutputState {
+    buffer: Vec<u8>,
+    file: Option<File>,
+    size: u64,
+    timestamp: u64,
+}
+
+/// An Emitter that writes key-value pairs to a series of log files.  When the file reaches its
+/// size threshold, it rolls over to the next file.
+pub struct ProtobufEmitter {
+    prefix: PathBuf,
+    target: u64,
+    state: Mutex<ProtobufOutputState>,
+}
+
+impl ProtobufEmitter {
+    pub fn new<P: AsRef<Path>>(prefix: P, target: u64) -> Result<Self, std::io::Error> {
+        let prefix = prefix.as_ref().to_path_buf();
+        let state = Mutex::new(ProtobufOutputState {
+            buffer: vec![],
+            file: None,
+            size: 0,
+            timestamp: 0,
+        });
+        Ok(Self {
+            prefix,
+            target,
+            state,
+        })
+    }
+
+    fn open(&self, state: &mut ProtobufOutputState) {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|x| x.as_micros())
+            .unwrap_or(0);
+        let mut path = OsString::from(self.prefix.as_os_str());
+        let ext = OsString::from(format!(".{}", ts));
+        path.push(ext);
+        let path = PathBuf::from(path);
+        let Ok(file) = OpenOptions::new().create(true).truncate(true).write(true).open(path) else {
+            return;
+        };
+        state.file = Some(file);
+        state.size = 0;
+    }
+
+    fn close(&self, state: &mut ProtobufOutputState) {
+        if let Some(file) = state.file.as_mut() {
+            let _ = file.flush();
+        }
+        state.file = None;
+        state.size = 0;
+    }
+}
+
+impl Emitter for ProtobufEmitter {
+    fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|x| x.as_micros() as u64)
+            .unwrap_or(0);
+        let mut frame = ClueFrame {
+            clue: Clue {
+                // TODO(rescrv): make prototk support Cow::Borrowed so we can eliminate this.
+                file: file.to_string(),
+                line,
+                level,
+                timestamp,
+                value,
+            },
+        };
+        let mut state = self.state.lock().unwrap();
+        frame.clue.timestamp = std::cmp::max(state.timestamp + 1, frame.clue.timestamp);
+        state.timestamp = frame.clue.timestamp;
+        stack_pack(&frame).append_to_vec(&mut state.buffer);
+        if state.buffer.len() > 1 << 16 {
+            let buffer = std::mem::take(&mut state.buffer);
+            'retry: for _ in 0..3 {
+                if state.file.is_none() {
+                    self.open(&mut state);
+                }
+                let size = state.size;
+                if let Some(file) = state.file.as_mut() {
+                    if size >= self.target {
+                        self.close(&mut state);
+                        continue;
+                    } else {
+                        if file.write_all(&buffer).is_err() {
+                            break 'retry;
+                        }
+                        state.size += buffer.len() as u64;
+                        return;
+                    }
+                }
+            }
+            EMITTER_FAILURE.click();
+            self.close(&mut state);
+        }
+    }
+
+    fn flush(&self) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(file) = state.file.as_mut() {
+            let _ = file.flush();
+        }
     }
 }
 
