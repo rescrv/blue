@@ -14,4 +14,4 @@ one_two_eight = { path = "../one_two_eight", version = "0.4" }
 prototk = { path = "../prototk", version = "0.6" }
 prototk_derive = { path = "../prototk_derive", version = "0.6" }
 tuple_key = { path = "../tuple_key", version = "0.4" }
-tuple_key_derive = { path = "../tuple_key_derive", version = "0.4" }
+tuple_key_derive = { path = "../tuple_key_derive", version = "0.5" }
