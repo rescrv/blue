@@ -17,7 +17,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.6" }
 tatl = { path = "../tatl", version = "0.5" }
 zerror = { path = "../zerror", version = "0.4" }
 zerror_core = { path = "../zerror_core", version = "0.4" }
-zerror_derive = { path = "../zerror_derive", version = "0.2" }
+zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
 [[example]]
 name = "saros-generate-waves"

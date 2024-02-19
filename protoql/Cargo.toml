@@ -23,7 +23,7 @@ tuple_key = { path = "../tuple_key", version = "0.4" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.5" }
 zerror = { path = "../zerror", version = "0.4" }
 zerror_core = { path = "../zerror_core", version = "0.4" }
-zerror_derive = { path = "../zerror_derive", version = "0.2" }
+zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
 [dev-dependencies]
 proptest = "1.0"
