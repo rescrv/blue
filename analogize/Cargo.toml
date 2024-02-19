@@ -17,7 +17,7 @@ serde_json = "1.0"
 
 arrrg = { path = "../arrrg", version = "0.3" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
-buffertk = { path = "../buffertk", version = "0.5" }
+buffertk = { path = "../buffertk", version = "0.6" }
 guacamole = { path = "../guacamole", version = "0.6" }
 mani = { path = "../mani", version = "0.2" }
 prototk = { path = "../prototk", version = "0.5" }

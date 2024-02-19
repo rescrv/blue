@@ -16,7 +16,7 @@ binaries = []
 nom = "7.1"
 
 biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.5" }
+buffertk = { path = "../buffertk", version = "0.6" }
 prototk = { path = "../prototk", version = "0.5" }
 prototk_derive = { path = "../prototk_derive", version = "0.5" }
 tatl = { path = "../tatl", version = "0.4" }
