@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
