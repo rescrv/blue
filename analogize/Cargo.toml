@@ -40,8 +40,3 @@ proptest = "1.0"
 name = "analogize"
 path = "src/bin/analogize.rs"
 required-features=["binaries"]
-
-[[example]]
-name = "github-post-process"
-path = "examples/github-post-process.rs"
-required-features=["binaries"]
