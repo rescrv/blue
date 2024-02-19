@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "biometrics_pb provides protocol buffers corresponding to biometric readings."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.5" }

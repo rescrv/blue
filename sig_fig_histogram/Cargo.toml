@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "sig_fig_histogram provides a histogram type that is exponentially distributed and human-friendly."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 
 [dependencies]

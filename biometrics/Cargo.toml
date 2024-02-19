@@ -5,5 +5,6 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Biometrics provide the vitals of a process in the form of counters, gauges, moments, and T-digests."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]

@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "split_channel provides a stream-of-messages abstraction with split send/recv channels."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [features]
 default = ["binaries"]

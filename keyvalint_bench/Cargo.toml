@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "keyvalint_bench provides standardized key-value store benchmarks."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [features]
 default = ["binaries"]

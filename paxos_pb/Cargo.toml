@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "paxos_pb provides protocol buffers for the Paxos prototocol."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 buffertk = { path = "../buffertk", version = "0.5" }

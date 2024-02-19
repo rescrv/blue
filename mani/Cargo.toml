@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Mani provides an in-memory manifest of related files."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [features]
 default = ["binaries"]

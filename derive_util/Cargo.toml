@@ -5,6 +5,7 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "derive_util provides tools for derive macros."
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 syn = "1.0"
