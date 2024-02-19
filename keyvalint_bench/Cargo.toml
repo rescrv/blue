@@ -24,7 +24,7 @@ arrrg = { path = "../arrrg", version = "0.3", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.3", optional = true }
 biometrics = { path = "../biometrics", version = "0.6" }
 guacamole = { path = "../guacamole", version = "0.6" }
-keyvalint = { path = "../keyvalint", version = "0.2" }
+keyvalint = { path = "../keyvalint", version = "0.3" }
 lsmtk = { path = "../lsmtk", version = "0.2" }
 sst = { path = "../sst", version = "0.5" }
 sync42 = { path = "../sync42", version = "0.5" }
