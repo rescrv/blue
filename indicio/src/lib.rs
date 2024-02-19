@@ -192,6 +192,12 @@ impl Display for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(x: bool) -> Self {
+        Self::Bool(x)
+    }
+}
+
 impl From<i64> for Value {
     fn from(x: i64) -> Self {
         Self::I64(x)
@@ -219,6 +225,14 @@ impl From<&str> for Value {
 impl From<String> for Value {
     fn from(s: String) -> Self {
         Self::String(s)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(values: Vec<Value>) -> Self {
+        Self::Array(Values {
+            values,
+        })
     }
 }
 
