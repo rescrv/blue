@@ -8,10 +8,6 @@ use std::sync::{Arc, Mutex};
 use biometrics::Counter;
 use tatl::{HeyListen, Stationary};
 
-mod parser;
-
-use parser::ParseError;
-
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
 pub const ALWAYS: u64 = 0;
@@ -35,22 +31,6 @@ pub fn register_biometrics(collector: biometrics::Collector) {
 /// Registers this crate's monitors with the provided HeyListen.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&EMITTER_FAILURE_MONITOR);
-}
-
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
-
-#[derive(Debug)]
-pub enum Error {
-    ParseError { display: String },
-    InvalidNumberLiteral { as_str: String },
-}
-
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Self {
-        Self::ParseError {
-            display: err.to_string(),
-        }
-    }
 }
 
 ////////////////////////////////////////////// Values //////////////////////////////////////////////
@@ -134,12 +114,6 @@ pub enum Value {
     Array(Values),
     #[prototk(7, message)]
     Object(Map),
-}
-
-impl Value {
-    pub fn parse<S: AsRef<str>>(value: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::value)(value.as_ref())?)
-    }
 }
 
 impl Default for Value {
