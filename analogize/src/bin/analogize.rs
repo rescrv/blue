@@ -55,7 +55,7 @@ fn main() -> Result<()> {
                     "correlate" => {
                         let number = if let Some(space) = remainder.find(' ') {
                             let number = &remainder[..space].trim();
-                            if let Some(number) = usize::from_str(number).ok() {
+                            if let Ok(number) = usize::from_str(number) {
                                 remainder = &remainder[space..].trim();
                                 number
                             } else {
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
                         };
                     }
                     "exemplars" => {
-                        let number = if let Some(number) = usize::from_str(remainder).ok() {
+                        let number = if let Ok(number) = usize::from_str(remainder) {
                             number
                         } else {
                             CORRELATE_DEFAULT_N

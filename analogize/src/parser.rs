@@ -279,7 +279,7 @@ fn array_query(input: &str) -> ParseResult<Query> {
                 ws0,
                 tag("]"),
             )),
-            |(_, _, values, _, _)| Query::Array(values.into()),
+            |(_, _, values, _, _)| Query::Array(values),
         ),
     )(input)
 }
@@ -369,12 +369,6 @@ mod test {
     use nom::combinator::{complete, cut};
 
     use super::*;
-
-    fn parse_error(s: &'static str) -> ParseError {
-        ParseError {
-            string: s.to_string(),
-        }
-    }
 
     fn interpret_error_for_test<'a, T, F: FnMut(&'a str) -> ParseResult<T>>(
         mut f: F,
@@ -471,26 +465,20 @@ mod test {
     #[test]
     fn parse_array_query() {
         assert_eq!(
-            Query::Array(vec![].into()),
+            Query::Array(vec![]),
             interpret_error_for_test(cut(complete(all_consuming(array_query))))("[]").unwrap()
         );
         assert_eq!(
-            Query::Array(
-                vec![
-                    Query::True,
-                    Query::I64(i64::MIN),
-                    Query::F64(std::f64::consts::PI),
-                    Query::String("hello world".to_string()),
-                    Query::Array(
-                        vec![
-                            Query::String("hello".to_string()),
-                            Query::String("world".to_string()),
-                        ]
-                        .into()
-                    ),
-                ]
-                .into()
-            ),
+            Query::Array(vec![
+                Query::True,
+                Query::I64(i64::MIN),
+                Query::F64(std::f64::consts::PI),
+                Query::String("hello world".to_string()),
+                Query::Array(vec![
+                    Query::String("hello".to_string()),
+                    Query::String("world".to_string()),
+                ]),
+            ]),
             interpret_error_for_test(cut(complete(all_consuming(array_query))))(
                 r#"[
                     true,
@@ -516,13 +504,10 @@ mod test {
                 ("pi".to_string(), Query::F64(std::f64::consts::PI)),
                 (
                     "hello_world".to_string(),
-                    Query::Array(
-                        vec![
-                            Query::String("hello".to_string()),
-                            Query::String("world".to_string()),
-                        ]
-                        .into()
-                    )
+                    Query::Array(vec![
+                        Query::String("hello".to_string()),
+                        Query::String("world".to_string()),
+                    ])
                 ),
             ]),
             interpret_error_for_test(cut(complete(all_consuming(object_query))))(

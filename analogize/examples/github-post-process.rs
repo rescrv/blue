@@ -29,7 +29,7 @@ fn main() {
             let mut append = false;
             let id = value.get("id");
             if let Some(Value::String(id)) = id {
-                let id = u64::from_str(&id).unwrap();
+                let id = u64::from_str(id).unwrap();
                 if !seen.contains(&id) {
                     seen.insert(id);
                     append = true;

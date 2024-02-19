@@ -5,6 +5,12 @@ authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "analogize is a log analyzer"
 license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = []
 
 [dependencies]
 chrono = "0.4"
@@ -29,3 +35,13 @@ zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
 [dev-dependencies]
 proptest = "1.0"
+
+[[bin]]
+name = "analogize"
+path = "src/bin/analogize.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "github-post-process"
+path = "examples/github-post-process.rs"
+required-features=["binaries"]

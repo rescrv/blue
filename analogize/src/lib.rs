@@ -153,7 +153,7 @@ impl SymbolTable {
         }
         let file = File::open(path.as_ref())
             .as_z()
-            .with_info("path", &path.as_ref().to_string_lossy())?;
+            .with_info("path", path.as_ref().to_string_lossy())?;
         Self::from_reader(file)
     }
 
@@ -198,7 +198,7 @@ impl SymbolTable {
     }
 
     pub fn translate(&mut self, object: &Value, text: &mut Vec<u32>) {
-        self.translate_recursive(&object, "", text);
+        self.translate_recursive(object, "", text);
     }
 
     pub fn translate_query(&self, query: &Query) -> Vec<Vec<u32>> {
@@ -340,7 +340,7 @@ impl SymbolTable {
                 for (k, v) in o.iter() {
                     let len = k.chars().count();
                     let symbol = format!("{}k{}{}", symbol, len, k);
-                    self.translate_recursive(&v, &symbol, text);
+                    self.translate_recursive(v, &symbol, text);
                 }
                 text.push(sigma + 1);
             }
@@ -421,7 +421,7 @@ impl SymbolTable {
                     let (k, q) = &o[0];
                     let len = k.chars().count();
                     let symbol = format!("{}ok{}{}", symbol, len, k);
-                    self.translate_query_recursive(&q, &symbol)
+                    self.translate_query_recursive(q, &symbol)
                 } else if o.is_empty() {
                     let symbol = symbol.to_string() + "o";
                     if let Some(sigma) = self.symbols.get(&symbol).copied() {
@@ -622,6 +622,7 @@ struct AnalogizeDocumentStub<'a> {
 
 struct AnalogizeDocument<'a> {
     document: CompressedDocument<'a>,
+    #[allow(dead_code)]
     timeline: BitVector<'a>,
 }
 
@@ -736,8 +737,7 @@ impl Query {
                     Box::new(
                         subqueries
                             .into_iter()
-                            .map(|q| q.conjunctions())
-                            .flatten()
+                            .flat_map(|q| q.conjunctions())
                             .map(|q| Query::Array(vec![q])),
                     )
                 }
@@ -833,8 +833,7 @@ impl Query {
     fn normalize_or(mut subqueries: Vec<Query>) -> Query {
         subqueries.iter_mut().for_each(Query::normalize_mut);
         subqueries.sort_by_key(|x| if let Query::Or(_) = *x { 1 } else { 0 });
-        let partition =
-            subqueries.partition_point(|x| if let Query::Or(_) = *x { false } else { true });
+        let partition = subqueries.partition_point(|x| !matches!(x, Query::Or(_)));
         let disjunctions = subqueries.split_off(partition);
         for disjunction in disjunctions.into_iter() {
             if let Query::Or(mut subq) = disjunction {
@@ -955,11 +954,7 @@ impl State {
     fn get_documents(&self) -> Result<Vec<Arc<DocumentMapping>>, Error> {
         let mani = self.mani.lock().unwrap();
         fn select_data(s: &str) -> Option<String> {
-            if s.starts_with("data:") {
-                Some(s[5..].to_string())
-            } else {
-                None
-            }
+            s.strip_prefix("data:").map(String::from)
         }
         let docs: Vec<_> = mani.strs().filter_map(select_data).collect();
         let mut mappings = Vec::with_capacity(docs.len());
@@ -1041,11 +1036,7 @@ impl State {
         let (json_inputs, file_number): (Vec<String>, String) = {
             let mani = self.mani.lock().unwrap();
             fn select_json(s: &str) -> Option<String> {
-                if s.starts_with("json:") {
-                    Some(s[5..].to_string())
-                } else {
-                    None
-                }
+                s.strip_prefix("json:").map(String::from)
             }
             (
                 mani.strs().filter_map(select_json).collect(),
