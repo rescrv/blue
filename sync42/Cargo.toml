@@ -13,7 +13,7 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.5" }
+biometrics = { path = "../biometrics", version = "0.6" }
 
 [dev-dependencies]
 guacamole = { path = "../guacamole", version = "0.6" }
