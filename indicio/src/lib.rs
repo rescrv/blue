@@ -61,7 +61,7 @@ impl From<Vec<Value>> for Values {
     }
 }
 
-/////////////////////////////////////////// KeyValuePair ///////////////////////////////////////////
+///////////////////////////////////////////// MapEntry /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, prototk_derive::Message)]
 pub struct MapEntry {
@@ -126,6 +126,16 @@ pub enum Value {
     Object(Map),
 }
 
+impl Value {
+    pub fn lookup(&self, key: &str) -> Option<&Value> {
+        if let Value::Object(map) = self {
+            map.entries.iter().filter(|e| e.key == key).take(1).map(|e| &e.value).next()
+        } else {
+            None
+        }
+    }
+}
+
 impl Default for Value {
     fn default() -> Self {
         Self::Object(Map::default())
@@ -179,6 +189,12 @@ impl Display for Value {
 impl From<bool> for Value {
     fn from(x: bool) -> Self {
         Self::Bool(x)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(x: i32) -> Self {
+        Self::I64(x as i64)
     }
 }
 
@@ -466,6 +482,12 @@ pub struct Clue {
     pub timestamp: u64,
     #[prototk(5, message)]
     pub value: Value,
+}
+
+impl Display for Clue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}:{} {} {} {}", self.file, self.line, self.level, self.timestamp, self.value)
+    }
 }
 
 ///////////////////////////////////////////// ClueFrame ////////////////////////////////////////////
