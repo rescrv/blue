@@ -216,6 +216,14 @@ impl SymbolTable {
         self.translate_query_recursive(query, "")
     }
 
+    pub fn reverse_translate_query(&self, text: &[u32]) -> Option<Value> {
+        if text.is_empty() {
+            return None;
+        }
+        let start = self.reverse_lookup(text[0])?;
+        self.reverse_translate_recursive(text, &start[..start.len() - 1])
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {
         self.symbols.iter().map(|(k, v)| (k.as_ref(), *v))
     }
@@ -1239,6 +1247,26 @@ impl Analogize {
                     continue;
                 };
                 values.push(value);
+            }
+        }
+        Ok(values)
+    }
+
+    pub fn exemplars(&self, num_results: usize) -> Result<Vec<Value>, Error> {
+        let doc_ptrs = self.state.get_documents()?;
+        let mut docs = vec![];
+        for ptr in doc_ptrs.iter() {
+            docs.push(ptr.doc()?);
+        }
+        let doc_refs: Vec<&CompressedDocument> = docs.iter().map(|d| &d.document).collect();
+        let syms = self.state.syms.lock().unwrap();
+        let markers: Vec<_> = syms.markers().collect();
+        let mut values = vec![];
+        for exemplar in scrunch::exemplars(&doc_refs, &markers).take(num_results) {
+            if let Some(exemplar) = syms.reverse_translate_query(exemplar.text()) {
+                values.push(exemplar);
+            } else {
+                // TODO(rescrv): report error
             }
         }
         Ok(values)

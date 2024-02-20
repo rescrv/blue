@@ -45,26 +45,39 @@ fn main() -> Result<()> {
             Ok(line) => {
                 rl.add_history_entry(&line)?;
                 let line = line.trim();
-                match Query::parse(line) {
-                    Ok(query) => {
-                        match analogize.query(query) {
-                            Ok(results) => {
-                                for result in results {
-                                    println!("{}", result);
-                                }
+                if line == "exemplars" {
+                    match analogize.exemplars(100) {
+                        Ok(exemplars) => {
+                            for exemplar in exemplars {
+                                println!("{}", exemplar);
                             }
-                            Err(err) => {
-                                eprintln!("error: {}", err);
-                            }
-                        };
-                    }
-                    Err(Error::Parsing { core: _, what }) => {
-                        eprintln!("{}", what);
-                    }
-                    Err(err) => {
-                        eprintln!("error: {}", err);
-                    }
-                };
+                        },
+                        Err(err) => {
+                            eprintln!("error: {}", err);
+                        }
+                    };
+                } else {
+                    match Query::parse(line) {
+                        Ok(query) => {
+                            match analogize.query(query) {
+                                Ok(results) => {
+                                    for result in results {
+                                        println!("{}", result);
+                                    }
+                                },
+                                Err(err) => {
+                                    eprintln!("error: {}", err);
+                                },
+                            };
+                        },
+                        Err(Error::Parsing { core: _, what }) => {
+                            eprintln!("{}", what);
+                        }
+                        Err(err) => {
+                            eprintln!("error: {}", err);
+                        }
+                    };
+                }
             }
             Err(ReadlineError::Interrupted) => {
                 rl.save_history(&history)?;
