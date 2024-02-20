@@ -178,11 +178,10 @@ pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
 
 /////////////////////////////////////////// bool literal ///////////////////////////////////////////
 
-fn ternary_literal(input: &str) -> ParseResult<Query> {
+fn bool_literal(input: &str) -> ParseResult<Query> {
     context(
-        "ternary literal",
+        "bool literal",
         alt((
-            map(tag("null"), |_| Query::Null),
             map(tag("true"), |_| Query::True),
             map(tag("false"), |_| Query::False),
         )),
@@ -221,7 +220,6 @@ fn number_literal(input: &str) -> ParseResult<Query> {
 fn unescape(input: &str) -> String {
     let mut out: Vec<char> = Vec::new();
     let mut prev_was_escape = false;
-    // TODO(rescrv):  Look into matching JSON exactly.
     for c in input.chars() {
         if prev_was_escape && (c == '\"' || c == '\\') {
             out.push(c);
@@ -338,7 +336,7 @@ fn or_query(input: &str) -> ParseResult<Query> {
 
 pub fn query_one(input: &str) -> ParseResult<Query> {
     alt((
-        ternary_literal,
+        bool_literal,
         number_literal,
         string_query,
         array_query,
@@ -387,18 +385,13 @@ mod test {
     }
 
     #[test]
-    fn null() {
-        assert_eq!(Query::Null, parse_all(ternary_literal)("null").unwrap(),);
-    }
-
-    #[test]
     fn bool_true() {
-        assert_eq!(Query::True, parse_all(ternary_literal)("true").unwrap(),);
+        assert_eq!(Query::True, parse_all(bool_literal)("true").unwrap(),);
     }
 
     #[test]
     fn bool_false() {
-        assert_eq!(Query::False, parse_all(ternary_literal)("false").unwrap(),);
+        assert_eq!(Query::False, parse_all(bool_literal)("false").unwrap(),);
     }
 
     #[test]

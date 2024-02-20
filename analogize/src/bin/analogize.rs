@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
@@ -9,12 +8,10 @@ use arrrg::CommandLine;
 
 use analogize::{Analogize, AnalogizeOptions, Error, Query};
 
-const CORRELATE_DEFAULT_N: usize = 5;
-
 fn main() -> Result<()> {
     // Process the command line.
     let (options, free) =
-        AnalogizeOptions::from_command_line("Usage: analogize --json <dir> --data <dir> [OPTIONS]");
+        AnalogizeOptions::from_command_line("Usage: analogize --logs <dir> --data <dir> [OPTIONS]");
     if !free.is_empty() {
         eprintln!("command takes no positional arguments");
         std::process::exit(1);
@@ -22,7 +19,7 @@ fn main() -> Result<()> {
 
     // Create the analogize instance.
     let history = PathBuf::from(options.data()).join(".history");
-    let mut analogize = match Analogize::new(options) {
+    let analogize = match Analogize::new(options) {
         Ok(analogize) => analogize,
         Err(err) => {
             eprintln!("could not instantiate analogize: {}", err);
@@ -48,37 +45,12 @@ fn main() -> Result<()> {
             Ok(line) => {
                 rl.add_history_entry(&line)?;
                 let line = line.trim();
-                let position = line.find(' ').unwrap_or(line.len());
-                let command = &line[..position];
-                let mut remainder = line[position..].trim();
-                match command {
-                    "correlate" => {
-                        let number = if let Some(space) = remainder.find(' ') {
-                            let number = &remainder[..space].trim();
-                            if let Ok(number) = usize::from_str(number) {
-                                remainder = &remainder[space..].trim();
-                                number
-                            } else {
-                                CORRELATE_DEFAULT_N
-                            }
-                        } else {
-                            CORRELATE_DEFAULT_N
-                        };
-                        let query = match Query::parse(remainder) {
-                            Ok(query) => query,
-                            Err(Error::Parsing { core: _, what }) => {
-                                eprintln!("{}", what);
-                                continue;
-                            }
-                            Err(err) => {
-                                eprintln!("unexpected error: {}", err);
-                                continue;
-                            }
-                        };
-                        match analogize.correlate(query, number) {
-                            Ok(exemplars) => {
-                                for exemplar in exemplars {
-                                    println!("{}", exemplar);
+                match Query::parse(line) {
+                    Ok(query) => {
+                        match analogize.query(query) {
+                            Ok(results) => {
+                                for result in results {
+                                    println!("{}", result);
                                 }
                             }
                             Err(err) => {
@@ -86,27 +58,13 @@ fn main() -> Result<()> {
                             }
                         };
                     }
-                    "exemplars" => {
-                        let number = if let Ok(number) = usize::from_str(remainder) {
-                            number
-                        } else {
-                            CORRELATE_DEFAULT_N
-                        };
-                        match analogize.exemplars(number) {
-                            Ok(exemplars) => {
-                                for exemplar in exemplars {
-                                    println!("{}", exemplar);
-                                }
-                            }
-                            Err(err) => {
-                                eprintln!("error: {}", err);
-                            }
-                        };
+                    Err(Error::Parsing { core: _, what }) => {
+                        eprintln!("{}", what);
                     }
-                    command => {
-                        eprintln!("unknown command: {}", command);
+                    Err(err) => {
+                        eprintln!("error: {}", err);
                     }
-                }
+                };
             }
             Err(ReadlineError::Interrupted) => {
                 rl.save_history(&history)?;

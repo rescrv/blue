@@ -15,13 +15,14 @@ use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
 
 use chrono::{DateTime, DurationRound, TimeDelta, Utc};
-use serde_json::Value;
 
 use buffertk::Unpackable;
+use indicio::{Clue, ClueVector, Value};
 use mani::{Edit, Manifest, ManifestOptions};
 use prototk::FieldNumber;
 use scrunch::bit_vector::sparse::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
+use scrunch::builder::Builder;
 use scrunch::{CompressedDocument, Document, RecordOffset};
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
@@ -48,14 +49,6 @@ pub enum Error {
         core: ErrorCore,
         what: String,
     },
-    Json {
-        core: ErrorCore,
-        what: String,
-    },
-    NotAnObject {
-        core: ErrorCore,
-        json: String,
-    },
     Manifest {
         core: ErrorCore,
         what: mani::Error,
@@ -78,15 +71,21 @@ pub enum Error {
     },
     InvalidTimestamp {
         core: ErrorCore,
-        nanos: i64,
-    },
-    MissingTimestamp {
-        core: ErrorCore,
-        json: String,
+        what: i64,
     },
     Scrunch {
         core: ErrorCore,
         what: scrunch::Error,
+    },
+    Indicio {
+        core: ErrorCore,
+        what: prototk::Error,
+    },
+    EmptyClueFile {
+        core: ErrorCore,
+    },
+    FileTooLarge {
+        core: ErrorCore,
     },
 }
 
@@ -97,15 +96,6 @@ impl From<std::io::Error> for Error {
         Self::System {
             core: ErrorCore::default(),
             kind: err.kind(),
-            what: err.to_string(),
-        }
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(err: serde_json::Error) -> Self {
-        Self::Json {
-            core: ErrorCore::default(),
             what: err.to_string(),
         }
     }
@@ -123,6 +113,15 @@ impl From<mani::Error> for Error {
 impl From<scrunch::Error> for Error {
     fn from(err: scrunch::Error) -> Self {
         Self::Scrunch {
+            core: ErrorCore::default(),
+            what: err,
+        }
+    }
+}
+
+impl From<prototk::Error> for Error {
+    fn from(err: prototk::Error) -> Self {
+        Self::Indicio {
             core: ErrorCore::default(),
             what: err,
         }
@@ -197,8 +196,20 @@ impl SymbolTable {
         text.push(u32::MAX);
     }
 
-    pub fn translate(&mut self, object: &Value, text: &mut Vec<u32>) {
-        self.translate_recursive(object, "", text);
+    pub fn translate(&mut self, clue: Clue, text: &mut Vec<u32>) {
+        let value = indicio::value!({
+            file: clue.file,
+            line: clue.line,
+            level: clue.level,
+            timestamp: clue.timestamp,
+            value: clue.value,
+        });
+        self.translate_recursive(&value, "", text);
+    }
+
+    pub fn reverse_translate(&self, text: &[u32]) -> Option<Value> {
+        // TODO(rescrv): Log the rate of failure.
+        self.reverse_translate_recursive(text, "")
     }
 
     pub fn translate_query(&self, query: &Query) -> Vec<Vec<u32>> {
@@ -222,98 +233,39 @@ impl SymbolTable {
         markers.into_iter()
     }
 
-    pub fn to_query(&self, text: &[u32]) -> Option<String> {
-        if text.is_empty() {
-            return None;
-        }
-        let mut start = self.reverse_lookup(text[0])?;
-        let text: String = text.iter().filter_map(|x| char::from_u32(*x)).collect();
-        let mut prefix = String::new();
-        let mut suffix = String::new();
-        let mut terminal = false;
-        while !start.is_empty() {
-            if terminal {
-                return None;
-            }
-            match start.chars().next() {
-                Some('t') => {
-                    start = &start[1..];
-                    prefix += "true";
-                    terminal = true;
-                }
-                Some('f') => {
-                    start = &start[1..];
-                    prefix += "false";
-                    terminal = true;
-                }
-                Some('n') => {
-                    start = &start[1..];
-                    prefix += "null";
-                    terminal = true;
-                }
-                Some('#') => {
-                    start = &start[1..];
-                    prefix += "#";
-                    terminal = true;
-                }
-                Some('s') => {
-                    start = &start[1..];
-                    let mut buf = vec![];
-                    serde_json::to_writer(&mut buf, &text).ok()?;
-                    prefix += std::str::from_utf8(&buf).ok()?;
-                    terminal = true;
-                }
-                Some('o') => {
-                    start = &start[1..];
-                    prefix += "{";
-                    suffix += "}";
-                }
-                Some('a') => {
-                    start = &start[1..];
-                    prefix += "[";
-                    suffix += "]";
-                }
-                Some('k') => {
-                    let len: String = start[1..]
-                        .chars()
-                        .take_while(|c| c.is_ascii_digit())
-                        .collect();
-                    start = &start[1 + len.len()..];
-                    let len = usize::from_str(&len).ok()?;
-                    let key = &start[..len];
-                    start = &start[len..];
-                    let mut buf = vec![];
-                    serde_json::to_writer(&mut buf, &key).ok()?;
-                    prefix += std::str::from_utf8(&buf).ok()?;
-                    prefix += ":";
-                }
-                _ => {
-                    return None;
-                }
-            }
-        }
-        let mut suffix: Vec<char> = suffix.chars().collect();
-        suffix.reverse();
-        let suffix: String = suffix.iter().collect();
-        Some(prefix + &suffix)
-    }
-
-    fn translate_recursive(&mut self, object: &Value, symbol: &str, text: &mut Vec<u32>) {
-        match object {
+    fn translate_recursive(&mut self, value: &Value, symbol: &str, text: &mut Vec<u32>) {
+        match value {
             Value::Bool(b) => {
-                let symbol = symbol.to_string() + if *b { "t" } else { "f" };
+                let symbol = symbol.to_string() + if *b { "T" } else { "F" };
                 let sigma = self.lookup_symbol(&symbol);
                 text.push(sigma);
             }
-            Value::Null => {
-                let symbol = symbol.to_string() + "n";
+            Value::I64(x) => {
+                let symbol = symbol.to_string() + "i";
                 let sigma = self.lookup_symbol(&symbol);
                 text.push(sigma);
+                for b in x.to_be_bytes() {
+                    text.push(b as u32);
+                }
+                text.push(sigma + 1);
             }
-            Value::Number(_) => {
-                let symbol = symbol.to_string() + "#";
+            Value::U64(x) => {
+                let symbol = symbol.to_string() + "u";
                 let sigma = self.lookup_symbol(&symbol);
                 text.push(sigma);
+                for b in x.to_be_bytes() {
+                    text.push(b as u32);
+                }
+                text.push(sigma + 1);
+            }
+            Value::F64(x) => {
+                let symbol = symbol.to_string() + "f";
+                let sigma = self.lookup_symbol(&symbol);
+                text.push(sigma);
+                for b in x.to_bits().to_be_bytes() {
+                    text.push(b as u32);
+                }
+                text.push(sigma + 1);
             }
             Value::String(s) => {
                 let symbol = symbol.to_string() + "s";
@@ -352,20 +304,12 @@ impl SymbolTable {
             Query::Any => {
                 let symbol = symbol.to_string();
                 let mut result = vec![];
-                for c in &["o", "a", "n", "t", "f", "#"] {
+                for c in &["o", "a", "T", "F", "i", "u", "f"] {
                     if let Some(sigma) = self.symbols.get(&(symbol.clone() + c)).copied() {
                         result.push(vec![sigma])
                     }
                 }
                 result
-            }
-            Query::Null => {
-                let symbol = symbol.to_string() + "n";
-                if let Some(sigma) = self.symbols.get(&symbol).copied() {
-                    vec![vec![sigma]]
-                } else {
-                    vec![]
-                }
             }
             Query::True => {
                 let symbol = symbol.to_string() + "t";
@@ -383,10 +327,62 @@ impl SymbolTable {
                     vec![]
                 }
             }
-            Query::I64(_) | Query::U64(_) | Query::F64(_) => {
-                let symbol = symbol.to_string() + "#";
-                if let Some(sigma) = self.symbols.get(&symbol).copied() {
-                    vec![vec![sigma]]
+            Query::I64(x) => {
+                let isymbol = symbol.to_string() + "i";
+                let usymbol = symbol.to_string() + "u";
+                if let Some(sigma) = self.symbols.get(&isymbol) {
+                    let mut text = Vec::new();
+                    text.push(*sigma);
+                    for b in x.to_be_bytes() {
+                        text.push(b as u32);
+                    }
+                    text.push(*sigma + 1);
+                    vec![text]
+                } else if let Some(sigma) = self.symbols.get(&usymbol) {
+                    let mut text = Vec::new();
+                    text.push(*sigma);
+                    for b in x.to_be_bytes() {
+                        text.push(b as u32);
+                    }
+                    text.push(*sigma + 1);
+                    vec![text]
+                } else {
+                    vec![]
+                }
+            }
+            Query::U64(x) => {
+                let isymbol = symbol.to_string() + "i";
+                let usymbol = symbol.to_string() + "u";
+                if let Some(sigma) = self.symbols.get(&usymbol) {
+                    let mut text = Vec::new();
+                    text.push(*sigma);
+                    for b in x.to_be_bytes() {
+                        text.push(b as u32);
+                    }
+                    text.push(*sigma + 1);
+                    vec![text]
+                } else if let Some(sigma) = self.symbols.get(&isymbol) {
+                    let mut text = Vec::new();
+                    text.push(*sigma);
+                    for b in x.to_be_bytes() {
+                        text.push(b as u32);
+                    }
+                    text.push(*sigma + 1);
+                    vec![text]
+                } else {
+                    vec![]
+                }
+            }
+            Query::F64(x) => {
+                let symbol = symbol.to_string() + "f";
+                if let Some(sigma) = self.symbols.get(&symbol) {
+                    let mut text = Vec::new();
+                    text.push(*sigma);
+                    for b in x.to_bits().to_be_bytes() {
+                        text.push(b as u32);
+                    }
+                    text.push(*sigma + 1);
+                    vec![text]
                 } else {
                     vec![]
                 }
@@ -434,8 +430,125 @@ impl SymbolTable {
                 }
             }
             Query::Or(_) => {
-                todo!();
+                panic!("do not translate disjunctions");
             }
+        }
+    }
+
+    fn reverse_translate_keys(&self, mut text: &[u32], path: &str) -> Option<Value> {
+        let mut map = indicio::Map::default();
+        while !text.is_empty() {
+            let symbol = self.reverse_lookup(text[0])?;
+            let relative = symbol.strip_prefix(path)?;
+            if !relative.starts_with('k') {
+                return None;
+            }
+            let key_len: String = relative[1..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let key = &relative[1 + key_len.len()..];
+            let Ok(key_len) = usize::from_str(&key_len) else {
+                return None;
+            };
+            let key = &key[..key.len() - 1];
+            if key_len != key.len() {
+                return None;
+            }
+            if symbol.ends_with('T') || symbol.ends_with('F') {
+                let value =
+                    self.reverse_translate_recursive(&text[..1], &symbol[..symbol.len() - 1])?;
+                text = &text[1..];
+                map.insert(key.to_string(), value);
+            } else {
+                let Some(position) = text.iter().position(|t| *t == text[0] + 1) else {
+                    return None;
+                };
+                let value = self.reverse_translate_recursive(
+                    &text[..position + 1],
+                    &symbol[..symbol.len() - 1],
+                )?;
+                text = &text[position + 1..];
+                map.insert(key.to_string(), value);
+            }
+        }
+        Some(Value::Object(map))
+    }
+
+    fn reverse_translate_array(&self, mut text: &[u32], path: &str) -> Option<Value> {
+        let mut values = vec![];
+        while !text.is_empty() {
+            let symbol = self.reverse_lookup(text[0])?;
+            if !symbol.starts_with(path) {
+                return None;
+            }
+            if symbol.ends_with('T') || symbol.ends_with('F') {
+                let value =
+                    self.reverse_translate_recursive(&text[..1], &symbol[..symbol.len() - 1])?;
+                text = &text[1..];
+                values.push(value);
+            } else {
+                let Some(position) = text.iter().position(|t| *t == text[0] + 1) else {
+                    return None;
+                };
+                let value = self.reverse_translate_recursive(
+                    &text[..position + 1],
+                    &symbol[..symbol.len() - 1],
+                )?;
+                text = &text[position + 1..];
+                values.push(value);
+            }
+        }
+        Some(Value::from(values))
+    }
+
+    fn reverse_translate_recursive(&self, text: &[u32], path: &str) -> Option<Value> {
+        if text.is_empty() {
+            return None;
+        }
+        let symbol = self.reverse_lookup(text[0])?;
+        let relative = symbol.strip_prefix(path)?;
+        match relative {
+            "o" => self.reverse_translate_keys(&text[1..text.len() - 1], &(path.to_string() + "o")),
+            "a" => {
+                self.reverse_translate_array(&text[1..text.len() - 1], &(path.to_string() + "a"))
+            }
+            "s" => Some(Value::String(
+                text.iter().copied().flat_map(char::from_u32).collect(),
+            )),
+            "i" => {
+                if text.len() != 10 {
+                    return None;
+                }
+                let mut buf = [0u8; 8];
+                for (b, t) in std::iter::zip(buf.iter_mut(), text[1..9].iter()) {
+                    *b = *t as u8;
+                }
+                Some(Value::I64(i64::from_be_bytes(buf)))
+            }
+            "u" => {
+                if text.len() != 10 {
+                    return None;
+                }
+                let mut buf = [0u8; 8];
+                for (b, t) in std::iter::zip(buf.iter_mut(), text[1..9].iter()) {
+                    *b = *t as u8;
+                }
+                Some(Value::U64(u64::from_be_bytes(buf)))
+            }
+            "f" => {
+                if text.len() != 10 {
+                    return None;
+                }
+                let mut buf = [0u8; 8];
+                for (b, t) in std::iter::zip(buf.iter_mut(), text[1..9].iter()) {
+                    *b = *t as u8;
+                }
+                Some(Value::F64(f64::from_bits(u64::from_be_bytes(buf))))
+            }
+            "T" => Some(Value::Bool(true)),
+            "F" => Some(Value::Bool(false)),
+            _ => None,
         }
     }
 
@@ -470,144 +583,98 @@ impl Default for SymbolTable {
     }
 }
 
-////////////////////////////////////////////// Builder /////////////////////////////////////////////
+//////////////////////////////////// convert_clues_to_analogize ////////////////////////////////////
 
-pub struct Builder {
-    time_field: String,
-    objects: Vec<(DateTime<Utc>, Value)>,
+#[allow(clippy::type_complexity)]
+fn group_by_second(
+    mut watermark: DateTime<Utc>,
+    clues: Vec<Clue>,
+) -> Result<Vec<(DateTime<Utc>, Vec<Clue>)>, Error> {
+    if clues.is_empty() {
+        return Err(Error::EmptyClueFile {
+            core: ErrorCore::default(),
+        });
+    }
+    watermark = watermark.duration_trunc(TimeDelta::seconds(1)).unwrap();
+    let mut results = vec![];
+    for clue in clues {
+        let Some(ts) = DateTime::from_timestamp_millis(clue.timestamp as i64 / 1_000) else {
+            return Err(Error::InvalidTimestamp {
+                core: ErrorCore::default(),
+                what: clue.timestamp as i64,
+            });
+        };
+        while watermark <= ts {
+            results.push((watermark, vec![]));
+            watermark += TimeDelta::seconds(1);
+        }
+        let len = results.len() - 1;
+        results[len].1.push(clue);
+    }
+    Ok(results)
 }
 
-impl Builder {
-    // TODO(rescrv): Take a query.
-    pub fn new(time_field: String) -> Self {
-        let objects = vec![];
-        Self {
-            time_field,
-            objects,
-        }
-    }
-
-    pub fn append_ndjson_from_reader<R: Read>(&mut self, reader: R) -> Result<(), Error> {
-        let reader = BufReader::new(reader);
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let value: Value = serde_json::from_str(line)?;
-            self.process_one_object(line, value)?;
-        }
-        Ok(())
-    }
-
-    pub fn process_one_object(&mut self, json: &str, value: Value) -> Result<(), Error> {
-        if let Value::Object(_) = value {
-            let ts =
-                extract_timestamp(&self.time_field, &value).ok_or(Error::MissingTimestamp {
-                    core: ErrorCore::default(),
-                    json: json.to_string(),
-                })?;
-            self.objects.push((ts, value));
-            Ok(())
-        } else {
-            let mut buf = vec![];
-            serde_json::to_writer(&mut buf, &value)?;
-            Err(Error::NotAnObject {
-                core: ErrorCore::default(),
-                json: String::from_utf8(buf).unwrap_or("<invalid JSON>".to_string()),
-            })
-        }
-    }
-
-    pub fn time_window(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
-        if let (Some(min), Some(max)) = (
-            self.objects.iter().map(|o| o.0).min(),
-            self.objects.iter().map(|o| o.0).max(),
-        ) {
-            Some((min, max))
-        } else {
-            None
-        }
-    }
-
-    pub fn seal<P: AsRef<Path>>(
-        self,
-        sym_table: &mut SymbolTable,
-        start_time: DateTime<Utc>,
-        path: P,
-    ) -> Result<(), Error> {
-        let (text, record_boundaries, second_boundaries) =
-            Self::seal_inner(sym_table, &self.objects, start_time);
-        let mut buf = Vec::new();
-        let mut builder = scrunch::builder::Builder::new(&mut buf);
-        let mut sub = builder.sub(FieldNumber::must(1));
-        // TODO(rescrv): remove the expect
-        CompressedDocument::construct(text, record_boundaries, &mut sub)
-            .expect("compressed document construction should succeed");
-        drop(sub);
-        let mut sub = builder.sub(FieldNumber::must(2));
-        // TODO(rescrv): remove the expect
-        BitVector::from_indices(
-            16,
-            second_boundaries[second_boundaries.len() - 1] + 1,
-            &second_boundaries,
-            &mut sub,
-        )
-        .expect("bit vector construction should succeed");
-        drop(sub);
-        drop(builder);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(path.as_ref())
-            .as_z()
-            .with_info("path", path.as_ref().to_string_lossy())?;
-        file.write_all(&buf)?;
-        Ok(())
-    }
-
-    fn group_by_second(
-        objects: &[(DateTime<Utc>, Value)],
-        start_time: DateTime<Utc>,
-    ) -> Vec<(DateTime<Utc>, Vec<&Value>)> {
-        let mut watermark = start_time.duration_trunc(TimeDelta::seconds(1)).unwrap();
-        let mut results = vec![];
-        for (ts, object) in objects {
-            while watermark <= *ts {
-                results.push((watermark, vec![]));
-                watermark += TimeDelta::seconds(1);
-            }
-            let len = results.len() - 1;
-            results[len].1.push(object);
-        }
-        results
-    }
-
-    fn seal_inner(
-        sym_table: &mut SymbolTable,
-        objects: &[(DateTime<Utc>, Value)],
-        start_time: DateTime<Utc>,
-    ) -> (Vec<u32>, Vec<usize>, Vec<usize>) {
-        let mut text = vec![];
-        let mut record_boundaries = vec![];
-        let mut second_boundaries = vec![];
-        for (_, objects) in Self::group_by_second(objects, start_time) {
-            if objects.is_empty() {
-                second_boundaries.push(record_boundaries.len());
-                record_boundaries.push(text.len());
-                sym_table.append_dummy_record(&mut text);
-            } else {
-                for object in objects {
-                    record_boundaries.push(text.len());
-                    sym_table.translate(object, &mut text);
-                }
-                second_boundaries.push(record_boundaries.len() - 1);
-            }
-        }
+#[allow(clippy::type_complexity)]
+fn convert_clues_to_analogize_inner(
+    sym_table: &mut SymbolTable,
+    start_time: DateTime<Utc>,
+    clues: Vec<Clue>,
+) -> Result<(Vec<u32>, Vec<usize>, Vec<usize>), Error> {
+    let mut text = vec![];
+    let mut record_boundaries = vec![];
+    let mut second_boundaries = vec![];
+    if clues.is_empty() {
         second_boundaries.push(record_boundaries.len());
-        (text, record_boundaries, second_boundaries)
+        record_boundaries.push(text.len());
+        sym_table.append_dummy_record(&mut text);
     }
+    if clues.is_empty() {
+        return Err(Error::EmptyClueFile {
+            core: ErrorCore::default(),
+        });
+    }
+    for (_, clues) in group_by_second(start_time, clues)? {
+        if clues.is_empty() {
+            second_boundaries.push(record_boundaries.len());
+            record_boundaries.push(text.len());
+            sym_table.append_dummy_record(&mut text);
+        } else {
+            for clue in clues {
+                record_boundaries.push(text.len());
+                sym_table.translate(clue, &mut text);
+            }
+            second_boundaries.push(record_boundaries.len() - 1);
+        }
+    }
+    second_boundaries.push(record_boundaries.len());
+    Ok((text, record_boundaries, second_boundaries))
+}
+
+pub fn convert_clues_to_analogize<P: AsRef<Path>>(
+    sym_table: &mut SymbolTable,
+    start_time: DateTime<Utc>,
+    clues: Vec<Clue>,
+    analogize: P,
+) -> Result<(), Error> {
+    let (text, record_boundaries, second_boundaries) =
+        convert_clues_to_analogize_inner(sym_table, start_time, clues)?;
+    let mut buf = Vec::new();
+    let mut builder = Builder::new(&mut buf);
+    let mut sub = builder.sub(FieldNumber::must(1));
+    CompressedDocument::construct(text, record_boundaries, &mut sub)?;
+    drop(sub);
+    let mut sub = builder.sub(FieldNumber::must(2));
+    BitVector::from_indices(
+        16,
+        second_boundaries[second_boundaries.len() - 1] + 1,
+        &second_boundaries,
+        &mut sub,
+    )
+    .ok_or(scrunch::Error::InvalidBitVector)?;
+    drop(sub);
+    drop(builder);
+    std::fs::write(analogize.as_ref(), buf)?;
+    Ok(())
 }
 
 ///////////////////////////////////////// AnalogizeDocument ////////////////////////////////////////
@@ -627,20 +694,19 @@ struct AnalogizeDocument<'a> {
 }
 
 impl<'a> AnalogizeDocument<'a> {
-    fn query(&self, syms: &SymbolTable, query: Query) -> Result<HashSet<RecordOffset>, Error> {
-        let query = query.normalize();
-        if let Query::Or(subqueries) = query {
+    fn query(&self, syms: &SymbolTable, query: &Query) -> Result<HashSet<RecordOffset>, Error> {
+        let records = if let Query::Or(subqueries) = query {
             let mut records = HashSet::new();
             for query in subqueries {
                 for offset in self.query(syms, query)? {
                     records.insert(offset);
                 }
             }
-            Ok(records)
+            records
         } else {
             let mut results = HashSet::new();
             let mut needles = vec![];
-            for conjunction in query.conjunctions() {
+            for conjunction in query.clone().conjunctions() {
                 needles.append(&mut syms.translate_query(&conjunction));
             }
             let mut needles = needles.into_iter();
@@ -658,8 +724,9 @@ impl<'a> AnalogizeDocument<'a> {
                     }
                 }
             }
-            Ok(results)
-        }
+            results
+        };
+        Ok(records)
     }
 }
 
@@ -683,7 +750,6 @@ impl<'a> Unpackable<'a> for AnalogizeDocument<'a> {
 pub enum Query {
     #[default]
     Any,
-    Null,
     True,
     False,
     I64(i64),
@@ -707,7 +773,6 @@ impl Query {
     pub fn normalize(self) -> Query {
         match self {
             Query::Any
-            | Query::Null
             | Query::True
             | Query::False
             | Query::I64(_)
@@ -720,10 +785,9 @@ impl Query {
         }
     }
 
-    pub fn conjunctions(self) -> impl Iterator<Item = Query> {
+    fn conjunctions(self) -> impl Iterator<Item = Query> {
         let answer: Box<dyn Iterator<Item = Query>> = match self {
             Query::Any
-            | Query::Null
             | Query::True
             | Query::False
             | Query::I64(_)
@@ -852,7 +916,6 @@ impl PartialEq for Query {
     fn eq(&self, query: &Query) -> bool {
         match (self, query) {
             (Query::Any, Query::Any) => true,
-            (Query::Null, Query::Null) => true,
             (Query::True, Query::True) => true,
             (Query::False, Query::False) => true,
             (Query::I64(x), Query::I64(y)) => x == y,
@@ -899,7 +962,7 @@ unsafe impl Sync for DocumentMapping {}
 struct State {
     options: AnalogizeOptions,
     done: AtomicBool,
-    json: PathBuf,
+    logs: PathBuf,
     data: PathBuf,
     mani: Mutex<Manifest>,
     syms: Mutex<SymbolTable>,
@@ -909,7 +972,7 @@ struct State {
 impl State {
     fn new(
         options: AnalogizeOptions,
-        json: PathBuf,
+        logs: PathBuf,
         data: PathBuf,
         mani: Manifest,
     ) -> Result<Self, Error> {
@@ -925,7 +988,7 @@ impl State {
         Ok(Self {
             options,
             done,
-            json,
+            logs,
             data,
             mani,
             syms,
@@ -966,16 +1029,16 @@ impl State {
 
     fn get_document(&self, doc: &str) -> Result<Arc<DocumentMapping>, Error> {
         let mut docs = self.docs.lock().unwrap();
-        {
-            if let Some(doc) = docs.get(doc) {
-                return Ok(Arc::clone(doc));
-            }
+        if let Some(doc) = docs.get(doc) {
+            return Ok(Arc::clone(doc));
         }
         let path = self.data.join(doc);
         let file = File::open(path)?;
         let md = file.metadata()?;
         if md.len() > usize::MAX as u64 {
-            panic!("TODO");
+            return Err(Error::FileTooLarge {
+                core: ErrorCore::default(),
+            });
         }
         // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
         let mapping = unsafe {
@@ -989,7 +1052,7 @@ impl State {
             )
         };
         if mapping == libc::MAP_FAILED {
-            panic!("TODO");
+            return Err(std::io::Error::last_os_error().into());
         }
         let mapping = Arc::new(DocumentMapping {
             data: mapping,
@@ -999,83 +1062,97 @@ impl State {
         Ok(mapping)
     }
 
-    fn get_boundaries(&self) -> Vec<(u32, u32)> {
-        let syms = self.syms.lock().unwrap();
-        syms.markers().collect()
-    }
-
     fn try_ingest(&self) -> Result<(), Error> {
-        self.log_json_to_ingest()?;
-        self.convert_ingested_json()?;
+        self.log_to_ingest()?;
+        self.convert_ingested_logs()?;
         Ok(())
     }
 
-    fn log_json_to_ingest(&self) -> Result<(), Error> {
+    fn log_to_ingest(&self) -> Result<(), Error> {
         let mut mani = self.mani.lock().unwrap();
-        let threshold_ns = mani.info('J').unwrap_or("0");
+        let threshold_ns = mani.info('L').unwrap_or("0");
         let threshold_ns =
             i64::from_str(threshold_ns).map_err(|_| Error::InvalidNumberLiteral {
                 core: ErrorCore::default(),
                 as_str: threshold_ns.to_string(),
             })?;
-        let (json_to_ingest, threshold_ns) = take_consistent_cut(&self.json, threshold_ns)?;
-        if json_to_ingest.is_empty() {
+        let (logs_to_ingest, threshold_ns) = take_consistent_cut(&self.logs, threshold_ns)?;
+        if logs_to_ingest.is_empty() {
             return Ok(());
         }
         let mut edit = Edit::default();
-        edit.info('J', &format!("{}", threshold_ns))?;
-        for json in json_to_ingest.iter() {
-            edit.add(&format!("json:{}", json))?;
+        edit.info('L', &format!("{}", threshold_ns))?;
+        for log in logs_to_ingest.iter() {
+            edit.add(&format!("log:{}", log))?;
         }
         mani.apply(edit)?;
         Ok(())
     }
 
-    fn convert_ingested_json(&self) -> Result<(), Error> {
+    fn convert_ingested_logs(&self) -> Result<(), Error> {
         // First, read the manifest to figure out what JSON needs to be ingested.
-        let (json_inputs, file_number): (Vec<String>, String) = {
+        let (log_inputs, file_number): (Vec<String>, String) = {
             let mani = self.mani.lock().unwrap();
-            fn select_json(s: &str) -> Option<String> {
-                s.strip_prefix("json:").map(String::from)
+            fn select_logs(s: &str) -> Option<String> {
+                s.strip_prefix("log:").map(String::from)
             }
             (
-                mani.strs().filter_map(select_json).collect(),
+                mani.strs().filter_map(select_logs).collect(),
                 mani.info('F').unwrap_or("0").to_string(),
             )
         };
-        if json_inputs.is_empty() {
+        if log_inputs.is_empty() {
             return Ok(());
         }
         let file_number = u64::from_str(&file_number).map_err(|_| Error::InvalidNumberLiteral {
             core: ErrorCore::default(),
             as_str: file_number,
         })?;
-        // Second, build the JSON for all the files at once.
-        // TODO(rescrv): push an expression into here.
-        let mut builder = Builder::new("created_at".to_string());
-        for input in json_inputs.iter() {
-            let input = File::open(self.json.join(input))?;
-            builder.append_ndjson_from_reader(input)?;
+        // Second, build the analogize file for all the files at once.
+        let mut clues = vec![];
+        for input in log_inputs.iter() {
+            let buf = std::fs::read(self.logs.join(input))?;
+            let mut cv = ClueVector::unpack(&buf)?.0;
+            clues.append(&mut cv.clues);
         }
         let mut edit = Edit::default();
         edit.info('F', &(file_number + 1).to_string())?;
-        if let Some((start_time, end_time)) = builder.time_window() {
+        if !clues.is_empty() {
             let mut syms = self.syms.lock().unwrap();
+            let start_time = clues.iter().map(|x| x.timestamp).min().unwrap_or(0);
+            let end_time = clues.iter().map(|x| x.timestamp).max().unwrap_or(0);
+            let start_time = DateTime::from_timestamp_millis(start_time as i64 / 1_000).ok_or(
+                Error::InvalidTimestamp {
+                    core: ErrorCore::default(),
+                    what: start_time as i64,
+                },
+            )?;
+            let end_time = DateTime::from_timestamp_millis(end_time as i64 / 1_000).ok_or(
+                Error::InvalidTimestamp {
+                    core: ErrorCore::default(),
+                    what: end_time as i64,
+                },
+            )?;
             let output_path = format!(
                 "{}_{}_{}.analogize",
                 date_time_to_string(start_time),
                 date_time_to_string(end_time),
                 file_number
             );
-            builder.seal(&mut syms, start_time, &self.data.join(&output_path))?;
+            convert_clues_to_analogize(
+                &mut syms,
+                start_time,
+                clues,
+                &self.data.join(&output_path),
+            )?;
             let syms_tmp = format!("symbols.{}", Utc::now().timestamp());
             let syms_tmp = self.data.join(syms_tmp);
             syms.to_file(&syms_tmp)?;
             rename(syms_tmp, self.data.join("symbols"))?;
             edit.add(&format!("data:{}", output_path))?;
         }
-        for input in json_inputs.iter() {
-            edit.rm(&format!("json:{}", input))?;
+        for input in log_inputs.iter() {
+            edit.rm(&format!("log:{}", input))?;
         }
         let mut mani = self.mani.lock().unwrap();
         mani.apply(edit)?;
@@ -1091,8 +1168,8 @@ impl State {
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct AnalogizeOptions {
-    #[arrrg(required, "Path to newline-delimited JSON files.")]
-    json: String,
+    #[arrrg(required, "Path to indicio log files.")]
+    logs: String,
     #[arrrg(required, "Path to analogize data files.")]
     data: String,
     #[arrrg(nested)]
@@ -1110,7 +1187,7 @@ impl AnalogizeOptions {
 impl Default for AnalogizeOptions {
     fn default() -> Self {
         Self {
-            json: "json".to_string(),
+            logs: "logs".to_string(),
             data: "data".to_string(),
             mani: ManifestOptions::default(),
             threads: 8,
@@ -1127,68 +1204,44 @@ pub struct Analogize {
 
 impl Analogize {
     pub fn new(options: AnalogizeOptions) -> Result<Self, Error> {
-        let json = PathBuf::from(&options.json);
-        if !json.exists() || !json.is_dir() {
+        let logs = PathBuf::from(&options.logs);
+        if !logs.exists() || !logs.is_dir() {
             return Err(Error::DirectoryNotFound {
                 core: ErrorCore::default(),
-                what: options.json,
+                what: options.logs,
             });
         }
         let data = PathBuf::from(&options.data);
         let mani = Manifest::open(options.mani.clone(), data.clone())?;
-        let state = Arc::new(State::new(options, json, data, mani)?);
+        let state = Arc::new(State::new(options, logs, data, mani)?);
         let state_p = Arc::clone(&state);
         let thread = Some(std::thread::spawn(move || state_p.background()));
         let this = Self { state, thread };
         Ok(this)
     }
 
-    pub fn correlate(&mut self, query: Query, num_results: usize) -> Result<Vec<String>, Error> {
-        let docs_arc: Vec<Arc<DocumentMapping>> = self.state.get_documents()?;
-        let mut docs: Vec<AnalogizeDocument> = Vec::with_capacity(docs_arc.len());
-        for doc in docs_arc.iter() {
-            docs.push(doc.doc()?);
-        }
-        let mut docs_ref: Vec<&CompressedDocument> = Vec::with_capacity(docs.len());
-        for doc in docs.iter() {
-            docs_ref.push(&doc.document);
-        }
-        let boundaries = self.state.get_boundaries();
-        let mut records: Vec<HashSet<RecordOffset>> = vec![];
-        for doc in docs.iter() {
+    pub fn query(&self, query: Query) -> Result<Vec<Value>, Error> {
+        let query = query.normalize();
+        let docs = self.state.get_documents()?;
+        let mut values = vec![];
+        for doc in docs {
+            let doc = doc.doc()?;
             let syms = self.state.syms.lock().unwrap();
-            records.push(doc.query(&syms, query.clone())?);
-        }
-        let select = move |doc: usize, record: RecordOffset| records[doc].contains(&record);
-        let mut exemplars = vec![];
-        for exemplar in scrunch::correlate(&docs_ref, &boundaries, select).take(num_results) {
-            let syms = self.state.syms.lock().unwrap();
-            if let Some(query) = syms.to_query(exemplar.text()) {
-                exemplars.push(query);
+            let mut records: Vec<RecordOffset> = doc.query(&syms, &query)?.into_iter().collect();
+            records.sort();
+            for record in records.into_iter() {
+                let Ok(record) = doc.document.retrieve(record) else {
+                    // TODO(rescrv): report error
+                    continue;
+                };
+                let Some(value) = syms.reverse_translate(&record) else {
+                    // TODO(rescrv): report error
+                    continue;
+                };
+                values.push(value);
             }
         }
-        Ok(exemplars)
-    }
-
-    pub fn exemplars(&mut self, num_results: usize) -> Result<Vec<String>, Error> {
-        let docs_arc: Vec<Arc<DocumentMapping>> = self.state.get_documents()?;
-        let mut docs: Vec<AnalogizeDocument> = Vec::with_capacity(docs_arc.len());
-        for doc in docs_arc.iter() {
-            docs.push(doc.doc()?);
-        }
-        let mut docs_ref: Vec<&CompressedDocument> = Vec::with_capacity(docs.len());
-        for doc in docs.iter() {
-            docs_ref.push(&doc.document);
-        }
-        let boundaries = self.state.get_boundaries();
-        let mut exemplars = vec![];
-        for exemplar in scrunch::exemplars(&docs_ref, &boundaries).take(num_results) {
-            let syms = self.state.syms.lock().unwrap();
-            if let Some(query) = syms.to_query(exemplar.text()) {
-                exemplars.push(query);
-            }
-        }
-        Ok(exemplars)
+        Ok(values)
     }
 }
 
@@ -1250,17 +1303,6 @@ fn take_consistent_cut<P: AsRef<Path>>(
     }
 }
 
-fn extract_timestamp(field: &str, value: &Value) -> Option<DateTime<Utc>> {
-    let v = value.get(field);
-    if let Some(Value::String(timestamp)) = &v {
-        Some(DateTime::parse_from_rfc3339(timestamp).ok()?.to_utc())
-    } else if let Some(Value::Number(timestamp)) = &v {
-        DateTime::from_timestamp(timestamp.as_i64()?, 0)
-    } else {
-        None
-    }
-}
-
 fn date_time_to_string(when: DateTime<Utc>) -> String {
     when.to_rfc3339_opts(chrono::format::SecondsFormat::Secs, true)
 }
@@ -1269,40 +1311,26 @@ fn date_time_to_string(when: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use indicio::{value, Clue};
+
     use super::*;
 
-    fn test_case(sym_table: &mut SymbolTable, json: &str) -> Vec<u32> {
-        let value: Value = serde_json::from_str(json).expect("json should be valid for test");
+    fn test_case(sym_table: &mut SymbolTable, value: Value) -> Vec<u32> {
         let mut translated: Vec<u32> = vec![];
-        sym_table.translate(&value, &mut translated);
+        sym_table.translate_recursive(&value, "", &mut translated);
         translated
-    }
-
-    #[test]
-    fn bool_null() {
-        let mut sym_table = SymbolTable::default();
-        let expected = vec![0x110000u32, 0x110002, 0x110001];
-        let returned = test_case(&mut sym_table, "{\"key\": null}");
-        assert_eq!(expected, returned);
-        assert_eq!(
-            HashMap::from([
-                ("o".to_string(), 0x110000),
-                ("ok3keyn".to_string(), 0x110002),
-            ]),
-            sym_table.symbols
-        );
     }
 
     #[test]
     fn bool_true() {
         let mut sym_table = SymbolTable::default();
         let expected = vec![0x110000u32, 0x110002, 0x110001];
-        let returned = test_case(&mut sym_table, "{\"key\": true}");
+        let returned = test_case(&mut sym_table, value!({key: true}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
                 ("o".to_string(), 0x110000),
-                ("ok3keyt".to_string(), 0x110002),
+                ("ok3keyT".to_string(), 0x110002),
             ]),
             sym_table.symbols
         );
@@ -1312,27 +1340,96 @@ mod tests {
     fn bool_false() {
         let mut sym_table = SymbolTable::default();
         let expected = vec![0x110000u32, 0x110002, 0x110001];
-        let returned = test_case(&mut sym_table, "{\"key\": false}");
+        let returned = test_case(&mut sym_table, value!({key: false}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
                 ("o".to_string(), 0x110000),
-                ("ok3keyf".to_string(), 0x110002),
+                ("ok3keyF".to_string(), 0x110002),
             ]),
             sym_table.symbols
         );
     }
 
     #[test]
-    fn number() {
+    fn number_i64() {
         let mut sym_table = SymbolTable::default();
-        let expected = vec![0x110000u32, 0x110002, 0x110001];
-        let returned = test_case(&mut sym_table, "{\"key\": 3.14}");
+        let expected = vec![
+            0x110000u32,
+            0x110002,
+            127,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            0x110003,
+            0x110001,
+        ];
+        let returned = test_case(&mut sym_table, value!({key: i64::MAX}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
                 ("o".to_string(), 0x110000),
-                ("ok3key#".to_string(), 0x110002),
+                ("ok3keyi".to_string(), 0x110002),
+            ]),
+            sym_table.symbols
+        );
+    }
+
+    #[test]
+    fn number_u64() {
+        let mut sym_table = SymbolTable::default();
+        let expected = vec![
+            0x110000u32,
+            0x110002,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            0x110003,
+            0x110001,
+        ];
+        let returned = test_case(&mut sym_table, value!({key: u64::MAX}));
+        assert_eq!(expected, returned);
+        assert_eq!(
+            HashMap::from([
+                ("o".to_string(), 0x110000),
+                ("ok3keyu".to_string(), 0x110002),
+            ]),
+            sym_table.symbols
+        );
+    }
+
+    #[test]
+    fn number_f64() {
+        let mut sym_table = SymbolTable::default();
+        let expected = vec![
+            0x110000u32,
+            0x110002,
+            64,
+            9,
+            33,
+            251,
+            84,
+            68,
+            45,
+            24,
+            0x110003,
+            0x110001,
+        ];
+        let returned = test_case(&mut sym_table, value!({key: std::f64::consts::PI}));
+        assert_eq!(expected, returned);
+        assert_eq!(
+            HashMap::from([
+                ("o".to_string(), 0x110000),
+                ("ok3keyf".to_string(), 0x110002),
             ]),
             sym_table.symbols
         );
@@ -1352,7 +1449,7 @@ mod tests {
             0x110003,
             0x110001,
         ];
-        let returned = test_case(&mut sym_table, "{\"key\": \"value\"}");
+        let returned = test_case(&mut sym_table, value!({key: "value"}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
@@ -1388,7 +1485,7 @@ mod tests {
             0x110003,
             0x110001, //
         ];
-        let returned = test_case(&mut sym_table, "{\"key\": [\"value1\", \"value2\"]}");
+        let returned = test_case(&mut sym_table, value!({key: ["value1", "value2"]}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
@@ -1416,7 +1513,7 @@ mod tests {
             0x110003,
             0x110001,
         ];
-        let returned = test_case(&mut sym_table, "{\"key\": {\"key\": \"value\"}}");
+        let returned = test_case(&mut sym_table, value!({key: {key: "value"}}));
         assert_eq!(expected, returned);
         assert_eq!(
             HashMap::from([
@@ -1428,38 +1525,34 @@ mod tests {
         );
     }
 
-    fn datetime_object(dt: &str, json: &str) -> (DateTime<Utc>, Value) {
-        (
-            DateTime::parse_from_rfc3339(dt).unwrap().to_utc(),
-            serde_json::from_str(json).unwrap(),
-        )
+    fn parse_dt(dt: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(dt).unwrap().to_utc()
+    }
+
+    fn make_clue(dt: &str, value: Value) -> Clue {
+        Clue {
+            file: "test_file".to_string(),
+            line: 42,
+            level: 0,
+            timestamp: parse_dt(dt).timestamp_nanos_opt().unwrap() as u64 / 1_000,
+            value,
+        }
     }
 
     #[test]
     fn seal_empty() {
         let mut sym_table = SymbolTable::default();
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
-        let (output, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &[], start_time);
-        assert!(output.is_empty());
-        assert!(record_boundaries.is_empty());
-        assert_eq!(vec![0], second_boundaries);
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
+        assert!(convert_clues_to_analogize_inner(&mut sym_table, start_time, vec![]).is_err());
     }
 
     #[test]
     fn seal_record_in_first_second() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![datetime_object(
-            "2024-02-16T15:10:00.01Z",
-            "{\"key\": \"value\"}",
-        )];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
+        let clues = vec![make_clue("2024-02-16T15:10:00.01Z", value!({key: "value"}))];
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
         assert_eq!(vec![0], record_boundaries);
         assert_eq!(vec![0, 1], second_boundaries);
     }
@@ -1467,94 +1560,83 @@ mod tests {
     #[test]
     fn seal_one_record_per_second() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![
-            datetime_object("2024-02-16T15:10:00.01Z", "{\"key\": \"value0\"}"),
-            datetime_object("2024-02-16T15:10:01.01Z", "{\"key\": \"value1\"}"),
-            datetime_object("2024-02-16T15:10:02.01Z", "{\"key\": \"value2\"}"),
+        let clues = vec![
+            make_clue("2024-02-16T15:10:00.01Z", value!({key: "value0"})),
+            make_clue("2024-02-16T15:10:01.01Z", value!({key: "value1"})),
+            make_clue("2024-02-16T15:10:02.01Z", value!({key: "value2"})),
         ];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
-        assert_eq!(vec![0, 10, 20], record_boundaries);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
+        assert_eq!(vec![0, 53, 106], record_boundaries);
         assert_eq!(vec![0, 1, 2, 3], second_boundaries);
     }
 
     #[test]
     fn seal_gap_at_beginning() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![
-            datetime_object("2024-02-16T15:10:01.01Z", "{\"key\": \"value1\"}"),
-            datetime_object("2024-02-16T15:10:02.01Z", "{\"key\": \"value2\"}"),
-            datetime_object("2024-02-16T15:10:03.01Z", "{\"key\": \"value3\"}"),
+        let clues = vec![
+            make_clue("2024-02-16T15:10:01.01Z", value!({key: "value1"})),
+            make_clue("2024-02-16T15:10:02.01Z", value!({key: "value2"})),
+            make_clue("2024-02-16T15:10:03.01Z", value!({key: "value3"})),
         ];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
-        assert_eq!(vec![0, 1, 11, 21], record_boundaries);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
+        assert_eq!(vec![0, 1, 54, 107], record_boundaries);
         assert_eq!(vec![0, 1, 2, 3, 4], second_boundaries);
     }
 
     #[test]
     fn seal_gap_after_first_record() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![
-            datetime_object("2024-02-16T15:10:00.01Z", "{\"key\": \"value0\"}"),
-            datetime_object("2024-02-16T15:10:02.01Z", "{\"key\": \"value2\"}"),
-            datetime_object("2024-02-16T15:10:03.01Z", "{\"key\": \"value3\"}"),
+        let clues = vec![
+            make_clue("2024-02-16T15:10:00.01Z", value!({key: "value0"})),
+            make_clue("2024-02-16T15:10:02.01Z", value!({key: "value2"})),
+            make_clue("2024-02-16T15:10:03.01Z", value!({key: "value3"})),
         ];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
-        assert_eq!(vec![0, 10, 11, 21], record_boundaries);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
+        assert_eq!(vec![0, 53, 54, 107], record_boundaries);
         assert_eq!(vec![0, 1, 2, 3, 4], second_boundaries);
     }
 
     #[test]
     fn seal_multiple_records_per_second() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![
-            datetime_object("2024-02-16T15:10:00.01Z", "{\"key\": \"value1\"}"),
-            datetime_object("2024-02-16T15:10:00.02Z", "{\"key\": \"value2\"}"),
-            datetime_object("2024-02-16T15:10:00.03Z", "{\"key\": \"value3\"}"),
-            datetime_object("2024-02-16T15:10:01.04Z", "{\"key\": \"value4\"}"),
+        let clues = vec![
+            make_clue("2024-02-16T15:10:00.01Z", value!({key: "value1"})),
+            make_clue("2024-02-16T15:10:00.02Z", value!({key: "value2"})),
+            make_clue("2024-02-16T15:10:00.03Z", value!({key: "value3"})),
+            make_clue("2024-02-16T15:10:01.04Z", value!({key: "value4"})),
         ];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
-        assert_eq!(vec![0, 10, 20, 30], record_boundaries);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
+        assert_eq!(vec![0, 53, 106, 159], record_boundaries);
         assert_eq!(vec![2, 3, 4], second_boundaries);
     }
 
     #[test]
     fn seal_multiple_records_per_second_with_gaps() {
         let mut sym_table = SymbolTable::default();
-        let objects = vec![
-            datetime_object("2024-02-16T15:10:01.01Z", "{\"key\": \"value1\"}"),
-            datetime_object("2024-02-16T15:10:01.02Z", "{\"key\": \"value2\"}"),
-            datetime_object("2024-02-16T15:10:01.03Z", "{\"key\": \"value3\"}"),
-            datetime_object("2024-02-16T15:10:03.04Z", "{\"key\": \"value4\"}"),
+        let clues = vec![
+            make_clue("2024-02-16T15:10:01.01Z", value!({key: "value1"})),
+            make_clue("2024-02-16T15:10:01.02Z", value!({key: "value2"})),
+            make_clue("2024-02-16T15:10:01.03Z", value!({key: "value3"})),
+            make_clue("2024-02-16T15:10:03.04Z", value!({key: "value4"})),
         ];
-        let start_time = DateTime::parse_from_rfc3339("2024-02-16T15:10:00Z")
-            .unwrap()
-            .to_utc();
+        let start_time = parse_dt("2024-02-16T15:10:00Z");
         let (_, record_boundaries, second_boundaries) =
-            Builder::seal_inner(&mut sym_table, &objects, start_time);
-        assert_eq!(vec![0, 1, 11, 21, 31, 32], record_boundaries);
+            convert_clues_to_analogize_inner(&mut sym_table, start_time, clues).unwrap();
+        assert_eq!(vec![0, 1, 54, 107, 160, 161], record_boundaries);
         assert_eq!(vec![0, 3, 4, 5, 6], second_boundaries);
     }
 
     #[test]
     fn query_no_normalization_expected() {
         assert_eq!(Query::Any, Query::Any.normalize());
-        assert_eq!(Query::Null, Query::Null.normalize());
         assert_eq!(Query::True, Query::True.normalize());
         assert_eq!(Query::False, Query::False.normalize());
         assert_eq!(Query::I64(42), Query::I64(42).normalize());
@@ -1629,10 +1711,6 @@ mod tests {
             Query::Any.conjunctions().collect::<Vec<_>>()
         );
         assert_eq!(
-            vec![Query::Null],
-            Query::Null.conjunctions().collect::<Vec<_>>()
-        );
-        assert_eq!(
             vec![Query::True],
             Query::True.conjunctions().collect::<Vec<_>>()
         );
@@ -1705,5 +1783,53 @@ mod tests {
             Query::must("{\"c\": [[\"x\"]]}"),
             Query::must("{\"c\": [[\"y\"]]}"),
         ], Query::must("{\"a\": 42, \"b\": [\"Hello World\", \"Goodbye World\"], \"c\": [false, [\"x\", \"y\"]]}").conjunctions().collect::<Vec<_>>());
+    }
+
+    fn do_reverse_translate(value: Value) {
+        let mut sym_table = SymbolTable::default();
+        let mut text = vec![];
+        sym_table.translate_recursive(&value, "", &mut text);
+        assert_eq!(Some(value), sym_table.reverse_translate(&text));
+    }
+
+    #[test]
+    fn reverse_translate_bool() {
+        do_reverse_translate(Value::Bool(true));
+        do_reverse_translate(Value::Bool(false));
+    }
+
+    #[test]
+    fn reverse_translate_numbers() {
+        do_reverse_translate(Value::I64(42));
+        do_reverse_translate(Value::U64(42));
+        do_reverse_translate(Value::F64(std::f64::consts::PI));
+    }
+
+    #[test]
+    fn reverse_translate_string() {
+        do_reverse_translate(value!("hello world"));
+    }
+
+    #[test]
+    fn reverse_translate_array() {
+        do_reverse_translate(value!([]));
+        do_reverse_translate(value!(["hello world"]));
+        do_reverse_translate(value!(["hello world", true]));
+        do_reverse_translate(value!(["hello world", true, 42]));
+    }
+
+    #[test]
+    fn reverse_translate_object() {
+        do_reverse_translate(value!({}));
+        do_reverse_translate(value!({greeting: "hello world"}));
+        do_reverse_translate(value!({greeting: "hello world", success: true}));
+        do_reverse_translate(value!({greeting: "hello world", success: true, number: 42}));
+    }
+
+    #[test]
+    fn reverse_translate_nesting() {
+        do_reverse_translate(
+            value!({greetings: ["hi", "howdy", "hello world"], numbers: [std::f64::consts::PI, 42]}),
+        );
     }
 }
