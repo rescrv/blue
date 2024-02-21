@@ -8,6 +8,22 @@ use arrrg::CommandLine;
 
 use analogize::{Analogize, AnalogizeOptions, Error, Query};
 
+fn parse_query(line: &str) -> Option<Query> {
+    match Query::parse(line) {
+        Ok(query) => {
+            Some(query)
+        },
+        Err(Error::Parsing { core: _, what }) => {
+            eprintln!("{}", what);
+            None
+        }
+        Err(err) => {
+            eprintln!("error: {}", err);
+            None
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // Process the command line.
     let (options, free) =
@@ -45,43 +61,49 @@ fn main() -> Result<()> {
             Ok(line) => {
                 rl.add_history_entry(&line)?;
                 let line = line.trim();
-                if line == "exemplars" {
-                    match analogize.exemplars(100) {
-                        Ok(exemplars) => {
-                            for exemplar in exemplars {
-                                println!("{}", exemplar);
+                if let Some(query) = line.strip_prefix("exemplars") {
+                    let query = query.trim();
+                    if let Ok(query) = Query::parse(query.trim()) {
+                        match analogize.correlates(query, 10) {
+                            Ok(exemplars) => {
+                                for exemplar in exemplars {
+                                    println!("{}", exemplar);
+                                }
+                            },
+                            Err(err) => {
+                                eprintln!("error: {}", err);
+                            }
+                        };
+                    } else {
+                        match analogize.exemplars(10) {
+                            Ok(exemplars) => {
+                                for exemplar in exemplars {
+                                    println!("{}", exemplar);
+                                }
+                            },
+                            Err(err) => {
+                                eprintln!("error: {}", err);
+                            }
+                        };
+                    }
+                } else {
+                    let Some(query) = parse_query(line) else {
+                        continue;
+                    };
+                    match analogize.query(query) {
+                        Ok(results) => {
+                            for result in results {
+                                println!("{}", result);
                             }
                         },
                         Err(err) => {
                             eprintln!("error: {}", err);
-                        }
-                    };
-                } else {
-                    match Query::parse(line) {
-                        Ok(query) => {
-                            match analogize.query(query) {
-                                Ok(results) => {
-                                    for result in results {
-                                        println!("{}", result);
-                                    }
-                                },
-                                Err(err) => {
-                                    eprintln!("error: {}", err);
-                                },
-                            };
                         },
-                        Err(Error::Parsing { core: _, what }) => {
-                            eprintln!("{}", what);
-                        }
-                        Err(err) => {
-                            eprintln!("error: {}", err);
-                        }
                     };
                 }
             }
             Err(ReadlineError::Interrupted) => {
                 rl.save_history(&history)?;
-                return Ok(());
             }
             Err(ReadlineError::Eof) => {
                 rl.save_history(&history)?;
@@ -89,7 +111,7 @@ fn main() -> Result<()> {
             }
             Err(err) => {
                 rl.save_history(&history)?;
-                panic!("could not read line: {}", err);
+                eprintln!("could not read line: {}", err);
             }
         }
     }

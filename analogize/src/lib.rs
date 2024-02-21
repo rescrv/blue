@@ -220,8 +220,40 @@ impl SymbolTable {
         if text.is_empty() {
             return None;
         }
-        let start = self.reverse_lookup(text[0])?;
-        self.reverse_translate_recursive(text, &start[..start.len() - 1])
+        let symbol = &self.reverse_lookup(text[0])?;
+        let terminal = self.reverse_translate_recursive(text, &symbol[..symbol.len() - 1])?;
+        fn build_from_symbol(mut symbol: &str, terminal: Value) -> Option<Value> {
+            if symbol.is_empty() {
+                return Some(terminal);
+            }
+            match &symbol[0..1] {
+                "o" => {
+                    if symbol.len() == 1 {
+                        return Some(terminal);
+                    }
+                    if &symbol[1..2] != "k" {
+                        return None;
+                    }
+                    let len: String = symbol[2..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
+                    symbol = &symbol[2 + len.len()..];
+                    let len = usize::from_str(&len).ok()?;
+                    let key = symbol[..len].to_string();
+                    let obj = build_from_symbol(&symbol[len..], terminal)?;
+                    Some(Value::Object(indicio::Map::from_iter(vec![(key, obj)])))
+                }
+                "a" => {
+                    let obj = build_from_symbol(&symbol[1..], terminal)?;
+                    Some(Value::Array(indicio::Values::from(vec![obj])))
+                }
+                _ => {
+                    Some(terminal)
+                }
+            }
+        }
+        build_from_symbol(symbol, terminal)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {
@@ -1263,6 +1295,33 @@ impl Analogize {
         let markers: Vec<_> = syms.markers().collect();
         let mut values = vec![];
         for exemplar in scrunch::exemplars(&doc_refs, &markers).take(num_results) {
+            if let Some(exemplar) = syms.reverse_translate_query(exemplar.text()) {
+                values.push(exemplar);
+            } else {
+                // TODO(rescrv): report error
+            }
+        }
+        Ok(values)
+    }
+
+    pub fn correlates(&self, query: Query, num_results: usize) -> Result<Vec<Value>, Error> {
+        let doc_ptrs = self.state.get_documents()?;
+        let mut docs = vec![];
+        for ptr in doc_ptrs.iter() {
+            docs.push(ptr.doc()?);
+        }
+        let doc_refs: Vec<&CompressedDocument> = docs.iter().map(|d| &d.document).collect();
+        let syms = self.state.syms.lock().unwrap();
+        let markers: Vec<_> = syms.markers().collect();
+        let mut offsets: HashMap<usize, HashSet<RecordOffset>> = HashMap::new();
+        for (idx, doc) in docs.iter().enumerate() {
+            let records = doc.query(&syms, &query)?;
+            offsets.insert(idx, records);
+        }
+        let mut values = vec![];
+        for exemplar in scrunch::correlate(&doc_refs, &markers, move |idx, offset| {
+            offsets.get(&idx).map(|r| r.get(&offset)).map(|o| o.is_some()).unwrap_or(false)
+        }).take(num_results) {
             if let Some(exemplar) = syms.reverse_translate_query(exemplar.text()) {
                 values.push(exemplar);
             } else {
