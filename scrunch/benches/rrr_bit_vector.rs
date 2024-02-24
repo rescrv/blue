@@ -82,16 +82,17 @@ fn bench_bit_vector_access(params: &RrrBitVectorParameters, b: &mut Bencher) {
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut accesses = Vec::with_capacity(b.size());
-    for _ in 0..b.size() {
+    for _ in 0..65536 {
         accesses.push(range_to(vector.len())(&mut guac));
     }
-    fn access(bv: &BitVector, accesses: &[usize]) {
+    let accesses = accesses.into_iter().cycle().take(b.size());
+    fn access(bv: &BitVector, accesses: impl Iterator<Item = usize>) {
         for access in accesses {
-            black_box(bv).access(black_box(*access));
+            black_box(bv).access(black_box(access));
         }
     }
     b.run(|| {
-        access(&vector, &accesses);
+        access(&vector, accesses);
     });
 }
 
@@ -115,16 +116,17 @@ fn bench_bit_vector_rank(params: &RrrBitVectorParameters, b: &mut Bencher) {
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut ranks = Vec::with_capacity(b.size());
-    for _ in 0..b.size() {
+    for _ in 0..65536 {
         ranks.push(range_to(vector.len())(&mut guac));
     }
-    fn rank(bv: &BitVector, ranks: &[usize]) {
+    let ranks = ranks.into_iter().cycle().take(b.size());
+    fn rank(bv: &BitVector, ranks: impl Iterator<Item = usize>) {
         for rank in ranks {
-            black_box(bv).rank(black_box(*rank));
+            black_box(bv).rank(black_box(rank));
         }
     }
     b.run(|| {
-        rank(&vector, &ranks);
+        rank(&vector, ranks);
     });
 }
 
@@ -148,16 +150,18 @@ fn bench_bit_vector_select(params: &RrrBitVectorParameters, b: &mut Bencher) {
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut selects = Vec::with_capacity(b.size());
-    for _ in 0..b.size() {
-        selects.push(vector.rank(range_to(vector.len())(&mut guac)).unwrap());
+    let max_rank = vector.rank(vector.len()).unwrap();
+    for _ in 0..65536 {
+        selects.push(range_to(max_rank + 1)(&mut guac));
     }
-    fn select(bv: &BitVector, selects: &[usize]) {
+    let selects = selects.into_iter().cycle().take(b.size());
+    fn select(bv: &BitVector, selects: impl Iterator<Item = usize>) {
         for select in selects {
-            black_box(bv).select(black_box(*select));
+            black_box(bv).select(black_box(select));
         }
     }
     b.run(|| {
-        select(&vector, &selects);
+        select(&vector, selects);
     });
 }
 
