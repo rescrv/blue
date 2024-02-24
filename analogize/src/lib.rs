@@ -248,9 +248,7 @@ impl SymbolTable {
                     let obj = build_from_symbol(&symbol[1..], terminal)?;
                     Some(Value::Array(indicio::Values::from(vec![obj])))
                 }
-                _ => {
-                    Some(terminal)
-                }
+                _ => Some(terminal),
             }
         }
         build_from_symbol(symbol, terminal)
@@ -1320,8 +1318,14 @@ impl Analogize {
         }
         let mut values = vec![];
         for exemplar in scrunch::correlate(&doc_refs, &markers, move |idx, offset| {
-            offsets.get(&idx).map(|r| r.get(&offset)).map(|o| o.is_some()).unwrap_or(false)
-        }).take(num_results) {
+            offsets
+                .get(&idx)
+                .map(|r| r.get(&offset))
+                .map(|o| o.is_some())
+                .unwrap_or(false)
+        })
+        .take(num_results)
+        {
             if let Some(exemplar) = syms.reverse_translate_query(exemplar.text()) {
                 values.push(exemplar);
             } else {

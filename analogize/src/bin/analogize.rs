@@ -10,9 +10,7 @@ use analogize::{Analogize, AnalogizeOptions, Error, Query};
 
 fn parse_query(line: &str) -> Option<Query> {
     match Query::parse(line) {
-        Ok(query) => {
-            Some(query)
-        },
+        Ok(query) => Some(query),
         Err(Error::Parsing { core: _, what }) => {
             eprintln!("{}", what);
             None
@@ -69,7 +67,7 @@ fn main() -> Result<()> {
                                 for exemplar in exemplars {
                                     println!("{}", exemplar);
                                 }
-                            },
+                            }
                             Err(err) => {
                                 eprintln!("error: {}", err);
                             }
@@ -80,7 +78,7 @@ fn main() -> Result<()> {
                                 for exemplar in exemplars {
                                     println!("{}", exemplar);
                                 }
-                            },
+                            }
                             Err(err) => {
                                 eprintln!("error: {}", err);
                             }
@@ -95,10 +93,10 @@ fn main() -> Result<()> {
                             for result in results {
                                 println!("{}", result);
                             }
-                        },
+                        }
                         Err(err) => {
                             eprintln!("error: {}", err);
-                        },
+                        }
                     };
                 }
             }
