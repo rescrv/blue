@@ -670,11 +670,7 @@ where
     type Item = Exemplar;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(exemplar) = self.next_inner() {
-            Some(Exemplar::from(exemplar))
-        } else {
-            None
-        }
+        self.next_inner().map(Exemplar::from)
     }
 }
 
