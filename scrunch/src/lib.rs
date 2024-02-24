@@ -525,8 +525,7 @@ struct ExemplarState {
 
 impl ExemplarState {
     fn cardinality(&self) -> usize {
-        self
-            .docs
+        self.docs
             .values()
             .map(|d| d.numer)
             .fold(0, usize::saturating_add)
@@ -730,11 +729,12 @@ where
                     doc.numer = 0;
                     for offset in doc.range.0..=doc.range.1 {
                         // TODO(rescrv): no unwrap
-                        let offset = TextOffset(self.docs[*idx].sa.lookup(
-                            &self.docs[*idx].sigma,
-                            &self.docs[*idx].psi,
-                            offset,
-                        ).unwrap());
+                        let offset = TextOffset(
+                            self.docs[*idx]
+                                .sa
+                                .lookup(&self.docs[*idx].sigma, &self.docs[*idx].psi, offset)
+                                .unwrap(),
+                        );
                         // TODO(rescrv): no unwrap
                         let offset = self.docs[*idx].lookup(offset).unwrap();
                         if (self.select)(*idx, offset) {
