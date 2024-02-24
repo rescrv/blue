@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-use std::fmt::Display;
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Deref;
@@ -129,7 +129,12 @@ pub enum Value {
 impl Value {
     pub fn lookup(&self, key: &str) -> Option<&Value> {
         if let Value::Object(map) = self {
-            map.entries.iter().filter(|e| e.key == key).take(1).map(|e| &e.value).next()
+            map.entries
+                .iter()
+                .filter(|e| e.key == key)
+                .take(1)
+                .map(|e| &e.value)
+                .next()
         } else {
             None
         }
@@ -236,9 +241,7 @@ impl From<String> for Value {
 
 impl From<Vec<Value>> for Value {
     fn from(values: Vec<Value>) -> Self {
-        Self::Array(Values {
-            values,
-        })
+        Self::Array(Values { values })
     }
 }
 
@@ -486,7 +489,11 @@ pub struct Clue {
 
 impl Display for Clue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}:{} {} {} {}", self.file, self.line, self.level, self.timestamp, self.value)
+        write!(
+            f,
+            "{}:{} {} {} {}",
+            self.file, self.line, self.level, self.timestamp, self.value
+        )
     }
 }
 
@@ -548,7 +555,12 @@ impl ProtobufEmitter {
         let ext = OsString::from(format!(".{}", ts));
         path.push(ext);
         let path = PathBuf::from(path);
-        let Ok(file) = OpenOptions::new().create(true).truncate(true).write(true).open(path) else {
+        let Ok(file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+        else {
             return;
         };
         state.file = Some(file);
