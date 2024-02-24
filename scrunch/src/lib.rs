@@ -496,20 +496,6 @@ impl Exemplar {
     }
 }
 
-impl From<CorrelateState> for Exemplar {
-    fn from(mut cs: CorrelateState) -> Self {
-        cs.needle.reverse();
-        Self {
-            count: cs
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add),
-            needle: cs.needle,
-        }
-    }
-}
-
 impl From<ExemplarState> for Exemplar {
     fn from(mut es: ExemplarState) -> Self {
         es.needle.reverse();
@@ -531,202 +517,20 @@ struct CorrelateDocState {
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
-struct CorrelateState {
-    terminal: u32,
-    needle: Vec<u32>,
-    docs: HashMap<usize, CorrelateDocState>,
-}
-
-impl Ord for CorrelateState {
-    fn cmp(&self, other: &CorrelateState) -> Ordering {
-        if self == other {
-            Ordering::Equal
-        } else {
-            let numer_lhs = self
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add);
-            let numer_rhs = other
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add);
-            let denom_lhs = self
-                .docs
-                .values()
-                .map(|d| d.range.1 + 1 - d.range.0)
-                .fold(0, usize::saturating_add);
-            let denom_rhs = other
-                .docs
-                .values()
-                .map(|d| d.range.1 + 1 - d.range.0)
-                .fold(0, usize::saturating_add);
-            if denom_lhs == 0 && denom_rhs == 0 {
-                Ordering::Equal
-            } else if denom_lhs == 0 {
-                Ordering::Less
-            } else if denom_rhs == 0 {
-                Ordering::Greater
-            } else {
-                (numer_lhs as f64 / denom_lhs as f64)
-                    .total_cmp(&(numer_rhs as f64 / denom_rhs as f64))
-            }
-        }
-    }
-}
-
-impl PartialOrd for CorrelateState {
-    fn partial_cmp(&self, other: &CorrelateState) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-pub fn correlate<'a, SA, ISA, PSI, F>(
-    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
-    boundaries: &[(u32, u32)],
-    select: F,
-) -> Correlate<'a, SA, ISA, PSI, F>
-where
-    SA: sa::SuffixArray,
-    ISA: isa::InverseSuffixArray,
-    PSI: psi::Psi,
-    F: Fn(usize, RecordOffset) -> bool,
-{
-    let mut heap = BinaryHeap::new();
-    for boundary in boundaries.iter() {
-        let mut state = CorrelateState {
-            // the starting boundary because we do backwards search.
-            terminal: boundary.0,
-            needle: vec![boundary.1],
-            docs: HashMap::new(),
-        };
-        for (idx, doc) in docs.iter().enumerate() {
-            let Ok(range) = doc.sigma.sa_range_for(boundary.1) else {
-                continue;
-            };
-            if range.0 > range.1 {
-                continue;
-            }
-            let mut numer = 0;
-            for offset in range.0..=range.1 {
-                let Ok(text_offset) = doc.sa.lookup(&doc.sigma, &doc.psi, offset) else {
-                    // TODO(rescrv): Metrics because this should never happen.
-                    continue;
-                };
-                let Ok(record_offset) = doc.lookup(TextOffset(text_offset)) else {
-                    // TODO(rescrv): Metrics because this should never happen.
-                    continue;
-                };
-                if select(idx, record_offset) {
-                    numer += 1;
-                }
-            }
-            if numer > 0 {
-                state.docs.insert(idx, CorrelateDocState { numer, range });
-            }
-        }
-        if !state.docs.is_empty() {
-            heap.push(state);
-        }
-    }
-    Correlate { docs, heap, select }
-}
-
-pub struct Correlate<'a, SA, ISA, PSI, F>
-where
-    SA: sa::SuffixArray,
-    ISA: isa::InverseSuffixArray,
-    PSI: psi::Psi,
-    F: Fn(usize, RecordOffset) -> bool,
-{
-    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
-    heap: BinaryHeap<CorrelateState>,
-    select: F,
-}
-
-impl<'a, SA, ISA, PSI, F> Iterator for Correlate<'a, SA, ISA, PSI, F>
-where
-    SA: sa::SuffixArray,
-    ISA: isa::InverseSuffixArray,
-    PSI: psi::Psi,
-    F: Fn(usize, RecordOffset) -> bool,
-{
-    type Item = Exemplar;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(correlate) = self.heap.pop() {
-            if correlate.terminal == correlate.needle[correlate.needle.len() - 1] {
-                return Some(Exemplar::from(correlate));
-            }
-            let mut new_correlates: HashMap<u32, CorrelateState> = HashMap::new();
-            for (idx, doc_state) in correlate.docs.iter() {
-                let doc = &self.docs[*idx];
-                for i in 1..=doc.sigma.K() as u32 {
-                    let Some(t) = doc.sigma.sigma_to_char(i) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    let new_correlate = new_correlates.entry(t).or_insert_with(|| {
-                        let mut needle = correlate.needle.clone();
-                        needle.push(t);
-                        CorrelateState {
-                            terminal: correlate.terminal,
-                            needle,
-                            docs: HashMap::new(),
-                        }
-                    });
-                    let Ok(range) = doc.sigma.sa_range_for_sigma(i) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    if range.0 > range.1 {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    }
-                    let Ok(range) = doc.psi.constrain(&doc.sigma, range, doc_state.range) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    if range.0 > range.1 {
-                        continue;
-                    }
-                    let mut numer = 0;
-                    for offset in range.0..=range.1 {
-                        let Ok(text_offset) = doc.sa.lookup(&doc.sigma, &doc.psi, offset) else {
-                            // TODO(rescrv): Metrics because this should never happen.
-                            continue;
-                        };
-                        let Ok(record_offset) = doc.lookup(TextOffset(text_offset)) else {
-                            // TODO(rescrv): Metrics because this should never happen.
-                            continue;
-                        };
-                        if (self.select)(*idx, record_offset) {
-                            numer += 1;
-                        }
-                    }
-                    if numer > 0 {
-                        new_correlate
-                            .docs
-                            .insert(*idx, CorrelateDocState { numer, range });
-                    }
-                }
-            }
-            for (_, new_correlate) in new_correlates {
-                if !new_correlate.docs.is_empty() {
-                    self.heap.push(new_correlate);
-                }
-            }
-        }
-        None
-    }
-}
-
-#[derive(Debug, Default, Eq, PartialEq)]
 struct ExemplarState {
     terminal: u32,
     needle: Vec<u32>,
     docs: HashMap<usize, CorrelateDocState>,
+}
+
+impl ExemplarState {
+    fn cardinality(&self) -> usize {
+        self
+            .docs
+            .values()
+            .map(|d| d.numer)
+            .fold(0, usize::saturating_add)
+    }
 }
 
 impl Ord for ExemplarState {
@@ -799,32 +603,30 @@ where
     heap: BinaryHeap<ExemplarState>,
 }
 
-impl<'a, SA, ISA, PSI> Iterator for Exemplars<'a, SA, ISA, PSI>
+impl<'a, SA, ISA, PSI> Exemplars<'a, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
     PSI: psi::Psi,
 {
-    type Item = Exemplar;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(correlate) = self.heap.pop() {
-            if correlate.terminal == correlate.needle[correlate.needle.len() - 1] {
-                return Some(Exemplar::from(correlate));
+    fn next_inner(&mut self) -> Option<ExemplarState> {
+        while let Some(exemplar) = self.heap.pop() {
+            if exemplar.terminal == exemplar.needle[exemplar.needle.len() - 1] {
+                return Some(exemplar);
             }
-            let mut new_correlates: HashMap<u32, ExemplarState> = HashMap::new();
-            for (idx, doc_state) in correlate.docs.iter() {
+            let mut new_exemplars: HashMap<u32, ExemplarState> = HashMap::new();
+            for (idx, doc_state) in exemplar.docs.iter() {
                 let doc = &self.docs[*idx];
                 for i in 1..=doc.sigma.K() as u32 {
                     let Some(t) = doc.sigma.sigma_to_char(i) else {
                         // TODO(rescrv): Metrics because this should never happen.
                         continue;
                     };
-                    let new_correlate = new_correlates.entry(t).or_insert_with(|| {
-                        let mut needle = correlate.needle.clone();
+                    let new_exemplar = new_exemplars.entry(t).or_insert_with(|| {
+                        let mut needle = exemplar.needle.clone();
                         needle.push(t);
                         ExemplarState {
-                            terminal: correlate.terminal,
+                            terminal: exemplar.terminal,
                             needle,
                             docs: HashMap::new(),
                         }
@@ -845,18 +647,113 @@ where
                         continue;
                     }
                     let numer = range.1 - range.0 + 1;
-                    new_correlate
+                    new_exemplar
                         .docs
                         .insert(*idx, CorrelateDocState { numer, range });
                 }
             }
-            for (_, new_correlate) in new_correlates {
-                if !new_correlate.docs.is_empty() {
-                    self.heap.push(new_correlate);
+            for (_, new_exemplar) in new_exemplars {
+                if !new_exemplar.docs.is_empty() {
+                    self.heap.push(new_exemplar);
                 }
             }
         }
         None
+    }
+}
+
+impl<'a, SA, ISA, PSI> Iterator for Exemplars<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    type Item = Exemplar;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(exemplar) = self.next_inner() {
+            Some(Exemplar::from(exemplar))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn correlate<'a, SA, ISA, PSI, F>(
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    boundaries: &[(u32, u32)],
+    select: F,
+) -> Correlate<'a, SA, ISA, PSI, F>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+    F: Fn(usize, RecordOffset) -> bool,
+{
+    let exemplars = exemplars(docs, boundaries);
+    let correlates = BinaryHeap::new();
+    Correlate {
+        docs,
+        exemplars,
+        correlates,
+        select,
+    }
+}
+
+pub struct Correlate<'a, SA, ISA, PSI, F>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+    F: Fn(usize, RecordOffset) -> bool,
+{
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    exemplars: Exemplars<'a, SA, ISA, PSI>,
+    correlates: BinaryHeap<ExemplarState>,
+    select: F,
+}
+
+impl<'a, SA, ISA, PSI, F> Iterator for Correlate<'a, SA, ISA, PSI, F>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+    F: Fn(usize, RecordOffset) -> bool,
+{
+    type Item = Exemplar;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(mut exemplar) = self.exemplars.next_inner() {
+                let cardinality = exemplar.cardinality();
+                for (idx, doc) in exemplar.docs.iter_mut() {
+                    doc.numer = 0;
+                    for offset in doc.range.0..=doc.range.1 {
+                        // TODO(rescrv): no unwrap
+                        let offset = TextOffset(self.docs[*idx].sa.lookup(
+                            &self.docs[*idx].sigma,
+                            &self.docs[*idx].psi,
+                            offset,
+                        ).unwrap());
+                        // TODO(rescrv): no unwrap
+                        let offset = self.docs[*idx].lookup(offset).unwrap();
+                        if (self.select)(*idx, offset) {
+                            doc.numer += 1;
+                        }
+                    }
+                }
+                self.correlates.push(exemplar);
+                if let Some(correlate) = self.correlates.peek() {
+                    if correlate.cardinality() >= cardinality {
+                        return self.correlates.pop().map(Exemplar::from);
+                    }
+                }
+            } else if let Some(correlate) = self.correlates.pop() {
+                return Some(Exemplar::from(correlate));
+            } else {
+                return None;
+            }
+        }
     }
 }
 
