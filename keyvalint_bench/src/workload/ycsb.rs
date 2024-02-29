@@ -11,6 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use armnod::{Armnod, ArmnodOptions};
 use biometrics::{Collector, Counter, Moments};
+use biometrics_sys::{BiometricsSys};
 use guacamole::{FromGuacamole, Guacamole};
 use keyvalint::Cursor;
 
@@ -332,6 +333,7 @@ impl<KVS: KeyValueStore + 'static> WorkloadTrait<KVS> for Workload<KVS> {
             }));
         }
         // Emit metrics until the end of the test.
+        let mut bio_sys = BiometricsSys::default();
         while (self.options.load || state.started.elapsed().as_secs() < self.options.duration_secs)
             && state.stopped.load(Ordering::Relaxed) < self.options.worker_threads
         {
@@ -345,6 +347,7 @@ impl<KVS: KeyValueStore + 'static> WorkloadTrait<KVS> for Workload<KVS> {
             if let Err(e) = collector.emit(&mut metrics, now) {
                 eprintln!("collector error: {}", e);
             }
+            bio_sys.emit(&mut metrics, now);
         }
         // Join the test threads.
         for thread in threads.into_iter() {
