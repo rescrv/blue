@@ -22,9 +22,9 @@ pub trait Sensor {
 
     /// Every sensor has a label.  This is a UTF-8 string.  It must be static because sensors are
     /// meant to be instantiated statically as well, and having the constraint here enforces that.
-    fn label(&'static self) -> &'static str;
+    fn label(&self) -> &'static str;
     /// Return a linearlizable view of the sensor.
-    fn read(&'static self) -> Self::Reading;
+    fn read(&self) -> Self::Reading;
 }
 
 ////////////////////////////////////////// SensorRegistry //////////////////////////////////////////
@@ -187,15 +187,15 @@ pub trait Emitter {
     /// Read the provided [Counter].
     fn emit_counter(
         &mut self,
-        counter: &'static Counter,
+        counter: &Counter,
         now_millis: u64,
     ) -> Result<(), Self::Error>;
     /// Read the provided [Gauge].
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now_millis: u64) -> Result<(), Self::Error>;
+    fn emit_gauge(&mut self, gauge: &Gauge, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
     fn emit_moments(
         &mut self,
-        moments: &'static Moments,
+        moments: &Moments,
         now_millis: u64,
     ) -> Result<(), Self::Error>;
 }
@@ -217,7 +217,7 @@ impl PlainTextEmitter {
 impl Emitter for PlainTextEmitter {
     type Error = std::io::Error;
 
-    fn emit_counter(&mut self, counter: &'static Counter, now: u64) -> Result<(), std::io::Error> {
+    fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
             "{} {} {}\n",
             counter.label(),
@@ -226,12 +226,12 @@ impl Emitter for PlainTextEmitter {
         ))
     }
 
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now: u64) -> Result<(), std::io::Error> {
+    fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
         self.output
             .write_fmt(format_args!("{} {} {}\n", gauge.label(), now, gauge.read()))
     }
 
-    fn emit_moments(&mut self, moments: &'static Moments, now: u64) -> Result<(), std::io::Error> {
+    fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
         self.output.write_fmt(format_args!(

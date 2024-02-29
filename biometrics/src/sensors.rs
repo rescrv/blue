@@ -25,13 +25,13 @@ impl Counter {
 
     /// Increment the counter by one.
     #[inline(always)]
-    pub fn click(&'static self) {
+    pub fn click(&self) {
         self.count(1)
     }
 
     /// Increment the counter by `x`.
     #[inline(always)]
-    pub fn count(&'static self, x: u64) {
+    pub fn count(&self, x: u64) {
         self.count.fetch_add(x, Ordering::Relaxed);
     }
 }
@@ -40,12 +40,12 @@ impl Sensor for Counter {
     type Reading = u64;
 
     #[inline(always)]
-    fn label(&'static self) -> &'static str {
+    fn label(&self) -> &'static str {
         self.label
     }
 
     #[inline(always)]
-    fn read(&'static self) -> u64 {
+    fn read(&self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
 }
@@ -71,7 +71,7 @@ impl Gauge {
 
     /// Set the value of the gauge.
     #[inline(always)]
-    pub fn set(&'static self, x: f64) {
+    pub fn set(&self, x: f64) {
         self.value.store(x.to_bits(), Ordering::Relaxed);
     }
 }
@@ -80,12 +80,12 @@ impl Sensor for Gauge {
     type Reading = f64;
 
     #[inline(always)]
-    fn label(&'static self) -> &'static str {
+    fn label(&self) -> &'static str {
         self.label
     }
 
     #[inline(always)]
-    fn read(&'static self) -> f64 {
+    fn read(&self) -> f64 {
         let u = self.value.load(Ordering::Relaxed);
         f64::from_bits(u)
     }
@@ -109,7 +109,7 @@ impl Moments {
     }
 
     /// Add the provided f64 to the accumulated moments.
-    pub fn add(&'static self, x: f64) {
+    pub fn add(&self, x: f64) {
         let mut value = self.value.lock().unwrap();
         value.push(x);
     }
@@ -119,12 +119,12 @@ impl Sensor for Moments {
     type Reading = moments::Moments;
 
     #[inline(always)]
-    fn label(&'static self) -> &'static str {
+    fn label(&self) -> &'static str {
         self.label
     }
 
     #[inline(always)]
-    fn read(&'static self) -> moments::Moments {
+    fn read(&self) -> moments::Moments {
         let value = self.value.lock().unwrap();
         *value
     }

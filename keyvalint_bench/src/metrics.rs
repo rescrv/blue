@@ -37,7 +37,7 @@ impl PlainTextEmitter {
 impl Emitter for PlainTextEmitter {
     type Error = std::io::Error;
 
-    fn emit_counter(&mut self, counter: &'static Counter, now: u64) -> Result<(), std::io::Error> {
+    fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
             "{} {} {}\n",
             counter.label(),
@@ -46,7 +46,7 @@ impl Emitter for PlainTextEmitter {
         ))
     }
 
-    fn emit_gauge(&mut self, gauge: &'static Gauge, now: u64) -> Result<(), std::io::Error> {
+    fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
         self.output.write_fmt(format_args!(
             "{} {} {}\n",
             gauge.label(),
@@ -55,7 +55,7 @@ impl Emitter for PlainTextEmitter {
         ))
     }
 
-    fn emit_moments(&mut self, moments: &'static Moments, now: u64) -> Result<(), std::io::Error> {
+    fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let moments = moments.read();
         self.output.write_fmt(format_args!(
