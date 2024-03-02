@@ -359,7 +359,10 @@ impl Version {
             } else {
                 let sst_path = SST_FILE(root, setsum);
                 let handle = fm.open(sst_path)?;
-                let sst = Sst::from_file_handle(handle)?;
+                let sst = Arc::new(Sst::from_file_handle(handle)?);
+                sc.insert(setsum, CachedSst {
+                    ptr: Arc::clone(&sst),
+                });
                 Ok(sst.cursor())
             }
         }
