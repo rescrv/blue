@@ -1,6 +1,6 @@
 //! Statistical moments.
 
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 /// Moments are the statistical moments of mean (m1), standard deviation (m2), skewness (m3) and
 /// kurtosis (m4).  When a distribution goes long tailed, skewness and kurtosis blow up, so the
@@ -144,11 +144,23 @@ impl Add<Moments> for Moments {
     }
 }
 
+impl AddAssign<Moments> for Moments {
+    fn add_assign(&mut self, other: Moments) {
+        *self = Self::add(self, &other);
+    }
+}
+
 impl Sub<Moments> for Moments {
     type Output = Self;
 
     fn sub(self, other: Moments) -> Self {
         Self::sub(&self, &other)
+    }
+}
+
+impl SubAssign<Moments> for Moments {
+    fn sub_assign(&mut self, other: Moments) {
+        *self = Self::sub(self, &other);
     }
 }
 
