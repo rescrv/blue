@@ -405,6 +405,29 @@ pub fn black_box<T>(dummy: T) -> T {
     }
 }
 
+/////////////////////////////////////////////// cycle //////////////////////////////////////////////
+
+pub struct Cycle<T>(Vec<T>, usize);
+
+impl<T> Cycle<T> {
+    pub fn new(t: Vec<T>) -> Self {
+        Self(t, 0)
+    }
+}
+
+impl<T: Copy> Iterator for Cycle<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.1 >= self.0.len() {
+            self.1 = 0;
+        }
+        let answer = self.0.get(self.1).copied();
+        self.1 += 1;
+        answer
+    }
+}
+
 ///////////////////////////////////////// increment_indices ////////////////////////////////////////
 
 pub fn increment_indices(indices: &mut [usize], limits: &[usize]) {
