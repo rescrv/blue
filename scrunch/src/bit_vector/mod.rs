@@ -1884,7 +1884,7 @@ pub mod tests {
                 }
 
                 proptest::prop_compose! {
-                    pub fn arb_bit_vector()(bv in proptest::collection::vec(proptest::arbitrary::any::<bool>(), 0..630)) -> Vec<bool> {
+                    pub fn arb_bit_vector()(bv in proptest::collection::vec(proptest::arbitrary::any::<bool>(), 0..1024)) -> Vec<bool> {
                         bv
                     }
                 }

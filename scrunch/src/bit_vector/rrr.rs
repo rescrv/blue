@@ -2,10 +2,11 @@ use std::fmt::Display;
 
 use buffertk::Unpackable;
 
-use crate::binary_search::partition_by;
 use crate::bit_array::{BitArray, Builder as BitArrayBuilder};
 use crate::builder::{Builder, Helper};
 use crate::Error;
+
+use super::BitVector as BitVectorTrait;
 
 //////////////////////////////////////////////// u63 ///////////////////////////////////////////////
 
@@ -30,12 +31,12 @@ impl u63 {
         Some(Self(x))
     }
 
-    fn select(&self, x: usize) -> Option<usize> {
+    fn select<F: FnMut(bool) -> bool>(&self, x: usize, mut f: F) -> Option<usize> {
         let mut idx = 0;
         let mut rank = 0;
         let mut w = self.0;
-        while w != 0 && rank < x {
-            rank += (w & 1) as usize;
+        while idx < 63 && rank < x {
+            rank += if f((w&1) == 1) { 1 } else { 0 };
             w >>= 1;
             idx += 1;
         }
@@ -46,20 +47,12 @@ impl u63 {
         }
     }
 
-    fn select0(&self, x: usize, remain: usize) -> Option<usize> {
-        let mut idx = 0;
-        let mut rank = 0;
-        let mut w = self.0;
-        while idx < remain && rank < x {
-            rank += if (w & 1) == 0 { 1 } else { 0 };
-            w >>= 1;
-            idx += 1;
-        }
-        if rank < x {
-            None
-        } else {
-            Some(idx)
-        }
+    fn select1(&self, x: usize) -> Option<usize> {
+        self.select(x, |b| b)
+    }
+
+    fn select0(&self, x: usize) -> Option<usize> {
+        self.select(x, |b| !b)
     }
 }
 
@@ -1697,7 +1690,7 @@ fn decode(mut o: u64, mut c: usize) -> Option<u63> {
             c -= 1;
         }
     }
-    Some(u63::must(word))
+    Some(u63(word))
 }
 
 /////////////////////////////////////////// BitVectorStub //////////////////////////////////////////
@@ -1706,27 +1699,36 @@ fn decode(mut o: u64, mut c: usize) -> Option<u63> {
 struct BitVectorStub<'a> {
     #[prototk(1, uint32)]
     word: u32,
+    #[prototk(13, uint32)]
+    select: u32,
     #[prototk(2, uint64)]
     bits: u64,
-    #[prototk(3, bytes)]
+    #[prototk(7, bytes)]
     p: &'a [u8],
-    #[prototk(4, bytes)]
+    #[prototk(8, bytes)]
     c: &'a [u8],
-    #[prototk(5, bytes)]
+    #[prototk(9, bytes)]
     o: &'a [u8],
-    #[prototk(6, bytes)]
+    #[prototk(10, bytes)]
     r: &'a [u8],
+    #[prototk(11, bytes)]
+    s0: &'a [u8],
+    #[prototk(12, bytes)]
+    s1: &'a [u8],
 }
 
 impl<'a> From<&'a BitVector<'a>> for BitVectorStub<'a> {
     fn from(bv: &'a BitVector<'a>) -> Self {
         Self {
             word: bv.word as u32,
+            select: bv.select,
             bits: bv.bits as u64,
             p: bv.p.as_ref(),
             c: bv.c.as_ref(),
             o: bv.o.as_ref(),
             r: bv.r.as_ref(),
+            s0: bv.s0.as_ref(),
+            s1: bv.s1.as_ref(),
         }
     }
 }
@@ -1737,11 +1739,14 @@ impl<'a> TryFrom<BitVectorStub<'a>> for BitVector<'a> {
     fn try_from(bvs: BitVectorStub<'a>) -> Result<Self, Self::Error> {
         Ok(BitVector {
             word: bvs.word.try_into()?,
+            select: bvs.select,
             bits: bvs.bits.try_into()?,
             p: BitArray::new(bvs.p),
             c: BitArray::new(bvs.c),
             o: BitArray::new(bvs.o),
             r: BitArray::new(bvs.r),
+            s0: BitArray::new(bvs.s0),
+            s1: BitArray::new(bvs.s1),
         })
     }
 }
@@ -1750,20 +1755,72 @@ impl<'a> TryFrom<BitVectorStub<'a>> for BitVector<'a> {
 
 pub struct BitVector<'a> {
     word: u8,
+    select: u32,
     bits: usize,
     p: BitArray<'a>,
     c: BitArray<'a>,
     o: BitArray<'a>,
     r: BitArray<'a>,
+    s0: BitArray<'a>,
+    s1: BitArray<'a>,
 }
 
 impl<'a> BitVector<'a> {
+    fn calc_p_r_width(bits: usize) -> Option<usize> {
+        let next_power_of_two = (bits + 1).next_power_of_two();
+        if next_power_of_two > 0 {
+            Some(std::cmp::max(next_power_of_two.ilog2() as usize + 1, 8))
+        } else {
+            None
+        }
+    }
+
     fn load_c_o(&self, c_offset: usize, o_offset: usize) -> Option<(usize, usize, u63)> {
         let c: usize = self.c.load(c_offset, 6)? as usize;
         let o_bits = *L.get(c)?;
         let o: u64 = self.o.load(o_offset, o_bits)?;
         let w = decode(o, c)?;
         Some((c, o_bits, w))
+    }
+
+    fn select_helper(
+        &self,
+        x: usize,
+        structure: &BitArray<'_>,
+        load_rank: impl Fn(usize) -> u64,
+        add_rank: impl Fn(usize) -> usize,
+        word_select: impl Fn(&u63, usize) -> Option<usize>,
+    ) -> Option<usize> {
+        if x == 0 {
+            return Some(0);
+        }
+        if x > self.len() {
+            return None;
+        }
+        let width = Self::calc_p_r_width(self.bits)?;
+        let augment: usize = structure.load((x / self.select as usize) * width, width)?.try_into().ok()?;
+        let mut o_offset: usize = self.p.load(augment * width, width)?.try_into().ok()?;
+        let mut c_offset: usize = augment * 6 * self.word as usize;
+        let mut rank: usize = load_rank(augment).try_into().ok()?;
+        let mut idx: usize = augment * self.word as usize * 63;
+        loop {
+            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
+                return None;
+            };
+            if rank + add_rank(c) >= x {
+                let idx = idx + word_select(&w, x - rank)?;
+                return if idx > self.len() {
+                    None
+                } else {
+                    Some(idx)
+                };
+            } else {
+                rank += add_rank(c);
+            }
+            c_offset += 6;
+            o_offset += o_bits;
+            idx += 63;
+        };
     }
 }
 
@@ -1772,17 +1829,22 @@ impl<'a> super::BitVector for BitVector<'a> {
 
     fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         const WORD: usize = 8;
+        const SELECT: u64 = 64;
         let mut build_p = BitArrayBuilder::with_capacity(bits.len());
         let mut build_c = BitArrayBuilder::with_capacity(bits.len());
         let mut build_o = BitArrayBuilder::with_capacity(bits.len());
         let mut build_r = BitArrayBuilder::with_capacity(bits.len());
+        let mut build_s0 = BitArrayBuilder::with_capacity(bits.len());
+        let mut build_s1 = BitArrayBuilder::with_capacity(bits.len());
+        let width = Self::calc_p_r_width(bits.len()).ok_or(Error::IntoUsize)?;
         let mut o_len = 0u64;
         let mut rank = 0u64;
+        let mut next_select0 = 0u64;
+        let mut next_select1 = 0u64;
         for (idx, word) in SixtyThreeBitWords::new(bits).enumerate() {
             if idx % WORD == 0 {
-                // TODO(rescrv): parameterize this to be more than 32 or less than 32 bits.
-                build_p.push_word(o_len, 32);
-                build_r.push_word(rank, 32);
+                build_p.push_word(o_len, width);
+                build_r.push_word(rank, width);
             }
             let (o, c) = encode(word);
             assert!(c <= 63);
@@ -1792,18 +1854,31 @@ impl<'a> super::BitVector for BitVector<'a> {
             }
             rank += c as u64;
             build_c.push_word(c as u64, 6);
+            while (idx + 1) as u64 * 63 - rank >= next_select0 {
+                build_s0.push_word((idx / WORD) as u64, width);
+                next_select0 += SELECT;
+            }
+            while rank >= next_select1 {
+                build_s1.push_word((idx / WORD) as u64, width);
+                next_select1 += SELECT;
+            }
         }
         let buf_p = build_p.seal();
         let buf_c = build_c.seal();
         let buf_o = build_o.seal();
         let buf_r = build_r.seal();
+        let buf_s0 = build_s0.seal();
+        let buf_s1 = build_s1.seal();
         builder.append_raw_packable(&BitVectorStub {
             word: WORD.try_into().expect("WORD must always fit a u8"),
+            select: SELECT.try_into().expect("SELECT must always fit a u32"),
             bits: bits.len() as u64,
             p: &buf_p,
             c: &buf_c,
             o: &buf_o,
             r: &buf_r,
+            s0: &buf_s0,
+            s1: &buf_s1,
         });
         Ok(())
     }
@@ -1822,6 +1897,8 @@ impl<'a> super::BitVector for BitVector<'a> {
         if index >= self.len() {
             return None;
         }
+        // Width of values in P.
+        let width = Self::calc_p_r_width(self.bits)?;
         // P strides by self.word * 63 bits at a time.
         let stride: usize = self.word as usize * 63;
         // The offset into P.
@@ -1829,9 +1906,9 @@ impl<'a> super::BitVector for BitVector<'a> {
         // The offset into O.
         let mut o_offset: usize = self
             .p
-            .load(p_offset * 32, 32)?
+            .load(p_offset * width, width)?
             .try_into()
-            .expect("32 bits should fit a usize");
+            .ok()?;
         // The offset into C
         let mut c_offset: usize = p_offset * 6 * self.word as usize;
         // Adjust index to account for our jump through P.
@@ -1860,16 +1937,18 @@ impl<'a> super::BitVector for BitVector<'a> {
                 add_one = true;
             }
         }
+        // Width of values in P, R.
+        let width = Self::calc_p_r_width(self.bits)?;
         // P strides by self.word * 63 bits at a time.
         let stride: usize = self.word as usize * 63;
         // The offset into P.
         let p_offset = index / stride;
         // The offset into O.
-        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
+        let mut o_offset: usize = self.p.load(p_offset * width, width)? as usize;
         // The offset into C
         let mut c_offset: usize = p_offset * 6 * self.word as usize;
         // Our base rank is the number of ones before our p_offset.
-        let mut rank: usize = self.r.load(p_offset * 32, 32)? as usize;
+        let mut rank: usize = self.r.load(p_offset * width, width)? as usize;
         // Adjust index to account for our jump through P.
         index -= p_offset * stride;
         // Step through the words until we have fewer than 63 bits left.
@@ -1889,85 +1968,31 @@ impl<'a> super::BitVector for BitVector<'a> {
     }
 
     fn select(&self, x: usize) -> Option<usize> {
-        if x == 0 {
-            return Some(0);
-        }
-        if x > self.len() {
-            return None;
-        }
-        let mut p_offset = partition_by(0, self.r.bits() / 32 - 1, |mid| {
-            // SAFETY(rescrv):  binary search should never go outside the specified len
-            self.r.load(mid * 32, 32).unwrap() < x as u64
-        });
-        // TODO(rescrv):  We really need a different partition_by function that does the greatest
-        // true, not first false.
-        while p_offset > 0 && self.r.load(p_offset * 32, 32).unwrap_or(u64::MAX) >= x as u64 {
-            p_offset -= 1;
-        }
-        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
-        let mut c_offset: usize = p_offset * 6 * self.word as usize;
-        let mut rank: usize = self.r.load(p_offset * 32, 32)? as usize;
-        let mut idx: usize = p_offset * self.word as usize * 63;
-        for _ in 0..self.word as usize {
-            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
-                return if rank >= x { Some(idx) } else { None };
-            };
-            if rank + c >= x {
-                return Some(idx + w.select(x - rank)?);
-            } else {
-                rank += c;
-            }
-            c_offset += 6;
-            o_offset += o_bits;
-            idx += 63;
-        }
-        None
+        // Width of values in P, R.
+        let width = Self::calc_p_r_width(self.bits)?;
+        let load_rank = |idx: usize| {
+            // SAFETY(rescrv):  binary search should never go outside the specified len.  When
+            // considering the last p_offset we'll hit this case, but the tests say that's OK.
+            self.r.load(idx * width, width).unwrap_or(u64::MAX)
+        };
+        let add_rank = |c: usize| {
+            c
+        };
+        self.select_helper(x, &self.s1, load_rank, add_rank, |w, r| w.select1(r))
     }
 
     fn select0(&self, x: usize) -> Option<usize> {
-        if x == 0 {
-            return Some(0);
-        }
-        if x > self.len() {
-            return None;
-        }
-        let load_rank0 = |idx: usize| {
+        // Width of values in P, R.
+        let width = Self::calc_p_r_width(self.bits)?;
+        let load_rank = |idx: usize| {
             // SAFETY(rescrv):  binary search should never go outside the specified len.  When
             // considering the last p_offset we'll hit this case, but the tests say that's OK.
-            idx as u64 * self.word as u64 * 63 - self.r.load(idx * 32, 32).unwrap_or(u64::MIN)
+            idx as u64 * self.word as u64 * 63 - self.r.load(idx * width, width).unwrap_or(u64::MIN)
         };
-        let mut p_offset = partition_by(0, self.r.bits() / 32, |mid| load_rank0(mid) < x as u64);
-        // TODO(rescrv):  We really need a different partition_by function that does the greatest
-        // true, not first false.
-        while p_offset > 0 && load_rank0(p_offset) >= x as u64 {
-            p_offset -= 1;
-        }
-        let mut o_offset: usize = self.p.load(p_offset * 32, 32)? as usize;
-        let mut c_offset: usize = p_offset * 6 * self.word as usize;
-        let mut rank: usize = load_rank0(p_offset) as usize;
-        let mut idx: usize = p_offset * self.word as usize * 63;
-        for _ in 0..self.word as usize {
-            if idx >= self.len() {
-                break;
-            }
-            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
-                return if rank >= x { Some(idx) } else { None };
-            };
-            if rank + 63 - c >= x {
-                let remain = self.len() - idx;
-                return if x - rank <= remain {
-                    Some(idx + w.select0(x - rank, remain)?)
-                } else {
-                    None
-                };
-            } else {
-                rank += 63 - c;
-            }
-            c_offset += 6;
-            o_offset += o_bits;
-            idx += 63;
-        }
-        None
+        let add_rank = |c: usize| {
+            63 - c
+        };
+        self.select_helper(x, &self.s0, load_rank, add_rank, |w, r| w.select0(r))
     }
 }
 
