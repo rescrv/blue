@@ -1,6 +1,6 @@
 use guacamole::combinators::*;
 use guacamole::Guacamole;
-use statslicer::{benchmark, black_box, statslicer_main, Bencher, Parameter, Parameters};
+use statslicer::{benchmark, black_box, statslicer_main, Bencher, Cycle, Parameter, Parameters};
 
 use scrunch::bit_vector::rrr::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
@@ -82,10 +82,10 @@ fn bench_bit_vector_access(params: &RrrBitVectorParameters, b: &mut Bencher) {
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut accesses = Vec::with_capacity(b.size());
-    for _ in 0..65536 {
+    for _ in 0..4096 {
         accesses.push(range_to(vector.len())(&mut guac));
     }
-    let accesses = accesses.into_iter().cycle().take(b.size());
+    let accesses = Cycle::new(accesses).take(b.size());
     fn access(bv: &BitVector, accesses: impl Iterator<Item = usize>) {
         for access in accesses {
             black_box(bv).access(black_box(access));
@@ -116,10 +116,10 @@ fn bench_bit_vector_rank(params: &RrrBitVectorParameters, b: &mut Bencher) {
     drop(builder);
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut ranks = Vec::with_capacity(b.size());
-    for _ in 0..65536 {
+    for _ in 0..4096 {
         ranks.push(range_to(vector.len())(&mut guac));
     }
-    let ranks = ranks.into_iter().cycle().take(b.size());
+    let ranks = Cycle::new(ranks).take(b.size());
     fn rank(bv: &BitVector, ranks: impl Iterator<Item = usize>) {
         for rank in ranks {
             black_box(bv).rank(black_box(rank));
@@ -151,10 +151,10 @@ fn bench_bit_vector_select(params: &RrrBitVectorParameters, b: &mut Bencher) {
     let vector = BitVector::parse(&buf).unwrap().0;
     let mut selects = Vec::with_capacity(b.size());
     let max_rank = vector.rank(vector.len()).unwrap();
-    for _ in 0..65536 {
+    for _ in 0..4096 {
         selects.push(range_to(max_rank + 1)(&mut guac));
     }
-    let selects = selects.into_iter().cycle().take(b.size());
+    let selects = Cycle::new(selects).take(b.size());
     fn select(bv: &BitVector, selects: impl Iterator<Item = usize>) {
         for select in selects {
             black_box(bv).select(black_box(select));
