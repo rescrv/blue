@@ -7,7 +7,7 @@ use arrrg::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
 use zerror::Z;
 
-use lsmtk::{IoToZ, LsmTree, LsmtkOptions};
+use lsmtk::{IoToZ, LsmTree, LsmtkOptions, TRACING};
 
 fn main() {
     let (options, free) =
@@ -37,6 +37,33 @@ fn main() {
     });
     let root = PathBuf::from(options.path());
     let tree = Arc::new(LsmTree::open(options).as_z().pretty_unwrap());
+    let emitter = indicio::ProtobufEmitter::new("clues", 1 << 30).as_z().pretty_unwrap();
+    TRACING.register(emitter);
+    TRACING.set_verbosity(indicio::INFO);
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
+    let tree_p = Arc::clone(&tree);
+    let _compactor = std::thread::spawn(move || loop {
+        if let Err(err) = tree_p.compaction_thread() {
+            eprintln!("{}", err.long_form());
+        }
+    });
     let tree_p = Arc::clone(&tree);
     let _compactor = std::thread::spawn(move || loop {
         if let Err(err) = tree_p.compaction_thread() {

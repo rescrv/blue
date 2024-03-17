@@ -6,8 +6,9 @@ use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
-use biometrics::{Collector, Counter};
+use biometrics::Counter;
 use keyvalint::{compare_bytes, Cursor, KeyRef};
+use indicio::{clue, INFO};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -27,7 +28,7 @@ use super::{
     TRASH_SST,
 };
 use crate::reference_counter::ReferenceCounter;
-use crate::verifier;
+use crate::{verifier, TRACING};
 
 mod recover;
 
@@ -93,7 +94,7 @@ static GARBAGE_COLLECTION_PERFORM: Counter = Counter::new("lsmtk.garbage_collect
 static GARBAGE_COLLECTION_KEYS_DROPPED: Counter =
     Counter::new("lsmtk.garbage_collection.keys_dropped");
 
-pub fn register_biometrics(collector: &Collector) {
+pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&OPEN_DB);
     collector.register_counter(&BYTES_INGESTED);
     collector.register_counter(&INGEST_LINK);
@@ -213,6 +214,15 @@ impl Compaction {
 
     fn inputs(&self) -> impl Iterator<Item = Setsum> + '_ {
         self.core.inputs.iter().copied()
+    }
+
+    fn to_value(&self) -> indicio::Value {
+        // TODO(rescrv): log key and included setsums
+        indicio::value!({
+            lower_level: self.core.lower_level,
+            upper_level: self.core.upper_level,
+            size: self.core.size,
+        })
     }
 }
 
@@ -431,6 +441,12 @@ impl Version {
         };
         for lower_level in 0..self.levels.len() - 1 {
             if let (Some(compaction), score) = self.find_trivial_move(compaction_id, lower_level) {
+                clue!(TRACING, INFO, {
+                    compaction: compaction_id.human_readable(),
+                    trivial_move: compaction.to_value(),
+                    score: score,
+                    level: 0,
+                });
                 return self.emit_compaction(compaction_id, compaction, score);
             }
         }
@@ -455,10 +471,22 @@ impl Version {
             let bounds = self.compute_bounds(0, first_key, last_key);
             if let (Some(compaction), score) = self.find_best_compaction(compaction_id, 0, bounds) {
                 if self.should_perform_mandatory_compaction() {
+                    clue!(TRACING, INFO, {
+                        compaction: compaction_id.human_readable(),
+                        mandatory: compaction.to_value(),
+                        score: score,
+                        level: 0,
+                    });
                     MANDATORY_COMPACTION.click();
                     mandatory = Some(compaction);
                     mandatory_score = score;
                 } else {
+                    clue!(TRACING, INFO, {
+                        compaction: compaction_id.human_readable(),
+                        candidate: compaction.to_value(),
+                        score: score,
+                        level: 0,
+                    });
                     candidate = Some(compaction);
                     best_score = score;
                 }
@@ -498,10 +526,22 @@ impl Version {
                         && compaction.core.size
                             < mandatory.as_ref().map(|x| x.core.size).unwrap_or_default()
                     {
+                        clue!(TRACING, INFO, {
+                            compaction: compaction_id.human_readable(),
+                            mandatory: compaction.to_value(),
+                            score: score,
+                            level: lower_level,
+                        });
                         CLEAR_OUT_FOR_L0.click();
                         mandatory = Some(compaction);
                         mandatory_score = (score as f64 * level_factor).ceil() as i64;
                     } else if score > best_score {
+                        clue!(TRACING, INFO, {
+                            compaction: compaction_id.human_readable(),
+                            candidate: compaction.to_value(),
+                            score: score,
+                            level: lower_level,
+                        });
                         candidate = Some(compaction);
                         best_score = (score as f64 * level_factor).ceil() as i64;
                     }
@@ -896,10 +936,15 @@ impl Version {
 
     fn emit_compaction(
         &self,
-        _compaction_id: CompactionID,
+        compaction_id: CompactionID,
         compaction: Compaction,
-        _score: i64,
+        score: i64,
     ) -> Option<Compaction> {
+        clue!(TRACING, INFO, {
+            compaction: compaction_id.human_readable(),
+            chosen: compaction.to_value(),
+            score: score,
+        });
         self.ongoing
             .lock()
             .unwrap()
