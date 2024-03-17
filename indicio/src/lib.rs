@@ -221,6 +221,12 @@ impl From<u64> for Value {
     }
 }
 
+impl From<usize> for Value {
+    fn from(x: usize) -> Self {
+        Self::U64(x as u64)
+    }
+}
+
 impl From<f64> for Value {
     fn from(x: f64) -> Self {
         Self::F64(x)
