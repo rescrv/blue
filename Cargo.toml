@@ -16,6 +16,7 @@ members = [
     "indicio",
     "keyvalint",
     "keyvalint_bench",
+    "listfree",
     "lsmtk",
     "macarunes",
     "mani",

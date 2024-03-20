@@ -1,0 +1,13 @@
+[package]
+name = "listfree"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "listfree provides a lockfree prepend-only list"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
+
+[dev-dependencies]
+guacamole = { path = "../guacamole", version = "0.6" }
