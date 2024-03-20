@@ -257,7 +257,7 @@ impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
 
 impl<K, V> Drop for SkipList<K, V> {
     fn drop(&mut self) {
-        let mut ptr = self.head.load(Ordering::Relaxed);
+        let mut ptr = self.head.load(Ordering::Acquire);
         while !ptr.is_null() {
             let to_drop = ptr;
             ptr = node_ptr::get_next(ptr, 0);
