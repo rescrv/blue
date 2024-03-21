@@ -197,8 +197,20 @@ pub fn from_seed<T, F: FnMut(&mut Guacamole) -> T>(mut func: F) -> impl FnMut(us
 /// other prime numbers provided to unique_set.  On platforms with 64-bit usize, a 63-bit number
 /// works well.  On platforms with 32-bit usize, a 31-bit number works well.
 pub fn unique_set(set_size: usize, random: usize) -> impl FnMut(&mut Guacamole) -> usize {
+    let mut indexer = unique_set_index(random);
     move |guac| {
-        range_to(set_size)(guac)
+        indexer(range_to(set_size)(guac))
+    }
+}
+
+/// Index into a unique set.  Converts numbers in [0, set_size) into X * random + random.  Random
+/// should be a prime number far apart from other prime numbers provided to unique_set.  On
+/// platforms with 64-bit usize, a 63-bit number works well.  On platforms with 32-bit usize, a
+/// 31-bit number works well.  Nothing prevents set_size from varying in size once this is
+/// instantiated.
+pub fn unique_set_index(random: usize) -> impl FnMut(usize) -> usize {
+    move |index| {
+        index
             .wrapping_mul(random)
             .wrapping_add(random)
     }
@@ -245,6 +257,62 @@ pub fn interarrival_duration(interarrival_rate: f64) -> impl FnMut(&mut Guacamol
         map(poisson(interarrival_rate), |x| {
             Duration::from_micros((x * 1_000_000.0) as u64)
         })(guac)
+    }
+}
+
+/// Generate a string using the provided length-determining and bytes-converting functions.
+pub fn string(
+    mut length: impl FnMut(&mut Guacamole) -> usize,
+    mut convert: impl FnMut(&[u8]) -> String,
+) -> impl FnMut(&mut Guacamole) -> String {
+    let mut buffer = vec![];
+    move |guac| {
+        let len = length(guac);
+        buffer.resize(len, 0);
+        guac.generate(&mut buffer[..len]);
+        convert(&buffer[..len])
+    }
+}
+
+/// The lower character set includes lower-case ASCII alphabets.
+pub const CHAR_SET_LOWER: &str = "abcdefghijklmnopqrstuvwxyz";
+/// The upper character set includes upper-case ASCII alphabets.
+pub const CHAR_SET_UPPER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The alph character set includes lower- and upper-case ASCII alphabets.
+pub const CHAR_SET_ALPHA: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The digit character set includes ASCII digits.
+pub const CHAR_SET_DIGIT: &str = "0123456789";
+/// The alnum character set includes lower- and upper-case ASCII alphabets and the digits.
+pub const CHAR_SET_ALNUM: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+/// The punct character set includes ASCII punctuation.
+pub const CHAR_SET_PUNCT: &str = "!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
+/// The hex character set includes lower-case hexadecimal numbers.
+pub const CHAR_SET_HEX: &str = "0123456789abcdef";
+/// The default character set includes most printable ASCII.
+pub const CHAR_SET_DEFAULT: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+/// Create a function that maps a slice of bytes to a string of the same length derived from the
+/// provided charset.  Requires that chars be fewer than 256 characters.
+///
+/// # Panics
+///
+/// - If chars.len() > 256.
+pub fn to_charset(chars: &str) -> impl FnMut(&[u8]) -> String {
+    let s: Vec<char> = chars.chars().collect();
+    assert!(s.len() <= 256);
+    let mut table: [char; 256] = ['A'; 256];
+    for (i, x) in table.iter_mut().enumerate() {
+        let d: f64 = (i as f64) / 256.0 * s.len() as f64;
+        let d: usize = d as usize;
+        assert!(d < s.len());
+        *x = s[d];
+    }
+    move |bytes: &[u8]| {
+        let mut string = String::with_capacity(bytes.len());
+        for b in bytes.iter() {
+            string.push(table[*b as usize]);
+        }
+        string
     }
 }
 
@@ -440,5 +508,15 @@ mod tests {
         assert_eq!(Count::One, func(&mut g));
         assert_eq!(Count::Three, func(&mut g));
         assert_eq!(Count::Three, func(&mut g));
+    }
+
+    #[test]
+    fn string() {
+        let mut strings = super::string(super::uniform(1, 8), to_charset(super::CHAR_SET_DEFAULT));
+        let mut g = Guacamole::default();
+        assert_eq!("kZ0_;3t", strings(&mut g));
+        assert_eq!("u./{pg", strings(&mut g));
+        assert_eq!("!aeS|\"", strings(&mut g));
+        assert_eq!("aE", strings(&mut g));
     }
 }
