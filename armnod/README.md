@@ -1,5 +1,5 @@
-guacamole
-=========
+armnod
+======
 
 Armnod is an anagram for "random"; Armnod is a library for working with random strings.
 
