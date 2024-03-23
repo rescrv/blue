@@ -1,5 +1,7 @@
 //! A WaveletTree that works with prefix codes.
 
+use std::collections::HashMap;
+
 use buffertk::{Packable, Unpackable};
 use prototk::{FieldNumber, Tag, WireType};
 
@@ -79,7 +81,9 @@ fn all_zero(mut iter: impl Iterator<Item = (u32, u8)>) -> bool {
 
 pub struct WaveletTree<'a, E: Encoder> {
     encoder: E,
+    root: Root,
     tree: &'a [u8],
+    nodes: HashMap<u64, (Node, BitVector<'a>)>,
 }
 
 impl<'a, E: Encoder> WaveletTree<'a, E> {
@@ -96,6 +100,9 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
     }
 
     fn load_node(&self, offset: u64) -> Option<Node> {
+        if let Some((node, _)) = self.nodes.get(&offset) {
+            return Some(node.clone());
+        }
         if offset >= self.tree.len() as u64 {
             return None;
         }
@@ -110,6 +117,39 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
             return None;
         }
         Some(Node::unpack(value).ok()?.0)
+    }
+
+    fn load_node_and_bit_vector(&self, offset: u64) -> Option<(&Node, &BitVector<'a>)> {
+        self.nodes.get(&offset).map(|(n, bv)| (n, bv))
+    }
+
+    fn load_nodes(&mut self) {
+        self.load_nodes_recursive(self.root.tree);
+    }
+
+    fn load_nodes_recursive(&mut self, offset: u64) {
+        let Some(node) = self.load_node(offset) else {
+            return;
+        };
+        if node.left != 0 {
+            self.load_nodes_recursive(node.left);
+        }
+        if node.right != 0 {
+            self.load_nodes_recursive(node.right);
+        }
+        let Some(start): Option<usize> = node.start.try_into().ok() else {
+            return;
+        };
+        let Some(limit): Option<usize> = node.limit.try_into().ok() else {
+            return;
+        };
+        if start > limit || limit > self.tree.len() {
+            return;
+        }
+        let Some(bv) = BitVector::parse(&self.tree[start..limit]).ok().map(|x| x.0) else {
+            return;
+        };
+        self.nodes.insert(offset, (node, bv));
     }
 
     fn construct_from_iter<H: Helper>(
@@ -172,13 +212,7 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         if node_offset == 0 {
             self.encoder.decode(e, sz)
         } else {
-            let node = self.load_node(node_offset)?;
-            if node.start > node.limit || node.limit > self.tree.len() as u64 {
-                return None;
-            }
-            let start: usize = node.start.try_into().ok()?;
-            let limit: usize = node.limit.try_into().ok()?;
-            let bv = BitVector::parse(&self.tree[start..limit]).ok()?.0;
+            let (node, bv) = self.load_node_and_bit_vector(node_offset)?;
             let bit = bv.access(x)?;
             let (x, node_offset) = if bit {
                 e |= 1 << sz;
@@ -191,16 +225,10 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         }
     }
 
-    fn recursive_rank(&self, e: u32, sz: u8, node: Node, x: usize) -> Option<usize> {
+    fn recursive_rank(&self, e: u32, sz: u8, node: &Node, bv: &BitVector<'a>, x: usize) -> Option<usize> {
         if sz == 0 {
             return None;
         }
-        if node.start > node.limit || node.limit > self.tree.len() as u64 {
-            return None;
-        }
-        let start: usize = node.start.try_into().ok()?;
-        let limit: usize = node.limit.try_into().ok()?;
-        let bv = BitVector::parse(&self.tree[start..limit]).ok()?.0;
         let (this_rank, next_node_offset) = if e & 1 != 0 {
             (bv.rank(x)?, node.right)
         } else {
@@ -209,30 +237,24 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         if sz == 1 {
             Some(this_rank)
         } else if next_node_offset != 0 {
-            let node = self.load_node(next_node_offset)?;
-            self.recursive_rank(e >> 1, sz - 1, node, this_rank)
+            let (node, bv) = self.load_node_and_bit_vector(next_node_offset)?;
+            self.recursive_rank(e >> 1, sz - 1, node, bv, this_rank)
         } else {
             None
         }
     }
 
-    fn recursive_select(&self, e: u32, sz: u8, node: Node, x: usize) -> Option<usize> {
+    fn recursive_select(&self, e: u32, sz: u8, node: &Node, bv: &BitVector<'a>, x: usize) -> Option<usize> {
         if sz == 0 {
             return None;
         }
         let x = if sz > 1 {
             let node_offset = if e & 1 != 0 { node.right } else { node.left };
-            let inner = self.load_node(node_offset)?;
-            self.recursive_select(e >> 1, sz - 1, inner, x)?
+            let (inner, bv) = self.load_node_and_bit_vector(node_offset)?;
+            self.recursive_select(e >> 1, sz - 1, inner, bv, x)?
         } else {
             x
         };
-        let start: usize = node.start.try_into().ok()?;
-        let limit: usize = node.limit.try_into().ok()?;
-        if start > limit || limit > self.tree.len() {
-            return None;
-        }
-        let bv = BitVector::parse(&self.tree[start..limit]).ok()?.0;
         if e & 1 != 0 {
             bv.select(x)
         } else {
@@ -274,30 +296,23 @@ impl<'a, E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'a, E> {
     }
 
     fn len(&self) -> usize {
-        if let Some(root) = Self::load_root(self.tree) {
-            root.length as usize
-        } else {
-            0
-        }
+        self.root.length as usize
     }
 
     fn access(&self, x: usize) -> Option<u32> {
-        let root = Self::load_root(self.tree)?;
-        self.recursive_access(0, 0, root.tree, x)
+        self.recursive_access(0, 0, self.root.tree, x)
     }
 
     fn rank_q(&self, q: u32, x: usize) -> Option<usize> {
-        let root = Self::load_root(self.tree)?;
-        let node = self.load_node(root.tree)?;
+        let (node, bv) = self.load_node_and_bit_vector(self.root.tree)?;
         let (e, sz) = self.encoder.encode(q)?;
-        self.recursive_rank(e, sz, node, x)
+        self.recursive_rank(e, sz, node, bv, x)
     }
 
     fn select_q(&self, q: u32, x: usize) -> Option<usize> {
-        let root = Self::load_root(self.tree)?;
-        let node = self.load_node(root.tree)?;
+        let (node, bv) = self.load_node_and_bit_vector(self.root.tree)?;
         let (e, sz) = self.encoder.encode(q)?;
-        self.recursive_select(e, sz, node, x)
+        self.recursive_select(e, sz, node, bv, x)
     }
 }
 
@@ -333,6 +348,9 @@ impl<'a, E: Encoder + Unpackable<'a>> Unpackable<'a> for WaveletTree<'a, E> {
             .map_err(|_| Error::InvalidEncoder)?
             .0;
         let tree = value;
-        Ok((WaveletTree { encoder, tree }, remain))
+        let nodes = HashMap::new();
+        let mut wt = WaveletTree { encoder, root, tree, nodes };
+        wt.load_nodes();
+        Ok((wt, remain))
     }
 }
