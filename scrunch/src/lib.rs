@@ -242,6 +242,7 @@ struct PsiDocumentStub<'a> {
 
 //////////////////////////////////////////// PsiDocument ///////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct PsiDocument<'a, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,

@@ -18,6 +18,9 @@ pub trait Encoder {
     fn encode(&self, t: u32) -> Option<(u32, u8)>;
     /// Decode the symbol `e` that is of size `s` bits.
     fn decode(&self, e: u32, s: u8) -> Option<u32>;
+
+    /// The number of symbols in the encoder.
+    fn symbols(&self) -> usize;
 }
 
 ///////////////////////////////////////// FixedWidthEncoder ////////////////////////////////////////
@@ -53,6 +56,10 @@ impl Encoder for FixedWidthEncoder {
     fn decode(&self, v: u32, _: u8) -> Option<u32> {
         let v: usize = v.try_into().ok()?;
         self.chars.get(v).copied()
+    }
+
+    fn symbols(&self) -> usize {
+        self.chars.len()
     }
 }
 
@@ -207,6 +214,10 @@ impl Encoder for HuffmanEncoder {
 
     fn decode(&self, v: u32, l: u8) -> Option<u32> {
         self.decode.get(&(v, l)).copied()
+    }
+
+    fn symbols(&self) -> usize {
+        self.encode.len()
     }
 }
 

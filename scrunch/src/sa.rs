@@ -115,6 +115,7 @@ impl<'a> TryFrom<&'a SampledSuffixArrayStub<'a>> for SampledSuffixArray<'a> {
 
 //////////////////////////////////////// SampledSuffixArray ////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct SampledSuffixArray<'a> {
     sampling: u32,
     zero: u64,

@@ -2,7 +2,7 @@
 
 /// A [BitArray] is a sequence of bits, from which variable-size words can be drawn from adjacent
 /// bits.  It is not a BitVector, but the underlying structure under a bit vector.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BitArray<'a> {
     bytes: &'a [u8],
 }
@@ -40,6 +40,14 @@ impl<'a> BitArray<'a> {
 
     pub fn bits(&self) -> usize {
         self.bytes.len() << 3
+    }
+}
+
+impl<'a> std::fmt::Debug for BitArray<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("BitArray")
+            .field("bytes", &self.bytes.len())
+            .finish()
     }
 }
 

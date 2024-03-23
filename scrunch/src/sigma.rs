@@ -153,6 +153,7 @@ impl<'a> std::fmt::Debug for Sigma<'a> {
         f.debug_struct("Sigma")
             .field("char_to_sigma", &self.char_to_sigma)
             .field("sigma_to_char", &self.sigma_to_char)
+            .field("columns", &self.columns)
             .finish()
     }
 }

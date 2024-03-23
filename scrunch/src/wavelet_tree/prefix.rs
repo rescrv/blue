@@ -301,6 +301,15 @@ impl<'a, E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'a, E> {
     }
 }
 
+impl<'a, E: Encoder + std::fmt::Debug> std::fmt::Debug for WaveletTree<'a, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("WaveletTree")
+            .field("encoder", &self.encoder.symbols())
+            .field("tree", &self.tree.len())
+            .finish()
+    }
+}
+
 impl<'a, E: Encoder + Unpackable<'a>> Unpackable<'a> for WaveletTree<'a, E> {
     type Error = Error;
 

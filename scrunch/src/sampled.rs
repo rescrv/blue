@@ -21,6 +21,7 @@ pub struct SampledArrayStub<'a> {
 
 /////////////////////////////////////////// SampledArray ///////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct SampledArray<'a> {
     bits: u8,
     values: BitArray<'a>,

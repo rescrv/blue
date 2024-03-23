@@ -55,6 +55,7 @@ where
 
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
+#[derive(Debug)]
 struct Context<WT>
 where
     WT: WaveletTree,
@@ -324,6 +325,16 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
         } else {
             Ok(start_of_cell - 1)
         }
+    }
+}
+
+impl<'a, WT: WaveletTree + std::fmt::Debug> std::fmt::Debug for WaveletTreePsi<'a, WT> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("WaveletTreePsi")
+            .field("table", &self.table)
+            .field("y_key", &self.y_key)
+            .field("y_value", &self.y_value.len())
+            .finish()
     }
 }
 

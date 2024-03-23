@@ -382,6 +382,16 @@ impl<'a> BitVector<'a> {
     }
 }
 
+impl<'a> std::fmt::Debug for BitVector<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("SparseBitVector")
+            .field("length", &self.length)
+            .field("branch", &self.branch)
+            .field("bytes", &self.bytes.len())
+            .finish()
+    }
+}
+
 impl<'a> BitVectorTrait for BitVector<'a> {
     type Output<'b> = BitVector<'b>;
 

@@ -29,6 +29,11 @@ name = "scrunch"
 path = "src/bin/scrunch.rs"
 required-features=["binaries"]
 
+[[bin]]
+name = "scrunch-inspect"
+path = "src/bin/scrunch-inspect.rs"
+required-features=["binaries"]
+
 [[bench]]
 name = "sparse_bit_vector"
 harness = false

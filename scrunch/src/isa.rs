@@ -104,6 +104,7 @@ impl<'a> TryFrom<&'a SampledInverseSuffixArrayStub<'a>> for SampledInverseSuffix
 
 ///////////////////////////////////// SampledInverseSuffixArray ////////////////////////////////////
 
+#[derive(Debug)]
 pub struct SampledInverseSuffixArray<'a> {
     sampled: SampledArray<'a>,
 }
