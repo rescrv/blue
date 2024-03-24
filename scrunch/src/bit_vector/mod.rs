@@ -7,6 +7,7 @@ use crate::binary_search::partition_by;
 use crate::builder::{Builder, Helper};
 
 pub mod rrr;
+pub mod cf_rrr;
 pub mod sparse;
 
 ///////////////////////////////////////////// BitVector ////////////////////////////////////////////
@@ -1924,5 +1925,6 @@ pub mod tests {
 
     test_BitVector!(reference, ReferenceBitVector);
     test_BitVector!(rrr, super::super::rrr::BitVector);
+    test_BitVector!(cf_rrr, super::super::cf_rrr::BitVector);
     test_BitVector!(sparse, super::super::sparse::BitVector);
 }
