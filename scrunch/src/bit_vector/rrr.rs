@@ -1775,12 +1775,15 @@ impl<'a> BitVector<'a> {
         }
     }
 
-    fn load_c_o(&self, c_offset: usize, o_offset: usize) -> Option<(usize, usize, u63)> {
+    fn load_c_o_bits(&self, c_offset: usize) -> Option<(usize, usize)> {
         let c: usize = self.c.load(c_offset, 6)? as usize;
         let o_bits = *L.get(c)?;
+        Some((c, o_bits))
+    }
+
+    fn load_o(&self, c: usize, o_offset: usize, o_bits: usize) -> Option<u63> {
         let o: u64 = self.o.load(o_offset, o_bits)?;
-        let w = decode(o, c)?;
-        Some((c, o_bits, w))
+        decode(o, c)
     }
 
     fn select_helper(
@@ -1804,10 +1807,9 @@ impl<'a> BitVector<'a> {
         let mut rank: usize = load_rank(augment).try_into().ok()?;
         let mut idx: usize = augment * self.word as usize * 63;
         loop {
-            let Some((c, o_bits, w)) = self.load_c_o(c_offset, o_offset) else {
-                return None;
-            };
+            let (c, o_bits) = self.load_c_o_bits(c_offset)?;
             if rank + add_rank(c) >= x {
+                let w = self.load_o(c, o_offset, o_bits)?;
                 let idx = idx + word_select(&w, x - rank)?;
                 return if idx > self.len() {
                     None
@@ -1915,12 +1917,13 @@ impl<'a> super::BitVector for BitVector<'a> {
         index -= p_offset * stride;
         // Step through the words until we have fewer than 63 bits left.
         while index >= 63 {
-            let (_, o_bits, _w) = self.load_c_o(c_offset, o_offset)?;
+            let (_, o_bits) = self.load_c_o_bits(c_offset)?;
             index -= 63;
             c_offset += 6;
             o_offset += o_bits;
         }
-        let (_, _, w) = self.load_c_o(c_offset, o_offset)?;
+        let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+        let w = self.load_o(c, o_offset, o_bits)?;
         Some(w.0 & (1 << index) != 0)
     }
 
@@ -1953,13 +1956,14 @@ impl<'a> super::BitVector for BitVector<'a> {
         index -= p_offset * stride;
         // Step through the words until we have fewer than 63 bits left.
         while index >= 63 {
-            let (c, o_bits, _) = self.load_c_o(c_offset, o_offset)?;
+            let (c, o_bits) = self.load_c_o_bits(c_offset)?;
             index -= 63;
             c_offset += 6;
             o_offset += o_bits;
             rank += c;
         }
-        let (_, _, w) = self.load_c_o(c_offset, o_offset)?;
+        let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+        let w = self.load_o(c, o_offset, o_bits)?;
         rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
         if add_one && (w.0 & (1 << index) != 0) {
             rank += 1;
