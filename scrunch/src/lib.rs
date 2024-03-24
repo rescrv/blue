@@ -315,7 +315,7 @@ where
         let sparse_boundaries: Vec<usize> =
             record_boundaries[1..].iter().map(|rb| rb - 1).collect();
         bit_vector::sparse::BitVector::from_indices(
-            128,
+            16,
             text.len(),
             &sparse_boundaries,
             &mut builder.sub(FieldNumber::must(1)),
