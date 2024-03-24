@@ -7,3 +7,4 @@
 cc 081b40648a944a858d3b8209f23e16e9a7a86cf1effc1115b061b3d1ecb9ac70 # shrinks to bv = []
 cc 0b4ee51c3c7399b74d9fe18ab9dd17903ae5c8c3e4f00f3229b258bbbd7ed7a5 # shrinks to bv = [0]
 cc c05f0abe5487b8d2d44a2c947956812799b5ad004b6ba684819e6f2dcf0a22dc # shrinks to bv = []
+cc e2004ceb040a1e8cb02a4c7940f74a699d6bc25ef22fe66ee0ad1490ea8c5f56 # shrinks to bv = [5, 5, 2, 2, 2, 2, 3, 3, 3, 4, 2, 2, 6, 2, 10, 2, 8, 9, 13, 11, 8, 12, 2, 8, 12, 14]
