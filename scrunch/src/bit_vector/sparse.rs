@@ -356,7 +356,7 @@ impl<'a> BitVector<'a> {
         })
     }
 
-    fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
+    pub fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
         if x > self.len() {
             return None;
         }

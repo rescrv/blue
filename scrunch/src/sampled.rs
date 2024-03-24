@@ -88,8 +88,8 @@ impl<'a> SampledArray<'a> {
 
     pub fn lookup(&self, x: usize) -> Option<usize> {
         // TODO(rescrv): access_rank.
-        if self.present.access(x)? {
-            let rank = self.present.rank(x)?;
+        let (access, rank) = self.present.access_rank(x)?;
+        if access {
             let bits = self.bits as usize;
             if let Some(v) = self.values.load(bits * rank, bits) {
                 v.try_into().ok()
