@@ -12,7 +12,7 @@ use super::BitVector as BitVectorTrait;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
-pub struct u63(u64);
+pub struct u63(pub(super) u64);
 
 impl u63 {
     const fn must(x: u64) -> Self {
@@ -47,11 +47,11 @@ impl u63 {
         }
     }
 
-    fn select1(&self, x: usize) -> Option<usize> {
+    pub(super) fn select1(&self, x: usize) -> Option<usize> {
         self.select(x, |b| b)
     }
 
-    fn select0(&self, x: usize) -> Option<usize> {
+    pub(super) fn select0(&self, x: usize) -> Option<usize> {
         self.select(x, |b| !b)
     }
 }
@@ -101,13 +101,13 @@ impl<'a> Iterator for SixtyThreeBitWords<'a> {
 
 ///////////////////////////////////////////// Binomials ////////////////////////////////////////////
 
-const L: &[usize] = &[
+pub(super) const L: &[usize] = &[
     0, 6, 11, 16, 20, 23, 27, 30, 33, 35, 38, 40, 42, 44, 46, 48, 49, 51, 52, 53, 55, 56, 57, 58,
     58, 59, 60, 60, 60, 61, 61, 61, 61, 61, 61, 61, 60, 60, 60, 59, 58, 58, 57, 56, 55, 53, 52, 51,
     49, 48, 46, 44, 42, 40, 38, 35, 33, 30, 27, 23, 20, 16, 11, 0,
 ];
 
-const K: &[&[u64]] = &[
+pub(super) const K: &[&[u64]] = &[
     &[1],
     &[1, 1],
     &[1, 2, 1],
@@ -1664,7 +1664,7 @@ const K: &[&[u64]] = &[
     ],
 ];
 
-fn encode(decoded: u63) -> (u64, usize) {
+pub(super) fn encode(decoded: u63) -> (u64, usize) {
     let c: usize = decoded.0.count_ones() as usize;
     let mut o = 0u64;
     let mut bits_remain = c;
@@ -1679,7 +1679,7 @@ fn encode(decoded: u63) -> (u64, usize) {
     (o, c)
 }
 
-fn decode(mut o: u64, mut c: usize) -> Option<u63> {
+pub(super) fn decode(mut o: u64, mut c: usize) -> Option<u63> {
     let mut word = 0u64;
     o += c as u64;
     for bit in 0..63 {
