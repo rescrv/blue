@@ -133,7 +133,7 @@ pub struct CodeBook {
 #[derive(Clone, Debug, Default)]
 pub struct HuffmanEncoder {
     encode: HashMap<u32, (u32, u8)>,
-    decode: HashMap<(u32, u8), u32>,
+    decode: HashMap<u32, u32>,
 }
 
 impl HuffmanEncoder {
@@ -201,7 +201,7 @@ impl Encoder for HuffmanEncoder {
             code <<= len - prev_len;
             let flipped = code.reverse_bits() >> (32 - len);
             encode.insert(sym, (flipped, len));
-            decode.insert((flipped, len), sym);
+            decode.insert(flipped, sym);
             code += 1;
             prev_len = len;
         }
@@ -212,8 +212,8 @@ impl Encoder for HuffmanEncoder {
         self.encode.get(&t).copied()
     }
 
-    fn decode(&self, v: u32, l: u8) -> Option<u32> {
-        self.decode.get(&(v, l)).copied()
+    fn decode(&self, v: u32, _: u8) -> Option<u32> {
+        self.decode.get(&v).copied()
     }
 
     fn symbols(&self) -> usize {
@@ -248,11 +248,11 @@ impl<'a> Unpackable<'a> for HuffmanEncoder {
                 return Err(Error::InvalidEncoder);
             }
             let len = cbe.len as u8;
-            if decode.contains_key(&(cbe.code, len)) {
+            if decode.contains_key(&cbe.code) {
                 return Err(Error::InvalidEncoder);
             }
             encode.insert(cbe.symbol, (cbe.code, len));
-            decode.insert((cbe.code, len), cbe.symbol);
+            decode.insert(cbe.code, cbe.symbol);
         }
         let this = HuffmanEncoder { encode, decode };
         Ok((this, buf))
