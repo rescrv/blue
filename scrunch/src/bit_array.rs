@@ -57,6 +57,52 @@ impl<'a> AsRef<[u8]> for BitArray<'a> {
     }
 }
 
+//////////////////////////////////////// FixedWidthIterator ////////////////////////////////////////
+
+pub struct FixedWidthIterator<'a> {
+    buf: BitArray<'a>,
+    pub end: usize,
+    width: usize,
+    pub index: usize,
+    next: u64,
+    bits: usize,
+}
+
+impl<'a> FixedWidthIterator<'a> {
+    pub fn new(buf: &'a [u8], align: usize, len: usize, width: usize) -> Self {
+        assert!(width <= 32);
+        Self {
+            buf: BitArray::new(buf),
+            end: len + align,
+            width,
+            index: align,
+            next: 0,
+            bits: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for FixedWidthIterator<'a> {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index + self.width > self.end  && self.bits < self.width {
+            return None;
+        }
+        if self.bits < self.width {
+            let amt = std::cmp::min(self.end - self.index, 32);
+            let x = self.buf.load(self.index, amt)?;
+            self.next |= x << self.bits;
+            self.bits += amt;
+            self.index += amt;
+        }
+        let x = self.next & ((1u64 << self.width) - 1);
+        self.next >>= self.width;
+        self.bits -= self.width;
+        Some(x)
+    }
+}
+
 ////////////////////////////////////////////// Builder /////////////////////////////////////////////
 
 // TODO(rescrv):  Make builder tie into the builder and not return a vec.
@@ -76,6 +122,10 @@ impl Builder {
             byte: 0u8,
             bits: 0usize,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len() * 8 + self.bits
     }
 
     pub fn push(&mut self, bit: bool) {
@@ -218,6 +268,62 @@ mod tests {
         let buf = builder.seal();
         let ba = BitArray::new(&buf);
         assert_eq!(Some(0x1eaff00d00c0ffeeu64), ba.load(0, 64));
+    }
+
+    #[test]
+    fn fixed_iter() {
+        let buf: [u8; 8] = [0xee, 0xff, 0xc0, 0x00, 0x0d, 0xf0, 0xaf, 0x1e];
+        let mut ba = FixedWidthIterator::new(&buf, 4, 60, 4);
+        // skip assert_eq!(Some(0xe), ba.next());
+        assert_eq!(Some(0xe), ba.next());
+        assert_eq!(Some(0xf), ba.next());
+        assert_eq!(Some(0xf), ba.next());
+        assert_eq!(Some(0x0), ba.next());
+        assert_eq!(Some(0xc), ba.next());
+        assert_eq!(Some(0x0), ba.next());
+        assert_eq!(Some(0x0), ba.next());
+        assert_eq!(Some(0xd), ba.next());
+        assert_eq!(Some(0x0), ba.next());
+        assert_eq!(Some(0x0), ba.next());
+        assert_eq!(Some(0xf), ba.next());
+        assert_eq!(Some(0xf), ba.next());
+        assert_eq!(Some(0xa), ba.next());
+        assert_eq!(Some(0xe), ba.next());
+        assert_eq!(Some(0x1), ba.next());
+        assert_eq!(None, ba.next());
+    }
+
+    #[test]
+    fn fixed_iter_bug_1() {
+        let mut builder = Builder::with_capacity(4096);
+        builder.push_word(3, 6);
+        builder.push_word(1, 6);
+        builder.push_word(4, 6);
+        builder.push_word(10, 6);
+        builder.push_word(11, 6);
+        builder.push_word(14, 6);
+        builder.push_word(12, 6);
+        builder.push_word(10, 6);
+        builder.push_word(11, 6);
+        builder.push_word(6, 6);
+        builder.push_word(17, 6);
+        builder.push_word(7, 6);
+        let len = builder.len();
+        let buf = builder.seal();
+        let mut iter = FixedWidthIterator::new(&buf, 0, len, 6);
+        assert_eq!(Some(3), iter.next());
+        assert_eq!(Some(1), iter.next());
+        assert_eq!(Some(4), iter.next());
+        assert_eq!(Some(10), iter.next());
+        assert_eq!(Some(11), iter.next());
+        assert_eq!(Some(14), iter.next());
+        assert_eq!(Some(12), iter.next());
+        assert_eq!(Some(10), iter.next());
+        assert_eq!(Some(11), iter.next());
+        assert_eq!(Some(6), iter.next());
+        assert_eq!(Some(17), iter.next());
+        assert_eq!(Some(7), iter.next());
+        assert_eq!(None, iter.next());
     }
 
     proptest::prop_compose! {
