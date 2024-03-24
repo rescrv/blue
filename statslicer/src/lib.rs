@@ -522,22 +522,27 @@ pub fn benchmark_main<P: Parameters, F: FnMut(&P, &mut Bencher)>(
         return;
     }
     let mut hist = sig_fig_histogram::Histogram::new(options.sig_figs);
-    let mut size = 16;
     const SEED_FACTOR: u64 = 4294967291u64;
     let mut seed = SEED_FACTOR;
-    while size < usize::MAX {
-        let mut b = Bencher::new(size, seed, false);
-        seed = seed.wrapping_mul(SEED_FACTOR);
-        f(params, &mut b);
-        if b.elapsed > Duration::from_millis(options.target_time) {
-            break;
+    let size = if let Some(benchmark_size) = options.benchmark_size.as_ref() {
+        *benchmark_size
+    } else {
+        let mut size = 16;
+        while size < usize::MAX {
+            let mut b = Bencher::new(size, seed, false);
+            seed = seed.wrapping_mul(SEED_FACTOR);
+            f(params, &mut b);
+            if b.elapsed > Duration::from_millis(options.target_time) {
+                break;
+            }
+            size = size.saturating_add(size >> 2);
         }
-        size = size.saturating_add(size >> 2);
-    }
-    if size == usize::MAX {
-        eprintln!("could not determine an appropriate size for this benchmark");
-        std::process::exit(1);
-    }
+        if size == usize::MAX {
+            eprintln!("could not determine an appropriate size for this benchmark");
+            std::process::exit(1);
+        }
+        size
+    };
     if !options.quiet {
         eprintln!("sizing benchmark at {}", size);
     }
@@ -659,6 +664,9 @@ pub struct BenchmarkOptions {
     /// Number of iterations to execute.
     #[arrrg(optional, "Iterations to run.")]
     pub iterations: u64,
+    /// Size of the benchmark (overrides --target-time).
+    #[arrrg(optional, "Size of the benchmark.")]
+    pub benchmark_size: Option<usize>,
     /// Number of significant figures to use in the output.
     #[arrrg(optional, "Significant figures to use.")]
     pub sig_figs: i32,
@@ -681,6 +689,7 @@ impl Default for BenchmarkOptions {
             warm_up: 5,
             target_time: 100,
             iterations: 1000,
+            benchmark_size: None,
             sig_figs: 3,
             added_params: "".to_string(),
             output_prefix: "exp/".to_string(),
