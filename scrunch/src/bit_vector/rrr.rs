@@ -1841,6 +1841,7 @@ impl<'a> super::BitVector for BitVector<'a> {
         let width = Self::calc_p_r_width(bits.len()).ok_or(Error::IntoUsize)?;
         let mut o_len = 0u64;
         let mut rank = 0u64;
+        let mut rank0 = 0u64;
         let mut next_select0 = 0u64;
         let mut next_select1 = 0u64;
         for (idx, word) in SixtyThreeBitWords::new(bits).enumerate() {
@@ -1855,8 +1856,9 @@ impl<'a> super::BitVector for BitVector<'a> {
                 o_len += L[c] as u64;
             }
             rank += c as u64;
+            rank0 += 63 - c as u64;
             build_c.push_word(c as u64, 6);
-            while (idx + 1) as u64 * 63 - rank >= next_select0 {
+            while rank0 >= next_select0 {
                 build_s0.push_word((idx / WORD) as u64, width);
                 next_select0 += SELECT;
             }
