@@ -86,7 +86,7 @@ impl<'a> Iterator for FixedWidthIterator<'a> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index + self.width > self.end  && self.bits < self.width {
+        if self.index >= self.end  && self.bits < self.width {
             return None;
         }
         if self.bits < self.width {
@@ -327,6 +327,27 @@ mod tests {
         assert_eq!(Some(6), iter.next());
         assert_eq!(Some(17), iter.next());
         assert_eq!(Some(7), iter.next());
+        assert_eq!(None, iter.next());
+    }
+
+    #[test]
+    fn fixed_iter_bug_2() {
+        let mut iter = FixedWidthIterator::new(&[22, 23, 112, 116, 145, 151, 164, 211, 212, 214, 215, 217, 225, 226, 227], 0, 15 * 8, 8);
+        assert_eq!(Some(22), iter.next());
+        assert_eq!(Some(23), iter.next());
+        assert_eq!(Some(112), iter.next());
+        assert_eq!(Some(116), iter.next());
+        assert_eq!(Some(145), iter.next());
+        assert_eq!(Some(151), iter.next());
+        assert_eq!(Some(164), iter.next());
+        assert_eq!(Some(211), iter.next());
+        assert_eq!(Some(212), iter.next());
+        assert_eq!(Some(214), iter.next());
+        assert_eq!(Some(215), iter.next());
+        assert_eq!(Some(217), iter.next());
+        assert_eq!(Some(225), iter.next());
+        assert_eq!(Some(226), iter.next());
+        assert_eq!(Some(227), iter.next());
         assert_eq!(None, iter.next());
     }
 
