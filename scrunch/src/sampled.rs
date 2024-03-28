@@ -5,7 +5,7 @@ use crate::bit_array::{BitArray, Builder as BitArrayBuilder};
 use crate::bit_vector::sparse::BitVector;
 use crate::bit_vector::BitVector as BitVectorTrait;
 use crate::builder::{Builder, Helper};
-use crate::Error;
+use crate::{bits_required, Error};
 
 ///////////////////////////////////////// SampledArrayStub /////////////////////////////////////////
 
@@ -33,16 +33,7 @@ impl<'a> SampledArray<'a> {
         values: &[(usize, usize)],
         builder: &mut Builder<H>,
     ) -> Result<(), Error> {
-        fn bits_required(values: &[(usize, usize)]) -> u8 {
-            let mut max = 1;
-            for (_, val) in values.iter() {
-                max = std::cmp::max(max, *val);
-            }
-            let max = max.next_power_of_two();
-            let bits = max.ilog2() as u8;
-            bits + 1
-        }
-        let bits = bits_required(values);
+        let bits = bits_required(values.iter().map(|(_, x)| x).max().copied().unwrap_or(1) as u64);
         let mut sparse = Vec::with_capacity(values.len());
         let mut bitwords = BitArrayBuilder::with_capacity(values.len());
         for (offset, value) in values.iter() {

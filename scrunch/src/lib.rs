@@ -784,6 +784,15 @@ fn check_record_boundaries(text: &[u32], record_boundaries: &[usize]) -> Result<
     Ok(())
 }
 
+/////////////////////////////////////////////// utils //////////////////////////////////////////////
+
+fn bits_required(max: u64) -> u8 {
+    let max = std::cmp::max(max, 1);
+    let max = max.next_power_of_two();
+    let bits = max.ilog2() as u8;
+    bits + 1
+}
+
 ///////////////////////////////////////////// test_util ////////////////////////////////////////////
 
 #[cfg(test)]
