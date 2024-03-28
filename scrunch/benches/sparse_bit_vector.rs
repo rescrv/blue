@@ -8,9 +8,9 @@ use scrunch::bit_vector::sparse::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
 use scrunch::builder::Builder;
 
-const BITS_SET: &[usize] = &[4096];
+const BITS_SET: &[usize] = &[256, 4096, 65536];
 
-const BRANCH: &[usize] = &[4, 8, 16, 32, 64, 128];
+const BRANCH: &[usize] = &[4, 8, 16, 32, 64, 96, 128];
 
 #[derive(Debug, Default, Eq, PartialEq)]
 struct SparseBitVectorParameters {

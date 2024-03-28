@@ -15,7 +15,6 @@ impl<'a> BitArray<'a> {
     pub fn load(&self, index: usize, mut bits: usize) -> Option<u64> {
         let mut byte_index = index >> 3;
         let mut bit_index = index & 7;
-        assert!(bits <= 64);
         let mut x = 0u64;
         let mut xlen = 0usize;
         while bits > 0 {

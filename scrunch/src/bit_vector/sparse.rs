@@ -4,7 +4,7 @@ use std::iter::zip;
 use buffertk::{stack_pack, v64, Unpackable};
 
 use crate::binary_search::binary_search_by;
-use crate::bit_array::BitArray;
+use crate::bit_array::{BitArray, FixedWidthIterator};
 use crate::bit_vector::BitVector as BitVectorTrait;
 use crate::builder::{Builder, Helper};
 use crate::Error;
@@ -31,24 +31,14 @@ impl<'a> Leaf<'a> {
             Some((self.base == x as u64, 0))
         } else {
             let x = x as u64;
-            let idx = binary_search_by(0, self.branch - 1, |mid| {
-                // SAFETY(rescrv):  words is parsed to be equal to self.bits.len() * branch - 1.
-                let load = self
-                    .words
-                    .load(mid * self.bits as usize, self.bits as usize)
-                    .unwrap();
-                if load == 0 {
-                    Ordering::Greater
-                } else {
-                    (self.base + load).cmp(&x)
+            let iter = FixedWidthIterator::new(self.words.as_ref(), 0, (self.branch - 1) * self.bits as usize, self.bits as usize);
+            for (idx, load) in iter.enumerate() {
+                let word = self.base + load;
+                if word >= x || load == 0 {
+                    return Some((word == x, idx + 1));
                 }
-            });
-            let word = self.base
-                + self
-                    .words
-                    .load(idx * self.bits as usize, self.bits as usize)
-                    .unwrap_or(0);
-            Some((word == x, idx + 1))
+            }
+            Some((false, self.branch))
         }
     }
 
