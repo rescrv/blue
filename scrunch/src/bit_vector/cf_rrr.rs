@@ -90,7 +90,7 @@ impl<'a> BitVector<'a> {
         }
     }
 
-    fn access_rank(&self, mut index: usize) -> Option<(bool, usize)> {
+    pub fn access_rank(&self, mut index: usize) -> Option<(bool, usize)> {
         if index > self.len() {
             return None;
         }
