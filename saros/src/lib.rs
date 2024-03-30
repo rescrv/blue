@@ -13,6 +13,7 @@ use tatl::{HeyListen, Stationary};
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 
+pub mod coding;
 pub mod dashboard;
 pub mod memory;
 
