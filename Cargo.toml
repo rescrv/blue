@@ -36,6 +36,7 @@ members = [
     "sst",
     "statslicer",
     "sync42",
+    "tag_index",
     "tatl",
     "texttale",
     "tiny_lfu",

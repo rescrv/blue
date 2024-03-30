@@ -1,0 +1,41 @@
+[package]
+name = "tag_index"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "tag_index provides a searchable index over key-value tags"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+benchmarks = []
+binaries = []
+
+[dependencies]
+libc = "0.2"
+
+buffertk = { path = "../buffertk", version = "0.6" }
+listfree = { path = "../listfree", version = "0.1" }
+scrunch = { path = "../scrunch", version = "0.2" }
+
+[dev-dependencies]
+arrrg = { path = "../arrrg", version = "0.3" }
+guacamole = { path = "../guacamole", version = "0.6" }
+statslicer = { path = "../statslicer", version = "0.2" }
+
+[[bin]]
+name = "benchmark-compressed-tag-index"
+path = "src/bin/benchmark-compressed-tag-index.rs"
+required-features=["benchmarks", "binaries"]
+
+[[bin]]
+name = "benchmark-inverted-tag-index"
+path = "src/bin/benchmark-inverted-tag-index.rs"
+required-features=["benchmarks", "binaries"]
+
+[[example]]
+name = "tag-index-guacamole"
+path = "examples/tag-index-guacamole.rs"
+required-features=["binaries"]
