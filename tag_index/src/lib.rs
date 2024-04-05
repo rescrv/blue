@@ -220,9 +220,7 @@ impl<'a> CompressedTagIndex<'a> {
 
 impl<'a> TagIndex for CompressedTagIndex<'a> {
     fn search<'b>(self: &'b Pin<Box<Self>>, tags: &[Tag]) -> Result<Vec<Tags<'b>>, std::io::Error> {
-        let doc = unsafe {
-            &self.doc.assume_init_ref()
-        };
+        let doc = unsafe { &self.doc.assume_init_ref() };
         let mut first = true;
         let mut records = HashSet::new();
         for tag in tags.iter() {

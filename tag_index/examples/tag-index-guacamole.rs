@@ -13,11 +13,17 @@ fn generator<'a>(
     let pieces = params.split('/').collect::<Vec<_>>();
     assert!(pieces.len() <= 2, "must provide !# or !#/#, nothing more");
     let (count, random) = if pieces.len() == 2 {
-        let c = pieces[0].parse::<usize>().expect("first argument must be a usize");
-        let r = pieces[1].parse::<usize>().expect("second argument must be a usize");
+        let c = pieces[0]
+            .parse::<usize>()
+            .expect("first argument must be a usize");
+        let r = pieces[1]
+            .parse::<usize>()
+            .expect("second argument must be a usize");
         (c, r)
     } else {
-        let c = pieces[0].parse::<usize>().expect("argument must be a usize");
+        let c = pieces[0]
+            .parse::<usize>()
+            .expect("argument must be a usize");
         (c, 4294967291)
     };
     let mut strings = from_seed(string(|_| 8, to_charset(CHAR_SET_LOWER)));

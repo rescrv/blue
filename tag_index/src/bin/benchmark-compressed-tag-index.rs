@@ -31,5 +31,8 @@ fn main() {
         println!("{}% done", idx);
     }
     let elapsed = start.elapsed();
-    println!("performed {} queries in {:?} and fetched {} tags", queries_len, elapsed, count);
+    println!(
+        "performed {} queries in {:?} and fetched {} tags",
+        queries_len, elapsed, count
+    );
 }
