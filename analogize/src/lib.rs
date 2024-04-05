@@ -633,7 +633,8 @@ fn group_by_second(
             core: ErrorCore::default(),
         });
     }
-    watermark = watermark.duration_trunc(TimeDelta::seconds(1)).unwrap();
+    let one_second = TimeDelta::try_seconds(1).expect("one second should always construct");
+    watermark = watermark.duration_trunc(one_second).unwrap();
     let mut results = vec![];
     for clue in clues {
         let Some(ts) = DateTime::from_timestamp_millis(clue.timestamp as i64 / 1_000) else {
@@ -644,7 +645,7 @@ fn group_by_second(
         };
         while watermark <= ts {
             results.push((watermark, vec![]));
-            watermark += TimeDelta::seconds(1);
+            watermark += one_second;
         }
         let len = results.len() - 1;
         results[len].1.push(clue);
