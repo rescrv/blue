@@ -39,7 +39,7 @@ fn generator<'a>(
 }
 
 fn materialize(guac: &mut Guacamole, tag: Tag) -> Vec<Tag<'static>> {
-    if !tag.value().is_empty() && tag.value().chars().next() == Some('!') {
+    if !tag.value().is_empty() && tag.value().starts_with('!') {
         let mut ret = vec![];
         let mut gen = generator(tag.key(), tag.value());
         while let Some(tag) = gen(guac) {
