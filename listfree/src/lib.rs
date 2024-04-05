@@ -156,7 +156,7 @@ mod tests {
 
     fn guacamole_reader(list: Arc<List<u64>>, shutdown: Arc<AtomicBool>) {
         while !shutdown.load(Ordering::Relaxed) {
-            for value in list.iter() {}
+            for _ in list.iter() {}
         }
     }
 
