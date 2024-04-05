@@ -12,10 +12,7 @@ struct Node<T> {
 impl<T> Node<T> {
     fn new(data: T) -> Self {
         let next = AtomicPtr::new(std::ptr::null_mut());
-        Self {
-            data,
-            next,
-        }
+        Self { data, next }
     }
 
     fn set_next(&self, x: *mut Node<T>) {
@@ -60,33 +57,27 @@ impl<T> List<T> {
         loop {
             let head = self.head.load(Ordering::Acquire);
             node_ptr::set_next(node, head);
-            if self.head.compare_exchange(
-                head,
-                node,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) == Ok(head) {
+            if self
+                .head
+                .compare_exchange(head, node, Ordering::SeqCst, Ordering::SeqCst)
+                == Ok(head)
+            {
                 return;
             }
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=&T> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         let _list = self;
         let node = self.head.load(Ordering::Acquire);
-        ListIterator {
-            _list,
-            node,
-        }
+        ListIterator { _list, node }
     }
 }
 
 impl<T> Default for List<T> {
     fn default() -> Self {
         let head = AtomicPtr::new(std::ptr::null_mut());
-        Self {
-            head,
-        }
+        Self { head }
     }
 }
 
@@ -109,7 +100,7 @@ pub struct ListIterator<'a, T> {
 }
 
 impl<'a, T> Iterator for ListIterator<'a, T> {
-    type Item=&'a T;
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.node.is_null() {
@@ -165,8 +156,7 @@ mod tests {
 
     fn guacamole_reader(list: Arc<List<u64>>, shutdown: Arc<AtomicBool>) {
         while !shutdown.load(Ordering::Relaxed) {
-            for value in list.iter() {
-            }
+            for value in list.iter() {}
         }
     }
 
