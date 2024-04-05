@@ -185,19 +185,11 @@ pub trait Emitter {
     type Error;
 
     /// Read the provided [Counter].
-    fn emit_counter(
-        &mut self,
-        counter: &Counter,
-        now_millis: u64,
-    ) -> Result<(), Self::Error>;
+    fn emit_counter(&mut self, counter: &Counter, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Gauge].
     fn emit_gauge(&mut self, gauge: &Gauge, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
-    fn emit_moments(
-        &mut self,
-        moments: &Moments,
-        now_millis: u64,
-    ) -> Result<(), Self::Error>;
+    fn emit_moments(&mut self, moments: &Moments, now_millis: u64) -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
