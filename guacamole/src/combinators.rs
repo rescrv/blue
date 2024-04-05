@@ -198,9 +198,7 @@ pub fn from_seed<T, F: FnMut(&mut Guacamole) -> T>(mut func: F) -> impl FnMut(us
 /// works well.  On platforms with 32-bit usize, a 31-bit number works well.
 pub fn unique_set(set_size: usize, random: usize) -> impl FnMut(&mut Guacamole) -> usize {
     let mut indexer = unique_set_index(random);
-    move |guac| {
-        indexer(range_to(set_size)(guac))
-    }
+    move |guac| indexer(range_to(set_size)(guac))
 }
 
 /// Index into a unique set.  Converts numbers in [0, set_size) into X * random + random.  Random
@@ -209,11 +207,7 @@ pub fn unique_set(set_size: usize, random: usize) -> impl FnMut(&mut Guacamole) 
 /// 31-bit number works well.  Nothing prevents set_size from varying in size once this is
 /// instantiated.
 pub fn unique_set_index(random: usize) -> impl FnMut(usize) -> usize {
-    move |index| {
-        index
-            .wrapping_mul(random)
-            .wrapping_add(random)
-    }
+    move |index| index.wrapping_mul(random).wrapping_add(random)
 }
 
 /// Generate numbers uniformly distributed between start and limit.
