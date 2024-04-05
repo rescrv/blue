@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use armnod::{Armnod, ArmnodOptions};
 use biometrics::{Collector, Counter, Moments};
-use biometrics_sys::{BiometricsSys};
+use biometrics_sys::BiometricsSys;
 use guacamole::{FromGuacamole, Guacamole};
 use keyvalint::Cursor;
 
