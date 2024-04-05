@@ -36,7 +36,7 @@ impl u63 {
         let mut rank = 0;
         let mut w = self.0;
         while idx < 63 && rank < x {
-            rank += if f((w&1) == 1) { 1 } else { 0 };
+            rank += if f((w & 1) == 1) { 1 } else { 0 };
             w >>= 1;
             idx += 1;
         }
@@ -1801,7 +1801,10 @@ impl<'a> BitVector<'a> {
             return None;
         }
         let width = Self::calc_p_r_width(self.bits)?;
-        let augment: usize = structure.load((x / self.select as usize) * width, width)?.try_into().ok()?;
+        let augment: usize = structure
+            .load((x / self.select as usize) * width, width)?
+            .try_into()
+            .ok()?;
         let mut o_offset: usize = self.p.load(augment * width, width)?.try_into().ok()?;
         let mut c_offset: usize = augment * 6 * self.word as usize;
         let mut rank: usize = load_rank(augment).try_into().ok()?;
@@ -1811,18 +1814,14 @@ impl<'a> BitVector<'a> {
             if rank + add_rank(c) >= x {
                 let w = self.load_o(c, o_offset, o_bits)?;
                 let idx = idx + word_select(&w, x - rank)?;
-                return if idx > self.len() {
-                    None
-                } else {
-                    Some(idx)
-                };
+                return if idx > self.len() { None } else { Some(idx) };
             } else {
                 rank += add_rank(c);
             }
             c_offset += 6;
             o_offset += o_bits;
             idx += 63;
-        };
+        }
     }
 }
 
@@ -1908,11 +1907,7 @@ impl<'a> super::BitVector for BitVector<'a> {
         // The offset into P.
         let p_offset = index / stride;
         // The offset into O.
-        let mut o_offset: usize = self
-            .p
-            .load(p_offset * width, width)?
-            .try_into()
-            .ok()?;
+        let mut o_offset: usize = self.p.load(p_offset * width, width)?.try_into().ok()?;
         // The offset into C
         let mut c_offset: usize = p_offset * 6 * self.word as usize;
         // Adjust index to account for our jump through P.
@@ -1981,9 +1976,7 @@ impl<'a> super::BitVector for BitVector<'a> {
             // considering the last p_offset we'll hit this case, but the tests say that's OK.
             self.r.load(idx * width, width).unwrap_or(u64::MAX)
         };
-        let add_rank = |c: usize| {
-            c
-        };
+        let add_rank = |c: usize| c;
         self.select_helper(x, &self.s1, load_rank, add_rank, |w, r| w.select1(r))
     }
 
@@ -1995,9 +1988,7 @@ impl<'a> super::BitVector for BitVector<'a> {
             // considering the last p_offset we'll hit this case, but the tests say that's OK.
             idx as u64 * self.word as u64 * 63 - self.r.load(idx * width, width).unwrap_or(u64::MIN)
         };
-        let add_rank = |c: usize| {
-            63 - c
-        };
+        let add_rank = |c: usize| 63 - c;
         self.select_helper(x, &self.s0, load_rank, add_rank, |w, r| w.select0(r))
     }
 }

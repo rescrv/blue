@@ -6,8 +6,8 @@ use super::Error;
 use crate::binary_search::partition_by;
 use crate::builder::{Builder, Helper};
 
-pub mod rrr;
 pub mod cf_rrr;
+pub mod rrr;
 pub mod sparse;
 
 ///////////////////////////////////////////// BitVector ////////////////////////////////////////////

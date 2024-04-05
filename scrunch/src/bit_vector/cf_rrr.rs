@@ -33,7 +33,17 @@ struct BitVectorStub<'a> {
 
 impl<'a> BitVectorStub<'a> {
     #[allow(clippy::too_many_arguments)]
-    fn new(bits: u64, words_per_block: u32, select_sample: u32, p_width: u64, r_width: u64, p: &'a [u8], b: &'a [u8], s0: &'a [u8], s1: &'a [u8]) -> Self {
+    fn new(
+        bits: u64,
+        words_per_block: u32,
+        select_sample: u32,
+        p_width: u64,
+        r_width: u64,
+        p: &'a [u8],
+        b: &'a [u8],
+        s0: &'a [u8],
+        s1: &'a [u8],
+    ) -> Self {
         Self {
             bits,
             words_per_block,
@@ -111,7 +121,12 @@ impl<'a> BitVector<'a> {
         assert!(index < stride);
         // Now iterate through c.
         let mut rank: usize = self.b.load(b_offset, self.r_width)?.try_into().ok()?;
-        let mut iter_c = FixedWidthIterator::new(self.b.as_ref(), b_offset + self.r_width, self.words_per_block as usize * 6, 6);
+        let mut iter_c = FixedWidthIterator::new(
+            self.b.as_ref(),
+            b_offset + self.r_width,
+            self.words_per_block as usize * 6,
+            6,
+        );
         let mut o_rel = 0;
         while index >= 63 {
             let c: usize = iter_c.next()?.try_into().ok()?;
@@ -120,7 +135,10 @@ impl<'a> BitVector<'a> {
             rank += c;
         }
         let c: usize = iter_c.next()?.try_into().ok()?;
-        let w = self.b.load(b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel, L[c])?;
+        let w = self.b.load(
+            b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel,
+            L[c],
+        )?;
         let w = decode(w, c)?;
         rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
         let access = w.0 & (1 << index) != 0;
@@ -140,21 +158,36 @@ impl<'a> BitVector<'a> {
         }
         let stride = (self.words_per_block * 63) as usize;
         let index_into_structure: usize = (x / stride) * self.r_width;
-        let index_into_p: usize = structure.load(index_into_structure, self.r_width)?.try_into().ok()?;
+        let index_into_p: usize = structure
+            .load(index_into_structure, self.r_width)?
+            .try_into()
+            .ok()?;
         for idx in 0..usize::MAX {
-            let index_of_block: usize = self.p.load((index_into_p + idx) * self.p_width, self.p_width)?.try_into().ok()?;
+            let index_of_block: usize = self
+                .p
+                .load((index_into_p + idx) * self.p_width, self.p_width)?
+                .try_into()
+                .ok()?;
             let mut o_rel = 0;
             let mut rank: usize = load_rank(index_into_p + idx, index_of_block)?;
             assert!(rank <= x);
             let mut index: usize = (index_into_p + idx) * self.words_per_block as usize * 63;
-            let iter_c = FixedWidthIterator::new(self.b.as_ref(), index_of_block + self.r_width, self.words_per_block as usize * 6, 6);
+            let iter_c = FixedWidthIterator::new(
+                self.b.as_ref(),
+                index_of_block + self.r_width,
+                self.words_per_block as usize * 6,
+                6,
+            );
             let mut itered = false;
             for c in iter_c {
                 itered = true;
                 let c: usize = c.try_into().ok()?;
                 let r: usize = add_rank(c);
                 if rank + r >= x {
-                    let o = self.b.load(index_of_block + self.r_width + self.words_per_block as usize * 6 + o_rel, L[c])?;
+                    let o = self.b.load(
+                        index_of_block + self.r_width + self.words_per_block as usize * 6 + o_rel,
+                        L[c],
+                    )?;
                     let w = decode(o, c)?;
                     let answer = index + word_select(&w, x - rank)?;
                     return if answer <= self.len() {
@@ -285,12 +318,9 @@ impl<'a> super::BitVector for BitVector<'a> {
 
     fn select(&self, x: usize) -> Option<usize> {
         let width = self.r_width;
-        let load_rank = |_: usize, ptr: usize| -> Option<usize> {
-            self.b.load(ptr, width).map(|r| r as usize)
-        };
-        let add_rank = |c: usize| {
-            c
-        };
+        let load_rank =
+            |_: usize, ptr: usize| -> Option<usize> { self.b.load(ptr, width).map(|r| r as usize) };
+        let add_rank = |c: usize| c;
         self.select_helper(x, &self.s1, load_rank, add_rank, |w, r| w.select1(r))
     }
 
@@ -300,9 +330,7 @@ impl<'a> super::BitVector for BitVector<'a> {
         let load_rank = |idx: usize, ptr: usize| -> Option<usize> {
             self.b.load(ptr, width).map(|r| idx * sample - r as usize)
         };
-        let add_rank = |c: usize| {
-            63 - c
-        };
+        let add_rank = |c: usize| 63 - c;
         self.select_helper(x, &self.s0, load_rank, add_rank, |w, r| w.select0(r))
     }
 }

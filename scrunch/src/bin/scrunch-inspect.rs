@@ -7,7 +7,9 @@ use scrunch::CompressedDocument;
 fn main() {
     for file in std::env::args().skip(1) {
         let data = read(&file).expect("should be able to read file");
-        let doc = CompressedDocument::unpack(&data).expect("should be able to parse document").0;
+        let doc = CompressedDocument::unpack(&data)
+            .expect("should be able to parse document")
+            .0;
         println!("{}", file);
         print!("{doc:#?}");
     }

@@ -4,9 +4,9 @@ use prototk::FieldNumber;
 use super::bit_array::{BitArray, Builder as BitArrayBuilder};
 use super::bit_vector::cf_rrr::BitVector;
 use super::bit_vector::BitVector as BitVectorTrait;
+use super::bits_required;
 use super::psi;
 use super::sigma::Sigma;
-use super::bits_required;
 use super::Builder;
 use super::Error;
 use super::Helper;
@@ -171,11 +171,21 @@ impl<'a> SuffixArray for SampledSuffixArray<'a> {
                 None
             }
         };
-        let max_value = sa.iter().cloned().filter_map(sample).max().unwrap_or_default();
+        let max_value = sa
+            .iter()
+            .cloned()
+            .filter_map(sample)
+            .max()
+            .unwrap_or_default();
         let bits = bits_required(max_value) as usize;
         let mut values = BitArrayBuilder::with_capacity(bits * sa.len());
         let mut present = vec![];
-        for (idx, value) in sa.iter().cloned().enumerate().filter_map(|(idx, v)| Some((idx, sample(v)?))) {
+        for (idx, value) in sa
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(idx, v)| Some((idx, sample(v)?)))
+        {
             while present.len() < idx {
                 present.push(false);
             }

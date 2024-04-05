@@ -31,7 +31,12 @@ impl<'a> Leaf<'a> {
             Some((self.base == x as u64, 0))
         } else {
             let x = x as u64;
-            let iter = FixedWidthIterator::new(self.words.as_ref(), 0, (self.branch - 1) * self.bits as usize, self.bits as usize);
+            let iter = FixedWidthIterator::new(
+                self.words.as_ref(),
+                0,
+                (self.branch - 1) * self.bits as usize,
+                self.bits as usize,
+            );
             for (idx, load) in iter.enumerate() {
                 let word = self.base + load;
                 if word >= x || load == 0 {

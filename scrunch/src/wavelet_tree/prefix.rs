@@ -232,7 +232,14 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         }
     }
 
-    fn recursive_rank(&self, e: u32, sz: u8, node: &Node, bv: &BitVector<'a>, x: usize) -> Option<usize> {
+    fn recursive_rank(
+        &self,
+        e: u32,
+        sz: u8,
+        node: &Node,
+        bv: &BitVector<'a>,
+        x: usize,
+    ) -> Option<usize> {
         if sz == 0 {
             return None;
         }
@@ -251,7 +258,14 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         }
     }
 
-    fn recursive_select(&self, e: u32, sz: u8, node: &Node, bv: &BitVector<'a>, x: usize) -> Option<usize> {
+    fn recursive_select(
+        &self,
+        e: u32,
+        sz: u8,
+        node: &Node,
+        bv: &BitVector<'a>,
+        x: usize,
+    ) -> Option<usize> {
         if sz == 0 {
             return None;
         }
@@ -356,7 +370,12 @@ impl<'a, E: Encoder + Unpackable<'a>> Unpackable<'a> for WaveletTree<'a, E> {
             .0;
         let tree = value;
         let nodes = vec![];
-        let mut wt = WaveletTree { encoder, root, tree, nodes };
+        let mut wt = WaveletTree {
+            encoder,
+            root,
+            tree,
+            nodes,
+        };
         wt.load_nodes();
         Ok((wt, remain))
     }
