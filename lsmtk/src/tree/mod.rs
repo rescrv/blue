@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::Counter;
-use keyvalint::{compare_bytes, Cursor, KeyRef};
 use indicio::{clue, INFO};
+use keyvalint::{compare_bytes, Cursor, KeyRef};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -370,9 +370,12 @@ impl Version {
                 let sst_path = SST_FILE(root, setsum);
                 let handle = fm.open(sst_path)?;
                 let sst = Arc::new(Sst::from_file_handle(handle)?);
-                sc.insert(setsum, CachedSst {
-                    ptr: Arc::clone(&sst),
-                });
+                sc.insert(
+                    setsum,
+                    CachedSst {
+                        ptr: Arc::clone(&sst),
+                    },
+                );
                 Ok(sst.cursor())
             }
         }

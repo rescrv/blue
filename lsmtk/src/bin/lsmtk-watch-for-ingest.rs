@@ -37,7 +37,9 @@ fn main() {
     });
     let root = PathBuf::from(options.path());
     let tree = Arc::new(LsmTree::open(options).as_z().pretty_unwrap());
-    let emitter = indicio::ProtobufEmitter::new("clues", 1 << 30).as_z().pretty_unwrap();
+    let emitter = indicio::ProtobufEmitter::new("clues", 1 << 30)
+        .as_z()
+        .pretty_unwrap();
     TRACING.register(emitter);
     TRACING.set_verbosity(indicio::INFO);
     let tree_p = Arc::clone(&tree);
