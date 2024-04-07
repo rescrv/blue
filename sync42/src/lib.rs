@@ -4,6 +4,7 @@ pub mod background;
 pub mod collector;
 pub mod lru;
 pub mod monitor;
+pub mod registry;
 pub mod spin_lock;
 pub mod state_hash_table;
 pub mod wait_list;
