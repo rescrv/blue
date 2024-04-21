@@ -1,0 +1,10 @@
+[package]
+name = "utf8path"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "utf8path provides a String-friendly path type"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
