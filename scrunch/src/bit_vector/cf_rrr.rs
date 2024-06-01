@@ -100,51 +100,6 @@ impl<'a> BitVector<'a> {
         }
     }
 
-    pub fn access_rank(&self, mut index: usize) -> Option<(bool, usize)> {
-        if index > self.len() {
-            return None;
-        }
-        if index == 0 && self.len() == 0 {
-            return Some((false, 0));
-        }
-        // The offset into P.
-        let stride = (self.words_per_block * 63) as usize;
-        let p_offset = index / stride;
-        // The offset into B.
-        let b_offset: usize = self
-            .p
-            .load(p_offset * self.p_width, self.p_width)?
-            .try_into()
-            .ok()?;
-        // Adjust index to account for our jump through P.
-        index -= p_offset * stride;
-        assert!(index < stride);
-        // Now iterate through c.
-        let mut rank: usize = self.b.load(b_offset, self.r_width)?.try_into().ok()?;
-        let mut iter_c = FixedWidthIterator::new(
-            self.b.as_ref(),
-            b_offset + self.r_width,
-            self.words_per_block as usize * 6,
-            6,
-        );
-        let mut o_rel = 0;
-        while index >= 63 {
-            let c: usize = iter_c.next()?.try_into().ok()?;
-            o_rel += L[c];
-            index -= 63;
-            rank += c;
-        }
-        let c: usize = iter_c.next()?.try_into().ok()?;
-        let w = self.b.load(
-            b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel,
-            L[c],
-        )?;
-        let w = decode(w, c)?;
-        rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
-        let access = w.0 & (1 << index) != 0;
-        Some((access, rank))
-    }
-
     fn select_helper(
         &self,
         x: usize,
@@ -302,6 +257,43 @@ impl<'a> super::BitVector for BitVector<'a> {
 
     fn len(&self) -> usize {
         self.bits
+    }
+
+    fn access_rank(&self, mut index: usize) -> Option<(bool, usize)> {
+        if index > self.len() {
+            return None;
+        }
+        if index == 0 && self.len() == 0 {
+            return Some((false, 0));
+        }
+        // The offset into P.
+        let stride = (self.words_per_block * 63) as usize;
+        let p_offset = index / stride;
+        // The offset into B.
+        let b_offset: usize = self
+            .p
+            .load(p_offset * self.p_width, self.p_width)?
+            .try_into()
+            .ok()?;
+        // Adjust index to account for our jump through P.
+        index -= p_offset * stride;
+        assert!(index < stride);
+        // Now iterate through c.
+        let mut rank: usize = self.b.load(b_offset, self.r_width)?.try_into().ok()?;
+        let mut iter_c = FixedWidthIterator::new(self.b.as_ref(), b_offset + self.r_width, self.words_per_block as usize * 6, 6);
+        let mut o_rel = 0;
+        while index >= 63 {
+            let c: usize = iter_c.next()?.try_into().ok()?;
+            o_rel += L[c];
+            index -= 63;
+            rank += c;
+        }
+        let c: usize = iter_c.next()?.try_into().ok()?;
+        let w = self.b.load(b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel, L[c])?;
+        let w = decode(w, c)?;
+        rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
+        let access = w.0 & (1 << index) != 0;
+        Some((access, rank))
     }
 
     fn access(&self, index: usize) -> Option<bool> {

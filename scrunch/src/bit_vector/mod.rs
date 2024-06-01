@@ -31,6 +31,9 @@ pub trait BitVector {
     fn access(&self, x: usize) -> Option<bool>;
     /// Computes `rank[x]`, the number of bits set at i < x.
     fn rank(&self, x: usize) -> Option<usize>;
+    /// Computes `access` and `rank` in one move.
+    fn access_rank(&self, x: usize) -> Option<(bool, usize)>;
+
     /// Select the x'th bit from this set.  An index.
     ///
     /// A default implementation is provided that uses binary search over rank.
@@ -141,6 +144,10 @@ impl<'a> BitVector for ReferenceBitVector<'a> {
 
     fn len(&self) -> usize {
         self.length
+    }
+
+    fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
+        Some((self.access(x)?, self.rank(x)?))
     }
 
     fn access(&self, x: usize) -> Option<bool> {

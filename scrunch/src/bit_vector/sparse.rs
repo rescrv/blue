@@ -350,31 +350,6 @@ impl<'a> BitVector<'a> {
             pointers,
         })
     }
-
-    pub fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
-        if x > self.len() {
-            return None;
-        }
-        if self.root.levels == 0 {
-            if x <= self.len() {
-                Some((false, 0))
-            } else {
-                None
-            }
-        } else {
-            let mut node_offset = self.root.node;
-            let mut cumulative_rank = 0;
-            for skip_factor in self.skip_factors.iter() {
-                let node = self.load_internal(node_offset as usize)?;
-                let (offset, pointer) = node.position(x)?;
-                node_offset = pointer;
-                cumulative_rank += offset * *skip_factor;
-            }
-            let leaf = self.load_leaf(node_offset as usize)?;
-            let (a, r) = leaf.access_rank(x)?;
-            Some((a, cumulative_rank + r))
-        }
-    }
 }
 
 impl<'a> std::fmt::Debug for BitVector<'a> {
@@ -412,6 +387,31 @@ impl<'a> BitVectorTrait for BitVector<'a> {
 
     fn len(&self) -> usize {
         self.length
+    }
+
+    fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
+        if x > self.len() {
+            return None;
+        }
+        if self.root.levels == 0 {
+            if x <= self.len() {
+                Some((false, 0))
+            } else {
+                None
+            }
+        } else {
+            let mut node_offset = self.root.node;
+            let mut cumulative_rank = 0;
+            for skip_factor in self.skip_factors.iter() {
+                let node = self.load_internal(node_offset as usize)?;
+                let (offset, pointer) = node.position(x)?;
+                node_offset = pointer;
+                cumulative_rank += offset * *skip_factor;
+            }
+            let leaf = self.load_leaf(node_offset as usize)?;
+            let (a, r) = leaf.access_rank(x)?;
+            Some((a, cumulative_rank + r))
+        }
     }
 
     fn access(&self, x: usize) -> Option<bool> {

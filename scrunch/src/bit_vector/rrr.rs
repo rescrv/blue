@@ -1896,6 +1896,11 @@ impl<'a> super::BitVector for BitVector<'a> {
         self.bits
     }
 
+    // TODO(rescrv): make this as efficient as it can be (compute both together).
+    fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
+        Some((self.access(x)?, self.rank(x)?))
+    }
+
     fn access(&self, mut index: usize) -> Option<bool> {
         if index >= self.len() {
             return None;
