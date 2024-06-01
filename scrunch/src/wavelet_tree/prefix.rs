@@ -134,27 +134,19 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
     }
 
     fn load_nodes_recursive(&mut self, offset: u64) -> Option<u64> {
-        let Some(mut node) = self.load_node(offset) else {
-            return None;
-        };
+        let mut node = self.load_node(offset)?;
         if node.left != 0 {
             node.left = self.load_nodes_recursive(node.left)?;
         }
         if node.right != 0 {
             node.right = self.load_nodes_recursive(node.right)?;
         }
-        let Some(start): Option<usize> = node.start.try_into().ok() else {
-            return None;
-        };
-        let Some(limit): Option<usize> = node.limit.try_into().ok() else {
-            return None;
-        };
+        let start: usize = node.start.try_into().ok()?;
+        let limit: usize = node.limit.try_into().ok()?;
         if start > limit || limit > self.tree.len() {
             return None;
         }
-        let Some(bv) = BitVector::parse(&self.tree[start..limit]).ok().map(|x| x.0) else {
-            return None;
-        };
+        let bv = BitVector::parse(&self.tree[start..limit]).ok().map(|x| x.0)?;
         self.nodes.push((node, bv));
         Some(self.nodes.len() as u64)
     }
