@@ -57,5 +57,9 @@ exclude = [
 [profile.release]
 debug = true
 lto = true
-opt-level = 3
+opt-level = 2
 panic = "abort"
+
+[profile.test]
+debug = true
+opt-level = 2
