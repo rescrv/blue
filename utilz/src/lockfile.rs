@@ -42,6 +42,7 @@ impl Lockfile {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .mode(0o600)
             .open(path)?;
         // Use the metadata to see if this process already holds a lock.
