@@ -15,7 +15,7 @@ for package in `target/debug/publish`
 do
     pushd $package
     cargo clippy --no-deps --all-targets
-    cargo hack $HACK_FLAGS --feature-powerset test --release
+    cargo hack $HACK_FLAGS --feature-powerset test
     cargo doc --no-deps
     ../target/debug/binaries
     popd
