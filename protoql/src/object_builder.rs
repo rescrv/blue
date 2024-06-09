@@ -533,13 +533,13 @@ mod tests {
             field_number: FieldNumber::must(7),
             wire_type: WireType::LengthDelimited,
         };
-        let begin = pb.begin_map_with_message(tag, &[&key_tag1, &key_buf1, &value_tag1]);
+        let begin = pb.begin_map_with_message(tag, &[key_tag1, key_buf1, value_tag1]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf1);
         // Finish the message
         pb.end_message(begin);
         // Second verse, practically the first.
-        let begin = pb.begin_map_with_message(tag, &[&key_tag2, &key_buf2, &value_tag2]);
+        let begin = pb.begin_map_with_message(tag, &[key_tag2, key_buf2, value_tag2]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf2);
         // Finish the message
@@ -575,7 +575,7 @@ mod tests {
             field_number: FieldNumber::must(7),
             wire_type: WireType::LengthDelimited,
         };
-        let begin = pb.begin_map_with_message(tag, &[&key_tag, &key_buf, &value_tag]);
+        let begin = pb.begin_map_with_message(tag, &[key_tag, key_buf, value_tag]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf);
         // Finish the message
@@ -605,7 +605,7 @@ mod tests {
             field_number: FieldNumber::must(7),
             wire_type: WireType::LengthDelimited,
         };
-        let begin = pb.begin_map_with_message(tag, &[&key_tag, &key_buf, &value_tag]);
+        let begin = pb.begin_map_with_message(tag, &[key_tag, key_buf, value_tag]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf);
         // Finish the message
@@ -638,7 +638,7 @@ mod tests {
             field_number: FieldNumber::must(5),
             wire_type: WireType::LengthDelimited,
         };
-        let begin = pb.begin_map_with_message(tag, &[&key_tag, &key_buf, &value_tag]);
+        let begin = pb.begin_map_with_message(tag, &[key_tag, key_buf, value_tag]);
         // Emit the value inline because we captured the value tag.
         pb.emit_inline(value_buf);
         // Finish the message
