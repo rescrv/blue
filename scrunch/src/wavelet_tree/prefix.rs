@@ -146,7 +146,9 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         if start > limit || limit > self.tree.len() {
             return None;
         }
-        let bv = BitVector::parse(&self.tree[start..limit]).ok().map(|x| x.0)?;
+        let bv = BitVector::parse(&self.tree[start..limit])
+            .ok()
+            .map(|x| x.0)?;
         self.nodes.push((node, bv));
         Some(self.nodes.len() as u64)
     }

@@ -280,7 +280,12 @@ impl<'a> super::BitVector for BitVector<'a> {
         assert!(index < stride);
         // Now iterate through c.
         let mut rank: usize = self.b.load(b_offset, self.r_width)?.try_into().ok()?;
-        let mut iter_c = FixedWidthIterator::new(self.b.as_ref(), b_offset + self.r_width, self.words_per_block as usize * 6, 6);
+        let mut iter_c = FixedWidthIterator::new(
+            self.b.as_ref(),
+            b_offset + self.r_width,
+            self.words_per_block as usize * 6,
+            6,
+        );
         let mut o_rel = 0;
         while index >= 63 {
             let c: usize = iter_c.next()?.try_into().ok()?;
@@ -289,7 +294,10 @@ impl<'a> super::BitVector for BitVector<'a> {
             rank += c;
         }
         let c: usize = iter_c.next()?.try_into().ok()?;
-        let w = self.b.load(b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel, L[c])?;
+        let w = self.b.load(
+            b_offset + self.r_width + self.words_per_block as usize * 6 + o_rel,
+            L[c],
+        )?;
         let w = decode(w, c)?;
         rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
         let access = w.0 & (1 << index) != 0;

@@ -104,7 +104,11 @@ impl<'a> Path<'a> {
 
     /// Join to this path another path.  Follows standard path rules where if the joined-with path
     /// is absolute, the first path is discarded.
-    pub fn join<'b, 'c>(&self, with: impl Into<Path<'b>>) -> Path<'c> where 'a: 'c, 'b: 'c {
+    pub fn join<'b, 'c>(&self, with: impl Into<Path<'b>>) -> Path<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
         let with = with.into();
         if with.is_abs() {
             with.clone()
@@ -847,42 +851,47 @@ mod tests {
 
     #[test]
     fn basename() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             assert_eq!(tc.basename, tc.path.basename(), "path: {:?}", tc.path);
         }
     }
 
     #[test]
     fn dirname() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             assert_eq!(tc.dirname, tc.path.dirname(), "path: {:?}", tc.path);
         }
     }
 
     #[test]
     fn is_abs() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             assert_eq!(tc.is_abs, tc.path.is_abs(), "path: {:?}", tc.path);
         }
     }
 
     #[test]
     fn is_normal() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             assert_eq!(tc.is_normal, tc.path.is_normal(), "path: {:?}", tc.path);
         }
     }
 
     #[test]
     fn strip_prefix() {
-        for tc in  TEST_CASES.iter() {
-            assert_eq!(Some(tc.basename.clone()), tc.path.strip_prefix(&tc.dirname), "path: {:?}", tc.path);
+        for tc in TEST_CASES.iter() {
+            assert_eq!(
+                Some(tc.basename.clone()),
+                tc.path.strip_prefix(&tc.dirname),
+                "path: {:?}",
+                tc.path
+            );
         }
     }
 
     #[test]
     fn split() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             let (dirname, basename) = tc.path.split();
             assert_eq!(tc.basename, basename, "path: {:?}", tc.path);
             assert_eq!(tc.dirname, dirname, "path: {:?}", tc.path);
@@ -900,9 +909,14 @@ mod tests {
                 Component::Normal(_) => 'N',
             }
         }
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             let components: Vec<_> = tc.path.components().collect();
-            assert_eq!(tc.components.chars().count(), components.len(), "path: {:?}", tc.path);
+            assert_eq!(
+                tc.components.chars().count(),
+                components.len(),
+                "path: {:?}",
+                tc.path
+            );
             for (lhs, rhs) in std::iter::zip(tc.components.chars(), components.into_iter()) {
                 assert_eq!(lhs, component_to_char(rhs), "path: {:?}", tc.path);
             }
@@ -911,7 +925,7 @@ mod tests {
 
     #[test]
     fn components_as_basename_dirname() {
-        for tc in  TEST_CASES.iter() {
+        for tc in TEST_CASES.iter() {
             let mut components: Vec<_> = tc.path.components().collect();
             fn basename_to_component(path: Path) -> Component {
                 if path.path == "." {
@@ -922,7 +936,10 @@ mod tests {
                     Component::Normal(path)
                 }
             }
-            assert_eq!(Some(basename_to_component(tc.basename.clone())), components.pop());
+            assert_eq!(
+                Some(basename_to_component(tc.basename.clone())),
+                components.pop()
+            );
         }
     }
 }

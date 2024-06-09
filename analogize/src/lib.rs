@@ -182,7 +182,11 @@ impl SymbolTable {
     }
 
     pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        let mut output = OpenOptions::new().create(true).truncate(true).write(true).open(path)?;
+        let mut output = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)?;
         let mut sorted = self.symbols.iter().collect::<Vec<_>>();
         sorted.sort();
         for (mangled, symbol) in sorted.into_iter() {
