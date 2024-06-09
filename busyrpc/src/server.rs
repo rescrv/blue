@@ -124,19 +124,19 @@ impl ServerOptions {
 
     /// Set the private_key_file.
     pub fn with_private_key_file(mut self, private_key_file: &str) -> Self {
-        self.private_key_file = private_key_file.to_owned();
+        private_key_file.clone_into(&mut self.private_key_file);
         self
     }
 
     /// Set the certificate_file.
     pub fn with_certificate_file(mut self, certificate_file: &str) -> Self {
-        self.certificate_file = certificate_file.to_owned();
+        certificate_file.clone_into(&mut self.certificate_file);
         self
     }
 
     /// Set the bind_to_host.
     pub fn with_bind_to_host(mut self, bind_to_host: &str) -> Self {
-        self.bind_to_host = bind_to_host.to_owned();
+        bind_to_host.clone_into(&mut self.bind_to_host);
         self
     }
 
@@ -282,7 +282,7 @@ impl Internals {
 
     fn get_channel(&self, fd: RawFd) -> Option<Arc<Mutex<Channel>>> {
         GET_CHANNEL.click();
-        self.channels.lock().unwrap().get(&fd).map(Arc::clone)
+        self.channels.lock().unwrap().get(&fd).cloned()
     }
 
     fn cancel_channel(&self, fd: RawFd) {

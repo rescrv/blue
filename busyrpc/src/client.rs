@@ -388,12 +388,6 @@ impl<'a, 'b> sync42::state_hash_table::Value for EstablishmentState<'a, 'b> {
     }
 }
 
-//////////////////////////////////////// ChannelHandleTrait ////////////////////////////////////////
-
-trait ChannelHandleTrait {
-    fn kill(&self);
-}
-
 /////////////////////////////////////////// ChannelHandle //////////////////////////////////////////
 
 struct ChannelHandle<'a, 'b, 'c, R: Resolver> {
@@ -439,7 +433,10 @@ struct ChannelManager<'a, 'b, R: Resolver> {
     connecting: StateHashTable<HostKey, EstablishmentState<'a, 'b>>,
 }
 
-impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
+impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
+    type ChannelHandle<'c> = ChannelHandle<'a, 'b, 'c, R> where Self: 'c;
+    type MonitoredChannel = MonitoredChannel<'a, 'b>;
+
     fn new(options: ClientOptions, resolver: R) -> Self {
         Self {
             options,
@@ -449,7 +446,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         }
     }
 
-    fn get_channel(&self) -> Result<ChannelHandle<'a, 'b, '_, R>, rpc_pb::Error> {
+    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error> {
         let resolved = { self.resolver.lock().unwrap().resolve()? };
         loop {
             {
@@ -471,10 +468,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         }
     }
 
-    fn establish_channel(
-        &self,
-        host: &Host,
-    ) -> Result<Arc<MonitoredChannel<'a, 'b>>, rpc_pb::Error> {
+    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
         let establish = self
             .connecting
             .get_or_create_state(HostKey::from(host.host_id()));
@@ -506,7 +500,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         Ok(ptr)
     }
 
-    fn new_channel(&self, host: &Host) -> Result<Arc<MonitoredChannel<'a, 'b>>, rpc_pb::Error> {
+    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
         let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|err| {
             rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
@@ -541,7 +535,7 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
         Ok(Arc::new(monitored_channel))
     }
 
-    fn register_channel(&self, host: &Host, chan: Arc<MonitoredChannel<'a, 'b>>) {
+    fn register_channel(&self, host: &Host, chan: Arc<Self::MonitoredChannel>) {
         let mut channels = self.channels.lock().unwrap();
         for channel in channels.iter_mut() {
             if channel.is_none() {
@@ -550,31 +544,6 @@ impl<'a, 'b, R: Resolver> ChannelManager<'a, 'b, R> {
             }
         }
         channels.push(Some((host.host_id(), Arc::clone(&chan))));
-    }
-}
-
-impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
-    type ChannelHandle<'c> = ChannelHandle<'a, 'b, 'c, R> where Self: 'c;
-    type MonitoredChannel = MonitoredChannel<'a, 'b>;
-
-    fn new(options: ClientOptions, resolver: R) -> Self {
-        Self::new(options, resolver)
-    }
-
-    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error> {
-        Self::get_channel(self)
-    }
-
-    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
-        Self::establish_channel(self, host)
-    }
-
-    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
-        Self::new_channel(self, host)
-    }
-
-    fn register_channel(&self, host: &Host, chan: Arc<Self::MonitoredChannel>) {
-        Self::register_channel(self, host, chan)
     }
 }
 
