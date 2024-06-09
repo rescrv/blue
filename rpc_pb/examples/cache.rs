@@ -45,7 +45,7 @@ service! {
 
 ////////////////////////////////////////// Implementation //////////////////////////////////////////
 
-struct CachedRegister {
+pub struct CachedRegister {
     value: Mutex<(Vec<u8>, Vec<u8>)>,
 }
 
