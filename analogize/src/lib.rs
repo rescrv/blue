@@ -182,7 +182,7 @@ impl SymbolTable {
     }
 
     pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        let mut output = OpenOptions::new().create(true).write(true).open(path)?;
+        let mut output = OpenOptions::new().create(true).truncate(true).write(true).open(path)?;
         let mut sorted = self.symbols.iter().collect::<Vec<_>>();
         sorted.sort();
         for (mangled, symbol) in sorted.into_iter() {
@@ -499,9 +499,7 @@ impl SymbolTable {
                 text = &text[1..];
                 map.insert(key.to_string(), value);
             } else {
-                let Some(position) = text.iter().position(|t| *t == text[0] + 1) else {
-                    return None;
-                };
+                let position = text.iter().position(|t| *t == text[0] + 1)?;
                 let value = self.reverse_translate_recursive(
                     &text[..position + 1],
                     &symbol[..symbol.len() - 1],
@@ -526,9 +524,7 @@ impl SymbolTable {
                 text = &text[1..];
                 values.push(value);
             } else {
-                let Some(position) = text.iter().position(|t| *t == text[0] + 1) else {
-                    return None;
-                };
+                let position = text.iter().position(|t| *t == text[0] + 1)?;
                 let value = self.reverse_translate_recursive(
                     &text[..position + 1],
                     &symbol[..symbol.len() - 1],
