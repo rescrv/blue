@@ -477,6 +477,12 @@ impl Collector {
     }
 }
 
+impl Default for Collector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /////////////////////////////////////////////// Clue ///////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, prototk_derive::Message)]
