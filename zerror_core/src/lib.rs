@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(0, TEST_COUNTER1.read());
         let mut error_core = ErrorCore::new(&TEST_COUNTER1);
         assert_eq!(1, TEST_COUNTER1.read());
-        error_core.internals.backtrace = "SOME-BACKTRACE\n".to_owned();
+        "SOME-BACKTRACE\n".clone_into(&mut error_core.internals.backtrace);
         assert_eq!("backtrace:\nSOME-BACKTRACE\n", error_core.long_form());
         let buf = stack_pack(&error_core).to_vec();
         let got: ErrorCore = Unpackable::unpack(&buf).unwrap().0;
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(0, TEST_COUNTER2.read());
         let mut error_core = ErrorCore::new(&TEST_COUNTER2);
         assert_eq!(1, TEST_COUNTER2.read());
-        error_core.internals.backtrace = "SOME-BACKTRACE\n".to_owned();
+        "SOME-BACKTRACE\n".clone_into(&mut error_core.internals.backtrace);
         error_core.set_info("VAR", 42);
         assert_eq!(
             "VAR = 42
