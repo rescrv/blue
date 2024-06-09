@@ -411,7 +411,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
-            let imm = state.imm.as_ref().map(Arc::clone);
+            let imm = state.imm.clone();
             let version = self.tree.take_snapshot();
             (mem, imm, version, state.seq_no)
         };
@@ -438,7 +438,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
-            let imm = state.imm.as_ref().map(Arc::clone);
+            let imm = state.imm.clone();
             let version = self.tree.take_snapshot();
             (mem, imm, version, state.seq_no)
         };

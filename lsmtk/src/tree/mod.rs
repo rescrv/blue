@@ -679,14 +679,14 @@ impl Version {
                         && compare_bytes(&this_level.ssts[lower_bound].first_key, first_key).is_lt()
                     {
                         fixed_point = false;
-                        first_key = &this_level.ssts[lower_bound].first_key.as_slice();
+                        first_key = this_level.ssts[lower_bound].first_key.as_slice();
                     }
                     if upper_bound > lower_bound
                         && compare_bytes(&this_level.ssts[upper_bound - 1].last_key, last_key)
                             .is_gt()
                     {
                         fixed_point = false;
-                        last_key = &this_level.ssts[upper_bound - 1].last_key.as_slice();
+                        last_key = this_level.ssts[upper_bound - 1].last_key.as_slice();
                     }
                     let new_lower_bound = this_level.lower_bound(first_key);
                     let new_upper_bound = this_level.upper_bound(last_key);
