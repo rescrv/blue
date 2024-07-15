@@ -1,0 +1,12 @@
+#!/usr/bin/env zsh
+
+set -e
+set -x
+
+export RUSTFLAGS="--deny warnings"
+
+cargo fmt -- --check
+cargo hack $HACK_FLAGS clippy --workspace --no-deps --all-targets
+
+set +x
+echo 'SUCCESS: this concludes our successful (fast) CI adventure'
