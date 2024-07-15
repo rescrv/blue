@@ -1,11 +1,8 @@
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use super::bit_array::{BitArray, Builder as BitArrayBuilder};
-use super::bit_vector::cf_rrr::BitVector;
-use super::bit_vector::BitVector as BitVectorTrait;
-use super::bits_required;
 use super::psi;
+use super::sampled::SampledArray;
 use super::sigma::Sigma;
 use super::Builder;
 use super::Error;
@@ -94,12 +91,8 @@ pub struct SampledSuffixArrayStub<'a> {
     sampling: u32,
     #[prototk(2, uint64)]
     zero: u64,
-    #[prototk(4, uint32)]
-    bits: u32,
-    #[prototk(5, bytes)]
-    values: &'a [u8],
-    #[prototk(6, bytes)]
-    present: &'a [u8],
+    #[prototk(3, bytes)]
+    sampled: &'a [u8],
 }
 
 impl<'a> TryFrom<&'a SampledSuffixArrayStub<'a>> for SampledSuffixArray<'a> {
@@ -109,50 +102,24 @@ impl<'a> TryFrom<&'a SampledSuffixArrayStub<'a>> for SampledSuffixArray<'a> {
         let SampledSuffixArrayStub {
             sampling,
             zero,
-            bits,
-            values,
-            present,
+            sampled,
         } = ssas;
-        if *bits > 64 {
-            return Err(Error::InvalidSuffixArray);
-        }
-        let bits = *bits as u8;
-        let values = BitArray::new(values);
-        let present = BitVector::parse(present)?.0;
+        let (sampled, _) = SampledArray::parse(sampled)?;
         Ok(SampledSuffixArray {
             sampling: *sampling,
             zero: *zero,
-            bits,
-            values,
-            present,
+            sampled,
         })
     }
 }
 
 //////////////////////////////////////// SampledSuffixArray ////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct SampledSuffixArray<'a> {
     sampling: u32,
     zero: u64,
-    bits: u8,
-    values: BitArray<'a>,
-    present: BitVector<'a>,
-}
-
-impl<'a> SampledSuffixArray<'a> {
-    fn value(&self, x: usize) -> Option<usize> {
-        let (access, rank) = self.present.access_rank(x)?;
-        if access {
-            let bits = self.bits as usize;
-            if let Some(v) = self.values.load(bits * rank, bits) {
-                v.try_into().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+    sampled: SampledArray<'a>,
 }
 
 impl<'a> SuffixArray for SampledSuffixArray<'a> {
@@ -164,40 +131,15 @@ impl<'a> SuffixArray for SampledSuffixArray<'a> {
         if sampling > 63 {
             return Err(Error::InvalidSuffixArray);
         }
-        let sample = |x: usize| -> Option<u64> {
-            if x % (1 << sampling) == 0 {
-                Some((x >> sampling) as u64)
-            } else {
-                None
+        let mut values = vec![];
+        for (idx, sa) in sa.iter().enumerate() {
+            if sa % (1 << sampling) == 0 {
+                values.push((idx, sa >> sampling));
             }
-        };
-        let max_value = sa
-            .iter()
-            .cloned()
-            .filter_map(sample)
-            .max()
-            .unwrap_or_default();
-        let bits = bits_required(max_value) as usize;
-        let mut values = BitArrayBuilder::with_capacity(bits * sa.len());
-        let mut present = vec![];
-        for (idx, value) in sa
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(idx, v)| Some((idx, sample(v)?)))
-        {
-            while present.len() < idx {
-                present.push(false);
-            }
-            present.push(true);
-            values.push_word(value, bits);
         }
         builder.append_u32(FieldNumber::must(1), sampling as u32);
         builder.append_u64(FieldNumber::must(2), sa[0] as u64);
-        builder.append_u32(FieldNumber::must(3), bits as u32);
-        let values = values.seal();
-        builder.append_bytes(FieldNumber::must(4), &values);
-        BitVector::construct(&present, &mut builder.sub(FieldNumber::must(5)))?;
+        SampledArray::construct(&values, &mut builder.sub(FieldNumber::must(3)))?;
         Ok(())
     }
 
@@ -212,7 +154,7 @@ impl<'a> SuffixArray for SampledSuffixArray<'a> {
             if idx == 0 {
                 return Ok(self.zero as usize - k);
             }
-            if let Some(sa) = self.value(idx) {
+            if let Some(sa) = self.sampled.lookup(idx) {
                 let sa = sa << self.sampling;
                 return Ok(sa - k);
             }
@@ -222,37 +164,17 @@ impl<'a> SuffixArray for SampledSuffixArray<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for SampledSuffixArray<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.debug_struct("SampledSuffixArray")
-            .field("sampling", &self.sampling)
-            .field("zero", &self.zero)
-            .field("bits", &self.bits)
-            .field("values", &self.values)
-            .field("present", &self.present.len())
-            .finish()
-    }
-}
-
 impl<'a> Unpackable<'a> for SampledSuffixArray<'a> {
     type Error = Error;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
         let (stub, buf) =
             SampledSuffixArrayStub::unpack(buf).map_err(|_| Error::InvalidSuffixArray)?;
-        if stub.bits > 64 {
-            return Err(Error::InvalidSuffixArray);
-        }
-        let bits = stub.bits as u8;
-        let values = BitArray::new(stub.values);
-        let present = BitVector::parse(stub.present)?.0;
         Ok((
             Self {
                 sampling: stub.sampling,
                 zero: stub.zero,
-                bits,
-                values,
-                present,
+                sampled: SampledArray::parse(stub.sampled)?.0,
             },
             buf,
         ))
