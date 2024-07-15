@@ -25,7 +25,7 @@ fn main() {
         panic!("free arguments are not accepted");
     }
     let mut guac = Guacamole::new(cmdline.seed.unwrap_or(0));
-    let mut remain = cmdline.bytes.unwrap_or(u64::max_value()) as usize;
+    let mut remain = cmdline.bytes.unwrap_or(u64::MAX) as usize;
     let mut buf = [0u8; 1 << 20];
     let buf: &mut [u8] = &mut buf;
     while remain > 0 {

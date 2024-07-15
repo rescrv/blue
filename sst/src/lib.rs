@@ -636,7 +636,7 @@ impl Default for SstMetadata {
             first_key: Vec::new(),
             last_key,
             smallest_timestamp: 0,
-            biggest_timestamp: u64::max_value(),
+            biggest_timestamp: u64::MAX,
             file_size: 0,
         }
     }
@@ -1073,38 +1073,25 @@ impl SstOptions {
     }
 
     /// Set the target block size.
-    pub fn target_block_size(mut self, mut target_block_size: u32) -> Self {
-        if target_block_size < CLAMP_MIN_TARGET_BLOCK_SIZE {
-            target_block_size = CLAMP_MIN_TARGET_BLOCK_SIZE;
-        }
-        if target_block_size > CLAMP_MAX_TARGET_BLOCK_SIZE {
-            target_block_size = CLAMP_MAX_TARGET_BLOCK_SIZE;
-        }
-        self.target_block_size = target_block_size as usize;
+    pub fn target_block_size(mut self, target_block_size: u32) -> Self {
+        self.target_block_size = target_block_size
+            .clamp(CLAMP_MIN_TARGET_BLOCK_SIZE, CLAMP_MAX_TARGET_BLOCK_SIZE)
+            as usize;
         self
     }
 
     /// Set the target file size.
-    pub fn target_file_size(mut self, mut target_file_size: u32) -> Self {
-        if target_file_size < CLAMP_MIN_TARGET_FILE_SIZE {
-            target_file_size = CLAMP_MIN_TARGET_FILE_SIZE;
-        }
-        if target_file_size > CLAMP_MAX_TARGET_FILE_SIZE {
-            target_file_size = CLAMP_MAX_TARGET_FILE_SIZE;
-        }
-        self.target_file_size = target_file_size as usize;
+    pub fn target_file_size(mut self, target_file_size: u32) -> Self {
+        self.target_file_size =
+            target_file_size.clamp(CLAMP_MIN_TARGET_FILE_SIZE, CLAMP_MAX_TARGET_FILE_SIZE) as usize;
         self
     }
 
-    /// Set the minimum file size.
-    pub fn minimum_file_size(mut self, mut minimum_file_size: u32) -> Self {
-        if minimum_file_size < CLAMP_MIN_MINIMUM_FILE_SIZE {
-            minimum_file_size = CLAMP_MIN_MINIMUM_FILE_SIZE;
-        }
-        if minimum_file_size > CLAMP_MAX_MINIMUM_FILE_SIZE {
-            minimum_file_size = CLAMP_MAX_MINIMUM_FILE_SIZE;
-        }
-        self.minimum_file_size = minimum_file_size as usize;
+    /// Set the minimum file size
+    pub fn minimum_file_size(mut self, minimum_file_size: u32) -> Self {
+        self.minimum_file_size = minimum_file_size
+            .clamp(CLAMP_MIN_MINIMUM_FILE_SIZE, CLAMP_MAX_MINIMUM_FILE_SIZE)
+            as usize;
         self
     }
 }
@@ -1166,14 +1153,14 @@ impl SstBuilder {
         Ok(SstBuilder {
             options,
             last_key: Vec::new(),
-            last_timestamp: u64::max_value(),
+            last_timestamp: u64::MAX,
             block_builder: None,
             block_start_offset: 0,
             bytes_written: 0,
             index_block: BlockBuilder::new(block_options),
             filter: vec![],
             setsum: Setsum::default(),
-            smallest_timestamp: u64::max_value(),
+            smallest_timestamp: u64::MAX,
             biggest_timestamp: 0,
             output: BufWriter::with_capacity(write_buffer_size, output),
             path: path.as_ref().to_path_buf(),

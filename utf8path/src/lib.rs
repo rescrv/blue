@@ -139,8 +139,8 @@ impl<'a> Path<'a> {
                 if prefix[..prefix_slash] != path[..path_slash] {
                     return None;
                 }
-                path = &path[path_slash + 1..].trim_start_matches('/');
-                prefix = &prefix[prefix_slash + 1..].trim_start_matches('/');
+                path = path[path_slash + 1..].trim_start_matches('/');
+                prefix = prefix[prefix_slash + 1..].trim_start_matches('/');
             } else if prefix == path {
                 return Some(Path::new("."));
             } else if let Some(path) = path.strip_prefix(prefix) {
@@ -151,9 +151,9 @@ impl<'a> Path<'a> {
                     return Some(Path::new(path));
                 }
             } else if prefix.starts_with("./") {
-                prefix = &prefix[2..].trim_start_matches('/');
+                prefix = prefix[2..].trim_start_matches('/');
             } else if path.starts_with("./") {
-                path = &path[2..].trim_start_matches('/');
+                path = path[2..].trim_start_matches('/');
             } else if prefix.is_empty() || prefix == "." {
                 if path.is_empty() {
                     return Some(Path::new("."));
@@ -882,7 +882,7 @@ mod tests {
         for tc in TEST_CASES.iter() {
             assert_eq!(
                 Some(tc.basename.clone()),
-                tc.path.strip_prefix(&tc.dirname),
+                tc.path.strip_prefix(tc.dirname.clone()),
                 "path: {:?}",
                 tc.path
             );

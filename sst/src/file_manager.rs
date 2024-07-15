@@ -284,7 +284,7 @@ pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error
     FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();
     let file = Arc::new(open(path.clone())?);
     let fd = file.as_raw_fd() as usize;
-    assert!(fd < usize::max_value());
+    assert!(fd < usize::MAX);
     let mut state = State {
         opening: HashSet::new(),
         files: Vec::with_capacity(fd + 1),

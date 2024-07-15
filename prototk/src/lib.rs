@@ -937,7 +937,7 @@ impl<'a> Unpackable<'a> for Tag {
         let mut up = Unpacker::new(buf);
         let tag: v64 = up.unpack()?;
         let tag: u64 = tag.into();
-        if tag > u32::max_value() as u64 {
+        if tag > u32::MAX as u64 {
             return Err(Error::TagTooLarge { tag });
         }
         let tag: u32 = tag as u32;

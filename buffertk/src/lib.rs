@@ -642,7 +642,7 @@ where
     {
         let mut up = Unpacker::new(buf);
         let tag: v64 = up.unpack()?;
-        if <v64 as Into<u64>>::into(tag) > u32::max_value() as u64 {
+        if <v64 as Into<u64>>::into(tag) > u32::MAX as u64 {
             return Err(Error::TagTooLarge { tag: tag.into() }.into());
         }
         let tag: u32 = tag.try_into().unwrap();

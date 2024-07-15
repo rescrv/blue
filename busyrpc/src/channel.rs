@@ -56,7 +56,7 @@ impl Channel {
         if send_buf_sz < 64 {
             send_buf_sz = 64;
         }
-        assert!(send_buf_sz < u32::max_value() as usize);
+        assert!(send_buf_sz < u32::MAX as usize);
         stream.get_ref().set_nodelay(true)?;
         stream.get_ref().set_nonblocking(true)?;
         Ok(Channel {

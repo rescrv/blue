@@ -47,7 +47,7 @@ impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
     fn seek(&mut self, key: &[u8]) -> Result<(), C::Error> {
         let kref = KeyRef {
             key,
-            timestamp: u64::max_value(),
+            timestamp: u64::MAX,
         };
         let mut left = 0usize;
         let mut right = self.cursors.len() - 1;

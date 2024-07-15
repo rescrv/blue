@@ -105,7 +105,7 @@ impl Cursor for ReferenceCursor {
     fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         let target = KeyValuePair {
             key: key.into(),
-            timestamp: u64::max_value(),
+            timestamp: u64::MAX,
             value: None,
         };
         self.index = match self.entries.binary_search(&target) {

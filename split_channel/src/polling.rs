@@ -149,7 +149,7 @@ impl OsPoll for Epoll {
         } else if ret == 0 {
             POLL_TIMEOUT.click();
             Ok(None)
-        } else if ev.u64 > i32::max_value() as u64 {
+        } else if ev.u64 > i32::MAX as u64 {
             FD_TRUNCATED.click();
             Ok(None)
         } else {

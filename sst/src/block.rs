@@ -241,7 +241,7 @@ impl BlockBuilder {
             options,
             buffer,
             last_key: Vec::default(),
-            last_timestamp: u64::max_value(),
+            last_timestamp: u64::MAX,
             restarts,
             bytes_since_restart: 0,
             key_value_pairs_since_restart: 0,
@@ -282,7 +282,7 @@ impl BlockBuilder {
         let pa = stack_pack(be);
         // This assert should be safe because our table size is limited to 1<<30 and be's pack size
         // should not exceed 3GiB.
-        assert!(self.buffer.len() + pa.pack_sz() <= u32::max_value() as usize);
+        assert!(self.buffer.len() + pa.pack_sz() <= u32::MAX as usize);
         pa.append_to_vec(&mut self.buffer);
 
         // Update the estimates for when we should do a restart.

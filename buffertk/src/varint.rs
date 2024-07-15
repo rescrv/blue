@@ -283,14 +283,14 @@ mod tests {
 
     #[test]
     fn from_into_u8() {
-        from_into_x(u8::min_value());
-        from_into_x(u8::max_value());
+        from_into_x(u8::MIN);
+        from_into_x(u8::MAX);
         from_into_x(1u8);
     }
 
     #[test]
     fn try_into_u8() {
-        let x: u64 = (u8::max_value() as u64) + 1;
+        let x: u64 = (u8::MAX as u64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<u8, Error> = v.try_into();
         assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
@@ -298,14 +298,14 @@ mod tests {
 
     #[test]
     fn from_into_u16() {
-        from_into_x(u16::min_value());
-        from_into_x(u16::max_value());
+        from_into_x(u16::MIN);
+        from_into_x(u16::MAX);
         from_into_x(1u16);
     }
 
     #[test]
     fn try_into_u16() {
-        let x: u64 = (u16::max_value() as u64) + 1;
+        let x: u64 = (u16::MAX as u64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<u16, Error> = v.try_into();
         assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
@@ -313,14 +313,14 @@ mod tests {
 
     #[test]
     fn from_into_u32() {
-        from_into_x(u32::min_value());
-        from_into_x(u32::max_value());
+        from_into_x(u32::MIN);
+        from_into_x(u32::MAX);
         from_into_x(1u32);
     }
 
     #[test]
     fn try_into_u32() {
-        let x: u64 = (u32::max_value() as u64) + 1;
+        let x: u64 = (u32::MAX as u64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<u32, Error> = v.try_into();
         assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
@@ -328,15 +328,15 @@ mod tests {
 
     #[test]
     fn from_into_u64() {
-        from_into_x(u64::min_value());
-        from_into_x(u64::max_value());
+        from_into_x(u64::MIN);
+        from_into_x(u64::MAX);
         from_into_x(1u64);
     }
 
     #[test]
     fn from_into_i8() {
-        from_into_x(i8::min_value());
-        from_into_x(i8::max_value());
+        from_into_x(i8::MIN);
+        from_into_x(i8::MAX);
         from_into_x(-1i8);
         from_into_x(0i8);
         from_into_x(1i8);
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn try_into_i8() {
-        let x: i64 = (i8::max_value() as i64) + 1;
+        let x: i64 = (i8::MAX as i64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<i8, Error> = v.try_into();
         assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
@@ -352,8 +352,8 @@ mod tests {
 
     #[test]
     fn from_into_i16() {
-        from_into_x(i16::min_value());
-        from_into_x(i16::max_value());
+        from_into_x(i16::MIN);
+        from_into_x(i16::MAX);
         from_into_x(-1i16);
         from_into_x(0i16);
         from_into_x(1i16);
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn try_into_i16() {
-        let x: i64 = (i16::max_value() as i64) + 1;
+        let x: i64 = (i16::MAX as i64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<i16, Error> = v.try_into();
         assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
@@ -369,8 +369,8 @@ mod tests {
 
     #[test]
     fn from_into_i32() {
-        from_into_x(i32::min_value());
-        from_into_x(i32::max_value());
+        from_into_x(i32::MIN);
+        from_into_x(i32::MAX);
         from_into_x(-1i32);
         from_into_x(0i32);
         from_into_x(1i32);
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn try_into_i32() {
-        let x: i64 = (i32::max_value() as i64) + 1;
+        let x: i64 = (i32::MAX as i64) + 1;
         let v: v64 = v64::from(x);
         let x2: Result<i32, Error> = v.try_into();
         assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
@@ -386,8 +386,8 @@ mod tests {
 
     #[test]
     fn from_into_i64() {
-        from_into_x(i64::min_value());
-        from_into_x(i64::max_value());
+        from_into_x(i64::MIN);
+        from_into_x(i64::MAX);
         from_into_x(-1i64);
         from_into_x(0i64);
         from_into_x(1i64);
@@ -395,27 +395,19 @@ mod tests {
 
     #[test]
     fn from_into_usize() {
-        from_into_x(usize::min_value());
-        from_into_x(usize::max_value());
+        from_into_x(usize::MIN);
+        from_into_x(usize::MAX);
         from_into_x(1usize);
     }
 
     #[test]
     fn assumption_u64_holds_usize() {
-        let min: u64 = usize::min_value().try_into().unwrap();
+        let min: u64 = usize::MIN.try_into().unwrap();
         let min: usize = min.try_into().unwrap();
-        assert_eq!(
-            usize::min_value(),
-            min,
-            "u64 cannot hold usize::min_value()"
-        );
-        let max: u64 = usize::max_value().try_into().unwrap();
+        assert_eq!(usize::MIN, min, "u64 cannot hold usize::MIN");
+        let max: u64 = usize::MAX.try_into().unwrap();
         let max: usize = max.try_into().unwrap();
-        assert_eq!(
-            usize::max_value(),
-            max,
-            "u64 cannot hold usize::max_value()"
-        );
+        assert_eq!(usize::MAX, max, "u64 cannot hold usize::MAX");
     }
 
     const TESTS: &[(u64, usize, &[u8])] = &[

@@ -1109,7 +1109,7 @@ impl Schema {
                     .with_info("bytes", &copy[..sz])?
                     .0;
                 let x: u64 = x.into();
-                if x >> 4 >= u32::max_value() as u64 {
+                if x >> 4 >= u32::MAX as u64 {
                     return Err(Error::Corruption {
                         core: ErrorCore::default(),
                         what: "invalid field number".to_owned(),

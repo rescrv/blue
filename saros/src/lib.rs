@@ -488,6 +488,7 @@ impl<B: BiometricsStore> BiometricsStore for Mutex<B> {
 //////////////////////////////////////////// QueryEngine ///////////////////////////////////////////
 
 /// QueryEngine executes queries against one or more BiometricsStore instances.
+#[derive(Default)]
 pub struct QueryEngine {
     biometrics: Vec<Arc<dyn BiometricsStore>>,
 }

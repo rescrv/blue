@@ -1500,7 +1500,7 @@ mod tests {
     #[test]
     fn int32() {
         helper_test::<int32, i32>(
-            i32::min_value(),
+            i32::MIN,
             &[0x80, 0x80, 0x80, 0x80, 0xf8, 0xff, 0xff, 0xff, 0xff, 1],
         );
         helper_test::<int32, i32>(
@@ -1509,13 +1509,13 @@ mod tests {
         );
         helper_test::<int32, i32>(0, &[0]);
         helper_test::<int32, i32>(1, &[1]);
-        helper_test::<int32, i32>(i32::max_value(), &[0xff, 0xff, 0xff, 0xff, 0x07]);
+        helper_test::<int32, i32>(i32::MAX, &[0xff, 0xff, 0xff, 0xff, 0x07]);
     }
 
     #[test]
     fn int64() {
         helper_test::<int64, i64>(
-            i64::min_value(),
+            i64::MIN,
             &[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1],
         );
         helper_test::<int64, i64>(
@@ -1525,7 +1525,7 @@ mod tests {
         helper_test::<int64, i64>(0, &[0]);
         helper_test::<int64, i64>(1, &[1]);
         helper_test::<int64, i64>(
-            i64::max_value(),
+            i64::MAX,
             &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f],
         );
     }
@@ -1534,7 +1534,7 @@ mod tests {
     fn uint32() {
         helper_test::<uint32, u32>(0, &[0]);
         helper_test::<uint32, u32>(1, &[1]);
-        helper_test::<uint32, u32>(u32::max_value(), &[0xff, 0xff, 0xff, 0xff, 0x0f]);
+        helper_test::<uint32, u32>(u32::MAX, &[0xff, 0xff, 0xff, 0xff, 0x0f]);
     }
 
     #[test]
@@ -1542,31 +1542,31 @@ mod tests {
         helper_test::<uint64, u64>(0, &[0]);
         helper_test::<uint64, u64>(1, &[1]);
         helper_test::<uint64, u64>(
-            u64::max_value(),
+            u64::MAX,
             &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
         );
     }
 
     #[test]
     fn sint32() {
-        helper_test::<sint32, i32>(i32::min_value(), &[0xff, 0xff, 0xff, 0xff, 0x0f]);
+        helper_test::<sint32, i32>(i32::MIN, &[0xff, 0xff, 0xff, 0xff, 0x0f]);
         helper_test::<sint32, i32>(-1, &[1]);
         helper_test::<sint32, i32>(0, &[0]);
         helper_test::<sint32, i32>(1, &[2]);
-        helper_test::<sint32, i32>(i32::max_value(), &[0xfe, 0xff, 0xff, 0xff, 0x0f]);
+        helper_test::<sint32, i32>(i32::MAX, &[0xfe, 0xff, 0xff, 0xff, 0x0f]);
     }
 
     #[test]
     fn sint64() {
         helper_test::<sint64, i64>(
-            i64::min_value(),
+            i64::MIN,
             &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
         );
         helper_test::<sint64, i64>(-1, &[1]);
         helper_test::<sint64, i64>(0, &[0]);
         helper_test::<sint64, i64>(1, &[2]);
         helper_test::<sint64, i64>(
-            i64::max_value(),
+            i64::MAX,
             &[0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1],
         );
     }
@@ -1575,38 +1575,32 @@ mod tests {
     fn fixed32() {
         helper_test::<fixed32, u32>(0, &[0, 0, 0, 0]);
         helper_test::<fixed32, u32>(1, &[1, 0, 0, 0]);
-        helper_test::<fixed32, u32>(u32::max_value(), &[0xff, 0xff, 0xff, 0xff]);
+        helper_test::<fixed32, u32>(u32::MAX, &[0xff, 0xff, 0xff, 0xff]);
     }
 
     #[test]
     fn fixed64() {
         helper_test::<fixed64, u64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
         helper_test::<fixed64, u64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
-        helper_test::<fixed64, u64>(
-            u64::max_value(),
-            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-        );
+        helper_test::<fixed64, u64>(u64::MAX, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     }
 
     #[test]
     fn sfixed32() {
-        helper_test::<sfixed32, i32>(i32::min_value(), &[0, 0, 0, 0x80]);
+        helper_test::<sfixed32, i32>(i32::MIN, &[0, 0, 0, 0x80]);
         helper_test::<sfixed32, i32>(-1, &[0xff, 0xff, 0xff, 0xff]);
         helper_test::<sfixed32, i32>(0, &[0, 0, 0, 0]);
         helper_test::<sfixed32, i32>(1, &[1, 0, 0, 0]);
-        helper_test::<sfixed32, i32>(i32::max_value(), &[0xff, 0xff, 0xff, 0x7f]);
+        helper_test::<sfixed32, i32>(i32::MAX, &[0xff, 0xff, 0xff, 0x7f]);
     }
 
     #[test]
     fn sfixed64() {
-        helper_test::<sfixed64, i64>(i64::min_value(), &[0, 0, 0, 0, 0, 0, 0, 0x80]);
+        helper_test::<sfixed64, i64>(i64::MIN, &[0, 0, 0, 0, 0, 0, 0, 0x80]);
         helper_test::<sfixed64, i64>(-1, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         helper_test::<sfixed64, i64>(0, &[0, 0, 0, 0, 0, 0, 0, 0]);
         helper_test::<sfixed64, i64>(1, &[1, 0, 0, 0, 0, 0, 0, 0]);
-        helper_test::<sfixed64, i64>(
-            i64::max_value(),
-            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f],
-        );
+        helper_test::<sfixed64, i64>(i64::MAX, &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]);
     }
 
     #[test]

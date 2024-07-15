@@ -101,7 +101,7 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Vers
     let mut colors_stack = Vec::new();
     for color in colors.iter().copied() {
         let lower = Bound::Included((color, 0));
-        let upper = Bound::Included((color, usize::max_value()));
+        let upper = Bound::Included((color, usize::MAX));
         if color_reverse_adj_list.range((lower, upper)).count() == 0 {
             vertices[color].level = 0;
             colors_stack.push(color);
@@ -109,8 +109,8 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Vers
     }
     // Perform a bfs across all colors to set the level to the max level based upon bfs depth.
     while let Some(color) = colors_stack.pop() {
-        let lower = Bound::Included((color, usize::min_value()));
-        let upper = Bound::Included((color, usize::max_value()));
+        let lower = Bound::Included((color, usize::MIN));
+        let upper = Bound::Included((color, usize::MAX));
         for (u, v) in color_forward_adj_list.range((lower, upper)).copied() {
             assert_eq!(color, u);
             if vertices[v].level == vertices.len() || vertices[v].level <= vertices[color].level {
@@ -230,8 +230,8 @@ fn tarjan_scc(vertices: &mut [Vertex], adj_list: &BTreeSet<(usize, usize)>) {
         if state[idx].index != vertices.len() {
             continue;
         }
-        let lower = Bound::Included((idx, usize::min_value()));
-        let upper = Bound::Included((idx, usize::max_value()));
+        let lower = Bound::Included((idx, usize::MIN));
+        let upper = Bound::Included((idx, usize::MAX));
         let iter = adj_list.range((lower, upper));
         let mut recursion = Vec::new();
         // strongconnect
@@ -248,7 +248,7 @@ fn tarjan_scc(vertices: &mut [Vertex], adj_list: &BTreeSet<(usize, usize)>) {
                 assert_eq!(*v, *src);
                 if state[*w].index == vertices.len() {
                     let lower = Bound::Included((*w, 0));
-                    let upper = Bound::Included((*w, usize::max_value()));
+                    let upper = Bound::Included((*w, usize::MAX));
                     let iter = adj_list.range((lower, upper));
                     // strongconnect
                     recursion.push((*w, iter));

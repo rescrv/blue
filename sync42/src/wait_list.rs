@@ -205,7 +205,7 @@ impl<T: Clone> WaitList<T> {
             self.wait_waiter_available.notify_one();
         }
         guard.owned = false;
-        guard.index = u64::max_value();
+        guard.index = u64::MAX;
         UNLINK.click();
     }
 

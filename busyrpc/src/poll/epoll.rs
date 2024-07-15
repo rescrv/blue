@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use std::os::fd::RawFd;
 
 use biometrics::{Collector, Counter};

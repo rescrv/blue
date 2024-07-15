@@ -163,7 +163,7 @@ impl TinyLFU {
     }
 
     fn read(&self, hashes: &[u64]) -> u64 {
-        let mut count = u64::max_value();
+        let mut count = u64::MAX;
         let modulus = self.counters.len();
         for hash in hashes.iter() {
             let value = self.counters.load(*hash as usize % modulus);

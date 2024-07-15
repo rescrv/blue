@@ -92,26 +92,15 @@ impl Default for ClientOptions {
 
 impl ClientOptions {
     /// Set the number of channels to open in parallel.
-    pub fn with_channels(mut self, mut channels: usize) -> Self {
-        if channels < MIN_CHANNELS {
-            channels = MIN_CHANNELS;
-        }
-        if channels > MAX_CHANNELS {
-            channels = MAX_CHANNELS;
-        }
-        self.channels = channels;
+    pub fn with_channels(mut self, channels: usize) -> Self {
+        self.channels = channels.clamp(MIN_CHANNELS, MAX_CHANNELS);
         self
     }
 
     /// Set the user_send_buffer.
-    pub fn with_user_send_buffer(mut self, mut user_send_buffer_size: usize) -> Self {
-        if user_send_buffer_size < MIN_USERSPACE_SEND_BUFFER {
-            user_send_buffer_size = MIN_USERSPACE_SEND_BUFFER;
-        }
-        if user_send_buffer_size > MAX_USERSPACE_SEND_BUFFER {
-            user_send_buffer_size = MAX_USERSPACE_SEND_BUFFER;
-        }
-        self.user_send_buffer_size = user_send_buffer_size;
+    pub fn with_user_send_buffer(mut self, user_send_buffer_size: usize) -> Self {
+        self.user_send_buffer_size =
+            user_send_buffer_size.clamp(MIN_USERSPACE_SEND_BUFFER, MAX_USERSPACE_SEND_BUFFER);
         self
     }
 }

@@ -115,7 +115,7 @@ impl Ballot {
 
     /// The largest possible ballot.
     pub const TOP: Ballot = Ballot {
-        number: u64::max_value(),
+        number: u64::MAX,
         leader: ReplicaID::TOP,
     };
 }
