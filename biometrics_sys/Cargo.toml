@@ -16,8 +16,3 @@ binaries = []
 libc = "0.2"
 
 biometrics = { path = "../biometrics", version = "0.6.0" }
-
-[[bin]]
-name = "biometrics-sys-print"
-path = "src/bin/biometrics-sys-print.rs"
-required-features=["binaries"]
