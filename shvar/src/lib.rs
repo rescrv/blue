@@ -17,6 +17,8 @@ pub enum Error {
     TrailingRightBrace,
     /// There's an invalid variable definition.
     InvalidVariable,
+    /// There were more than 256 variables during expansion (possible cycle?)
+    DepthLimitExceeded,
     /// The user-requested ${FOO:?ERROR MESSAGE} form will return `"ERROR MESSAGE".to_string()` via
     /// this variant.
     Requested(String),
@@ -384,11 +386,15 @@ impl Builder {
 /////////////////////////////////////////////// parse //////////////////////////////////////////////
 
 fn parse_statement(
+    depth: usize,
     vars: &mut dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
 ) -> Result<(), Error> {
+    if depth > 256 {
+        return Err(Error::DepthLimitExceeded);
+    }
     // SAFETY(rescrv):  If you add another break to this loop, update the assert in `expand`.
     while let Some(c) = tokens.peek() {
         match c {
@@ -396,10 +402,10 @@ fn parse_statement(
                 parse_single_quotes(vars, witness, tokens, output)?;
             }
             '"' => {
-                parse_double_quotes(vars, witness, tokens, output)?;
+                parse_double_quotes(depth, vars, witness, tokens, output)?;
             }
             '$' => {
-                parse_variable(vars, witness, tokens, output)?;
+                parse_variable(depth, vars, witness, tokens, output)?;
             }
             '}' => {
                 break;
@@ -434,6 +440,7 @@ fn parse_single_quotes(
 }
 
 fn parse_double_quotes(
+    depth: usize,
     vars: &mut dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
@@ -479,7 +486,7 @@ fn parse_double_quotes(
             }
             '$' => {
                 noexpect = true;
-                parse_variable(vars, witness, tokens, output)?;
+                parse_variable(depth, vars, witness, tokens, output)?;
             }
             c if prev_was_whack => {
                 output.push('\\');
@@ -499,6 +506,7 @@ fn parse_double_quotes(
 }
 
 fn parse_variable(
+    depth: usize,
     vars: &mut dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
@@ -514,7 +522,7 @@ fn parse_variable(
         };
         tokens.accept(action);
         let mut expanded = Builder::from_other(output);
-        parse_statement(vars, witness, tokens, &mut expanded)?;
+        parse_statement(depth + 1, vars, witness, tokens, &mut expanded)?;
         match action {
             '-' => {
                 if let Some(val) = vars.lookup(&ident) {
@@ -577,7 +585,7 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 pub fn expand(vars: &mut dyn VariableProvider, input: &str) -> Result<String, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
-    parse_statement(vars, &mut (), &mut tokens, &mut output)?;
+    parse_statement(0, vars, &mut (), &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
