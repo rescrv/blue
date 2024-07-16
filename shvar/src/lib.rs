@@ -17,6 +17,13 @@ pub enum Error {
     TrailingRightBrace,
     /// There's an invalid variable definition.
     InvalidVariable,
+    /// Invalid characater.
+    InvalidCharacter {
+        /// The character that was expected.
+        expected: char,
+        /// What (if anything) was at this position.
+        returned: Option<char>,
+    },
     /// There were more than 256 variables during expansion (possible cycle?)
     DepthLimitExceeded,
     /// The user-requested ${FOO:?ERROR MESSAGE} form will return `"ERROR MESSAGE".to_string()` via
@@ -265,7 +272,10 @@ impl<'a> Tokenize<'a> {
         if self.accept(c) {
             Ok(())
         } else {
-            todo!();
+            return Err(Error::InvalidCharacter {
+                expected: c,
+                returned: self.peek(),
+            });
         }
     }
 
@@ -543,7 +553,10 @@ fn parse_variable(
                 }
             }
             c => {
-                todo!("complain about the token in this position: {c:?}");
+                return Err(Error::InvalidCharacter {
+                    expected: '-',
+                    returned: Some(c),
+                });
             }
         }
     } else if let Some(val) = vars.lookup(&ident) {
@@ -568,7 +581,7 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
                 if !identifier.is_empty() {
                     return Ok(identifier);
                 } else {
-                    todo!("return an error for empty identifier");
+                    return Err(Error::InvalidVariable);
                 }
             }
         }
