@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter::{Enumerate, Peekable};
 use std::str::Chars;
@@ -240,6 +240,12 @@ pub trait VariableWitness {
 
 impl VariableWitness for () {
     fn witness(&mut self, _: &str) {}
+}
+
+impl VariableWitness for HashSet<String> {
+    fn witness(&mut self, ident: &str) {
+        self.insert(String::from(ident));
+    }
 }
 
 ///////////////////////////////////////////// Tokenizer ////////////////////////////////////////////
@@ -531,13 +537,6 @@ fn parse_variable(
                     output.append(expanded);
                 }
             }
-            '?' => {
-                if let Some(val) = vars.lookup(&ident) {
-                    output.push_str(val);
-                } else {
-                    return Err(Error::Requested(expanded.into_string()));
-                }
-            }
             '+' => {
                 if vars.lookup(&ident).is_some() {
                     output.append(expanded);
@@ -592,6 +591,24 @@ pub fn expand(vars: &mut dyn VariableProvider, input: &str) -> Result<String, Er
         return Err(Error::TrailingRightBrace);
     }
     Ok(output.into_string().trim().to_string())
+}
+
+/////////////////////////////////////////////// rcvar //////////////////////////////////////////////
+
+/// Return a vector of the variables in use by this script.
+pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
+    let mut tokens = Tokenize::new(input);
+    let mut output = Builder::default();
+    let mut witnesses: HashSet<String> = HashSet::new();
+    parse_statement(0, &mut (), &mut witnesses, &mut tokens, &mut output)?;
+    if tokens.peek().is_some() {
+        // SAFETY(rescrv): We can only break out of the loop early on '}'.
+        assert_eq!(Some('}'), tokens.peek());
+        return Err(Error::TrailingRightBrace);
+    }
+    let mut witnesses: Vec<_> = witnesses.into_iter().collect();
+    witnesses.sort();
+    Ok(witnesses)
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -747,5 +764,13 @@ mod tests {
     fn describe_my_shell_foospace_double_quotes() {
         let mut env: HashMap<&str, &str> = HashMap::from([("FOOSPACE", "foo ")]);
         assert_eq!(r#""foo ""#, expand(&mut env, r#""${FOOSPACE}""#).unwrap());
+    }
+
+    #[test]
+    fn four_rcvar() {
+        assert_eq!(
+            vec!["BAR".to_string(), "BAZ".to_string(), "FOO".to_string(), "QUUX".to_string()],
+            rcvar("${FOO}-${BAR}-${BAZ}-${QUUX}").unwrap(),
+        );
     }
 }
