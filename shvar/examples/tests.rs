@@ -71,7 +71,7 @@ fn expect(test_name: &str) -> &str {
 
 fn generate_test_case1(foo: Option<String>) {
     let mut test_name = String::new();
-    if let Some(foo) = foo.as_ref() {
+    if foo.is_some() {
         test_name += "foo_isset";
     } else {
         test_name += "foo_notset";
@@ -95,7 +95,7 @@ fn generate_test_case1(foo: Option<String>) {
 
 fn generate_test_case3(foo: Option<String>, op1: Operator, bar: Option<String>) {
     let mut test_name = String::new();
-    if let Some(foo) = foo.as_ref() {
+    if foo.is_some() {
         test_name += "foo_isset_";
     } else {
         test_name += "foo_notset_";
@@ -104,7 +104,7 @@ fn generate_test_case3(foo: Option<String>, op1: Operator, bar: Option<String>) 
         Operator::DefaultValue => "default",
         Operator::AlternateValue => "alternate",
     };
-    if let Some(bar) = bar.as_ref() {
+    if bar.is_some() {
         test_name += "_bar_isset";
     } else {
         test_name += "_bar_notset";
@@ -138,7 +138,7 @@ fn generate_test_case5(
     baz: Option<String>,
 ) {
     let mut test_name = String::new();
-    if let Some(foo) = foo.as_ref() {
+    if foo.is_some() {
         test_name += "foo_isset_";
     } else {
         test_name += "foo_notset_";
@@ -147,7 +147,7 @@ fn generate_test_case5(
         Operator::DefaultValue => "default",
         Operator::AlternateValue => "alternate",
     };
-    if let Some(bar) = bar.as_ref() {
+    if bar.is_some() {
         test_name += "_bar_isset_";
     } else {
         test_name += "_bar_notset_";
@@ -156,7 +156,7 @@ fn generate_test_case5(
         Operator::DefaultValue => "default",
         Operator::AlternateValue => "alternate",
     };
-    if let Some(baz) = baz.as_ref() {
+    if baz.is_some() {
         test_name += "_baz_isset";
     } else {
         test_name += "_baz_notset";
@@ -210,7 +210,7 @@ fn main() {
     println!("// AUTO-GENERATED FILE:  DO NOT EDIT MANUALLY (or with sed)");
     println!("// regenerate with:  cargo run --example tests > tests/shvar.rs && cargo fmt");
     println!("use std::collections::HashMap;");
-    println!("use shvar::{{quote, expand}};");
+    println!("use shvar::expand;");
 
     for idx in 0..2 {
         let (foo, _, _) = foo_bar_baz(idx);

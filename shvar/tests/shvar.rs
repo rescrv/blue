@@ -1,6 +1,6 @@
 // AUTO-GENERATED FILE:  DO NOT EDIT MANUALLY (or with sed)
 // regenerate with:  cargo run --example tests > tests/shvar.rs && cargo fmt
-use shvar::{expand, quote};
+use shvar::expand;
 use std::collections::HashMap;
 
 #[test]

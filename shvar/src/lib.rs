@@ -685,17 +685,17 @@ mod tests {
 
     #[test]
     fn describe_my_shell_foo_bar_two_words() {
-        assert_eq!("foo bar", expand(&mut(), "foo bar").unwrap());
+        assert_eq!("foo bar", expand(&mut (), "foo bar").unwrap());
     }
 
     #[test]
     fn describe_my_shell_foo_bar_single_quotes() {
-        assert_eq!(r#""foo bar""#, expand(&mut(), "'foo bar'").unwrap());
+        assert_eq!(r#""foo bar""#, expand(&mut (), "'foo bar'").unwrap());
     }
 
     #[test]
     fn describe_my_shell_foo_bar_double_quotes() {
-        assert_eq!(r#""foo bar""#, expand(&mut(), r#""foo bar""#).unwrap());
+        assert_eq!(r#""foo bar""#, expand(&mut (), r#""foo bar""#).unwrap());
     }
 
     #[test]
@@ -707,7 +707,10 @@ mod tests {
     #[test]
     fn describe_my_shell_foobar_single_quotes() {
         let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(r#""${FOOBAR}""#, expand(&mut env, r#"'${FOOBAR}'"#).unwrap());
+        assert_eq!(
+            r#""${FOOBAR}""#,
+            expand(&mut env, r#"'${FOOBAR}'"#).unwrap()
+        );
     }
 
     #[test]
@@ -719,13 +722,19 @@ mod tests {
     #[test]
     fn describe_my_shell_abcd_no_quote() {
         let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(r#"abfoo barcd"#, expand(&mut env, r#"ab${FOOBAR}cd"#).unwrap());
+        assert_eq!(
+            r#"abfoo barcd"#,
+            expand(&mut env, r#"ab${FOOBAR}cd"#).unwrap()
+        );
     }
 
     #[test]
     fn describe_my_shell_abcd_double_quotes() {
         let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(r#"ab"foo bar"cd"#, expand(&mut env, r#"ab"${FOOBAR}"cd"#).unwrap());
+        assert_eq!(
+            r#"ab"foo bar"cd"#,
+            expand(&mut env, r#"ab"${FOOBAR}"cd"#).unwrap()
+        );
     }
 
     #[test]
