@@ -223,22 +223,32 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
 ///
 /// It is expected that the provider do no expansion of its own.
 pub trait VariableProvider {
-    fn lookup(&self, ident: &str) -> Option<&str>;
+    fn lookup(&self, ident: &str) -> Option<String>;
 }
 
 impl VariableProvider for () {
-    fn lookup(&self, _: &str) -> Option<&str> {
+    fn lookup(&self, _: &str) -> Option<String> {
         None
     }
 }
 
 impl<K: Borrow<str> + Eq + Hash, V: AsRef<str>> VariableProvider for HashMap<K, V> {
-    fn lookup(&self, ident: &str) -> Option<&str> {
-        self.get(ident).map(|s| s.as_ref())
+    fn lookup(&self, ident: &str) -> Option<String> {
+        self.get(ident).map(|s| s.as_ref().to_string())
     }
 }
 
-///////////////////////////////////////// VariableProvider /////////////////////////////////////////
+//////////////////////////////////////// EnvironmentProvider ///////////////////////////////////////
+
+pub struct EnvironmentProvider;
+
+impl VariableProvider for EnvironmentProvider {
+    fn lookup(&self, var: &str) -> Option<String> {
+        std::env::var(var).ok()
+    }
+}
+
+////////////////////////////////////////// VariableWitness /////////////////////////////////////////
 
 /// A VariableWitness collects the identifiers of variables in use in a string.
 pub trait VariableWitness {
@@ -272,10 +282,10 @@ impl<'a> Tokenize<'a> {
         if self.accept(c) {
             Ok(())
         } else {
-            return Err(Error::InvalidCharacter {
+            Err(Error::InvalidCharacter {
                 expected: c,
                 returned: self.peek(),
-            });
+            })
         }
     }
 
@@ -542,7 +552,7 @@ fn parse_variable(
         match action {
             '-' => {
                 if let Some(val) = vars.lookup(&ident) {
-                    output.push_str(val);
+                    output.push_str(&val);
                 } else {
                     output.append(expanded);
                 }
@@ -560,7 +570,7 @@ fn parse_variable(
             }
         }
     } else if let Some(val) = vars.lookup(&ident) {
-        output.push_str(val);
+        output.push_str(&val);
     }
     tokens.expect('}')?;
     Ok(())
