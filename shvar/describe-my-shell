@@ -1,0 +1,98 @@
+alias magic="python3 -c 'import sys; print(sys.argv[1:])'"
+
+echo start with "['foo', 'bar']"
+magic foo bar
+
+echo
+echo single-quote "[\"'foo bar'\"]"
+magic 'foo bar'
+
+echo
+echo double-quote "['\"foo bar\"']"
+magic "foo bar"
+
+echo
+echo FOOBAR="foo bar"
+FOOBAR="foo bar"
+
+echo
+echo expand it '['"'"'${FOOBAR}'"'"']'
+magic ${FOOBAR}
+echo "['foo', 'bar']"
+echo POSIX shells will match '^'
+
+echo
+echo single-quote the expansion '["'"'"'${FOOBAR}'"'"'"]'
+magic '${FOOBAR}'
+echo '['"'"'${FOOBAR}'"'"']'
+echo POSIX shells will match '^'
+
+echo
+echo double-quote the expansion '['"'"'"${FOOBAR}"'"'"']'
+magic "${FOOBAR}"
+echo '['"'"foo bar"'"']'
+echo POSIX shells will match '^'
+
+echo
+echo expansion in the middle of abcd '['"'"'ab${FOOBAR}cd'"'"']'
+magic ab${FOOBAR}cd
+echo '['"'"abfoo"'", "'"barcd"'"']'
+echo POSIX shells will match '^'
+
+echo
+echo double-quote the expansion in the middle of abcd '['"'"'ab"${FOOBAR}"cd'"'"']'
+magic ab"${FOOBAR}"cd
+echo '['"'"abfoo barcd"'"']'
+echo POSIX shells will match '^'
+
+echo
+echo FOOSPACE="foo "
+FOOSPACE="foo "
+
+echo
+echo double-quote the expansion of FOOSPACE '['"'"'"${FOOSPACE}"'"'"']'
+magic "${FOOSPACE}"
+echo '['"'"foo "'"']'
+echo POSIX shells will match '^' '(note the space)'
+
+echo
+echo expansion of FOOSPACE '['"'"'${FOOSPACE}'"'"']'
+magic ${FOOSPACE}
+echo '['"'"foo"'"']'
+echo POSIX shells will match '^' '(note the absence of space)'
+
+echo
+echo expansion of 's1=" " s2="" s3=""' '['"'"'${s1}"${s2}"${s3}'"'"']'
+export s1=" "
+export s2=""
+export s3=""
+magic ${s1}"${s2}"${s3}
+echo '['"''"']'
+echo POSIX shells will match '^' '(note the absence of space)'
+
+echo
+echo expansion of 's1="" s2=" " s3=""' '['"'"'${s1}"${s2}"${s3}'"'"']'
+export s1=""
+export s2=" "
+export s3=""
+magic ${s1}"${s2}"${s3}
+echo '['"' '"']'
+echo POSIX shells will match '^' '(note the presence of space)'
+
+echo
+echo expansion of 's1="" s2="" s3=" "' '['"'"'${s1}"${s2}"${s3}'"'"']'
+export s1=""
+export s2=""
+export s3=" "
+magic ${s1}"${s2}"${s3}
+echo '['"''"']'
+echo POSIX shells will match '^' '(note the absence of space)'
+
+echo
+echo expansion of 's1="" s2=" FOO" s3=""' '['"'"'${s1}"${s2}"${s3}'"'"']'
+export s1=""
+export s2=" FOO"
+export s3=""
+magic ${s1}"${s2}"${s3}
+echo '['"' FOO'"']'
+echo POSIX shells will match '^' '(note the presence of space)'

@@ -30,6 +30,7 @@ members = [
     "saros",
     "scrunch",
     "setsum",
+    "shvar",
     "skipfree",
     "sig_fig_histogram",
     "split_channel",
