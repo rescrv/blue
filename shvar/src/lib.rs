@@ -803,7 +803,12 @@ mod tests {
     #[test]
     fn four_rcvar() {
         assert_eq!(
-            vec!["BAR".to_string(), "BAZ".to_string(), "FOO".to_string(), "QUUX".to_string()],
+            vec![
+                "BAR".to_string(),
+                "BAZ".to_string(),
+                "FOO".to_string(),
+                "QUUX".to_string()
+            ],
             rcvar("${FOO}-${BAR}-${BAZ}-${QUUX}").unwrap(),
         );
     }
