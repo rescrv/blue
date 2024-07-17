@@ -238,6 +238,17 @@ impl<K: Borrow<str> + Eq + Hash, V: AsRef<str>> VariableProvider for HashMap<K, 
     }
 }
 
+impl VariableProvider for Vec<Box<dyn VariableProvider>> {
+    fn lookup(&self, ident: &str) -> Option<String> {
+        for vp in self.iter() {
+            if let Some(value) = vp.lookup(ident) {
+                return Some(value);
+            }
+        }
+        None
+    }
+}
+
 //////////////////////////////////////// EnvironmentProvider ///////////////////////////////////////
 
 pub struct EnvironmentProvider;
