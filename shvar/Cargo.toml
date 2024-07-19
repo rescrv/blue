@@ -7,7 +7,17 @@ description = "shvar provides a POSIX-compliant shell variable substitution rout
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 
 [dev-dependencies]
 proptest = "1.0"
+
+[[example]]
+name = "tests"
+path = "examples/tests.rs"
+required-features=["binaries"]

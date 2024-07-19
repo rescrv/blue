@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_names)]
+
 const ANSWERS: &[(&str, &str)] = &[
     ("foo_isset", "foo"),
     ("foo_isset_alternate_bar_isset", "bar"),
