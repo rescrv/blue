@@ -382,6 +382,7 @@ impl Builder {
         if !self.within_quotes() {
             self.expanded.push('"');
         }
+        self.prev = '"';
         self.inc_quote_count();
     }
 
@@ -389,13 +390,10 @@ impl Builder {
         let was_in_quotes = self.within_quotes();
         self.dec_quote_count();
         let is_in_quotes = self.within_quotes();
-        if was_in_quotes != is_in_quotes {
-            if self.expanded.ends_with('"') {
-                self.expanded.pop();
-            } else {
-                self.expanded.push('"');
-            }
+        if was_in_quotes && !is_in_quotes {
+            self.expanded.push('"');
         }
+        self.prev = '"';
     }
 
     fn within_quotes(&self) -> bool {
@@ -463,6 +461,8 @@ fn parse_single_quotes(
     output: &mut Builder,
 ) -> Result<(), Error> {
     tokens.expect('\'')?;
+    // NOTE(rescrv): Single quotes would seem to want single quotes here.
+    // Instead, what we want is to have the literal string pop up in double quotes.
     output.open_double_quotes();
     while let Some(c) = tokens.peek() {
         if tokens.accept('\'') {
@@ -470,7 +470,15 @@ fn parse_single_quotes(
             return Ok(());
         } else {
             tokens.accept(c);
-            output.push(c);
+            if c == '"' {
+                output.push('\\');
+                output.push(c);
+            } else if c == '\n' {
+                output.push('\\');
+                output.push('n');
+            } else {
+                output.push(c);
+            }
         }
     }
     Err(Error::OpenSingleQuotes)
@@ -655,14 +663,14 @@ mod tests {
     fn expand_all_empty() {
         let mut env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", "")]);
         assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
     fn expand_space_empty_empty() {
         let mut env: HashMap<&str, &str> = HashMap::from([("s1", " "), ("s2", ""), ("s3", "")]);
         assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
@@ -676,7 +684,7 @@ mod tests {
     fn expand_empty_empty_space() {
         let mut env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", " ")]);
         assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
@@ -686,6 +694,15 @@ mod tests {
         assert_eq!(
             "foo-bar-baz",
             expand(&mut env, "${FOO}-${BAR}-${BAZ}").unwrap()
+        );
+    }
+
+    #[test]
+    fn novar_expansion() {
+        let mut env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!(
+            r#""" "" """#,
+            expand(&mut env, "\"${FOO}\" \"${BAR}\" \"${BAZ}\"").unwrap()
         );
     }
 
