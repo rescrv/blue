@@ -1,0 +1,12 @@
+[package]
+name = "rc_conf"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "rc_conf provides rc.conf and rc.d-like data structures for consumption."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
+shvar = { path = "../shvar", version = "0.1" }
+utf8path = { path = "../utf8path", version = "0.1" }
