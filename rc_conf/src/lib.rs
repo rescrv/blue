@@ -56,6 +56,12 @@ impl From<shvar::Error> for Error {
     }
 }
 
+impl From<std::str::Utf8Error> for Error {
+    fn from(err: std::str::Utf8Error) -> Self {
+        todo!();
+    }
+}
+
 ///////////////////////////////////////////// RcScript /////////////////////////////////////////////
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
