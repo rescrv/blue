@@ -311,6 +311,7 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
 
 ////////////////////////////////////////////// RcConf //////////////////////////////////////////////
 
+/// An RC Configuration.
 pub trait RcConf {
     fn variables(&self) -> Vec<String>;
     fn lookup(&self, k: &str) -> Option<String>;
@@ -318,6 +319,7 @@ pub trait RcConf {
 
 //////////////////////////////////////////// RcConfFile ////////////////////////////////////////////
 
+/// An RC configuration found within a single file.
 pub struct RcConfFile {
     values: HashMap<String, String>,
 }
@@ -350,6 +352,7 @@ impl RcConf for RcConfFile {
 
 //////////////////////////////////////////// RcConfChain ///////////////////////////////////////////
 
+/// A chain of RC configurations.
 pub struct RcConfChain {
     chain: Vec<Box<dyn RcConf>>,
 }
