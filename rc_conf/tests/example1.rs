@@ -8,7 +8,7 @@ use common::cargo_dir;
 fn example1() {
     let cd = cargo_dir();
     let rcscript = cd.into_std().join("rcscript");
-    let mut output = Command::new(rcscript)
+    let output = Command::new(rcscript)
         .arg("rc.d/example1")
         .arg("rcvar")
         .stdout(Stdio::piped())

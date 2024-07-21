@@ -1,7 +1,5 @@
 use utf8path::Path;
 
-use rc_conf::Error;
-
 /// Return the cargo directory where binaries built by the application will reside.
 pub fn cargo_dir() -> Path<'static> {
     if let Some(bin_path) = std::env::var_os("CARGO_BIN_PATH") {

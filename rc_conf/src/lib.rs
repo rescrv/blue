@@ -6,16 +6,49 @@ use utf8path::Path;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
-pub enum Error {}
+#[derive(Debug)]
+pub enum Error {
+    FileTooLarge {
+        path: Path<'static>,
+    },
+    TrailingWhack {
+        path: Path<'static>,
+    },
+    ProhibitedCharacter {
+        path: Path<'static>,
+        line: u32,
+        string: String,
+        character: char,
+    },
+    InvalidRcConf {
+        path: Path<'static>,
+        line: u32,
+        message: String,
+    },
+    InvalidRcScript {
+        path: Path<'static>,
+        line: u32,
+        message: String,
+    },
+    InvalidInvocation {
+        message: String,
+    },
+    IoError(std::io::Error),
+    ShvarError(shvar::Error),
+    Utf8Error(std::str::Utf8Error),
+}
 
 impl Error {
     pub fn file_too_large(file: &Path) -> Self {
-        todo!();
+        Self::FileTooLarge {
+            path: file.clone().into_owned(),
+        }
     }
 
     pub fn trailing_whack(file: &Path) -> Self {
-        todo!();
+        Self::TrailingWhack {
+            path: file.clone().into_owned(),
+        }
     }
 
     pub fn prohibited_character(
@@ -24,41 +57,52 @@ impl Error {
         string: impl AsRef<str>,
         character: char,
     ) -> Self {
-        todo!();
+        Self::ProhibitedCharacter {
+            path: file.clone().into_owned(),
+            line,
+            string: string.as_ref().to_string(),
+            character,
+        }
     }
 
     pub fn invalid_rc_conf(file: &Path, line: u32, message: impl AsRef<str>) -> Self {
-        todo!();
+        Self::InvalidRcConf {
+            path: file.clone().into_owned(),
+            line,
+            message: message.as_ref().to_string(),
+        }
     }
 
     pub fn invalid_rc_script(file: &Path, line: u32, message: impl AsRef<str>) -> Self {
-        todo!();
-    }
-
-    pub fn duplicate_command(file: &Path, line: u32, variable: impl AsRef<str>) -> Self {
-        todo!();
+        Self::InvalidRcScript {
+            path: file.clone().into_owned(),
+            line,
+            message: message.as_ref().to_string(),
+        }
     }
 
     pub fn invalid_invocation(message: impl AsRef<str>) -> Self {
-        todo!();
+        Self::InvalidInvocation {
+            message: message.as_ref().to_string(),
+        }
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        todo!();
+        Self::IoError(err)
     }
 }
 
 impl From<shvar::Error> for Error {
     fn from(err: shvar::Error) -> Self {
-        todo!();
+        Self::ShvarError(err)
     }
 }
 
 impl From<std::str::Utf8Error> for Error {
     fn from(err: std::str::Utf8Error) -> Self {
-        todo!();
+        Self::Utf8Error(err)
     }
 }
 
@@ -126,7 +170,8 @@ impl RcScript {
                         command = Some(val.to_string());
                     }
                     "PROVIDE" | "VERSION" | "COMMAND" => {
-                        return Err(Error::duplicate_command(path, number, var));
+                        return Err(Error::invalid_rc_script(path, number, 
+                                format!("{} was repeated", var)));
                     }
                     _ => {
                         return Err(Error::invalid_rc_script(
@@ -284,7 +329,7 @@ impl RcConfFile {
             if let Some((var, val)) = line.split_once('=') {
                 values.insert(var.to_string(), val.to_string());
             } else {
-                return Err(Error::invalid_rc_conf(&path, number, line));
+                return Err(Error::invalid_rc_conf(path, number, line));
             }
         }
         Ok(Self {
@@ -299,7 +344,7 @@ impl RcConf for RcConfFile {
     }
 
     fn lookup(&self, k: &str) -> Option<String> {
-        self.values.get(k).map(String::clone)
+        self.values.get(k).cloned()
     }
 }
 
