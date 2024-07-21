@@ -199,10 +199,16 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
             }
             (State::Unquoted, '\'') => {
                 state = State::Single;
+                if next_word.is_none() {
+                    next_word = Some(String::new());
+                }
                 prev_was_whack = false;
             }
             (State::Unquoted, '"') => {
                 state = State::Double;
+                if next_word.is_none() {
+                    next_word = Some(String::new());
+                }
                 prev_was_whack = false;
             }
             (State::Unquoted, c) => {
@@ -703,6 +709,30 @@ mod tests {
         assert_eq!(
             r#""" "" """#,
             expand(&mut env, "\"${FOO}\" \"${BAR}\" \"${BAZ}\"").unwrap()
+        );
+    }
+
+    #[test]
+    fn my_command1() {
+        let mut env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!(
+            r#"my-command --args" "foo --field1 "" --field2 """#,
+            expand(&mut env, "my-command --args\" \"foo --field1 \"${FIELD1}\" --field2 \"${FIELD2}\"").unwrap()
+        );
+    }
+
+    #[test]
+    fn my_command2() {
+        assert_eq!(
+            vec![
+                "my-command".to_string(),
+                "--args foo".to_string(),
+                "--field1".to_string(),
+                "".to_string(),
+                "--field2".to_string(),
+                "".to_string(),
+            ],
+            split("my-command --args\" \"foo --field1 \"\" --field2 \"\"").unwrap(),
         );
     }
 
