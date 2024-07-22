@@ -170,8 +170,11 @@ impl RcScript {
                         command = Some(val.to_string());
                     }
                     "PROVIDE" | "VERSION" | "COMMAND" => {
-                        return Err(Error::invalid_rc_script(path, number, 
-                                format!("{} was repeated", var)));
+                        return Err(Error::invalid_rc_script(
+                            path,
+                            number,
+                            format!("{} was repeated", var),
+                        ));
                     }
                     _ => {
                         return Err(Error::invalid_rc_script(
@@ -231,7 +234,10 @@ impl RcScript {
     }
 
     pub fn rcvar(&self) -> Result<Vec<String>, Error> {
-        Ok(shvar::rcvar(&self.command)?.into_iter().map(|v| format!("{}_{}", self.name, v)).collect())
+        Ok(shvar::rcvar(&self.command)?
+            .into_iter()
+            .map(|v| format!("{}_{}", self.name, v))
+            .collect())
     }
 
     pub fn invoke(&self, args: &[impl AsRef<str>]) -> Result<(), Error> {
@@ -240,16 +246,14 @@ impl RcScript {
         } else {
             let args = args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
             match args[0] {
-                "run" => {
-                    self.run(&args[1..])
-                },
+                "run" => self.run(&args[1..]),
                 "describe" => {
                     if args.len() != 1 {
                         eprintln!("arguments ignored");
                     }
                     println!("{self:#?}");
                     Ok(())
-                },
+                }
                 "rcvar" => {
                     if args.len() != 1 {
                         eprintln!("arguments ignored");
@@ -258,10 +262,11 @@ impl RcScript {
                         println!("{rcvar}");
                     }
                     Ok(())
-                },
-                _ => {
-                    Err(Error::invalid_invocation(format!("unknown command {:?}", args[0])))
-                },
+                }
+                _ => Err(Error::invalid_invocation(format!(
+                    "unknown command {:?}",
+                    args[0]
+                ))),
             }
         }
     }
@@ -272,9 +277,7 @@ impl RcScript {
         let mut cmd = shvar::split(&exp)?;
         cmd.push("--".to_string());
         cmd.extend(args.iter().map(|s| s.to_string()));
-        let mut child = Command::new(&cmd[0])
-            .args(&cmd[1..])
-            .spawn()?;
+        let mut child = Command::new(&cmd[0]).args(&cmd[1..]).spawn()?;
         let exit_status = child.wait()?;
         std::process::exit(exit_status.code().unwrap_or(0));
     }
@@ -292,9 +295,7 @@ pub struct EnvironmentVariableProvider {
 
 impl EnvironmentVariableProvider {
     pub const fn new(prefix: Option<String>) -> Self {
-        Self {
-            prefix,
-        }
+        Self { prefix }
     }
 }
 
@@ -334,9 +335,7 @@ impl RcConfFile {
                 return Err(Error::invalid_rc_conf(path, number, line));
             }
         }
-        Ok(Self {
-            values,
-        })
+        Ok(Self { values })
     }
 }
 
@@ -360,9 +359,7 @@ pub struct RcConfChain {
 impl RcConfChain {
     // Construct a new RcConfChain that will lookup in chain[i + 1] before chain[i].
     pub const fn new(chain: Vec<Box<dyn RcConf>>) -> Self {
-        Self {
-            chain,
-        }
+        Self { chain }
     }
 }
 
@@ -396,9 +393,7 @@ impl RcConf for RcConfChain {
 /// Parse the chain of rc conf files.  Later files will override earlier files.
 // NOTE(rescrv):  Direction differs from the internals because there is no reverse iterator.
 pub fn parse_rc_conf_chain(chain: String) -> Result<impl RcConf, Error> {
-    let mut rc_confs = RcConfChain {
-        chain: vec![],
-    };
+    let mut rc_confs = RcConfChain { chain: vec![] };
     for piece in chain.split(':') {
         let rc_contents = read_to_string(piece)?;
         let piece = Path::from(piece);
@@ -503,7 +498,12 @@ COMMAND="my-command" "--option"
             )
             .unwrap();
             assert_eq!(
-                RcScript::new("name", "command", "c0ffee1eaff00d", "\"my-command\" \"--option\""),
+                RcScript::new(
+                    "name",
+                    "command",
+                    "c0ffee1eaff00d",
+                    "\"my-command\" \"--option\""
+                ),
                 rc_script
             );
         }
@@ -538,7 +538,10 @@ COMMAND=my-command \
 "#,
             )
             .unwrap();
-            assert_eq!(vec!["name_MY_VARIABLE".to_string()], rc_script.rcvar().unwrap());
+            assert_eq!(
+                vec!["name_MY_VARIABLE".to_string()],
+                rc_script.rcvar().unwrap()
+            );
         }
     }
 }

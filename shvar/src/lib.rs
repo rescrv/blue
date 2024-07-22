@@ -717,7 +717,11 @@ mod tests {
         let mut env: HashMap<&str, &str> = HashMap::new();
         assert_eq!(
             r#"my-command --args" "foo --field1 "" --field2 """#,
-            expand(&mut env, "my-command --args\" \"foo --field1 \"${FIELD1}\" --field2 \"${FIELD2}\"").unwrap()
+            expand(
+                &mut env,
+                "my-command --args\" \"foo --field1 \"${FIELD1}\" --field2 \"${FIELD2}\""
+            )
+            .unwrap()
         );
     }
 
