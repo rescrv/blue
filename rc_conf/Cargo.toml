@@ -7,6 +7,16 @@ description = "rc_conf provides rc.conf and rc.d-like data structures for consum
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 shvar = { path = "../shvar", version = "0.1" }
 utf8path = { path = "../utf8path", version = "0.1" }
+
+[[bin]]
+name = "rcscript"
+path = "src/bin/rcscript.rs"
+required-features=["binaries"]

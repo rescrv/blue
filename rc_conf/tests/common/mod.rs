@@ -4,7 +4,7 @@ use utf8path::Path;
 pub fn cargo_dir() -> Path<'static> {
     if let Some(bin_path) = std::env::var_os("CARGO_BIN_PATH") {
         Path::try_from(bin_path).expect("CARGO_BIN_PATH should be UTF-8")
-    } else if let Some(mut path) = std::env::current_exe().ok() {
+    } else if let Ok(mut path) = std::env::current_exe() {
         path.pop();
         if path.ends_with("deps") {
             path.pop();
