@@ -80,11 +80,10 @@ pub struct Tags<'a> {
 }
 
 impl<'a> Tags<'a> {
-    pub fn new(tags: &'a str) -> Option<Tags<'a>> {
-        Self::parse(&Cow::Borrowed(tags))?;
-        Some(Tags {
-            tags: Cow::Borrowed(tags),
-        })
+    pub fn new<'b, S: Into<Cow<'b, str>>>(tags: S) -> Option<Tags<'b>> {
+        let tags = tags.into();
+        Self::parse(&tags)?;
+        Some(Tags { tags })
     }
 
     pub fn to_owned(self) -> Tags<'static> {
