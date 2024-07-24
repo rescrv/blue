@@ -1,0 +1,9 @@
+[package]
+name = "unix_sock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libc = "0.2"
+
+utf8path = { path = "../utf8path", version = "0.1" }

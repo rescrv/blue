@@ -44,6 +44,7 @@ members = [
     "tiny_lfu",
     "tuple_key",
     "tuple_key_derive",
+    "unix_sock",
     "utf8path",
     "utilz",
     "zerror",
