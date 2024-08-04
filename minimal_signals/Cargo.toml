@@ -1,0 +1,11 @@
+[package]
+name = "minimal_signals"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "minimal_signals provides a minimal API for working with signals."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
+libc = "0.2"

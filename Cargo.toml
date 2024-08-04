@@ -21,6 +21,7 @@ members = [
     "macarunes",
     "mani",
     "meta",
+    "minimal_signals",
     "one_two_eight",
     "paxos_pb",
     "protoql",
