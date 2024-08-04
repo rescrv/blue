@@ -3,7 +3,22 @@ name = "unix_sock"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 libc = "0.2"
 
 utf8path = { path = "../utf8path", version = "0.1" }
+
+[[example]]
+name = "unix-sock-client"
+path = "examples/unix-sock-client.rs"
+required-features=["binaries"]
+
+[[example]]
+name = "unix-sock-server"
+path = "examples/unix-sock-server.rs"
+required-features=["binaries"]
