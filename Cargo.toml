@@ -29,6 +29,7 @@ members = [
     "prototk_derive",
     "rc_conf",
     "rpc_pb",
+    "rustrc",
     "saros",
     "scrunch",
     "setsum",

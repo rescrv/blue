@@ -1,0 +1,3 @@
+#!/usr/bin/env rcscript
+DESCRIBE="Print the results of --message in both positions (config and runtime)."
+COMMAND=rustrc-smoke-test --environment "${MESSAGE}"
