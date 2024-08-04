@@ -82,7 +82,7 @@ fn generate_test_case1(foo: Option<String>) {
     println!("\n#[test]");
     println!("fn {test_name}_1() {{");
 
-    println!("    let mut env: HashMap<&str, &str> = HashMap::from([");
+    println!("    let env: HashMap<&str, &str> = HashMap::from([");
     if let Some(foo) = foo {
         println!("        (\"FOO\", {foo:?}),");
     }
@@ -90,7 +90,7 @@ fn generate_test_case1(foo: Option<String>) {
 
     let expect = expect(&test_name);
     let mut assertion = format!("assert_eq!({expect:?}");
-    assertion += ", expand(&mut env, \"${FOO}\").unwrap())";
+    assertion += ", expand(&env, \"${FOO}\").unwrap())";
     println!("    {assertion}");
     println!("}}");
 }
@@ -115,7 +115,7 @@ fn generate_test_case3(foo: Option<String>, op1: Operator, bar: Option<String>) 
     println!("\n#[test]");
     println!("fn {test_name}_2() {{");
 
-    println!("    let mut env: HashMap<&str, &str> = HashMap::from([");
+    println!("    let env: HashMap<&str, &str> = HashMap::from([");
     if let Some(foo) = foo {
         println!("        (\"FOO\", {foo:?}),");
     }
@@ -125,7 +125,7 @@ fn generate_test_case3(foo: Option<String>, op1: Operator, bar: Option<String>) 
     println!("    ]);");
     let expect = expect(&test_name);
     let mut assertion = format!("assert_eq!({expect:?}");
-    assertion += ", expand(&mut env, \"${FOO:";
+    assertion += ", expand(&env, \"${FOO:";
     assertion += op1.as_str();
     assertion += "${BAR}}\").unwrap());";
     println!("    {assertion}");
@@ -167,7 +167,7 @@ fn generate_test_case5(
     println!("\n#[test]");
     println!("fn {test_name}_3() {{");
 
-    println!("    let mut env: HashMap<&str, &str> = HashMap::from([");
+    println!("    let env: HashMap<&str, &str> = HashMap::from([");
     if let Some(foo) = foo {
         println!("        (\"FOO\", {foo:?}),");
     }
@@ -180,7 +180,7 @@ fn generate_test_case5(
     println!("    ]);");
     let expect = expect(&test_name);
     let mut assertion = format!("assert_eq!({expect:?}");
-    assertion += ", expand(&mut env, \"${FOO:";
+    assertion += ", expand(&env, \"${FOO:";
     assertion += op1.as_str();
     assertion += "${BAR:";
     assertion += op2.as_str();
