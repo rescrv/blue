@@ -1,7 +1,8 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::fs::read_to_string;
 use std::process::Command;
 
+use shvar::{PrefixingVariableProvider, VariableProvider};
 use utf8path::Path;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -36,6 +37,7 @@ pub enum Error {
     IoError(std::io::Error),
     ShvarError(shvar::Error),
     Utf8Error(std::str::Utf8Error),
+    FromUtf8Error(std::string::FromUtf8Error),
 }
 
 impl Error {
@@ -106,70 +108,90 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        Self::FromUtf8Error(err)
+    }
+}
+
+////////////////////////////////////////// SwitchPosition //////////////////////////////////////////
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SwitchPosition {
+    No,
+    Yes,
+    Manual,
+}
+
+impl SwitchPosition {
+    pub fn from_enable<S: AsRef<str>>(s: S) -> Option<Self> {
+        let s = s.as_ref();
+        match s {
+            "YES" => Some(SwitchPosition::Yes),
+            "NO" => Some(SwitchPosition::No),
+            "MANUAL" => Some(SwitchPosition::Manual),
+            _ => None,
+        }
+    }
+
+    pub fn is_enabled(self) -> bool {
+        match self {
+            Self::Yes => true,
+            Self::Manual => true,
+            Self::No => false,
+        }
+    }
+}
+
 ///////////////////////////////////////////// RcScript /////////////////////////////////////////////
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RcScript {
     name: String,
-    provide: String,
-    version: String,
+    describe: String,
     command: String,
 }
 
 impl RcScript {
     pub fn new(
         name: impl Into<String>,
-        provide: impl Into<String>,
-        version: impl Into<String>,
+        describe: impl Into<String>,
         command: impl Into<String>,
     ) -> Self {
         let name = name.into();
-        let provide = provide.into();
-        let version = version.into();
+        let describe = describe.into();
         let command = command.into();
         Self {
             name,
-            provide,
-            version,
+            describe,
             command,
         }
     }
 
     pub fn parse(path: &Path, contents: &str) -> Result<Self, Error> {
         let name = name_from_path(path);
-        let mut provide = None;
-        let mut version = None;
+        let mut describe = None;
         let mut command = None;
-        for (number, line) in linearize(path, contents)? {
-            if line.trim().starts_with('#') {
+        for (number, line, _) in linearize(path, contents)? {
+            if line.trim().starts_with('#') || line.trim().is_empty() {
                 continue;
             }
             if let Some((var, val)) = line.split_once('=') {
                 match var {
-                    "PROVIDE" if provide.is_none() => {
+                    "DESCRIBE" if describe.is_none() => {
                         if val.contains('$') {
                             return Err(Error::invalid_rc_script(
                                 path,
                                 number,
-                                "PROVIDE takes no variables",
+                                "DESCRIBE takes no variables",
                             ));
                         }
-                        provide = Some(val.to_string());
-                    }
-                    "VERSION" if version.is_none() => {
-                        if val.contains('$') {
-                            return Err(Error::invalid_rc_script(
-                                path,
-                                number,
-                                "VERSION takes no variables",
-                            ));
-                        }
-                        version = Some(val.to_string());
+                        describe = Some(val.to_string());
                     }
                     "COMMAND" if command.is_none() => {
                         command = Some(val.to_string());
                     }
-                    "PROVIDE" | "VERSION" | "COMMAND" => {
+                    "DESCRIBE" | "COMMAND" => {
                         return Err(Error::invalid_rc_script(
                             path,
                             number,
@@ -192,28 +214,22 @@ impl RcScript {
                 ));
             }
         }
-        match (provide, version, command) {
-            (Some(provide), Some(version), Some(command)) => {
+        match (describe, command) {
+            (Some(describe), Some(command)) => {
                 let rc = RcScript {
                     name,
-                    provide,
-                    version,
+                    describe,
                     command,
                 };
                 rc.rcvar()?;
                 Ok(rc)
             }
-            (None, _, _) => Err(Error::invalid_rc_script(
+            (None, _) => Err(Error::invalid_rc_script(
                 path,
                 1,
-                "missing a PROVIDE declaration",
+                "missing a DESCRIBE declaration",
             )),
-            (_, None, _) => Err(Error::invalid_rc_script(
-                path,
-                1,
-                "missing a VERSION declaration",
-            )),
-            (_, _, None) => Err(Error::invalid_rc_script(
+            (_, None) => Err(Error::invalid_rc_script(
                 path,
                 1,
                 "missing a COMMAND declaration",
@@ -221,12 +237,8 @@ impl RcScript {
         }
     }
 
-    pub fn provide(&self) -> &str {
-        &self.provide
-    }
-
-    pub fn version(&self) -> &str {
-        &self.version
+    pub fn describe(&self) -> &str {
+        &self.describe
     }
 
     pub fn command(&self) -> &str {
@@ -234,9 +246,14 @@ impl RcScript {
     }
 
     pub fn rcvar(&self) -> Result<Vec<String>, Error> {
+        let name = self
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
         Ok(shvar::rcvar(&self.command)?
             .into_iter()
-            .map(|v| format!("{}_{}", self.name, v))
+            .map(|v| format!("{}_{}", name, v))
             .collect())
     }
 
@@ -272,8 +289,14 @@ impl RcScript {
     }
 
     fn run(&self, args: &[&str]) -> Result<(), Error> {
-        let mut evp = EnvironmentVariableProvider::new(Some(self.name.clone() + "_"));
-        let exp = shvar::expand(&mut evp, &self.command)?;
+        let mut name = self
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        name.push('_');
+        let evp = EnvironmentVariableProvider::new(Some(name));
+        let exp = shvar::expand(&evp, &self.command)?;
         let mut cmd = shvar::split(&exp)?;
         cmd.push("--".to_string());
         cmd.extend(args.iter().map(|s| s.to_string()));
@@ -312,103 +335,285 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
 
 ////////////////////////////////////////////// RcConf //////////////////////////////////////////////
 
-/// An RC Configuration.
-pub trait RcConf {
-    fn variables(&self) -> Vec<String>;
-    fn lookup(&self, k: &str) -> Option<String>;
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RcConf {
+    items: HashMap<String, String>,
 }
 
-//////////////////////////////////////////// RcConfFile ////////////////////////////////////////////
+impl RcConf {
+    pub fn parse(path: &str) -> Result<Self, Error> {
+        let mut seen = HashSet::default();
+        let mut items = HashMap::default();
+        for piece in path.split(':') {
+            let piece = Path::from(piece);
+            if !piece.exists() {
+                continue;
+            }
+            Self::parse_recursive(&piece, &mut seen, &mut items)?;
+        }
+        Ok(Self { items })
+    }
 
-/// An RC configuration found within a single file.
-pub struct RcConfFile {
-    values: HashMap<String, String>,
-}
-
-impl RcConfFile {
-    pub fn parse(path: &Path, contents: &str) -> Result<Self, Error> {
-        let mut values = HashMap::new();
-        for (number, line) in linearize(path, contents)? {
-            if let Some((var, val)) = line.split_once('=') {
-                values.insert(var.to_string(), val.to_string());
+    fn parse_recursive(
+        path: &Path,
+        seen: &mut HashSet<Path>,
+        items: &mut HashMap<String, String>,
+    ) -> Result<(), Error> {
+        if seen.contains(path) {
+            return Ok(());
+        }
+        seen.insert(path.clone().into_owned());
+        let contents = std::fs::read_to_string(path.as_str())?;
+        for (number, line, _) in linearize(path, &contents)? {
+            if line.trim().starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(source) = line.trim().strip_prefix("source ") {
+                Self::parse_recursive(&Path::from(source), seen, items)?;
+            } else if let Some((var, val)) = line.split_once('=') {
+                let split = shvar::split(val)?;
+                if split.len() != 1 {
+                    return Err(Error::invalid_rc_conf(path, number, line));
+                }
+                items.insert(var.to_string(), split[0].clone());
             } else {
                 return Err(Error::invalid_rc_conf(path, number, line));
             }
         }
-        Ok(Self { values })
-    }
-}
-
-impl RcConf for RcConfFile {
-    fn variables(&self) -> Vec<String> {
-        self.values.keys().map(String::from).collect()
+        Ok(())
     }
 
-    fn lookup(&self, k: &str) -> Option<String> {
-        self.values.get(k).cloned()
+    pub fn examine(path: &str) -> Result<String, Error> {
+        let mut seen = HashSet::default();
+        let mut rc_conf = String::new();
+        for (idx, piece) in path.split(':').enumerate() {
+            let piece = Path::from(piece);
+            if !piece.exists() {
+                continue;
+            }
+            if seen.contains(&piece) {
+                rc_conf += &format!(
+                    "# rc_conf[{}] = {:?}; already sourced\n",
+                    idx,
+                    piece.as_str()
+                );
+                continue;
+            }
+            rc_conf += &format!("# rc_conf[{}] = {:?}\n", idx, piece.as_str());
+            seen.insert(piece.clone().into_owned());
+            Self::examine_recursive(&piece, &mut seen, &mut rc_conf)?;
+        }
+        Ok(rc_conf)
     }
-}
 
-//////////////////////////////////////////// RcConfChain ///////////////////////////////////////////
-
-/// A chain of RC configurations.
-pub struct RcConfChain {
-    chain: Vec<Box<dyn RcConf>>,
-}
-
-impl RcConfChain {
-    // Construct a new RcConfChain that will lookup in chain[i + 1] before chain[i].
-    pub const fn new(chain: Vec<Box<dyn RcConf>>) -> Self {
-        Self { chain }
-    }
-}
-
-impl RcConf for RcConfChain {
-    fn variables(&self) -> Vec<String> {
-        let mut values: HashSet<String> = HashSet::default();
-        for rc_conf in self.chain.iter() {
-            for variable in rc_conf.variables().into_iter() {
-                values.insert(variable);
+    fn examine_recursive(
+        path: &Path,
+        seen: &mut HashSet<Path>,
+        rc_conf: &mut String,
+    ) -> Result<(), Error> {
+        seen.insert(path.clone().into_owned());
+        let contents = std::fs::read_to_string(path.as_str())?;
+        for (_, line, raw) in linearize(path, &contents)? {
+            if let Some(source) = line.trim().strip_prefix("source ") {
+                let source = Path::from(source);
+                if !seen.contains(&source) {
+                    *rc_conf += &format!("# begin source {:?}\n", source);
+                    seen.insert(path.clone().into_owned());
+                    Self::examine_recursive(&source, seen, rc_conf)?;
+                    *rc_conf += &format!("# end source {:?}\n", source);
+                } else {
+                    *rc_conf += &format!("# already sourced {:?}\n", source);
+                }
+            } else {
+                for line in raw {
+                    *rc_conf += &line;
+                    rc_conf.push('\n');
+                }
             }
         }
-        let mut values: Vec<String> = values.into_iter().collect();
-        values.sort();
-        values
+        Ok(())
     }
 
-    fn lookup(&self, k: &str) -> Option<String> {
-        let mut rc_confs = self.chain.iter().collect::<Vec<_>>();
-        rc_confs.reverse();
-        for rc_conf in rc_confs {
-            if let Some(v) = rc_conf.lookup(k) {
-                return Some(v);
+    pub fn variables(&self) -> Vec<String> {
+        self.items.values().cloned().collect()
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        for (key, value) in other.items.into_iter() {
+            self.items.insert(key, value);
+        }
+    }
+
+    pub fn bind_for_invoke(&self, path: &Path) -> Result<HashMap<String, String>, Error> {
+        let mut bindings = HashMap::new();
+        let output = std::process::Command::new(path.clone().into_std())
+            .arg("rcvar")
+            .output()?;
+        if !output.status.success() {
+            todo!();
+        }
+        let stdout = String::from_utf8(output.stdout)?;
+        for var in stdout.split_whitespace() {
+            if let Some(value) = self.lookup(var) {
+                let value = shvar::expand(self, &value)?;
+                let quoted = shvar::quote(shvar::split(&value)?);
+                bindings.insert(var.to_string(), quoted);
+            } else if let Some(var2) =
+                var.strip_prefix(&(path.basename().as_str().to_string() + "_"))
+            {
+                if let Some(value) = self.lookup(var2) {
+                    let value = shvar::expand(self, &value)?;
+                    let quoted = shvar::quote(shvar::split(&value)?);
+                    bindings.insert(var.to_string(), quoted);
+                }
             }
         }
-        None
+        Ok(bindings)
+    }
+
+    pub fn wrapper(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
+        let mut prefix = service
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        prefix.push('_');
+        let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
+        let pvp = PrefixingVariableProvider {
+            prefix,
+            nested: self,
+        };
+        let vp = (&meta, &pvp);
+        let Some(wrapper) = vp.lookup(variable) else {
+            return Ok(vec![]);
+        };
+        let wrapper = shvar::expand(&vp, &wrapper)?;
+        if wrapper.trim().is_empty() {
+            return Ok(vec![]);
+        }
+        Ok(shvar::split(&wrapper)?)
+    }
+
+    pub fn service_switch(&self, service: &str) -> SwitchPosition {
+        let mut enabled = service
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        enabled += "_ENABLED";
+        let Some(enable) = self.lookup(&enabled) else {
+            // TODO(rescrv): biometrics.
+            return SwitchPosition::No;
+        };
+        let Ok(mut split) = shvar::split(&enable) else {
+            // TODO(rescrv): biometrics.
+            return SwitchPosition::No;
+        };
+        let enable = if split.len() == 1 {
+            // SAFETY(rescrv): Length is one, so pop will succeed.
+            split.pop().unwrap()
+        } else {
+            enable
+        };
+        let Some(switch) = SwitchPosition::from_enable(enable) else {
+            // TODO(rescrv): biometrics.
+            return SwitchPosition::No;
+        };
+        switch
     }
 }
 
-//////////////////////////////////////// parse_rc_conf_chain ///////////////////////////////////////
-
-/// Parse the chain of rc conf files.  Later files will override earlier files.
-// NOTE(rescrv):  Direction differs from the internals because there is no reverse iterator.
-pub fn parse_rc_conf_chain(chain: String) -> Result<impl RcConf, Error> {
-    let mut rc_confs = RcConfChain { chain: vec![] };
-    for piece in chain.split(':') {
-        let rc_contents = read_to_string(piece)?;
-        let piece = Path::from(piece);
-        let rc_conf = RcConfFile::parse(&piece, &rc_contents)?;
-        rc_confs.chain.push(Box::new(rc_conf));
+impl shvar::VariableProvider for RcConf {
+    fn lookup(&self, ident: &str) -> Option<String> {
+        self.items.get(ident).cloned()
     }
-    Ok(rc_confs)
+}
+
+/////////////////////////////////////////////// rc.d ///////////////////////////////////////////////
+
+pub fn load_services(
+    rc_d_path: &str,
+) -> Result<HashMap<String, Result<Path<'static>, String>>, Error> {
+    let mut services = HashMap::default();
+    for rc_d in rc_d_path.split(':') {
+        if !Path::from(rc_d).exists() {
+            continue;
+        }
+        for dirent in std::fs::read_dir(rc_d)? {
+            let dirent = dirent?;
+            let path = Path::try_from(dirent.path())?.into_owned();
+            let name = dirent.file_name().to_string_lossy().to_string();
+            if *name != *dirent.file_name() {
+                todo!();
+            }
+            match services.entry(name) {
+                Entry::Occupied(mut entry) => {
+                    let value: &mut Result<Path<'static>, String> = entry.get_mut();
+                    if value.is_ok() {
+                        *value = Err("duplicate service definition".to_string());
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(Ok(path));
+                }
+            };
+        }
+    }
+    Ok(services)
+}
+
+///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
+
+pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
+    let rc_conf = RcConf::parse(rc_conf_path).expect("rc_conf should parse");
+    let rc_d = load_services(rc_d_path).expect("rc.d should parse");
+    let Some(path) = rc_d.get(service) else {
+        eprintln!("expected service to be available via --rc-d-path");
+        std::process::exit(130);
+    };
+    let path = match path {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("service encountered an error: {err:?}");
+            std::process::exit(131);
+        }
+    };
+    if !rc_conf.service_switch(service).is_enabled() {
+        eprintln!("service not enabled");
+        std::process::exit(132);
+    }
+    let bound = rc_conf
+        .bind_for_invoke(path)
+        .expect("bind for invoke should bind");
+    let wrapper = rc_conf
+        .wrapper(service, "WRAPPER")
+        .expect("wrapper should generate");
+    let mut child = if !wrapper.is_empty() {
+        std::process::Command::new(&wrapper[0])
+            .args(&wrapper[1..])
+            .arg(path.as_str())
+            .arg("run")
+            .args(args)
+            .envs(bound)
+            .spawn()
+            .expect("rc stub should execute")
+    } else {
+        std::process::Command::new(path.as_str())
+            .arg("run")
+            .args(args)
+            .envs(bound)
+            .spawn()
+            .expect("rc stub should execute")
+    };
+    let exit_status = child.wait().expect("child.wait should succeed");
+    std::process::exit(exit_status.code().unwrap_or(0));
 }
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////
 
 /// Turn the contents of a file into numbered lines, while respecting line continuation markers.
-pub fn linearize(path: &Path, contents: &str) -> Result<Vec<(u32, String)>, Error> {
+pub fn linearize(path: &Path, contents: &str) -> Result<Vec<(u32, String, Vec<String>)>, Error> {
     let mut start = 1;
     let mut acc = String::new();
+    let mut raw = vec![];
     let mut lines = vec![];
     for (number, line) in contents.split_terminator('\n').enumerate() {
         if number as u64 >= u32::MAX as u64 {
@@ -437,13 +642,14 @@ pub fn linearize(path: &Path, contents: &str) -> Result<Vec<(u32, String)>, Erro
         }
         if !end_whack {
             acc += line.trim();
+            raw.push(line.to_string());
             let line = std::mem::take(&mut acc);
-            if !line.is_empty() {
-                lines.push((start, line));
-            }
+            let raw = std::mem::take(&mut raw);
+            lines.push((start, line, raw));
             start = number as u32 + 1;
         } else {
             acc += line[..line.len() - 1].trim();
+            raw.push(line.to_string());
         }
     }
     if !acc.is_empty() {
@@ -466,7 +672,7 @@ mod tests {
 
         #[test]
         fn new() {
-            RcScript::new("name", "provide", "version", "command");
+            RcScript::new("name", "describe", "command");
         }
 
         #[test]
@@ -474,14 +680,13 @@ mod tests {
             let rc_script = RcScript::parse(
                 &Path::from("name"),
                 r#"
-PROVIDE=command
-VERSION=c0ffee1eaff00d
+DESCRIBE=my description
 COMMAND=my-command --option
 "#,
             )
             .unwrap();
             assert_eq!(
-                RcScript::new("name", "command", "c0ffee1eaff00d", "my-command --option"),
+                RcScript::new("name", "my description", "my-command --option"),
                 rc_script
             );
         }
@@ -491,19 +696,13 @@ COMMAND=my-command --option
             let rc_script = RcScript::parse(
                 &Path::from("name"),
                 r#"
-PROVIDE=command
-VERSION=c0ffee1eaff00d
+DESCRIBE=my description
 COMMAND="my-command" "--option"
 "#,
             )
             .unwrap();
             assert_eq!(
-                RcScript::new(
-                    "name",
-                    "command",
-                    "c0ffee1eaff00d",
-                    "\"my-command\" \"--option\""
-                ),
+                RcScript::new("name", "my description", "\"my-command\" \"--option\""),
                 rc_script
             );
         }
@@ -513,15 +712,14 @@ COMMAND="my-command" "--option"
             let rc_script = RcScript::parse(
                 &Path::from("name"),
                 r#"
-PROVIDE=command
-VERSION=c0ffee1eaff00d
+DESCRIBE=my description
 COMMAND=my-command \
     --option
 "#,
             )
             .unwrap();
             assert_eq!(
-                RcScript::new("name", "command", "c0ffee1eaff00d", "my-command --option"),
+                RcScript::new("name", "my description", "my-command --option"),
                 rc_script
             );
         }
@@ -531,8 +729,7 @@ COMMAND=my-command \
             let rc_script = RcScript::parse(
                 &Path::from("name"),
                 r#"
-PROVIDE=command
-VERSION=c0ffee1eaff00d
+DESCRIBE=my description
 COMMAND=my-command \
     --option ${MY_VARIABLE}
 "#,
@@ -541,6 +738,69 @@ COMMAND=my-command \
             assert_eq!(
                 vec!["name_MY_VARIABLE".to_string()],
                 rc_script.rcvar().unwrap()
+            );
+        }
+    }
+
+    mod rcexamine {
+        use super::super::RcConf;
+
+        #[test]
+        fn examine() {
+            let examined =
+                RcConf::examine("bar.conf:foo.conf").expect("examine should always succeed");
+            assert_eq!(
+                r#"
+# rc_conf[0] = "bar.conf"
+# begin source "foo.conf"
+foo_ENABLE=YES
+# end source "foo.conf"
+
+bar_ENABLE=YES
+
+# already sourced "foo.conf"
+# rc_conf[1] = "foo.conf"; already sourced
+            "#
+                .trim(),
+                examined.trim()
+            );
+        }
+    }
+
+    mod rclist {
+        use std::collections::HashMap;
+
+        use utf8path::Path;
+
+        #[test]
+        fn list_rc_d_once() {
+            let services =
+                super::super::load_services("rc.d").expect("load_services should always succeed");
+            assert_eq!(
+                HashMap::from([
+                    ("example1".to_string(), Ok(Path::from("rc.d/example1"))),
+                    ("example2".to_string(), Ok(Path::from("rc.d/example2"))),
+                ]),
+                services
+            );
+        }
+
+        #[test]
+        fn list_rc_d_twice() {
+            let services = super::super::load_services("rc.d:rc.d")
+                .expect("load_services should always succeed");
+            assert_eq!(
+                HashMap::from([
+                    (
+                        "example1".to_string(),
+                        Err("duplicate service definition".to_string())
+                    ),
+                    (
+                        "example2".to_string(),
+                        Err("duplicate service definition".to_string())
+                    ),
+                ]),
+                services
             );
         }
     }

@@ -10,13 +10,42 @@ repository = "https://github.com/rescrv/blue"
 [features]
 default = ["binaries"]
 
-binaries = []
+binaries = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
+getopts = { version = "0.2", optional = true }
+
+arrrg = { path = "../arrrg", version = "0.3", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.3", optional = true }
 shvar = { path = "../shvar", version = "0.1" }
 utf8path = { path = "../utf8path", version = "0.1" }
 
 [[bin]]
 name = "rcscript"
 path = "src/bin/rcscript.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rcexamine"
+path = "src/bin/rcexamine.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rclist"
+path = "src/bin/rclist.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rcinvoke"
+path = "src/bin/rcinvoke.rs"
+required-features=["binaries"]
+
+[[test]]
+name = "example1"
+path = "tests/example1.rs"
+required-features=["binaries"]
+
+[[test]]
+name = "example2"
+path = "tests/example2.rs"
 required-features=["binaries"]

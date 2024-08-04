@@ -1,6 +1,5 @@
-#!/rcscript
+#!/usr/bin/env rcscript
 
-PROVIDE=bar
-VERSION=1eaff00d
+DESCRIBE=example2 rcscript
 COMMAND=python3 -c 'import sys; print(sys.argv[1:]); sys.exit(1)' \
     --field1 "${FIELD1}" --field2 "${FIELD2}"
