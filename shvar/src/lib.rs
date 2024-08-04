@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter::{Enumerate, Peekable};
 use std::str::Chars;
+use std::sync::Arc;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -255,6 +256,58 @@ impl VariableProvider for Vec<Box<dyn VariableProvider>> {
     }
 }
 
+impl<T: VariableProvider> VariableProvider for &T {
+    fn lookup(&self, ident: &str) -> Option<String> {
+        <T as VariableProvider>::lookup(self, ident)
+    }
+}
+
+impl<T: VariableProvider> VariableProvider for Arc<T> {
+    fn lookup(&self, ident: &str) -> Option<String> {
+        self.as_ref().lookup(ident)
+    }
+}
+
+macro_rules! impl_tuple_provider {
+    ($($name:ident)+) => {
+        #[allow(non_snake_case)]
+        impl<$($name: VariableProvider),+> VariableProvider for ($($name,)+) {
+            fn lookup(&self, ident: &str) -> Option<String> {
+                let ($(ref $name,)+) = *self;
+                $(if let Some(value) = $name.lookup(ident) { return Some(value); })+
+                None
+            }
+        }
+    };
+}
+
+impl_tuple_provider! { A }
+impl_tuple_provider! { A B }
+impl_tuple_provider! { A B C }
+impl_tuple_provider! { A B C D }
+impl_tuple_provider! { A B C D E }
+impl_tuple_provider! { A B C D E F }
+impl_tuple_provider! { A B C D E F G }
+impl_tuple_provider! { A B C D E F G H }
+impl_tuple_provider! { A B C D E F G H I }
+impl_tuple_provider! { A B C D E F G H I J }
+impl_tuple_provider! { A B C D E F G H I J K }
+impl_tuple_provider! { A B C D E F G H I J K L }
+impl_tuple_provider! { A B C D E F G H I J K L M }
+impl_tuple_provider! { A B C D E F G H I J K L M N }
+impl_tuple_provider! { A B C D E F G H I J K L M N O }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W X }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W X Y }
+impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
+
 //////////////////////////////////////// EnvironmentProvider ///////////////////////////////////////
 
 pub struct EnvironmentProvider;
@@ -262,6 +315,24 @@ pub struct EnvironmentProvider;
 impl VariableProvider for EnvironmentProvider {
     fn lookup(&self, var: &str) -> Option<String> {
         std::env::var(var).ok()
+    }
+}
+
+///////////////////////////////////// PrefixingVariableProvider ////////////////////////////////////
+
+pub struct PrefixingVariableProvider<P: VariableProvider> {
+    pub nested: P,
+    pub prefix: String,
+}
+
+impl<P: VariableProvider> VariableProvider for PrefixingVariableProvider<P> {
+    fn lookup(&self, var: &str) -> Option<String> {
+        let prefixed = self.prefix.clone() + var;
+        if let Some(value) = self.nested.lookup(&prefixed) {
+            Some(value)
+        } else {
+            self.nested.lookup(var)
+        }
     }
 }
 
