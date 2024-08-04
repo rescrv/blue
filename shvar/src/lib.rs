@@ -428,7 +428,7 @@ impl Builder {
 
 fn parse_statement(
     depth: usize,
-    vars: &mut dyn VariableProvider,
+    vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -461,7 +461,7 @@ fn parse_statement(
 }
 
 fn parse_single_quotes(
-    _: &mut dyn VariableProvider,
+    _: &dyn VariableProvider,
     _: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -492,7 +492,7 @@ fn parse_single_quotes(
 
 fn parse_double_quotes(
     depth: usize,
-    vars: &mut dyn VariableProvider,
+    vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -558,7 +558,7 @@ fn parse_double_quotes(
 
 fn parse_variable(
     depth: usize,
-    vars: &mut dyn VariableProvider,
+    vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -629,7 +629,7 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 ////////////////////////////////////////////// expand //////////////////////////////////////////////
 
 /// Expand the input to a shell-quoted string suitable for passing to `split`.
-pub fn expand(vars: &mut dyn VariableProvider, input: &str) -> Result<String, Error> {
+pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     parse_statement(0, vars, &mut (), &mut tokens, &mut output)?;
@@ -648,7 +648,7 @@ pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     let mut witnesses: HashSet<String> = HashSet::new();
-    parse_statement(0, &mut (), &mut witnesses, &mut tokens, &mut output)?;
+    parse_statement(0, &(), &mut witnesses, &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
@@ -667,58 +667,55 @@ mod tests {
 
     #[test]
     fn expand_all_empty() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", "")]);
-        assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", "")]);
+        assert_eq!("", expand(&env, "${s1}${s2}${s3}").unwrap());
+        assert_eq!("\"\"", expand(&env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
     fn expand_space_empty_empty() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("s1", " "), ("s2", ""), ("s3", "")]);
-        assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("s1", " "), ("s2", ""), ("s3", "")]);
+        assert_eq!("", expand(&env, "${s1}${s2}${s3}").unwrap());
+        assert_eq!("\"\"", expand(&env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
     fn expand_empty_space_empty() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", " "), ("s3", "")]);
-        assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("\" \"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", " "), ("s3", "")]);
+        assert_eq!("", expand(&env, "${s1}${s2}${s3}").unwrap());
+        assert_eq!("\" \"", expand(&env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
     fn expand_empty_empty_space() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", " ")]);
-        assert_eq!("", expand(&mut env, "${s1}${s2}${s3}").unwrap());
-        assert_eq!("\"\"", expand(&mut env, "${s1}\"${s2}\"${s3}").unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("s1", ""), ("s2", ""), ("s3", " ")]);
+        assert_eq!("", expand(&env, "${s1}${s2}${s3}").unwrap());
+        assert_eq!("\"\"", expand(&env, "${s1}\"${s2}\"${s3}").unwrap());
     }
 
     #[test]
     fn sample_expansion() {
-        let mut env: HashMap<&str, &str> =
+        let env: HashMap<&str, &str> =
             HashMap::from([("FOO", "foo"), ("BAR", "bar"), ("BAZ", "baz")]);
-        assert_eq!(
-            "foo-bar-baz",
-            expand(&mut env, "${FOO}-${BAR}-${BAZ}").unwrap()
-        );
+        assert_eq!("foo-bar-baz", expand(&env, "${FOO}-${BAR}-${BAZ}").unwrap());
     }
 
     #[test]
     fn novar_expansion() {
-        let mut env: HashMap<&str, &str> = HashMap::new();
+        let env: HashMap<&str, &str> = HashMap::new();
         assert_eq!(
             r#""" "" """#,
-            expand(&mut env, "\"${FOO}\" \"${BAR}\" \"${BAZ}\"").unwrap()
+            expand(&env, "\"${FOO}\" \"${BAR}\" \"${BAZ}\"").unwrap()
         );
     }
 
     #[test]
     fn my_command1() {
-        let mut env: HashMap<&str, &str> = HashMap::new();
+        let env: HashMap<&str, &str> = HashMap::new();
         assert_eq!(
             r#"my-command --args" "foo --field1 "" --field2 """#,
             expand(
-                &mut env,
+                &env,
                 "my-command --args\" \"foo --field1 \"${FIELD1}\" --field2 \"${FIELD2}\""
             )
             .unwrap()
@@ -787,68 +784,62 @@ mod tests {
 
     #[test]
     fn describe_my_shell_foo_bar_two_words() {
-        assert_eq!("foo bar", expand(&mut (), "foo bar").unwrap());
+        assert_eq!("foo bar", expand(&(), "foo bar").unwrap());
     }
 
     #[test]
     fn describe_my_shell_foo_bar_single_quotes() {
-        assert_eq!(r#""foo bar""#, expand(&mut (), "'foo bar'").unwrap());
+        assert_eq!(r#""foo bar""#, expand(&(), "'foo bar'").unwrap());
     }
 
     #[test]
     fn describe_my_shell_foo_bar_double_quotes() {
-        assert_eq!(r#""foo bar""#, expand(&mut (), r#""foo bar""#).unwrap());
+        assert_eq!(r#""foo bar""#, expand(&(), r#""foo bar""#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_foobar_no_quote() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(r#"foo bar"#, expand(&mut env, r#"${FOOBAR}"#).unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
+        assert_eq!(r#"foo bar"#, expand(&env, r#"${FOOBAR}"#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_foobar_single_quotes() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(
-            r#""${FOOBAR}""#,
-            expand(&mut env, r#"'${FOOBAR}'"#).unwrap()
-        );
+        let env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
+        assert_eq!(r#""${FOOBAR}""#, expand(&env, r#"'${FOOBAR}'"#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_foobar_double_quotes() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(r#""foo bar""#, expand(&mut env, r#""${FOOBAR}""#).unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
+        assert_eq!(r#""foo bar""#, expand(&env, r#""${FOOBAR}""#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_abcd_no_quote() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
-        assert_eq!(
-            r#"abfoo barcd"#,
-            expand(&mut env, r#"ab${FOOBAR}cd"#).unwrap()
-        );
+        let env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
+        assert_eq!(r#"abfoo barcd"#, expand(&env, r#"ab${FOOBAR}cd"#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_abcd_double_quotes() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
+        let env: HashMap<&str, &str> = HashMap::from([("FOOBAR", "foo bar")]);
         assert_eq!(
             r#"ab"foo bar"cd"#,
-            expand(&mut env, r#"ab"${FOOBAR}"cd"#).unwrap()
+            expand(&env, r#"ab"${FOOBAR}"cd"#).unwrap()
         );
     }
 
     #[test]
     fn describe_my_shell_foospace_no_quote() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOSPACE", "foo ")]);
-        assert_eq!(r#"foo"#, expand(&mut env, r#"${FOOSPACE}"#).unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("FOOSPACE", "foo ")]);
+        assert_eq!(r#"foo"#, expand(&env, r#"${FOOSPACE}"#).unwrap());
     }
 
     #[test]
     fn describe_my_shell_foospace_double_quotes() {
-        let mut env: HashMap<&str, &str> = HashMap::from([("FOOSPACE", "foo ")]);
-        assert_eq!(r#""foo ""#, expand(&mut env, r#""${FOOSPACE}""#).unwrap());
+        let env: HashMap<&str, &str> = HashMap::from([("FOOSPACE", "foo ")]);
+        assert_eq!(r#""foo ""#, expand(&env, r#""${FOOSPACE}""#).unwrap());
     }
 
     #[test]
