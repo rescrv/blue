@@ -1,16 +1,22 @@
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "prototk")]
 use std::ffi::OsString;
 use std::fmt::Display;
+#[cfg(feature = "prototk")]
 use std::fs::{File, OpenOptions};
+#[cfg(feature = "prototk")]
 use std::io::Write;
 use std::ops::Deref;
+#[cfg(feature = "prototk")]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "prototk")]
 use std::time::SystemTime;
 
 use biometrics::Counter;
+#[cfg(feature = "prototk")]
 use buffertk::stack_pack;
 use tatl::{HeyListen, Stationary};
 
@@ -41,9 +47,10 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
 
 ////////////////////////////////////////////// Values //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, prototk_derive::Message)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub struct Values {
-    #[prototk(1, message)]
+    #[cfg_attr(feature = "prototk", prototk(1, message))]
     values: Vec<Value>,
 }
 
@@ -63,11 +70,12 @@ impl From<Vec<Value>> for Values {
 
 ///////////////////////////////////////////// MapEntry /////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, prototk_derive::Message)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub struct MapEntry {
-    #[prototk(1, string)]
+    #[cfg_attr(feature = "prototk", prototk(1, string))]
     key: String,
-    #[prototk(2, message)]
+    #[cfg_attr(feature = "prototk", prototk(2, message))]
     value: Value,
 }
 
@@ -82,9 +90,10 @@ impl From<(String, Value)> for MapEntry {
 
 //////////////////////////////////////////////// Map ///////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, prototk_derive::Message)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub struct Map {
-    #[prototk(1, message)]
+    #[cfg_attr(feature = "prototk", prototk(1, message))]
     entries: Vec<MapEntry>,
 }
 
@@ -108,21 +117,22 @@ impl FromIterator<(String, Value)> for Map {
 
 /////////////////////////////////////////////// Value //////////////////////////////////////////////
 
-#[derive(Clone, Debug, prototk_derive::Message)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub enum Value {
-    #[prototk(1, Bool)]
+    #[cfg_attr(feature = "prototk", prototk(1, Bool))]
     Bool(bool),
-    #[prototk(2, uint64)]
+    #[cfg_attr(feature = "prototk", prototk(2, uint64))]
     U64(u64),
-    #[prototk(3, sint64)]
+    #[cfg_attr(feature = "prototk", prototk(3, sint64))]
     I64(i64),
-    #[prototk(4, double)]
+    #[cfg_attr(feature = "prototk", prototk(4, double))]
     F64(f64),
-    #[prototk(5, string)]
+    #[cfg_attr(feature = "prototk", prototk(5, string))]
     String(String),
-    #[prototk(6, message)]
+    #[cfg_attr(feature = "prototk", prototk(6, message))]
     Array(Values),
-    #[prototk(7, message)]
+    #[cfg_attr(feature = "prototk", prototk(7, message))]
     Object(Map),
 }
 
@@ -485,17 +495,18 @@ impl Default for Collector {
 
 /////////////////////////////////////////////// Clue ///////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, prototk_derive::Message)]
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub struct Clue {
-    #[prototk(1, string)]
+    #[cfg_attr(feature = "prototk", prototk(1, string))]
     pub file: String,
-    #[prototk(2, uint32)]
+    #[cfg_attr(feature = "prototk", prototk(2, uint32))]
     pub line: u32,
-    #[prototk(3, uint64)]
+    #[cfg_attr(feature = "prototk", prototk(3, uint64))]
     pub level: u64,
-    #[prototk(4, uint64)]
+    #[cfg_attr(feature = "prototk", prototk(4, uint64))]
     pub timestamp: u64,
-    #[prototk(5, message)]
+    #[cfg_attr(feature = "prototk", prototk(5, message))]
     pub value: Value,
 }
 
@@ -511,22 +522,25 @@ impl Display for Clue {
 
 ///////////////////////////////////////////// ClueFrame ////////////////////////////////////////////
 
+#[cfg(feature = "prototk")]
 #[derive(Default, prototk_derive::Message)]
 pub struct ClueFrame {
-    #[prototk(1, message)]
+    #[cfg_attr(feature = "prototk", prototk(1, message))]
     pub clue: Clue,
 }
 
 //////////////////////////////////////////// ClueVector ////////////////////////////////////////////
 
+#[cfg(feature = "prototk")]
 #[derive(Default, prototk_derive::Message)]
 pub struct ClueVector {
-    #[prototk(1, message)]
+    #[cfg_attr(feature = "prototk", prototk(1, message))]
     pub clues: Vec<Clue>,
 }
 
 ////////////////////////////////////////// ProtobufEmitter /////////////////////////////////////////
 
+#[cfg(feature = "prototk")]
 struct ProtobufOutputState {
     buffer: Vec<u8>,
     file: Option<File>,
@@ -536,12 +550,14 @@ struct ProtobufOutputState {
 
 /// An Emitter that writes key-value pairs to a series of log files.  When the file reaches its
 /// size threshold, it rolls over to the next file.
+#[cfg(feature = "prototk")]
 pub struct ProtobufEmitter {
     prefix: PathBuf,
     target: u64,
     state: Mutex<ProtobufOutputState>,
 }
 
+#[cfg(feature = "prototk")]
 impl ProtobufEmitter {
     pub fn new<P: AsRef<Path>>(prefix: P, target: u64) -> Result<Self, std::io::Error> {
         let prefix = prefix.as_ref().to_path_buf();
@@ -588,6 +604,7 @@ impl ProtobufEmitter {
     }
 }
 
+#[cfg(feature = "prototk")]
 impl Emitter for ProtobufEmitter {
     fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
         let timestamp = SystemTime::now()

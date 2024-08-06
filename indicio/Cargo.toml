@@ -8,17 +8,18 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [features]
-default = ["binaries"]
+default = ["binaries", "prototk"]
 
 binaries = []
+prototk = ["dep:buffertk", "dep:prototk", "dep:prototk_derive"]
 
 [dependencies]
 nom = "7.1"
 
 biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.6" }
-prototk = { path = "../prototk", version = "0.6" }
-prototk_derive = { path = "../prototk_derive", version = "0.6" }
+buffertk = { path = "../buffertk", version = "0.6", optional = true }
+prototk = { path = "../prototk", version = "0.6", optional = true }
+prototk_derive = { path = "../prototk_derive", version = "0.6", optional = true }
 tatl = { path = "../tatl", version = "0.5" }
 
 [[example]]
