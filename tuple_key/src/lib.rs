@@ -1,9 +1,11 @@
 #![doc = include_str!("../README.md")]
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use buffertk::{v64, Packable};
 
+use buffertk::Unpackable;
 use prototk::{FieldNumber, WireType};
 use prototk_derive::Message;
 use zerror::{iotoz, Z};
@@ -63,6 +65,15 @@ pub enum Error {
         #[prototk(2, string)]
         what: String,
     },
+}
+
+impl Error {
+    pub fn schema_incompatibility(s: impl Into<String>) -> Self {
+        Self::SchemaIncompatibility {
+            core: ErrorCore::default(),
+            what: s.into(),
+        }
+    }
 }
 
 impl Default for Error {
@@ -218,6 +229,10 @@ impl TupleKey {
         TupleKeyIterator::from(buf)
     }
 
+    pub fn conforms_to<T>(&self, schema: &Schema<T>) -> bool {
+        schema.lookup(self).is_ok()
+    }
+
     fn append_bytes(&mut self, iter: impl Iterator<Item = u8>) -> usize {
         let mut count = 0;
         for c in iter {
@@ -239,13 +254,44 @@ impl TupleKey {
         (buf, sz)
     }
 
+    fn unfield_number(buf_in: &[u8]) -> Option<(FieldNumber, KeyDataType, Direction)> {
+        if buf_in.len() > 10 {
+            return None;
+        }
+        let mut buf = [0u8; 10];
+        for (f, t) in std::iter::zip(buf_in.iter(), buf.iter_mut()) {
+            *t = *f;
+        }
+        let sz = buf_in.len();
+        buf[0..sz].iter_mut().for_each(|c| *c = c.rotate_right(1));
+        let x = v64::unpack(&buf[0..sz]).ok()?.0;
+        let x: u64 = x.into();
+        let (key_type, direction) = from_discriminant(x as u8 & 15u8)?;
+        if x >> 4 > u32::MAX as u64 {
+            return None;
+        }
+        let field_number = FieldNumber::new((x >> 4) as u32).ok()?;
+        Some((field_number, key_type, direction))
+    }
+
     fn extend_field_number(&mut self, f: FieldNumber, value: KeyDataType, dir: Direction) {
         let (buf, sz) = Self::field_number(f, value, dir);
         self.buf.extend_from_slice(&buf[0..sz])
     }
 }
 
-// TODO(rescrv):  Make this a try_from.
+impl std::ops::Deref for TupleKey {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.buf
+    }
+}
+
+// NOTE(rescrv):  This is not a try_from.  Every byte string is a valid tuple key, because despite
+// our conventions above, a tuple key is just a sequence of byte strings.  The typing is such a
+// convenience that it's tied in.  If you need a tuple key to adhere to a given structure, you need
+// to parse and validate it separately from this function.
 impl From<&[u8]> for TupleKey {
     fn from(buf: &[u8]) -> Self {
         Self { buf: buf.to_vec() }
@@ -273,7 +319,6 @@ impl<'a> TupleKeyIterator<'a> {
     }
 }
 
-// TODO(rescrv):  Make this a try_from.
 impl<'a> From<&'a [u8]> for TupleKeyIterator<'a> {
     fn from(buf: &'a [u8]) -> Self {
         Self { buf, offset: 0 }
@@ -318,6 +363,16 @@ impl<'a> TupleKeyParser<'a> {
         Self {
             iter: TupleKeyIterator::from(tk),
         }
+    }
+
+    pub fn peek_next(&self) -> Result<Option<(FieldNumber, KeyDataType, Direction)>, &'static str> {
+        let elem = match self.iter.clone().next() {
+            Some(elem) => elem,
+            None => {
+                return Ok(None);
+            }
+        };
+        Ok(Some(TupleKey::unfield_number(elem).ok_or("not a valid tag")?))
     }
 
     pub fn parse_next(&mut self, f: FieldNumber, dir: Direction) -> Result<(), &'static str> {
@@ -384,6 +439,10 @@ pub trait Element: Sized {
 
     fn append_to(&self, key: &mut TupleKey);
     fn parse_from(buf: &[u8]) -> Result<Self, &'static str>;
+
+    fn key_data_type(&self) -> KeyDataType {
+        <Self as Element>::DATA_TYPE
+    }
 }
 
 impl Element for () {
@@ -546,6 +605,41 @@ impl Element for String {
 
 pub trait TypedTupleKey: TryFrom<TupleKey> + Into<TupleKey> {}
 
+////////////////////////////////////////////// Schema //////////////////////////////////////////////
+
+pub struct Schema<T> {
+    node: T,
+    children: HashMap<FieldNumber, Schema<T>>,
+}
+
+impl<T> Schema<T> {
+    pub fn lookup(&self, tk: &TupleKey) -> Result<&T, Error> {
+        Ok(&self.schema_for_key(tk)?.node)
+    }
+
+    pub fn schema_for_key<'a>(&'a self, tk: &TupleKey) -> Result<&'a Schema<T>, Error> {
+        let mut tkp = TupleKeyParser::new(tk);
+        self.schema_for_key_recurse(&mut tkp, 0)
+    }
+
+    fn schema_for_key_recurse<'a>(&'a self, tkp: &mut TupleKeyParser, index: usize) -> Result<&'a Schema<T>, Error> {
+        if let Some((f, k, d)) = tkp.peek_next().map_err(Error::schema_incompatibility)? {
+            if let Some(recurse) = self.children.get(&f) {
+                if k == KeyDataType::unit {
+                    tkp.parse_next(f, d).map_err(Error::schema_incompatibility)?;
+                } else {
+                    tkp.parse_next_with_key(f, d).map_err(Error::schema_incompatibility)?;
+                }
+                recurse.schema_for_key_recurse(tkp, index + 1)
+            } else {
+                Err(Error::schema_incompatibility(format!("unknown field {f} at index {index}")))
+            }
+        } else {
+            Ok(self)
+        }
+    }
+}
+
 ///////////////////////////////////////// reverse_encoding /////////////////////////////////////////
 
 fn reverse_encoding(bytes: &mut [u8]) {
@@ -668,6 +762,32 @@ mod tuple_key {
                 2,
                 TupleKeyIterator::number_of_elements_in_common_prefix(tk1.iter(), tk3.iter())
             );
+        }
+    }
+
+    mod properties {
+        use super::*;
+
+        proptest::proptest! {
+            #[test]
+            fn field_number_round_trip(f in 1..prototk::FIRST_RESERVED_FIELD_NUMBER) {
+                for d in [Direction::Forward, Direction::Reverse] {
+                    for v in [
+                        KeyDataType::unit,
+                        KeyDataType::fixed32,
+                        KeyDataType::fixed64,
+                        KeyDataType::sfixed32,
+                        KeyDataType::sfixed64,
+                        KeyDataType::string,
+                    ] {
+                        let (buf, sz) = TupleKey::field_number(FieldNumber::must(f), v, d);
+                        let (f1, v1, d1) = TupleKey::unfield_number(&buf[..sz]).unwrap();
+                        assert_eq!(f1, f);
+                        assert_eq!(v1, v);
+                        assert_eq!(d1, d);
+                    }
+                }
+            }
         }
     }
 }

@@ -175,6 +175,17 @@ enum TestElement {
 }
 
 impl TestElement {
+    fn key_data_type(&self) -> KeyDataType {
+        match self {
+            TestElement::Unit => KeyDataType::unit,
+            TestElement::I32(_) => KeyDataType::sfixed32,
+            TestElement::U32(_) => KeyDataType::fixed32,
+            TestElement::I64(_) => KeyDataType::sfixed64,
+            TestElement::U64(_) => KeyDataType::fixed64,
+            TestElement::String(_) => KeyDataType::string,
+        }
+    }
+
     fn extend(&self, f: FieldNumber, d: Direction, key: &mut TupleKey) {
         match self {
             TestElement::Unit => key.extend(f),
@@ -230,6 +241,10 @@ proptest::proptest! {
         }
         let mut parser = TupleKeyParser::new(&key);
         for (field_number, direction, element) in elements.iter() {
+            let (f, k, d) = parser.peek_next().unwrap().unwrap();
+            assert_eq!(*field_number, f);
+            assert_eq!(element.key_data_type(), k);
+            assert_eq!(*direction, d);
             element.parse(*field_number, *direction, &mut parser);
         }
     }
