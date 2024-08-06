@@ -203,6 +203,15 @@ pub enum Error {
     },
 }
 
+impl Error {
+    pub fn resolve_failure(what: impl Into<String>) -> Self {
+        Self::ResolveFailure {
+            core: ErrorCore::default(),
+            what: what.into(),
+        }
+    }
+}
+
 impl Default for Error {
     fn default() -> Error {
         Error::Success {
