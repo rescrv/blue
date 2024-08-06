@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use biometrics::Counter;
 use tatl::{HeyListen, Stationary};
 
+pub mod stdio;
+
 #[cfg(feature = "prototk")]
 pub mod protobuf;
 
@@ -409,6 +411,50 @@ impl<E: Emitter + Sync> Emitter for Arc<E> {
     }
 }
 
+macro_rules! impl_tuple_emitter {
+    ($($name:ident)+) => {
+        #[allow(non_snake_case)]
+        impl<$($name: Emitter),+> Emitter for ($($name,)+) {
+            fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
+                let ($(ref $name,)+) = *self;
+                $(<$name as Emitter>::emit($name, file, line, level, value.clone());)+
+            }
+
+            fn flush(&self) {
+                let ($(ref $name,)+) = *self;
+                $(<$name as Emitter>::flush($name);)+
+            }
+        }
+    };
+}
+
+impl_tuple_emitter! { A }
+impl_tuple_emitter! { A B }
+impl_tuple_emitter! { A B C }
+impl_tuple_emitter! { A B C D }
+impl_tuple_emitter! { A B C D E }
+impl_tuple_emitter! { A B C D E F }
+impl_tuple_emitter! { A B C D E F G }
+impl_tuple_emitter! { A B C D E F G H }
+impl_tuple_emitter! { A B C D E F G H I }
+impl_tuple_emitter! { A B C D E F G H I J }
+impl_tuple_emitter! { A B C D E F G H I J K }
+impl_tuple_emitter! { A B C D E F G H I J K L }
+impl_tuple_emitter! { A B C D E F G H I J K L M }
+impl_tuple_emitter! { A B C D E F G H I J K L M N }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V W }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V W X }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V W X Y }
+impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
+
 ///////////////////////////////////////////// Collector ////////////////////////////////////////////
 
 /// A collector is meant to be a static singleton that conditionally logs.
@@ -446,7 +492,7 @@ impl Collector {
     /// Emit the value via the collector if and only if it is logging and has an emitter
     /// configured.
     pub fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
-        if self.is_logging() {
+        if self.is_logging() && self.verbosity() >= level {
             let mut emitter = self.emitter.lock().unwrap();
             if let Some(emitter) = emitter.as_deref_mut() {
                 emitter.emit(file, line, level, value);
@@ -518,7 +564,7 @@ impl Display for Clue {
 /// This will be lazy, and only evaluate the key-value pair if the collector is logging.
 #[macro_export]
 macro_rules! clue {
-    ($collector:ident, $level:expr, { $($value:tt)* }) => {
+    ($collector:path, $level:expr, { $($value:tt)* }) => {
         if $collector.is_logging() && $collector.verbosity() >= $level {
             $collector.emit(file!(), line!(), $level, $crate::value!({ $($value)* }));
         }

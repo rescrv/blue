@@ -26,7 +26,7 @@ pub struct ClueVector {
 
 ////////////////////////////////////////// ProtobufEmitter /////////////////////////////////////////
 
-struct ProtobufOutputState {
+struct OutputState {
     buffer: Vec<u8>,
     file: Option<File>,
     size: u64,
@@ -38,13 +38,13 @@ struct ProtobufOutputState {
 pub struct ProtobufEmitter {
     prefix: PathBuf,
     target: u64,
-    state: Mutex<ProtobufOutputState>,
+    state: Mutex<OutputState>,
 }
 
 impl ProtobufEmitter {
     pub fn new<P: AsRef<Path>>(prefix: P, target: u64) -> Result<Self, std::io::Error> {
         let prefix = prefix.as_ref().to_path_buf();
-        let state = Mutex::new(ProtobufOutputState {
+        let state = Mutex::new(OutputState {
             buffer: vec![],
             file: None,
             size: 0,
@@ -57,7 +57,7 @@ impl ProtobufEmitter {
         })
     }
 
-    fn open(&self, state: &mut ProtobufOutputState) {
+    fn open(&self, state: &mut OutputState) {
         let ts = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|x| x.as_micros())
@@ -78,7 +78,7 @@ impl ProtobufEmitter {
         state.size = 0;
     }
 
-    fn close(&self, state: &mut ProtobufOutputState) {
+    fn close(&self, state: &mut OutputState) {
         if let Some(file) = state.file.as_mut() {
             let _ = file.flush();
         }
@@ -100,6 +100,7 @@ impl Emitter for ProtobufEmitter {
                 line,
                 level,
                 timestamp,
+                // TODO(rescrv): and this (so that we can take value by ref).
                 value,
             },
         };

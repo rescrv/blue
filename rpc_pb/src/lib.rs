@@ -251,6 +251,13 @@ impl From<std::io::Error> for Error {
 
 iotoz! {Error}
 
+#[cfg(feature = "indicio")]
+impl Error {
+    pub fn into_value(&self) -> indicio::Value {
+        todo!();
+    }
+}
+
 ////////////////////////////////////////////// Status //////////////////////////////////////////////
 
 /// A status represents the return value of an RPC function.
