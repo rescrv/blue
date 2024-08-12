@@ -71,9 +71,12 @@ pub struct ClientOptions {
     /// SSL/TLS ca_file.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
     pub ca_file: String,
-    /// Disable SSL verification.
-    #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
-    pub verify_none: bool,
+    /// SSL/TLS private key.
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
+    pub private_key_file: String,
+    /// SSL/TLS certificate.
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
+    pub certificate_file: String,
     /// The user send-buffer size.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
@@ -84,7 +87,8 @@ impl Default for ClientOptions {
         Self {
             channels: 2,
             ca_file: "ca.crt".to_string(),
-            verify_none: false,
+            private_key_file: "localhost.key".to_string(),
+            certificate_file: "localhost.crt".to_string(),
             user_send_buffer_size: 65536,
         }
     }
@@ -502,9 +506,19 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
                 what: format!("invalid CA file: {}", err),
             }
         })?;
-        if self.options.verify_none {
-            builder.set_verify(boring::ssl::SslVerifyMode::NONE);
-        }
+        builder.set_private_key_file(&self.options.private_key_file, SslFiletype::PEM).map_err(|err| {
+            rpc_pb::Error::EncryptionMisconfiguration {
+                core: ErrorCore::default(),
+                what: format!("invalid private key file: {}", err),
+            }
+        })?;
+        builder.set_certificate_file(&self.options.certificate_file, SslFiletype::PEM).map_err(|err| {
+            rpc_pb::Error::EncryptionMisconfiguration {
+                core: ErrorCore::default(),
+                what: format!("invalid certificate file: {}", err),
+            }
+        })?;
+        builder.set_verify(boring::ssl::SslVerifyMode::PEER|boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT);
         let connector = builder.build();
         let stream = TcpStream::connect(host.connect())?;
         let stream = connector.connect(host.hostname_or_ip(), stream).map_err(|err| {

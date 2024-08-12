@@ -72,9 +72,6 @@ pub struct ServerOptions {
     /// SSL/TLS certificate.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
     pub certificate_file: String,
-    /// SSL/TLS verification disabled if true.
-    #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
-    pub verify_none: bool,
     /// Bind-to this host.
     #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to bind to."))]
     pub bind_to_host: String,
@@ -103,9 +100,7 @@ impl ServerOptions {
             .set_certificate_file(&self.certificate_file, SslFiletype::PEM)
             .expect("invalid certificate");
         acceptor.check_private_key().expect("invalid private key");
-        if self.verify_none {
-            acceptor.set_verify(boring::ssl::SslVerifyMode::NONE);
-        }
+        acceptor.set_verify(boring::ssl::SslVerifyMode::PEER|boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT);
         acceptor.build()
     }
 
@@ -116,7 +111,7 @@ impl ServerOptions {
 
     /// Set the ca_file.
     pub fn with_ca_file(mut self, ca_file: &str) -> Self {
-        self.ca_file = ca_file.to_owned();
+        ca_file.clone_into(&mut self.ca_file);
         self
     }
 
@@ -150,12 +145,6 @@ impl ServerOptions {
         self
     }
 
-    /// Set verify_none to true.
-    pub fn with_verify_none(mut self) -> Self {
-        self.verify_none = true;
-        self
-    }
-
     /// Set the user_send_buffer_size.
     pub fn with_user_send_buffer_size(mut self, user_send_buffer_size: usize) -> Self {
         self.user_send_buffer_size = user_send_buffer_size;
@@ -172,7 +161,6 @@ impl Default for ServerOptions {
             bind_to_host: "localhost".to_owned(),
             bind_to_port: 2049,
             thread_pool_size: 64,
-            verify_none: false,
             user_send_buffer_size: 65536,
         }
     }
