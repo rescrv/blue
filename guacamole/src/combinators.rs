@@ -282,7 +282,8 @@ pub const CHAR_SET_UPPER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 /// The alph character set includes lower- and upper-case ASCII alphabets.
 pub const CHAR_SET_ALPHA: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 /// The alph character set includes lower- and upper-case ASCII alphabets and a space.
-pub const CHAR_SET_ALPHA_SPACE8: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ        ";
+pub const CHAR_SET_ALPHA_SPACE8: &str =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ        ";
 /// The digit character set includes ASCII digits.
 pub const CHAR_SET_DIGIT: &str = "0123456789";
 /// The alnum character set includes lower- and upper-case ASCII alphabets and the digits.

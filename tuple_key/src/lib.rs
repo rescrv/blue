@@ -372,7 +372,9 @@ impl<'a> TupleKeyParser<'a> {
                 return Ok(None);
             }
         };
-        Ok(Some(TupleKey::unfield_number(elem).ok_or("not a valid tag")?))
+        Ok(Some(
+            TupleKey::unfield_number(elem).ok_or("not a valid tag")?,
+        ))
     }
 
     pub fn parse_next(&mut self, f: FieldNumber, dir: Direction) -> Result<(), &'static str> {
@@ -612,7 +614,15 @@ pub struct Schema<T> {
     children: HashMap<FieldNumber, Schema<T>>,
 }
 
-impl<T> Schema<T> {
+impl<T: Debug> Schema<T> {
+    pub const fn new(node: T, children: HashMap<FieldNumber, Schema<T>>) -> Self {
+        Self { node, children }
+    }
+
+    pub fn is_terminal(&self, tk: &TupleKey) -> Result<bool, Error> {
+        Ok(self.schema_for_key(tk)?.children.is_empty())
+    }
+
     pub fn lookup(&self, tk: &TupleKey) -> Result<&T, Error> {
         Ok(&self.schema_for_key(tk)?.node)
     }
@@ -622,17 +632,49 @@ impl<T> Schema<T> {
         self.schema_for_key_recurse(&mut tkp, 0)
     }
 
-    fn schema_for_key_recurse<'a>(&'a self, tkp: &mut TupleKeyParser, index: usize) -> Result<&'a Schema<T>, Error> {
+    fn schema_for_key_recurse<'a>(
+        &'a self,
+        tkp: &mut TupleKeyParser,
+        index: usize,
+    ) -> Result<&'a Schema<T>, Error> {
         if let Some((f, k, d)) = tkp.peek_next().map_err(Error::schema_incompatibility)? {
             if let Some(recurse) = self.children.get(&f) {
-                if k == KeyDataType::unit {
-                    tkp.parse_next(f, d).map_err(Error::schema_incompatibility)?;
-                } else {
-                    tkp.parse_next_with_key(f, d).map_err(Error::schema_incompatibility)?;
-                }
+                match k {
+                    KeyDataType::unit => {
+                        tkp.parse_next(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                    KeyDataType::fixed32 => {
+                        let _: u32 = tkp
+                            .parse_next_with_key(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                    KeyDataType::sfixed32 => {
+                        let _: i32 = tkp
+                            .parse_next_with_key(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                    KeyDataType::fixed64 => {
+                        let _: u64 = tkp
+                            .parse_next_with_key(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                    KeyDataType::sfixed64 => {
+                        let _: i64 = tkp
+                            .parse_next_with_key(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                    KeyDataType::string => {
+                        let _: String = tkp
+                            .parse_next_with_key(f, d)
+                            .map_err(Error::schema_incompatibility)?;
+                    }
+                };
                 recurse.schema_for_key_recurse(tkp, index + 1)
             } else {
-                Err(Error::schema_incompatibility(format!("unknown field {f} at index {index}")))
+                Err(Error::schema_incompatibility(format!(
+                    "unknown field {f} at index {index}"
+                )))
             }
         } else {
             Ok(self)

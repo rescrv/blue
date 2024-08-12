@@ -203,7 +203,12 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
     /// table.  This is meant to be used for draining a server of waiters.
     pub fn arbitary_key(&self) -> Option<K> {
         ARBITRARY_KEY.click();
-        self.entries.lock().unwrap().iter().map(|(k, _)| k.clone()).next()
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.clone())
+            .next()
     }
 
     /// Create a new piece of state, returning None iff there already exists state for `key`.
