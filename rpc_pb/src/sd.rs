@@ -43,6 +43,28 @@ impl Host {
     pub fn connect(&self) -> &str {
         &self.connect
     }
+
+    /// Get the hostname for this host, inferring if a port can be stripped.
+    pub fn hostname_or_ip(&self) -> &str {
+        let connect = &self.connect;
+        fn strip_port(connect: &str) -> &str {
+            if let Some((host, _)) = connect.rsplit_once(':') {
+                host
+            } else {
+                connect
+            }
+        }
+        if connect.starts_with('[') {
+            let connect = strip_port(connect);
+            if connect.ends_with(']') {
+                &connect[1..connect.len() - 1]
+            } else {
+                &self.connect
+            }
+        } else {
+            strip_port(connect)
+        }
+    }
 }
 
 impl FromStr for Host {
