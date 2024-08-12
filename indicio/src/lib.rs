@@ -248,8 +248,9 @@ impl From<String> for Value {
     }
 }
 
-impl From<Vec<Value>> for Value {
-    fn from(values: Vec<Value>) -> Self {
+impl<V: Into<Value>> From<Vec<V>> for Value {
+    fn from(values: Vec<V>) -> Self {
+        let values = values.into_iter().map(|v| v.into()).collect();
         Self::Array(Values { values })
     }
 }
@@ -566,7 +567,8 @@ impl Display for Clue {
 macro_rules! clue {
     ($collector:path, $level:expr, { $($value:tt)* }) => {
         if $collector.is_logging() && $collector.verbosity() >= $level {
-            $collector.emit(file!(), line!(), $level, $crate::value!({ $($value)* }));
+            let loc = concat!(module_path!(), " ", file!());
+            $collector.emit(loc, line!(), $level, $crate::value!({ $($value)* }));
         }
     };
 }

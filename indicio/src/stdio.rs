@@ -10,7 +10,7 @@ impl Emitter for StdioEmitter {
     fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|x| x.as_micros() as f64 / 1_000.0)
+            .map(|x| x.as_micros() as f64 / 1_000_000.0)
             .unwrap_or(0.0);
         let level = match level {
             0 => "A",
@@ -23,7 +23,7 @@ impl Emitter for StdioEmitter {
                 return;
             }
         };
-        eprintln!("{level} {timestamp:10.3} {file}:{line} {value}");
+        eprintln!("{level} {timestamp:10.6} {file}:{line} {value}");
     }
 
     fn flush(&self) {}
