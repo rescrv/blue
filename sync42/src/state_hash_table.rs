@@ -100,11 +100,13 @@ static NEW_STATE_HASH_TABLE: Counter = Counter::new("sync42.state_hash_table.new
 
 static ENTRY_INSERTED: Counter = Counter::new("sync42.state_hash_table.inserted");
 static ENTRY_REMOVED: Counter = Counter::new("sync42.state_hash_table.removed");
+static ARBITRARY_KEY: Counter = Counter::new("sync42.state_hash_table.arbitrary_key");
 
 /// Register the biometrics for state hash table.
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&ENTRY_INSERTED);
     collector.register_counter(&ENTRY_REMOVED);
+    collector.register_counter(&ARBITRARY_KEY);
 }
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
@@ -195,6 +197,13 @@ impl<K: Key, V: Value> StateHashTable<K, V> {
         Self {
             entries: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Return a seemingly-arbitrary key from the hash table or None if there's no keys in the hash
+    /// table.  This is meant to be used for draining a server of waiters.
+    pub fn arbitary_key(&self) -> Option<K> {
+        ARBITRARY_KEY.click();
+        self.entries.lock().unwrap().iter().map(|(k, _)| k.clone()).next()
     }
 
     /// Create a new piece of state, returning None iff there already exists state for `key`.
