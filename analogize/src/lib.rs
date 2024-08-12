@@ -17,7 +17,8 @@ use std::time::Duration;
 use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 
 use buffertk::Unpackable;
-use indicio::{Clue, ClueVector, Value};
+use indicio::protobuf::ClueVector;
+use indicio::{Clue, Value};
 use mani::{Edit, Manifest, ManifestOptions};
 use prototk::FieldNumber;
 use scrunch::bit_vector::sparse::BitVector;
