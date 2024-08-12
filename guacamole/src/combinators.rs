@@ -240,8 +240,15 @@ pub fn normal(mean: f64, stdev: f64) -> impl FnMut(&mut Guacamole) -> f64 {
 }
 
 /// Generate numbers according to a poisson distribution with the specified interarrival rate.
-pub fn poisson(interarrival_rate: f64) -> impl FnMut(&mut Guacamole) -> f64 {
-    move |guac| (0.0 - f64::from_guacamole(&mut (), guac).ln()) / interarrival_rate
+pub fn exponentially_distributed(mean: impl Into<f64>) -> impl FnMut(&mut Guacamole) -> f64 {
+    let mean = mean.into();
+    move |guac| (0.0 - f64::from_guacamole(&mut (), guac).ln()) * mean
+}
+
+/// Generate numbers according to a poisson distribution with the specified interarrival rate.
+pub fn poisson(interarrival_rate: impl Into<f64>) -> impl FnMut(&mut Guacamole) -> f64 {
+    let interarrival_rate = interarrival_rate.into();
+    move |guac| exponentially_distributed(1.0 / interarrival_rate)(guac)
 }
 
 /// Generate a duration that, if perfectly respected, corresponds to a poisson distribution of
@@ -274,6 +281,8 @@ pub const CHAR_SET_LOWER: &str = "abcdefghijklmnopqrstuvwxyz";
 pub const CHAR_SET_UPPER: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 /// The alph character set includes lower- and upper-case ASCII alphabets.
 pub const CHAR_SET_ALPHA: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The alph character set includes lower- and upper-case ASCII alphabets and a space.
+pub const CHAR_SET_ALPHA_SPACE8: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ        ";
 /// The digit character set includes ASCII digits.
 pub const CHAR_SET_DIGIT: &str = "0123456789";
 /// The alnum character set includes lower- and upper-case ASCII alphabets and the digits.
@@ -284,6 +293,8 @@ pub const CHAR_SET_PUNCT: &str = "!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
 pub const CHAR_SET_HEX: &str = "0123456789abcdef";
 /// The default character set includes most printable ASCII.
 pub const CHAR_SET_DEFAULT: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~";
+/// The base-20 characters used for Plus Codes (Open Location Codes).
+pub const CHAR_SET_PLUS_CODES: &str = "23456789CFGHJMPQRVWX";
 
 /// Create a function that maps a slice of bytes to a string of the same length derived from the
 /// provided charset.  Requires that chars be fewer than 256 characters.
