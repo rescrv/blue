@@ -5,14 +5,10 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-use boring::ssl::{SslConnector, SslMethod};
-
+use boring::ssl::{SslConnector, SslFiletype, SslMethod};
 use biometrics::{Collector, Counter};
-
 use buffertk::{stack_pack, Unpacker};
-
 use rpc_pb::sd::{Host, HostID};
-
 use sync42::monitor::{Monitor, MonitorCore};
 use sync42::spin_lock::SpinLock;
 use sync42::state_hash_table::{Handle, StateHashTable};
@@ -72,9 +68,12 @@ pub struct ClientOptions {
         arrrg(optional, "Number of channels to establish.")
     )]
     pub channels: usize,
+    /// SSL/TLS ca_file.
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
+    pub ca_file: String,
     /// Disable SSL verification.
     #[cfg_attr(feature = "binaries", arrrg(flag, "Do not verify SSL certificates."))]
-    pub ssl_verify_none: bool,
+    pub verify_none: bool,
     /// The user send-buffer size.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
@@ -84,7 +83,8 @@ impl Default for ClientOptions {
     fn default() -> Self {
         Self {
             channels: 2,
-            ssl_verify_none: false,
+            ca_file: "ca.crt".to_string(),
+            verify_none: false,
             user_send_buffer_size: 65536,
         }
     }
@@ -496,12 +496,18 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
                 what: format!("could not build connector builder: {}", err),
             }
         })?;
-        if self.options.ssl_verify_none {
+        builder.set_ca_file(&self.options.ca_file).map_err(|err| {
+            rpc_pb::Error::EncryptionMisconfiguration {
+                core: ErrorCore::default(),
+                what: format!("invalid CA file: {}", err),
+            }
+        })?;
+        if self.options.verify_none {
             builder.set_verify(boring::ssl::SslVerifyMode::NONE);
         }
         let connector = builder.build();
         let stream = TcpStream::connect(host.connect())?;
-        let stream = connector.connect(host.connect(), stream).map_err(|err| {
+        let stream = connector.connect(host.hostname_or_ip(), stream).map_err(|err| {
             rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: format!("{}", err),

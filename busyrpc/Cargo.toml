@@ -15,7 +15,7 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
 libc = "0.2"
-boring = "4.7.0"
+boring = "4.9.1"
 crc32c = "0.6"
 
 biometrics = { path = "../biometrics", version = "0.6" }

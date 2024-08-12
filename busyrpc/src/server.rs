@@ -64,8 +64,8 @@ pub fn register_biometrics(collector: &mut Collector) {
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ServerOptions {
     /// SSL/TLS ca_file.
-    #[cfg_attr(feature = "binaries", arrrg(optional, "Path to the CA certificate."))]
-    pub ca_file: Option<String>,
+    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
+    pub ca_file: String,
     /// SSL/TLS private key.
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
     pub private_key_file: String,
@@ -95,9 +95,7 @@ impl ServerOptions {
     pub fn must_build_acceptor(&self) -> SslAcceptor {
         // Setup our SSL preferences.
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        if let Some(ca_file) = self.ca_file.as_ref() {
-            acceptor.set_ca_file(ca_file).expect("invalid ca file");
-        }
+        acceptor.set_ca_file(&self.ca_file).expect("invalid ca file");
         acceptor
             .set_private_key_file(&self.private_key_file, SslFiletype::PEM)
             .expect("invalid private key");
@@ -118,7 +116,7 @@ impl ServerOptions {
 
     /// Set the ca_file.
     pub fn with_ca_file(mut self, ca_file: &str) -> Self {
-        self.ca_file = Some(ca_file.to_owned());
+        self.ca_file = ca_file.to_owned();
         self
     }
 
@@ -168,9 +166,9 @@ impl ServerOptions {
 impl Default for ServerOptions {
     fn default() -> Self {
         Self {
-            ca_file: None,
-            private_key_file: "".to_string(),
-            certificate_file: "".to_string(),
+            ca_file: "ca.crt".to_string(),
+            private_key_file: "localhost.key".to_string(),
+            certificate_file: "localhost.crt".to_string(),
             bind_to_host: "localhost".to_owned(),
             bind_to_port: 2049,
             thread_pool_size: 64,
