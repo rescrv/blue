@@ -215,9 +215,6 @@ impl Pid1Configuration {
     pub fn from_options(options: &Pid1Options) -> Result<Self, rc_conf::Error> {
         let services = load_services(&options.rc_d_path)?;
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
-        clue!(COLLECTOR, INFO, {
-            configuration: indicio::Value::from(options),
-        });
         Ok(Self { services, rc_conf })
     }
 }
@@ -446,6 +443,10 @@ impl Pid1 {
             let state = state.lock().unwrap();
             (state.processes.clone(), Arc::clone(&state.config))
         };
+        clue!(COLLECTOR, INFO, {
+            converge: true,
+            services: indicio::Value::from(config.services.keys().collect::<Vec<_>>()),
+        });
         fn has_process(state: &Mutex<Pid1State>, exec: &Arc<Execution>) -> bool {
             let state = state.lock().unwrap();
             state.has_process(exec)
@@ -474,10 +475,17 @@ impl Pid1 {
         for service in config.services.keys() {
             let mut state = state.lock().unwrap();
             if state.is_inhibited(service) {
-                continue;
-            }
-            if state.service_switch(service) == SwitchPosition::Yes && !state.is_running(service) {
+                clue!(COLLECTOR, INFO, {
+                    started: false,
+                    service: service,
+                    inhibited: true,
+                });
+            } else if state.service_switch(service) == SwitchPosition::Yes && !state.is_running(service) {
                 RESPAWNING.click();
+                clue!(COLLECTOR, INFO, {
+                    started: true,
+                    service: service,
+                });
                 state.spawn(reclaim.clone(), service, &[])?;
             }
         }
@@ -854,6 +862,9 @@ impl Execution {
                 Ok(())
             }
             Err(err) => {
+                clue!(COLLECTOR, ERROR, {
+                    exec: indicio::Value::from(&self.context),
+                });
                 self.set_pid(0);
                 Err(err)
             }

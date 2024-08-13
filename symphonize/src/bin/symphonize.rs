@@ -220,23 +220,24 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
                 match args[0] {
                     "services" | "service" => {
                         services(&options, &pid1, &args[1..]);
-                    },
+                    }
                     "reload" => {
                         let mut child = match std::process::Command::new("cargo")
                             .args(["build", "--workspace", "--bins"])
-                            .spawn() {
+                            .spawn()
+                        {
                             Ok(child) => child,
                             Err(err) => {
                                 eprintln!("error: {err:?}");
                                 continue;
-                            },
+                            }
                         };
                         let status = match child.wait() {
                             Ok(status) => status,
                             Err(err) => {
                                 eprintln!("error: {err:?}");
                                 continue;
-                            },
+                            }
                         };
                         if !status.success() {
                             eprintln!("error: reload incomplete");
@@ -251,19 +252,14 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
                         };
                         if let Err(err) = pid1.reconfigure(pid1_options) {
                             eprintln!("error: {err:?}");
-                            continue;
                         }
-                        if let Err(err) = pid1.reload() {
-                            eprintln!("error: {err:?}");
-                            continue;
-                        }
-                    },
+                    }
                     "exit" => {
                         break;
-                    },
+                    }
                     _ => {
                         eprintln!("error: uknown command: {}", &args[0]);
-                    },
+                    }
                 };
             }
             Err(ReadlineError::Interrupted) => {}
