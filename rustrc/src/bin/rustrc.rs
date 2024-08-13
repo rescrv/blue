@@ -100,6 +100,19 @@ impl unix_sock::Invokable for UnixSockAdapter {
                     }
                 }
 
+                // NOTE(rescrv):  I've gone back and forth on these five lines.
+                //
+                // On the one hand, it's handy to restart everything in one fell swoop.
+                //
+                // On the other hand, it's SEV-worthy to restart everything in one fell swoop.
+                /*
+                let free = if free.is_empty() {
+                    self.pid1.enabled_services()
+                } else {
+                    free
+                };
+                */
+
                 if matches.opt_present("s") {
                     for service in free.iter() {
                         if let Err(err) = self.pid1.start(service) {
