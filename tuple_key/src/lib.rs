@@ -229,7 +229,7 @@ impl TupleKey {
         TupleKeyIterator::from(buf)
     }
 
-    pub fn conforms_to<T>(&self, schema: &Schema<T>) -> bool {
+    pub fn conforms_to<T: Debug>(&self, schema: &Schema<T>) -> bool {
         schema.lookup(self).is_ok()
     }
 
