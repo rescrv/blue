@@ -36,6 +36,11 @@ impl<'a> Path<'a> {
         &self.path
     }
 
+    /// Is the path a directory?
+    pub fn is_dir(&self) -> bool {
+        std::path::Path::new(self.path.as_ref()).is_dir()
+    }
+
     /// Compute the basename of the path.  This is guaraneed to be a non-empty path component
     /// (falling back to "." for paths that end with "/").
     pub fn basename(&self) -> Path<'_> {
