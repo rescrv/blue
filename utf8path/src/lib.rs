@@ -244,11 +244,17 @@ impl<'a> std::fmt::Debug for Path<'a> {
     }
 }
 
-impl From<String> for Path<'static> {
+impl<'a> From<String> for Path<'a> {
     fn from(s: String) -> Self {
         Self {
             path: Cow::Owned(s),
         }
+    }
+}
+
+impl<'a> From<Path<'a>> for String {
+    fn from(path: Path<'a>) -> Self {
+        path.path.into_owned()
     }
 }
 
@@ -257,6 +263,12 @@ impl<'a> From<&'a str> for Path<'a> {
         Self {
             path: Cow::Borrowed(s),
         }
+    }
+}
+
+impl<'a> From<&'a Path<'a>> for &'a str {
+    fn from(path: &'a Path<'a>) -> Self {
+        &path.path
     }
 }
 
@@ -293,12 +305,6 @@ impl<'a> TryFrom<std::ffi::OsString> for Path<'a> {
 impl<'a> From<Path<'a>> for std::path::PathBuf {
     fn from(path: Path<'a>) -> Self {
         PathBuf::from(path.path.to_string())
-    }
-}
-
-impl<'a> From<Path<'a>> for String {
-    fn from(path: Path<'a>) -> Self {
-        path.path.to_string()
     }
 }
 
