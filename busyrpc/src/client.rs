@@ -5,8 +5,8 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-use boring::ssl::{SslConnector, SslFiletype, SslMethod};
 use biometrics::{Collector, Counter};
+use boring::ssl::{SslConnector, SslFiletype, SslMethod};
 use buffertk::{stack_pack, Unpacker};
 use rpc_pb::sd::{Host, HostID};
 use sync42::monitor::{Monitor, MonitorCore};
@@ -506,27 +506,29 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
                 what: format!("invalid CA file: {}", err),
             }
         })?;
-        builder.set_private_key_file(&self.options.private_key_file, SslFiletype::PEM).map_err(|err| {
-            rpc_pb::Error::EncryptionMisconfiguration {
+        builder
+            .set_private_key_file(&self.options.private_key_file, SslFiletype::PEM)
+            .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("invalid private key file: {}", err),
-            }
-        })?;
-        builder.set_certificate_file(&self.options.certificate_file, SslFiletype::PEM).map_err(|err| {
-            rpc_pb::Error::EncryptionMisconfiguration {
+            })?;
+        builder
+            .set_certificate_file(&self.options.certificate_file, SslFiletype::PEM)
+            .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("invalid certificate file: {}", err),
-            }
-        })?;
-        builder.set_verify(boring::ssl::SslVerifyMode::PEER|boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+            })?;
+        builder.set_verify(
+            boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+        );
         let connector = builder.build();
         let stream = TcpStream::connect(host.connect())?;
-        let stream = connector.connect(host.hostname_or_ip(), stream).map_err(|err| {
-            rpc_pb::Error::TransportFailure {
+        let stream = connector
+            .connect(host.hostname_or_ip(), stream)
+            .map_err(|err| rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: format!("{}", err),
-            }
-        })?;
+            })?;
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let monitored_channel = MonitoredChannel {
             monitor: Monitor::new(

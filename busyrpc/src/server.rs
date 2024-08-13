@@ -92,7 +92,9 @@ impl ServerOptions {
     pub fn must_build_acceptor(&self) -> SslAcceptor {
         // Setup our SSL preferences.
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        acceptor.set_ca_file(&self.ca_file).expect("invalid ca file");
+        acceptor
+            .set_ca_file(&self.ca_file)
+            .expect("invalid ca file");
         acceptor
             .set_private_key_file(&self.private_key_file, SslFiletype::PEM)
             .expect("invalid private key");
@@ -100,7 +102,9 @@ impl ServerOptions {
             .set_certificate_file(&self.certificate_file, SslFiletype::PEM)
             .expect("invalid certificate");
         acceptor.check_private_key().expect("invalid private key");
-        acceptor.set_verify(boring::ssl::SslVerifyMode::PEER|boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        acceptor.set_verify(
+            boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+        );
         acceptor.build()
     }
 
