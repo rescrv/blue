@@ -19,6 +19,7 @@ rustyline = "11.0"
 
 arrrg = { path = "../arrrg", version = "0.3" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+indicio = { path = "../indicio", version = "0.3" }
 minimal_signals = { path = "../minimal_signals", version = "0.1" }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
 rc_conf = { path = "../rc_conf", version = "0.1" }

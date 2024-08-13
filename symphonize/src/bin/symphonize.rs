@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use arrrg::CommandLine;
+use indicio::stdio::StdioEmitter;
+use indicio::{clue, ALWAYS, INFO};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{Config, Editor};
 use utf8path::Path;
 
-use rustrc::{Pid1, Pid1Options, Target};
+use rustrc::{Pid1, Pid1Options, Target, COLLECTOR};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Options {}
@@ -221,7 +223,7 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
                     },
                     "reload" => {
                         let mut child = match std::process::Command::new("cargo")
-                            .args(&["build", "--workspace", "--bins"])
+                            .args(["build", "--workspace", "--bins"])
                             .spawn() {
                             Ok(child) => child,
                             Err(err) => {
@@ -286,6 +288,15 @@ fn main() {
     }
     let pid1_options =
         autoinfer_configuration(&options).expect("should be able to infer configuration");
+
+    // Indicio.
+    let emitter = Arc::new(StdioEmitter);
+    COLLECTOR.register(Arc::clone(&emitter));
+    COLLECTOR.set_verbosity(INFO);
+    clue!(COLLECTOR, ALWAYS, {
+        env: std::env::vars().map(|(k, v)| k + "=" + &v).collect::<Vec<_>>(),
+        args: std::env::args().map(String::from).collect::<Vec<_>>(),
+    });
 
     // Setup Pid1.
     let mut pid1 = Arc::new(Pid1::new(pid1_options).expect("pid1::new should work"));
