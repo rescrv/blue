@@ -408,9 +408,7 @@ impl Pid1 {
     }
 
     pub fn reload(&self) -> Result<(), Error> {
-        let options = {
-            self.options.lock().unwrap().clone()
-        };
+        let options = { self.options.lock().unwrap().clone() };
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
         {
             let mut state = self.state.lock().unwrap();
