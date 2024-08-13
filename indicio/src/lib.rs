@@ -248,6 +248,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<&String> for Value {
+    fn from(s: &String) -> Self {
+        Self::String(s.clone())
+    }
+}
+
 impl<V: Into<Value>> From<Vec<V>> for Value {
     fn from(values: Vec<V>) -> Self {
         let values = values.into_iter().map(|v| v.into()).collect();

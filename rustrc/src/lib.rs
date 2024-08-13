@@ -4,9 +4,68 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
+use indicio::{clue, value, ERROR, INFO, TRACING};
 use one_two_eight::generate_id;
 use rc_conf::{load_services, RcConf, SwitchPosition};
 use utf8path::Path;
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static IO_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.io");
+static SHVAR_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.shvar");
+static RC_CONF_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.rc_conf");
+static UNKNOWN_SERVICE: biometrics::Counter = biometrics::Counter::new("rustrc.error.unknown_service");
+static NUL_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.null");
+static STATE_NEW: biometrics::Counter = biometrics::Counter::new("rustrc.state.new");
+static INHIBITED_SERVICE: biometrics::Counter = biometrics::Counter::new("rustrc.inhibited");
+static WAITPID_ENTER: biometrics::Counter = biometrics::Counter::new("rustrc.waitpid.enter");
+static WAITPID_EXIT: biometrics::Counter = biometrics::Counter::new("rustrc.waitpid.exit");
+static NON_POSITIVE_PID: biometrics::Counter = biometrics::Counter::new("rustrc.non_positive_pid");
+static RECLAIM: biometrics::Counter = biometrics::Counter::new("rustrc.reclaim");
+static JOINING_THREAD: biometrics::Counter = biometrics::Counter::new("rustrc.join");
+static CONVERGE: biometrics::Counter = biometrics::Counter::new("rustrc.converge");
+static RESPAWNING: biometrics::Counter = biometrics::Counter::new("rustrc.respawn");
+static RECONFIGURE: biometrics::Counter = biometrics::Counter::new("rustrc.api.reconfigure");
+static RELOAD: biometrics::Counter = biometrics::Counter::new("rustrc.api.reload");
+static KILL: biometrics::Counter = biometrics::Counter::new("rustrc.api.kill");
+static LIST_SERVICES: biometrics::Counter = biometrics::Counter::new("rustrc.api.list_services");
+static ENABLED_SERVICES: biometrics::Counter = biometrics::Counter::new("rustrc.api.enabled_services");
+static START: biometrics::Counter = biometrics::Counter::new("rustrc.api.start");
+static RESTART: biometrics::Counter = biometrics::Counter::new("rustrc.api.restart");
+static STOP: biometrics::Counter = biometrics::Counter::new("rustrc.api.stop");
+static EXECUTION_KILL: biometrics::Counter = biometrics::Counter::new("rustrc.execution.kill");
+static EXECUTION_EXEC: biometrics::Counter = biometrics::Counter::new("rustrc.execution.exec");
+
+pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&IO_ERROR);
+    collector.register_counter(&SHVAR_ERROR);
+    collector.register_counter(&RC_CONF_ERROR);
+    collector.register_counter(&NUL_ERROR);
+    collector.register_counter(&STATE_NEW);
+    collector.register_counter(&INHIBITED_SERVICE);
+    collector.register_counter(&WAITPID_ENTER);
+    collector.register_counter(&WAITPID_EXIT);
+    collector.register_counter(&NON_POSITIVE_PID);
+    collector.register_counter(&RECLAIM);
+    collector.register_counter(&JOINING_THREAD);
+    collector.register_counter(&CONVERGE);
+    collector.register_counter(&RESPAWNING);
+    collector.register_counter(&RECONFIGURE);
+    collector.register_counter(&RELOAD);
+    collector.register_counter(&KILL);
+    collector.register_counter(&LIST_SERVICES);
+    collector.register_counter(&ENABLED_SERVICES);
+    collector.register_counter(&START);
+    collector.register_counter(&RESTART);
+    collector.register_counter(&STOP);
+    collector.register_counter(&UNKNOWN_SERVICE);
+    collector.register_counter(&EXECUTION_KILL);
+    collector.register_counter(&EXECUTION_EXEC);
+}
+
+////////////////////////////////////////////// indicio /////////////////////////////////////////////
+
+pub static COLLECTOR: indicio::Collector = indicio::Collector::new();
 
 //////////////////////////////////////////// ExecutionID ///////////////////////////////////////////
 
@@ -29,24 +88,28 @@ pub enum Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
+        IO_ERROR.click();
         Self::Io(err)
     }
 }
 
 impl From<shvar::Error> for Error {
     fn from(err: shvar::Error) -> Self {
+        SHVAR_ERROR.click();
         Self::Shvar(err)
     }
 }
 
 impl From<rc_conf::Error> for Error {
     fn from(err: rc_conf::Error) -> Self {
+        RC_CONF_ERROR.click();
         Self::RcConf(err)
     }
 }
 
 impl From<std::ffi::NulError> for Error {
     fn from(_: std::ffi::NulError) -> Self {
+        NUL_ERROR.click();
         Self::NulError
     }
 }
@@ -90,6 +153,28 @@ impl<S: AsRef<str>> From<S> for Target {
     }
 }
 
+impl From<&Target> for indicio::Value {
+    fn from(target: &Target) -> Self {
+        match target {
+            Target::All => {
+                value!({
+                    all: true,
+                })
+            },
+            Target::One(s) => {
+                value!({
+                    one: s,
+                })
+            },
+            Target::Pid(p) => {
+                value!({
+                    pid: *p,
+                })
+            }
+        }
+    }
+}
+
 //////////////////////////////////////////// Pid1Options ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
@@ -109,6 +194,15 @@ impl Default for Pid1Options {
     }
 }
 
+impl From<&Pid1Options> for indicio::Value {
+    fn from(options: &Pid1Options) -> Self {
+        value!({
+            rc_conf_path: options.rc_conf_path.as_str(),
+            rc_d_path: options.rc_d_path.as_str(),
+        })
+    }
+}
+
 ///////////////////////////////////////// Pid1Configuration ////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,6 +215,9 @@ impl Pid1Configuration {
     pub fn from_options(options: &Pid1Options) -> Result<Self, rc_conf::Error> {
         let services = load_services(&options.rc_d_path)?;
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
+        clue!(COLLECTOR, INFO, {
+            configuration: indicio::Value::from(options),
+        });
         Ok(Self { services, rc_conf })
     }
 }
@@ -142,6 +239,7 @@ impl Pid1State {
         let converge = 1;
         let processes = vec![];
         let inhibited = HashSet::new();
+        STATE_NEW.click();
         Self {
             shutdown,
             converge,
@@ -165,17 +263,26 @@ impl Pid1State {
 
     fn service_switch(&self, service: &str) -> SwitchPosition {
         if self.is_inhibited(service) {
-            // TODO(rescrv): biometrics;
+            INHIBITED_SERVICE.click();
+            clue!(COLLECTOR, INFO, {
+                inhibited: service,
+            });
             return SwitchPosition::No;
         }
         self.config.rc_conf.service_switch(service)
     }
 
     fn set_inhibit(&mut self, service: &str) {
+        clue!(COLLECTOR, INFO, {
+            set_inhibit: service,
+        });
         self.inhibited.insert(service.to_string());
     }
 
     fn clear_inhibit(&mut self, service: &str) {
+        clue!(COLLECTOR, INFO, {
+            clear_inhibit: service,
+        });
         self.inhibited.remove(service);
     }
 
@@ -193,6 +300,9 @@ impl Pid1State {
         let config = Arc::clone(&self.config);
         let service = service.to_string();
         let context = ExecutionContext::new(&config, &service, argv)?;
+        clue!(COLLECTOR, INFO, {
+            spawn: indicio::Value::from(&context),
+        });
         let execution = Arc::new(Execution::new(execution_id, config, service, context));
         let exec = Arc::clone(&execution);
         let thread = std::thread::Builder::new()
@@ -208,12 +318,16 @@ impl Pid1State {
         let pid = exec.block_until_have_pid();
         if pid > 0 {
             let mut status = 0;
+            WAITPID_ENTER.click();
             unsafe {
                 if libc::waitpid(pid, &mut status, 0) < 0 {
                     // TODO(rescrv): log that this failed.
                     // TODO(rescrv): backoff and retry in a loop.
                 }
             }
+            WAITPID_EXIT.click();
+        } else {
+            NON_POSITIVE_PID.click();
         }
         reclaim.send(exec).unwrap();
     }
@@ -282,7 +396,9 @@ impl Pid1 {
                     break;
                 }
             };
+            RECLAIM.click();
             if let Some(join) = exec.take_thread() {
+                JOINING_THREAD.click();
                 let _ = join.join();
             }
             let mut state = state.lock().unwrap();
@@ -325,6 +441,7 @@ impl Pid1 {
         reclaim: &SyncSender<Arc<Execution>>,
         state: &Mutex<Pid1State>,
     ) -> Result<(), Error> {
+        CONVERGE.click();
         let (processes, config) = {
             let state = state.lock().unwrap();
             (state.processes.clone(), Arc::clone(&state.config))
@@ -348,7 +465,7 @@ impl Pid1 {
                     }
                     exec.kill(minimal_signals::SIGTERM)?;
                 }
-                while !has_process(state, &exec) {
+                while has_process(state, &exec) {
                     exec.kill(minimal_signals::SIGKILL)?;
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
@@ -360,6 +477,7 @@ impl Pid1 {
                 continue;
             }
             if state.service_switch(service) == SwitchPosition::Yes && !state.is_running(service) {
+                RESPAWNING.click();
                 state.spawn(reclaim.clone(), service, &[])?;
             }
         }
@@ -400,6 +518,10 @@ impl Pid1 {
     }
 
     pub fn reconfigure(&self, options: Pid1Options) -> Result<(), Error> {
+        RECONFIGURE.click();
+        clue!(COLLECTOR, INFO, {
+            reconfigure: indicio::Value::from(&options),
+        });
         {
             let options2 = options.clone();
             *self.options.lock().unwrap() = options2;
@@ -408,6 +530,10 @@ impl Pid1 {
     }
 
     pub fn reload(&self) -> Result<(), Error> {
+        RELOAD.click();
+        clue!(COLLECTOR, INFO, {
+            reload: true,
+        });
         let options = { self.options.lock().unwrap().clone() };
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
         {
@@ -423,6 +549,13 @@ impl Pid1 {
     }
 
     pub fn kill(&self, mut target: Target, signal: minimal_signals::Signal) -> Result<(), Error> {
+        KILL.click();
+        clue!(COLLECTOR, INFO, {
+            kill: {
+                target: indicio::Value::from(&target),
+                signal: signal.to_string(),
+            },
+        });
         let mut err = Ok(());
         let state = self.state.lock().unwrap();
         for process in state.processes.iter() {
@@ -430,6 +563,12 @@ impl Pid1 {
                 let pid: libc::pid_t = *process.pid.lock().unwrap();
                 if pid > 0 {
                     unsafe {
+                        clue!(COLLECTOR, TRACING, {
+                            kill: {
+                                pid: pid,
+                                signal: signal.to_string(),
+                            },
+                        });
                         if libc::kill(pid, signal.into_i32()) < 0 && err.is_ok() {
                             err = Err(std::io::Error::last_os_error().into());
                         }
@@ -441,6 +580,7 @@ impl Pid1 {
     }
 
     pub fn list_services(&self) -> Vec<String> {
+        LIST_SERVICES.click();
         self.state
             .lock()
             .unwrap()
@@ -452,6 +592,7 @@ impl Pid1 {
     }
 
     pub fn enabled_services(&self) -> Vec<String> {
+        ENABLED_SERVICES.click();
         let state = self.state.lock().unwrap();
         state
             .config
@@ -463,6 +604,7 @@ impl Pid1 {
     }
 
     pub fn start(&self, service: &str) -> Result<(), Error> {
+        START.click();
         let mut state = self.state.lock().unwrap();
         state.clear_inhibit(service);
         match state.service_switch(service) {
@@ -483,6 +625,7 @@ impl Pid1 {
     }
 
     pub fn restart(&self, service: &str) -> Result<(), Error> {
+        RESTART.click();
         let switch = {
             let state = self.state.lock().unwrap();
             state.service_switch(service)
@@ -500,6 +643,7 @@ impl Pid1 {
     }
 
     pub fn stop(&self, service: &str) -> Result<(), Error> {
+        STOP.click();
         let mut processes: Vec<Arc<Execution>> = {
             let mut state = self.state.lock().unwrap();
             state.set_inhibit(service);
@@ -563,6 +707,7 @@ impl ExecutionContext {
     pub fn new(config: &Pid1Configuration, service: &str, argv: &[&str]) -> Result<Self, Error> {
         // setup path
         let Some(path) = config.services.get(service) else {
+            UNKNOWN_SERVICE.click();
             return Err(Error::UnknownService);
         };
         let path = match path {
@@ -601,6 +746,23 @@ impl ExecutionContext {
             wrapper,
             argv,
             env,
+        })
+    }
+}
+
+impl From<&ExecutionContext> for indicio::Value {
+    fn from(exec: &ExecutionContext) -> Self {
+        fn c_string_to_string(s: &CString) -> String {
+            s.to_string_lossy().into_owned()
+        }
+        fn to_value(strs: &[CString]) -> indicio::Value {
+            strs.iter().map(c_string_to_string).collect::<Vec<_>>().into()
+        }
+        value!({
+            path: c_string_to_string(&exec.path),
+            wrapper: to_value(&exec.wrapper),
+            argv: to_value(&exec.argv),
+            env: to_value(&exec.env),
         })
     }
 }
@@ -665,6 +827,10 @@ impl Execution {
     }
 
     pub fn kill(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
+        EXECUTION_KILL.click();
+        clue!(COLLECTOR, INFO, {
+            kill: indicio::Value::from(&self.context),
+        });
         if let Some(pid) = self.pid() {
             unsafe {
                 if libc::kill(pid, signal.into_i32()) < 0
@@ -678,6 +844,10 @@ impl Execution {
     }
 
     fn exec(self: &Arc<Self>) -> Result<(), Error> {
+        EXECUTION_EXEC.click();
+        clue!(COLLECTOR, INFO, {
+            exec: indicio::Value::from(&self.context),
+        });
         match self.exec_inner() {
             Ok(pid) => {
                 self.set_pid(pid);

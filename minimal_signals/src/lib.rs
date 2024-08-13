@@ -36,6 +36,19 @@ pub const SIGCHLD: Signal = Signal(libc::SIGCHLD);
 pub const SIGUSR1: Signal = Signal(libc::SIGUSR1);
 pub const SIGUSR2: Signal = Signal(libc::SIGUSR2);
 
+impl std::fmt::Debug for Signal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let set = SignalSet::new().add(*self);
+        write!(f, "{}", set)
+    }
+}
+
+impl std::fmt::Display for Signal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{:?}", self)
+    }
+}
+
 ///////////////////////////////////////////// SignalSet ////////////////////////////////////////////
 
 pub struct SignalSet {
@@ -148,6 +161,12 @@ impl std::fmt::Debug for SignalSet {
 impl std::fmt::Display for SignalSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{:?}", self)
+    }
+}
+
+impl From<Signal> for SignalSet {
+    fn from(s: Signal) -> Self {
+        Self::new().add(s)
     }
 }
 
