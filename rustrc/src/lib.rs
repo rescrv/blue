@@ -230,7 +230,7 @@ struct Pid1Coordination {
 
 #[derive(Debug)]
 pub struct Pid1 {
-    options: Pid1Options,
+    options: Mutex<Pid1Options>,
     state: Arc<Mutex<Pid1State>>,
     coord: Arc<Pid1Coordination>,
     // Reclaim threads that waitpid on processes.
@@ -258,6 +258,7 @@ impl Pid1 {
         let converger = std::thread::Builder::new()
             .spawn(move || Self::converge_thread(converge_reclaim, converge_state, converge_coord))
             .unwrap();
+        let options = Mutex::new(options);
 
         Ok(Self {
             options,
@@ -398,8 +399,19 @@ impl Pid1 {
         Ok(())
     }
 
+    pub fn reconfigure(&self, options: Pid1Options) -> Result<(), Error> {
+        {
+            let options2 = options.clone();
+            *self.options.lock().unwrap() = options2;
+        }
+        self.reload()
+    }
+
     pub fn reload(&self) -> Result<(), Error> {
-        let config = Arc::new(Pid1Configuration::from_options(&self.options)?);
+        let options = {
+            self.options.lock().unwrap().clone()
+        };
+        let config = Arc::new(Pid1Configuration::from_options(&options)?);
         {
             let mut state = self.state.lock().unwrap();
             state.config = config;
