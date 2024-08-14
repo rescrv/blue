@@ -324,6 +324,11 @@ impl Pid1State {
                     // TODO(rescrv): backoff and retry in a loop.
                 }
             }
+            clue!(COLLECTOR, INFO, {
+                waitpid: {
+                    pid: pid,
+                },
+            });
             WAITPID_EXIT.click();
         } else {
             NON_POSITIVE_PID.click();
@@ -456,9 +461,21 @@ impl Pid1 {
         for exec in processes {
             let current_context = ExecutionContext::new(&config, &exec.service, &[])?;
             if current_context != exec.context {
-                if exec.pid().is_none() {
-                    todo!("log this");
-                }
+                let Some(pid) = exec.pid() else {
+                    clue!(COLLECTOR, ERROR, {
+                        error: {
+                            human: format!("failed to converge {}; manually reload and restart", exec.service),
+                        }
+                    });
+                    continue;
+                };
+                clue!(COLLECTOR, INFO, {
+                    converge: {
+                        old: indicio::Value::from(&exec.context),
+                        new: indicio::Value::from(&current_context),
+                        pid: pid,
+                    },
+                });
                 for iter in 1..=3 {
                     for _ in 0..(1 << iter) * 10 {
                         std::thread::sleep(std::time::Duration::from_millis(100));
