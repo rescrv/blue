@@ -6,6 +6,10 @@ use std::process::Command;
 use shvar::{PrefixingVariableProvider, VariableProvider};
 use utf8path::Path;
 
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
+const RESTRICTED_VARIABLES: &[&str] = &["NAME"];
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -277,6 +281,9 @@ impl RcScript {
                         eprintln!("arguments ignored");
                     }
                     for rcvar in self.rcvar()?.into_iter() {
+                        if RESTRICTED_VARIABLES.iter().any(|v| *v == rcvar) {
+                            continue;
+                        }
                         println!("{rcvar}");
                     }
                     Ok(())
@@ -297,13 +304,17 @@ impl RcScript {
             .collect::<String>();
         name.push('_');
         let evp = EnvironmentVariableProvider::new(Some(name));
-        let exp = shvar::expand(&evp, &self.command)?;
+        let meta = HashMap::from([("NAME".to_string(), self.name.to_string())]);
+        let exp = shvar::expand(&(&meta, &evp), &self.command)?;
         let mut cmd = shvar::split(&exp)?;
         if !args.is_empty() {
             cmd.push("--".to_string());
         }
         cmd.extend(args.iter().map(|s| s.to_string()));
-        panic!("{:?}", Command::new(&cmd[0]).args(&cmd[1..]).exec());
+        panic!(
+            "{args:?}\n{:?}",
+            Command::new(&cmd[0]).args(&cmd[1..]).exec()
+        );
     }
 }
 
@@ -451,7 +462,9 @@ impl RcConf {
             .arg("rcvar")
             .output()?;
         if !output.status.success() {
-            todo!();
+            return Err(Error::InvalidInvocation {
+                message: "rcvar command failed".to_string(),
+            });
         }
         let stdout = String::from_utf8(output.stdout)?;
         for var in stdout.split_whitespace() {
@@ -542,9 +555,6 @@ pub fn load_services(
             let dirent = dirent?;
             let path = Path::try_from(dirent.path())?.into_owned();
             let name = dirent.file_name().to_string_lossy().to_string();
-            if *name != *dirent.file_name() {
-                todo!();
-            }
             match services.entry(name) {
                 Entry::Occupied(mut entry) => {
                     let value: &mut Result<Path<'static>, String> = entry.get_mut();
