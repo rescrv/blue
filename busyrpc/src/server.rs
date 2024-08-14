@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::{Arc, Mutex};
 
-use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
-
 use biometrics::{Collector, Counter};
-
+use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use buffertk::{stack_pack, Unpackable};
-
-use zerror_core::ErrorCore;
-
+use indicio::{clue, INFO};
 use rpc_pb::{Context, Error, Request, Response, Status};
+use zerror_core::ErrorCore;
 
 use super::builtins;
 use super::channel::Channel;
 use super::poll::{default_pollster, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
+use super::LOGGING;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -176,14 +174,16 @@ struct Internals {
     channels: Mutex<HashMap<RawFd, Arc<Mutex<Channel>>>>,
     services: ServiceRegistry,
     pollster: Box<dyn Pollster>,
+    canceled: OwnedFd,
 }
 
 impl Internals {
-    fn new(pollster: Box<dyn Pollster>, services: ServiceRegistry) -> Arc<Self> {
+    fn new(pollster: Box<dyn Pollster>, services: ServiceRegistry, canceled: OwnedFd) -> Arc<Self> {
         Arc::new(Self {
             channels: Mutex::default(),
             services,
             pollster,
+            canceled,
         })
     }
 
@@ -202,6 +202,9 @@ impl Internals {
                     continue 'serving;
                 }
             };
+            if fd == self.canceled.as_raw_fd() {
+                break 'serving;
+            }
             POLL_SUCCESS.click();
             let chan = match self.get_channel(fd) {
                 Some(chan) => chan,
@@ -416,10 +419,30 @@ pub struct Server {
 
 impl Server {
     /// Create a new server from the options and service registry.
-    pub fn new(options: ServerOptions, services: ServiceRegistry) -> Result<Self, rpc_pb::Error> {
+    pub fn new(
+        options: ServerOptions,
+        services: ServiceRegistry,
+    ) -> Result<(Self, impl FnOnce()), rpc_pb::Error> {
         let pollster = options.pollster()?;
-        let internals = Internals::new(pollster, services);
-        Ok(Self { options, internals })
+        let mut fds: [libc::c_int; 2] = [-1; 2];
+        // SAFETY(rescrv):  We are passing a suitably-sized array of ints.
+        unsafe {
+            if libc::pipe(&mut fds as *mut libc::c_int) < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        // SAFETY(rescrv):  We were just handed this file descriptor.
+        let watch = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        pollster.arm_forever(watch.as_raw_fd())?;
+        let cancel = move || {
+            // SAFETY(rescrv): We will be the only ones to call close, and the function is returned
+            // as a FnOnce.  Trust in the type system from there.
+            unsafe {
+                libc::close(fds[1]);
+            }
+        };
+        let internals = Internals::new(pollster, services, watch);
+        Ok((Self { options, internals }, cancel))
     }
 
     /// Serve the server forever.
@@ -444,9 +467,39 @@ impl Server {
                 core: ErrorCore::default(),
                 what: err.to_string(),
             })?;
-        'listening: for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
+        'listening: loop {
+            let break_fd = self.internals.canceled.as_raw_fd();
+            let mut pfd = [
+                libc::pollfd {
+                    fd: break_fd,
+                    events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: listener.as_raw_fd(),
+                    events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                },
+            ];
+            let ret = unsafe { libc::poll(pfd.as_mut_ptr(), 2, -1) };
+            if pfd[0].revents != 0 {
+                clue!(LOGGING, INFO, {
+                    serve: {
+                        canceled: true,
+                    },
+                });
+                break;
+            }
+            if ret < 0 {
+                clue!(LOGGING, INFO, {
+                    serve: {
+                        error: true,
+                    },
+                });
+                break;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
                     let acceptor = acceptor.clone();
                     let stream = match acceptor.accept(stream) {
                         Ok(stream) => stream,

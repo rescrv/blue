@@ -560,7 +560,7 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
 
 ////////////////////////////////////////////// Client //////////////////////////////////////////////
 
-pub struct Client<'a: 'b, 'b, R: Resolver + Send + Sync> {
+struct Client<'a: 'b, 'b, R: Resolver + Send + Sync> {
     sequencer: AtomicU64,
     concurrent_ops: StateHashTable<u64, ShtState>,
     channels: ChannelManager<'a, 'b, R>,

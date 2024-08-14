@@ -115,4 +115,29 @@ impl Pollster for Epollster {
         }
         Ok(())
     }
+
+    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::Error> {
+        let ev = POLLIN | POLLERR | POLLHUP;
+        let mut ep_event = libc::epoll_event {
+            events: map_events_to_ep(ev),
+            u64: fd as u64,
+        };
+        POLL_MOD.click();
+        let ret =
+            unsafe { libc::epoll_ctl(self.epoll_inst, libc::EPOLL_CTL_MOD, fd, &mut ep_event) };
+        let ret = if ret < 0 && unsafe { *libc::__errno_location() } == libc::ENOENT {
+            POLL_ADD.click();
+            unsafe { libc::epoll_ctl(self.epoll_inst, libc::EPOLL_CTL_ADD, fd, &mut ep_event) }
+        } else if ret < 0 {
+            POLL_MOD_ERR.click();
+            return Err(std::io::Error::last_os_error().into());
+        } else {
+            ret
+        };
+        if ret < 0 {
+            POLL_ADD_ERR.click();
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(())
+    }
 }

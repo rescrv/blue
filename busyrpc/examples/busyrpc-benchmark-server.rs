@@ -42,6 +42,6 @@ fn main() {
         }
     });
     let services = ServiceRegistry::new();
-    let server = Server::new(options.server, services).as_z().pretty_unwrap();
+    let (server, _) = Server::new(options.server, services).as_z().pretty_unwrap();
     server.serve().as_z().pretty_unwrap();
 }

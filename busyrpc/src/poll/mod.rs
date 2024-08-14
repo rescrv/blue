@@ -20,6 +20,7 @@ pub fn register_biometrics(collector: &mut Collector) {
 pub trait Pollster: Send + Sync + 'static {
     fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::Error>;
     fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::Error>;
+    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::Error>;
 }
 
 #[cfg(target_os = "linux")]
