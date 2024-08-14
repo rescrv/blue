@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use shvar::{PrefixingVariableProvider, VariableProvider};
@@ -298,11 +299,11 @@ impl RcScript {
         let evp = EnvironmentVariableProvider::new(Some(name));
         let exp = shvar::expand(&evp, &self.command)?;
         let mut cmd = shvar::split(&exp)?;
-        cmd.push("--".to_string());
+        if !args.is_empty() {
+            cmd.push("--".to_string());
+        }
         cmd.extend(args.iter().map(|s| s.to_string()));
-        let mut child = Command::new(&cmd[0]).args(&cmd[1..]).spawn()?;
-        let exit_status = child.wait()?;
-        std::process::exit(exit_status.code().unwrap_or(0));
+        panic!("{:?}", Command::new(&cmd[0]).args(&cmd[1..]).exec());
     }
 }
 
