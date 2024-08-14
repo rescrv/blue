@@ -4,7 +4,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
-use indicio::{clue, value, ERROR, INFO, TRACING};
+use indicio::{clue, value, ERROR, INFO};
 use one_two_eight::generate_id;
 use rc_conf::{load_services, RcConf, SwitchPosition};
 use utf8path::Path;
@@ -571,7 +571,7 @@ impl Pid1 {
                 let pid: libc::pid_t = *process.pid.lock().unwrap();
                 if pid > 0 {
                     unsafe {
-                        clue!(COLLECTOR, TRACING, {
+                        clue!(COLLECTOR, INFO, {
                             kill: {
                                 pid: pid,
                                 signal: signal.to_string(),
