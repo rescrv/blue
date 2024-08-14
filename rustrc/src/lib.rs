@@ -900,7 +900,7 @@ impl Execution {
         // spawn
         let mut pid: libc::pid_t = -1;
         unsafe {
-            if libc::posix_spawn(
+            if libc::posix_spawnp(
                 &mut pid,
                 exe.as_ptr() as _,
                 std::ptr::null(),
