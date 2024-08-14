@@ -42,6 +42,9 @@ pub trait CommandLine: Sized + Default + Eq + PartialEq {
         let mut reconstructed_args = command_line.canonical_command_line(None);
         let mut free_p = free.clone();
         reconstructed_args.append(&mut free_p);
+        let mut args = args.to_vec();
+        args.retain(|a| *a != "--");
+        reconstructed_args.retain(|a| *a != "--");
         if args != reconstructed_args {
             panic!(
                 "non-canonical commandline specified:
