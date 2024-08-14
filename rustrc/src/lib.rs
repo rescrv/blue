@@ -14,7 +14,8 @@ use utf8path::Path;
 static IO_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.io");
 static SHVAR_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.shvar");
 static RC_CONF_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.rc_conf");
-static UNKNOWN_SERVICE: biometrics::Counter = biometrics::Counter::new("rustrc.error.unknown_service");
+static UNKNOWN_SERVICE: biometrics::Counter =
+    biometrics::Counter::new("rustrc.error.unknown_service");
 static NUL_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.null");
 static STATE_NEW: biometrics::Counter = biometrics::Counter::new("rustrc.state.new");
 static INHIBITED_SERVICE: biometrics::Counter = biometrics::Counter::new("rustrc.inhibited");
@@ -29,7 +30,8 @@ static RECONFIGURE: biometrics::Counter = biometrics::Counter::new("rustrc.api.r
 static RELOAD: biometrics::Counter = biometrics::Counter::new("rustrc.api.reload");
 static KILL: biometrics::Counter = biometrics::Counter::new("rustrc.api.kill");
 static LIST_SERVICES: biometrics::Counter = biometrics::Counter::new("rustrc.api.list_services");
-static ENABLED_SERVICES: biometrics::Counter = biometrics::Counter::new("rustrc.api.enabled_services");
+static ENABLED_SERVICES: biometrics::Counter =
+    biometrics::Counter::new("rustrc.api.enabled_services");
 static START: biometrics::Counter = biometrics::Counter::new("rustrc.api.start");
 static RESTART: biometrics::Counter = biometrics::Counter::new("rustrc.api.restart");
 static STOP: biometrics::Counter = biometrics::Counter::new("rustrc.api.stop");
@@ -160,12 +162,12 @@ impl From<&Target> for indicio::Value {
                 value!({
                     all: true,
                 })
-            },
+            }
             Target::One(s) => {
                 value!({
                     one: s,
                 })
-            },
+            }
             Target::Pid(p) => {
                 value!({
                     pid: *p,
@@ -480,7 +482,9 @@ impl Pid1 {
                     service: service,
                     inhibited: true,
                 });
-            } else if state.service_switch(service) == SwitchPosition::Yes && !state.is_running(service) {
+            } else if state.service_switch(service) == SwitchPosition::Yes
+                && !state.is_running(service)
+            {
                 RESPAWNING.click();
                 clue!(COLLECTOR, INFO, {
                     started: true,
@@ -764,7 +768,10 @@ impl From<&ExecutionContext> for indicio::Value {
             s.to_string_lossy().into_owned()
         }
         fn to_value(strs: &[CString]) -> indicio::Value {
-            strs.iter().map(c_string_to_string).collect::<Vec<_>>().into()
+            strs.iter()
+                .map(c_string_to_string)
+                .collect::<Vec<_>>()
+                .into()
         }
         value!({
             path: c_string_to_string(&exec.path),
