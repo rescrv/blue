@@ -1,0 +1,25 @@
+[package]
+name = "stdioredirect"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "stdioredirect provides a tool to wrap another command and redirect its outut."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = []
+
+[dependencies]
+getopts = { version = "0.2" }
+libc = "0.2"
+
+arrrg = { path = "../arrrg", version = "0.3" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+
+[[bin]]
+name = "stdioredirect"
+path = "src/bin/stdioredirect.rs"
+required-features=["binaries"]

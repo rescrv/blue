@@ -39,6 +39,7 @@ members = [
     "split_channel",
     "sst",
     "statslicer",
+    "stdioredirect",
     "symphonize",
     "sync42",
     "tag_index",
