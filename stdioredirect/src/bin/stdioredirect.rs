@@ -2,6 +2,8 @@ use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 
+use std::path::{Path, PathBuf};
+
 use arrrg::CommandLine;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
@@ -26,6 +28,27 @@ pub struct Options {
     stderr: Option<String>,
 }
 
+fn close_or_dup2(close: bool, file: Option<String>, fd: libc::c_int, opts: OpenOptions) {
+    // take care of stdin
+    if close {
+        unsafe {
+            // NOTE(rescrv):  On Linux, valid file descriptors cannot fail.  I don't think it's
+            // worth failing over this, but maybe revisit and add error-handling.
+            libc::close(fd);
+        }
+    } else if let Some(file) = file {
+        if !PathBuf::from(&file).parent().unwrap_or(Path::new("..")).exists() {
+            panic!("could not open {file}: containing directory does not exist");
+        }
+        let file = opts.open(file).expect("file should open");
+        unsafe {
+            if libc::dup2(file.as_raw_fd(), fd) < 0 {
+                panic!("could not dup2: {:?}", std::io::Error::last_os_error());
+            }
+        }
+    }
+}
+
 fn main() {
     // option parsing
     let (options, free) =
@@ -43,54 +66,21 @@ fn main() {
         std::process::exit(254);
     }
     // take care of stdin
-    if options.close_stdin {
-        unsafe {
-            libc::close(libc::STDIN_FILENO);
-        }
-    } else if let Some(stdin) = options.stdin {
-        let stdin = OpenOptions::new().read(true).open(stdin).unwrap();
-        unsafe {
-            if libc::dup2(stdin.as_raw_fd(), libc::STDIN_FILENO) < 0 {
-                panic!("{:?}", std::io::Error::last_os_error());
-            }
-        }
-    }
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    close_or_dup2(options.close_stdin, options.stdin, libc::STDIN_FILENO, opts);
     // take care of stdout
-    if options.close_stdout {
-        unsafe {
-            libc::close(libc::STDOUT_FILENO);
-        }
-    } else if let Some(stdout) = options.stdout {
-        let stdout = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(stdout)
-            .unwrap();
-        unsafe {
-            if libc::dup2(stdout.as_raw_fd(), libc::STDOUT_FILENO) < 0 {
-                panic!("{:?}", std::io::Error::last_os_error());
-            }
-        }
-    }
+    let mut opts = OpenOptions::new();
+    opts.write(true)
+        .truncate(true)
+        .create(true);
+    close_or_dup2(options.close_stdout, options.stdout, libc::STDOUT_FILENO, opts);
     // take care of stderr
-    if options.close_stderr {
-        unsafe {
-            libc::close(libc::STDERR_FILENO);
-        }
-    } else if let Some(stderr) = options.stderr {
-        let stderr = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(stderr)
-            .unwrap();
-        unsafe {
-            if libc::dup2(stderr.as_raw_fd(), libc::STDERR_FILENO) < 0 {
-                panic!("{:?}", std::io::Error::last_os_error());
-            }
-        }
-    }
+    let mut opts = OpenOptions::new();
+    opts.write(true)
+        .truncate(true)
+        .create(true);
+    close_or_dup2(options.close_stderr, options.stderr, libc::STDERR_FILENO, opts);
     // now exec
     panic!(
         "{:?}",
