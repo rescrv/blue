@@ -498,6 +498,7 @@ impl Builder {
 /////////////////////////////////////////////// parse //////////////////////////////////////////////
 
 fn parse_statement(
+    generate_errors: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -514,10 +515,10 @@ fn parse_statement(
                 parse_single_quotes(vars, witness, tokens, output)?;
             }
             '"' => {
-                parse_double_quotes(depth, vars, witness, tokens, output)?;
+                parse_double_quotes(generate_errors, depth, vars, witness, tokens, output)?;
             }
             '$' => {
-                parse_variable(depth, vars, witness, tokens, output)?;
+                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
             }
             '}' => {
                 break;
@@ -562,6 +563,7 @@ fn parse_single_quotes(
 }
 
 fn parse_double_quotes(
+    generate_errors: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -608,7 +610,7 @@ fn parse_double_quotes(
             }
             '$' => {
                 noexpect = true;
-                parse_variable(depth, vars, witness, tokens, output)?;
+                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
             }
             c if prev_was_whack => {
                 output.push('\\');
@@ -628,6 +630,7 @@ fn parse_double_quotes(
 }
 
 fn parse_variable(
+    generate_errors: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -644,7 +647,14 @@ fn parse_variable(
         };
         tokens.accept(action);
         let mut expanded = Builder::from_other(output);
-        parse_statement(depth + 1, vars, witness, tokens, &mut expanded)?;
+        parse_statement(
+            generate_errors,
+            depth + 1,
+            vars,
+            witness,
+            tokens,
+            &mut expanded,
+        )?;
         match action {
             '-' => {
                 if let Some(val) = vars.lookup(&ident) {
@@ -656,6 +666,13 @@ fn parse_variable(
             '+' => {
                 if vars.lookup(&ident).is_some() {
                     output.append(expanded);
+                }
+            }
+            '?' => {
+                if let Some(val) = vars.lookup(&ident) {
+                    output.push_str(&val);
+                } else if generate_errors {
+                    return Err(Error::Requested(expanded.into_string()));
                 }
             }
             c => {
@@ -703,7 +720,7 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
-    parse_statement(0, vars, &mut (), &mut tokens, &mut output)?;
+    parse_statement(true, 0, vars, &mut (), &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
@@ -719,7 +736,7 @@ pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     let mut witnesses: HashSet<String> = HashSet::new();
-    parse_statement(0, &(), &mut witnesses, &mut tokens, &mut output)?;
+    parse_statement(false, 0, &(), &mut witnesses, &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
