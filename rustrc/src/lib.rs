@@ -118,6 +118,139 @@ impl From<std::ffi::NulError> for Error {
     }
 }
 
+impl From<Error> for indicio::Value {
+    fn from(err: Error) -> Self {
+        fn shvar_to_value(err: shvar::Error) -> indicio::Value {
+            match err {
+                shvar::Error::OpenSingleQuotes => { indicio::value!({open_single_quotes: true}) },
+                shvar::Error::OpenDoubleQuotes => { indicio::value!({open_double_quotes: true}) },
+                shvar::Error::TrailingRightBrace => { indicio::value!({trailing_right_brace: true}) },
+                shvar::Error::InvalidVariable => { indicio::value!({invalid_variable: true}) },
+                shvar::Error::InvalidCharacter {
+                    expected,
+                    returned: Some(returned),
+                } => { indicio::value!({invalid_charcater: { expected: expected, returned: returned }}) },
+                shvar::Error::InvalidCharacter {
+                    expected,
+                    returned: None,
+                } => { indicio::value!({invalid_charcater: { expected: expected }}) },
+                shvar::Error::DepthLimitExceeded => { indicio::value!({depth_limit_exceeded: true}) },
+                shvar::Error::Requested(message) => { indicio::value!({requested: message}) },
+            }
+        }
+        match err {
+            Error::GeneratingExecutionID => {
+                indicio::value!({
+                    generating_execution_id: true,
+                })
+            }
+            Error::UnknownService => {
+                indicio::value!({
+                    unknown_service: true,
+                })
+            },
+            Error::ServiceDisabled => {
+                indicio::value!({
+                    service_disabled: true,
+                })
+            },
+            Error::ServiceAlreadyStarted => {
+                indicio::value!({
+                    service_already_started: true,
+                })
+            },
+            Error::ServiceError(msg) => {
+                indicio::value!({
+                    service_error: msg,
+                })
+            },
+            Error::Io(err) => {
+                indicio::value!({
+                    io: format!("{:?}", err),
+                })
+            },
+            Error::Shvar(err) => {
+                indicio::value!({
+                    shvar: shvar_to_value(err),
+                })
+            },
+            Error::RcConf(err) => {
+                let inner = match err {
+                    rc_conf::Error::FileTooLarge { path } => {
+                        indicio::value!({
+                            path: path.as_str(),
+                            file_too_large: true,
+                        })
+                    },
+                    rc_conf::Error::TrailingWhack { path } => {
+                        indicio::value!({
+                            path: path.as_str(),
+                            trailing_whack: true,
+                        })
+                    },
+                    rc_conf::Error::ProhibitedCharacter { path, line, string, character } => {
+                        indicio::value!({
+                            path: path.as_str(),
+                            line: line,
+                            prohibited_character: {
+                                string: string,
+                                character: character,
+                            },
+                        })
+                    },
+                    rc_conf::Error::InvalidRcConf { path, line, message } => {
+                        indicio::value!({
+                            path: path.as_str(),
+                            line: line,
+                            invalid_rc_conf: message,
+                        })
+                    },
+                    rc_conf::Error::InvalidRcScript { path, line, message } => {
+                        indicio::value!({
+                            path: path.as_str(),
+                            line: line,
+                            invalid_rc_Script: message,
+                        })
+                    },
+                    rc_conf::Error::InvalidInvocation { message } => {
+                        indicio::value!({
+                            invalid_invocation: message,
+                        })
+                    },
+                    rc_conf::Error::IoError(err) => {
+                        indicio::value!({
+                            io: format!("{:?}", err),
+                        })
+                    },
+                    rc_conf::Error::ShvarError(err) => {
+                        indicio::value!({
+                            shvar: shvar_to_value(err),
+                        })
+                    },
+                    rc_conf::Error::Utf8Error(err) => {
+                        indicio::value!({
+                            utf8: format!("{:?}", err),
+                        })
+                    },
+                    rc_conf::Error::FromUtf8Error(err) => {
+                        indicio::value!({
+                            from_utf8: format!("{:?}", err),
+                        })
+                    },
+                };
+                indicio::value!({
+                    rc_conf: inner,
+                })
+            },
+            Error::NulError => {
+                indicio::value!({
+                    generating_execution_id: true,
+                })
+            },
+        }
+    }
+}
+
 ////////////////////////////////////////////// Target //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default)]
@@ -350,6 +483,7 @@ impl Pid1State {
                 waitpid: {
                     pid: pid,
                 },
+                exec: indicio::Value::from(&exec.context),
             });
             WAITPID_EXIT.click();
         } else {
@@ -472,13 +606,18 @@ impl Pid1 {
                 state.cleanup_backoff(Instant::now());
                 state.converge
             };
-            if let Ok(w) = Self::converge(&reclaim, &state) {
-                wait = w;
-                converge = c;
-            } else {
-                // TODO(rescrv): backoff and retry
-                std::thread::sleep(std::time::Duration::from_secs(1));
+            match Self::converge(&reclaim, &state) {
+                Ok(w) => {
+                    wait = w;
+                    converge = c;
+                },
+                Err(err) => {
+                    clue!(COLLECTOR, ERROR, {
+                        error: indicio::Value::from(err),
+                    });
+                },
             }
+            wait = std::cmp::max(wait, Duration::from_secs(1));
         }
     }
 
@@ -575,11 +714,11 @@ impl Pid1 {
             let mut state = self.state.lock().unwrap();
             state.shutdown = true;
         }
-        for iter in 1..=3 {
+        'outer: for iter in 1..=3 {
             for _ in 0..(1 << iter) * 10 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if !self.has_processes() {
-                    break;
+                    break 'outer;
                 }
             }
             let _ = self.kill(Target::All, minimal_signals::SIGTERM);
@@ -725,6 +864,7 @@ impl Pid1 {
         if state.service_switch(service) == SwitchPosition::Manual {
             state.spawn(self.reclaim.clone(), service, &[])?;
         }
+        self.coord.converge.notify_all();
         Ok(())
     }
 
@@ -782,7 +922,7 @@ impl Pid1 {
 
 ///////////////////////////////////////// ExecutionContext /////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, Hash)]
+#[derive(Clone, Debug, Eq)]
 pub struct ExecutionContext {
     pub path: CString,
     pub wrapper: Vec<CString>,
@@ -797,6 +937,15 @@ impl PartialEq for ExecutionContext {
             && self.wrapper == other.wrapper
             && self.argv == other.argv
             && self.env == other.env
+    }
+}
+
+impl Hash for ExecutionContext {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.path.hash(h);
+        self.wrapper.hash(h);
+        self.argv.hash(h);
+        self.env.hash(h);
     }
 }
 
@@ -1042,17 +1191,26 @@ impl BackoffTracker {
     fn track(&mut self, service: String, credit: Duration) {
         let (last_tracked, penalty) = self
             .penalties
-            .entry(service)
-            .or_insert((Instant::now(), Duration::ZERO));
-        let elapsed = last_tracked.elapsed();
+            .entry(service.clone())
+            .or_insert((Instant::now(), Duration::from_secs(1)));
         *last_tracked = Instant::now();
         fn compound(duration: Duration) -> Duration {
             Duration::from_micros(
-                1_000_000 * (std::f64::consts::E.powf(1.01 * duration.as_secs_f64())) as u64,
+                (duration.as_micros() as f64 * std::f64::consts::E.powf(0.05 * duration.as_secs_f64() / 60.)) as u64,
             )
         }
-        *penalty = penalty.saturating_sub(compound(credit) + elapsed.saturating_sub(credit));
+        let old_penalty = *penalty;
+        *penalty = penalty.saturating_sub(compound(credit));
         *penalty = penalty.saturating_mul(2);
+        *penalty = (*penalty).clamp(Duration::ZERO, Duration::from_secs(300));
+        // TODO(rescrv): Don't log under lock.  Almost certainly under lock.
+        clue!(COLLECTOR, INFO, {
+            service: service,
+            credit: format!("{:?}", credit),
+            adjusted: format!("{:?}", compound(credit)),
+            old_penalty: format!("{:?}", old_penalty),
+            new_penalty: format!("{:?}", *penalty),
+        });
     }
 
     fn backoff(&mut self, service: &str) -> Duration {
