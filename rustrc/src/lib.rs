@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
+use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, WaitTimeoutResult};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use indicio::{clue, value, ERROR, INFO};
 use one_two_eight::generate_id;
@@ -230,6 +232,7 @@ struct Pid1State {
     config: Arc<Pid1Configuration>,
     processes: Vec<Arc<Execution>>,
     inhibited: HashSet<String>,
+    backedoff: HashMap<String, Instant>,
 }
 
 impl Pid1State {
@@ -238,6 +241,7 @@ impl Pid1State {
         let converge = 1;
         let processes = vec![];
         let inhibited = HashSet::new();
+        let backedoff = HashMap::new();
         STATE_NEW.click();
         Self {
             shutdown,
@@ -245,6 +249,7 @@ impl Pid1State {
             config,
             processes,
             inhibited,
+            backedoff,
         }
     }
 
@@ -271,11 +276,11 @@ impl Pid1State {
         self.config.rc_conf.service_switch(service)
     }
 
-    fn set_inhibit(&mut self, service: &str) {
+    fn set_inhibit(&mut self, service: String) {
         clue!(COLLECTOR, INFO, {
-            set_inhibit: service,
+            set_inhibit: &service,
         });
-        self.inhibited.insert(service.to_string());
+        self.inhibited.insert(service);
     }
 
     fn clear_inhibit(&mut self, service: &str) {
@@ -289,12 +294,29 @@ impl Pid1State {
         self.inhibited.contains(service)
     }
 
+    fn set_backoff(&mut self, service: String, when: Instant) {
+        self.backedoff.insert(service, when);
+    }
+
+    fn get_backoff(&self, service: &str) -> Option<Instant> {
+        self.backedoff.get(service).cloned()
+    }
+
+    fn clear_backoff(&mut self, service: &str) {
+        self.backedoff.remove(service);
+    }
+
+    fn cleanup_backoff(&mut self, now: Instant) {
+        self.backedoff.retain(|_, v| *v > now);
+    }
+
     fn spawn(
         &mut self,
         reclaim: SyncSender<Arc<Execution>>,
         service: &str,
         argv: &[&str],
     ) -> Result<ExecutionID, Error> {
+        self.clear_backoff(service);
         let execution_id = ExecutionID::generate().ok_or(Error::GeneratingExecutionID)?;
         let config = Arc::clone(&self.config);
         let service = service.to_string();
@@ -342,6 +364,7 @@ impl Pid1State {
 #[derive(Debug, Default)]
 struct Pid1Coordination {
     converge: Condvar,
+    backoff: Mutex<BackoffTracker>,
 }
 
 /////////////////////////////////////////////// Pid1 ///////////////////////////////////////////////
@@ -405,12 +428,22 @@ impl Pid1 {
                 JOINING_THREAD.click();
                 let _ = join.join();
             }
-            let mut state = state.lock().unwrap();
-            state.processes.retain(|p| !Arc::ptr_eq(p, &exec));
-            state.converge = state.converge.saturating_add(1);
-            coord.converge.notify_all();
-            if state.converge == u64::MAX {
-                todo!();
+            let backoff = {
+                let mut backoff = coord.backoff.lock().unwrap();
+                backoff.track(exec.service.to_string(), exec.context.started.elapsed());
+                backoff.wipe_debts();
+                backoff.backoff(&exec.service)
+            };
+            let service = exec.service.to_string();
+            {
+                let mut state = state.lock().unwrap();
+                state.processes.retain(|p| !Arc::ptr_eq(p, &exec));
+                state.converge = state.converge.saturating_add(1);
+                state.set_backoff(service, Instant::now() + backoff);
+                coord.converge.notify_all();
+                if state.converge == u64::MAX {
+                    todo!();
+                }
             }
         }
     }
@@ -421,18 +454,26 @@ impl Pid1 {
         coord: Arc<Pid1Coordination>,
     ) {
         let mut converge = 0;
+        let mut wait = Duration::from_secs(10);
         loop {
             let c = {
                 let mut state = state.lock().unwrap();
+                clue!(COLLECTOR, INFO, { wait: format!("{:?}", wait), });
                 while !state.shutdown && converge >= state.converge {
-                    state = coord.converge.wait(state).unwrap();
+                    let timed_out: WaitTimeoutResult;
+                    (state, timed_out) = coord.converge.wait_timeout(state, wait).unwrap();
+                    if timed_out.timed_out() {
+                        break;
+                    }
                 }
                 if state.shutdown {
                     break;
                 }
+                state.cleanup_backoff(Instant::now());
                 state.converge
             };
-            if Self::converge(&reclaim, &state).is_ok() {
+            if let Ok(w) = Self::converge(&reclaim, &state) {
+                wait = w;
                 converge = c;
             } else {
                 // TODO(rescrv): backoff and retry
@@ -444,7 +485,7 @@ impl Pid1 {
     fn converge(
         reclaim: &SyncSender<Arc<Execution>>,
         state: &Mutex<Pid1State>,
-    ) -> Result<(), Error> {
+    ) -> Result<Duration, Error> {
         CONVERGE.click();
         let (processes, config) = {
             let state = state.lock().unwrap();
@@ -491,6 +532,8 @@ impl Pid1 {
                 }
             }
         }
+        let now = Instant::now();
+        let mut min = Instant::now() + Duration::from_secs(300);
         for service in config.services.keys() {
             let mut state = state.lock().unwrap();
             if state.is_inhibited(service) {
@@ -503,14 +546,28 @@ impl Pid1 {
                 && !state.is_running(service)
             {
                 RESPAWNING.click();
-                clue!(COLLECTOR, INFO, {
-                    started: true,
-                    service: service,
-                });
-                state.spawn(reclaim.clone(), service, &[])?;
+                let mut delay = false;
+                if let Some(backoff_until) = state.get_backoff(service) {
+                    if backoff_until > now {
+                        clue!(COLLECTOR, INFO, {
+                            started: false,
+                            service: service,
+                            delayed: format!("{:?}", backoff_until - now),
+                        });
+                        min = std::cmp::min(min, backoff_until);
+                        delay = true;
+                    }
+                }
+                if !delay {
+                    clue!(COLLECTOR, INFO, {
+                        started: true,
+                        service: service,
+                    });
+                    state.spawn(reclaim.clone(), service, &[])?;
+                }
             }
         }
-        Ok(())
+        Ok(min.saturating_duration_since(now))
     }
 
     pub fn shutdown(self) -> Result<(), Error> {
@@ -673,9 +730,10 @@ impl Pid1 {
 
     pub fn stop(&self, service: &str) -> Result<(), Error> {
         STOP.click();
+        let service_string = service.to_string();
         let mut processes: Vec<Arc<Execution>> = {
             let mut state = self.state.lock().unwrap();
-            state.set_inhibit(service);
+            state.set_inhibit(service_string);
             state
                 .processes
                 .iter()
@@ -724,12 +782,22 @@ impl Pid1 {
 
 ///////////////////////////////////////// ExecutionContext /////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, Hash)]
 pub struct ExecutionContext {
     pub path: CString,
     pub wrapper: Vec<CString>,
     pub argv: Vec<CString>,
     pub env: Vec<CString>,
+    pub started: Instant,
+}
+
+impl PartialEq for ExecutionContext {
+    fn eq(&self, other: &ExecutionContext) -> bool {
+        self.path == other.path
+            && self.wrapper == other.wrapper
+            && self.argv == other.argv
+            && self.env == other.env
+    }
 }
 
 impl ExecutionContext {
@@ -770,11 +838,13 @@ impl ExecutionContext {
             }
         }
         env.sort();
+        let started = Instant::now();
         Ok(Self {
             path,
             wrapper,
             argv,
             env,
+            started,
         })
     }
 }
@@ -961,6 +1031,58 @@ impl Execution {
     }
 }
 
+////////////////////////////////////////// BackoffTracker //////////////////////////////////////////
+
+#[derive(Debug, Default)]
+struct BackoffTracker {
+    penalties: HashMap<String, (Instant, Duration)>,
+}
+
+impl BackoffTracker {
+    fn track(&mut self, service: String, credit: Duration) {
+        let (last_tracked, penalty) = self
+            .penalties
+            .entry(service)
+            .or_insert((Instant::now(), Duration::ZERO));
+        let elapsed = last_tracked.elapsed();
+        *last_tracked = Instant::now();
+        fn compound(duration: Duration) -> Duration {
+            Duration::from_micros(
+                1_000_000 * (std::f64::consts::E.powf(1.01 * duration.as_secs_f64())) as u64,
+            )
+        }
+        *penalty = penalty.saturating_sub(compound(credit) + elapsed.saturating_sub(credit));
+        *penalty = penalty.saturating_mul(2);
+    }
+
+    fn backoff(&mut self, service: &str) -> Duration {
+        let (last_tracked, penalty) = self
+            .penalties
+            .get(service)
+            .cloned()
+            .unwrap_or((Instant::now(), Duration::ZERO));
+        let our_decision = penalty.clamp(Duration::from_secs(10), Duration::from_secs(60));
+        let mut hasher = std::hash::DefaultHasher::new();
+        last_tracked.hash(&mut hasher);
+        let zero_to_one =
+            (hasher.finish() & 0x1fffffffffffffu64) as f64 / (1u64 << f64::MANTISSA_DIGITS) as f64;
+        Duration::from_micros((our_decision.as_micros() as f64 * (0.0 - zero_to_one.ln())) as u64)
+            .clamp(Duration::ZERO, Duration::from_secs(300))
+    }
+
+    fn wipe_debts(&mut self) {
+        let mut services = vec![];
+        for (service, (last_tracked, penalty)) in self.penalties.iter() {
+            if last_tracked.elapsed() >= *penalty {
+                services.push(service.to_string());
+            }
+        }
+        for service in services {
+            self.penalties.remove(&service);
+        }
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -976,5 +1098,14 @@ mod tests {
         pid1.spawn("rustrc-smoke-test", &["--argument", "GOODBYE WORLD"])
             .expect("spawn should work");
         pid1.shutdown().expect("shutdown should work");
+    }
+
+    #[test]
+    fn backoff_tracker() {
+        let mut bt = BackoffTracker::default();
+        println!(
+            "FINDME {:?}",
+            bt.track("foo".to_string(), Duration::from_secs(1))
+        );
     }
 }
