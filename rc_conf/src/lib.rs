@@ -251,11 +251,7 @@ impl RcScript {
     }
 
     pub fn rcvar(&self) -> Result<Vec<String>, Error> {
-        let name = self
-            .name
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '_' })
-            .collect::<String>();
+        let name = var_prefix_from_service(&self.name);
         Ok(shvar::rcvar(&self.command)?
             .into_iter()
             .map(|v| format!("{}_{}", name, v))
@@ -297,11 +293,7 @@ impl RcScript {
     }
 
     fn run(&self, args: &[&str]) -> Result<(), Error> {
-        let mut name = self
-            .name
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '_' })
-            .collect::<String>();
+        let mut name = var_prefix_from_service(&self.name);
         name.push('_');
         let evp = EnvironmentVariableProvider::new(Some(name));
         let meta = HashMap::from([("NAME".to_string(), self.name.to_string())]);
@@ -312,7 +304,9 @@ impl RcScript {
         }
         cmd.extend(args.iter().map(|s| s.to_string()));
         panic!(
-            "{args:?}\n{:?}",
+            "could not exec {} {:?}\n{:?}",
+            &cmd[0],
+            args,
             Command::new(&cmd[0]).args(&cmd[1..]).exec()
         );
     }
@@ -458,7 +452,7 @@ impl RcConf {
 
     pub fn bind_for_invoke(&self, path: &Path) -> Result<HashMap<String, String>, Error> {
         let mut bindings = HashMap::new();
-        let output = std::process::Command::new(path.clone().into_std())
+        let output = Command::new(path.clone().into_std())
             .arg("rcvar")
             .output()?;
         if !output.status.success() {
@@ -473,7 +467,7 @@ impl RcConf {
                 let quoted = shvar::quote(shvar::split(&value)?);
                 bindings.insert(var.to_string(), quoted);
             } else if let Some(var2) =
-                var.strip_prefix(&(path.basename().as_str().to_string() + "_"))
+                var.strip_prefix(&(var_prefix_from_service(&name_from_path(path)) + "_"))
             {
                 if let Some(value) = self.lookup(var2) {
                     let value = shvar::expand(self, &value)?;
@@ -486,10 +480,7 @@ impl RcConf {
     }
 
     pub fn wrapper(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
-        let mut prefix = service
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '_' })
-            .collect::<String>();
+        let mut prefix = var_prefix_from_service(service);
         prefix.push('_');
         let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
         let pvp = PrefixingVariableProvider {
@@ -508,10 +499,7 @@ impl RcConf {
     }
 
     pub fn service_switch(&self, service: &str) -> SwitchPosition {
-        let mut enabled = service
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '_' })
-            .collect::<String>();
+        let mut enabled = var_prefix_from_service(service);
         enabled += "_ENABLED";
         let Some(enable) = self.lookup(&enabled) else {
             // TODO(rescrv): biometrics.
@@ -597,25 +585,22 @@ pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str])
     let wrapper = rc_conf
         .wrapper(service, "WRAPPER")
         .expect("wrapper should generate");
-    let mut child = if !wrapper.is_empty() {
-        std::process::Command::new(&wrapper[0])
+    let err = if !wrapper.is_empty() {
+        Command::new(&wrapper[0])
             .args(&wrapper[1..])
             .arg(path.as_str())
             .arg("run")
             .args(args)
             .envs(bound)
-            .spawn()
-            .expect("rc stub should execute")
+            .exec()
     } else {
-        std::process::Command::new(path.as_str())
+        Command::new(path.as_str())
             .arg("run")
             .args(args)
             .envs(bound)
-            .spawn()
-            .expect("rc stub should execute")
+            .exec()
     };
-    let exit_status = child.wait().expect("child.wait should succeed");
-    std::process::exit(exit_status.code().unwrap_or(0));
+    panic!("command unexpectedly failed: {err}");
 }
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////
@@ -672,6 +657,13 @@ pub fn linearize(path: &Path, contents: &str) -> Result<Vec<(u32, String, Vec<St
 /// Return the service name from the given path.
 pub fn name_from_path(path: &Path) -> String {
     path.basename().as_str().to_string()
+}
+
+pub fn var_prefix_from_service(service: &str) -> String {
+    service
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
