@@ -194,6 +194,14 @@ impl Display for Value {
     }
 }
 
+impl From<char> for Value {
+    fn from(x: char) -> Self {
+        let mut s = String::new();
+        s.push(x);
+        Self::String(s)
+    }
+}
+
 impl From<bool> for Value {
     fn from(x: bool) -> Self {
         Self::Bool(x)
