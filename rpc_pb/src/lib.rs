@@ -8,8 +8,6 @@ use prototk_derive::Message;
 use zerror::{iotoz, Z};
 use zerror_core::ErrorCore;
 
-pub mod sd;
-
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 /// The maximum request size allowed.
