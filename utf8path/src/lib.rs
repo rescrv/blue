@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::path::PathBuf;
 
 /////////////////////////////////////////////// Path ///////////////////////////////////////////////
@@ -240,6 +240,12 @@ impl<'a> Path<'a> {
 impl<'a> AsRef<Path<'a>> for Path<'a> {
     fn as_ref(&self) -> &Path<'a> {
         self
+    }
+}
+
+impl<'a> Borrow<std::path::Path> for Path<'a> {
+    fn borrow(&self) -> &std::path::Path {
+        std::path::Path::new(self.as_str())
     }
 }
 
