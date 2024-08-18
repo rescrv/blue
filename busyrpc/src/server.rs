@@ -7,7 +7,7 @@ use biometrics::{Collector, Counter};
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use buffertk::{stack_pack, Unpackable};
 use indicio::{clue, INFO};
-use rpc_pb::{Context, Error, Request, Response, Status};
+use rpc_pb::{Context, Error, Host, Request, Response, Status};
 use zerror_core::ErrorCore;
 
 use super::builtins;
@@ -71,11 +71,11 @@ pub struct ServerOptions {
     #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
     pub certificate_file: String,
     /// Bind-to this host.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Hostname to bind to."))]
-    pub bind_to_host: String,
-    /// Bind-to this port.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Port to bind to."))]
-    pub bind_to_port: u16,
+    #[cfg_attr(
+        feature = "binaries",
+        arrrg(required, "Host to bind to in host:ID=host:port format.")
+    )]
+    pub bind_to: Host,
     /// Number of threads to spawn.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Number of threads to spawn."))]
     pub thread_pool_size: u16,
@@ -130,14 +130,8 @@ impl ServerOptions {
     }
 
     /// Set the bind_to_host.
-    pub fn with_bind_to_host(mut self, bind_to_host: &str) -> Self {
-        bind_to_host.clone_into(&mut self.bind_to_host);
-        self
-    }
-
-    /// Set the bind_to_port.
-    pub fn with_bind_to_port(mut self, bind_to_port: u16) -> Self {
-        self.bind_to_port = bind_to_port;
+    pub fn with_bind_to(mut self, bind_to: &Host) -> Self {
+        bind_to.clone_into(&mut self.bind_to);
         self
     }
 
@@ -157,11 +151,10 @@ impl ServerOptions {
 impl Default for ServerOptions {
     fn default() -> Self {
         Self {
-            ca_file: "ca.crt".to_string(),
-            private_key_file: "localhost.key".to_string(),
-            certificate_file: "localhost.crt".to_string(),
-            bind_to_host: "localhost".to_owned(),
-            bind_to_port: 2049,
+            ca_file: "UNSET".to_string(),
+            private_key_file: "UNSET".to_string(),
+            certificate_file: "UNSET".to_string(),
+            bind_to: Host::default(),
             thread_pool_size: 64,
             user_send_buffer_size: 65536,
         }
@@ -445,6 +438,11 @@ impl Server {
         Ok((Self { options, internals }, cancel))
     }
 
+    /// Return the Host to which this server is bound.
+    pub fn host(&self) -> Host {
+        self.options.bind_to.clone()
+    }
+
     /// Serve the server forever.
     pub fn serve(&self) -> Result<(), Error> {
         // Spawn threads to serve the thread pool.
@@ -458,15 +456,12 @@ impl Server {
         // SSL/TLS acceptor
         let acceptor = Arc::new(self.options.must_build_acceptor());
         // Listen for incoming connections.
-        let bind_to = format!(
-            "{}:{}",
-            self.options.bind_to_host, self.options.bind_to_port
-        );
-        let listener =
-            TcpListener::bind(bind_to).map_err(|err| rpc_pb::Error::TransportFailure {
+        let listener = TcpListener::bind(self.options.bind_to.connect()).map_err(|err| {
+            rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
                 what: err.to_string(),
-            })?;
+            }
+        })?;
         'listening: loop {
             let break_fd = self.internals.canceled.as_raw_fd();
             let mut pfd = [

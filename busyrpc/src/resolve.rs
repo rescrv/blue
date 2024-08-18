@@ -1,8 +1,6 @@
 use std::str::FromStr;
 
-use rpc_pb::sd::Host;
-
-use super::Resolver;
+use rpc_pb::{Host, Resolver};
 
 ////////////////////////////////////////// StringResolver //////////////////////////////////////////
 
@@ -51,7 +49,7 @@ impl std::fmt::Display for StringResolver {
                 connect += ",";
             }
             connect += &host.host_id().human_readable();
-            connect += ";";
+            connect += "=";
             connect += host.connect();
         }
         write!(fmt, "{}", connect)
@@ -66,13 +64,13 @@ mod tests {
 
     #[test]
     fn string_resolver() {
-        let mut string_resolver = StringResolver::new("host:d2ed2c22-c16a-2443-e401-4c6bd698afdf;127.0.0.1:8000,host:1c4e2a90-9290-2920-cb6c-c221807d666f;127.0.0.1:8001,host:76ae3e09-4e2f-2d6d-bd40-490f6fc15411;127.0.0.1:8002").unwrap();
+        let mut string_resolver = StringResolver::new("host:d2ed2c22-c16a-2443-e401-4c6bd698afdf=127.0.0.1:8000,host:1c4e2a90-9290-2920-cb6c-c221807d666f=127.0.0.1:8001,host:76ae3e09-4e2f-2d6d-bd40-490f6fc15411=127.0.0.1:8002").unwrap();
         let host1 =
-            Host::from_str("host:d2ed2c22-c16a-2443-e401-4c6bd698afdf;127.0.0.1:8000").unwrap();
+            Host::from_str("host:d2ed2c22-c16a-2443-e401-4c6bd698afdf=127.0.0.1:8000").unwrap();
         let host2 =
-            Host::from_str("host:1c4e2a90-9290-2920-cb6c-c221807d666f;127.0.0.1:8001").unwrap();
+            Host::from_str("host:1c4e2a90-9290-2920-cb6c-c221807d666f=127.0.0.1:8001").unwrap();
         let host3 =
-            Host::from_str("host:76ae3e09-4e2f-2d6d-bd40-490f6fc15411;127.0.0.1:8002").unwrap();
+            Host::from_str("host:76ae3e09-4e2f-2d6d-bd40-490f6fc15411=127.0.0.1:8002").unwrap();
         assert_eq!(Ok(host1.clone()), string_resolver.resolve());
         assert_eq!(Ok(host2.clone()), string_resolver.resolve());
         assert_eq!(Ok(host3.clone()), string_resolver.resolve());

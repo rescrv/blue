@@ -2,8 +2,6 @@
 
 use biometrics::Collector;
 
-use rpc_pb::sd::Host;
-
 mod buffers;
 mod channel;
 mod client;
@@ -30,12 +28,3 @@ pub fn register_biometrics(collector: &mut Collector) {
 ////////////////////////////////////////////// indicio /////////////////////////////////////////////
 
 pub static LOGGING: indicio::Collector = indicio::Collector::new();
-
-///////////////////////////////////////////// Resolver /////////////////////////////////////////////
-
-/// A trait for resolving hosts.
-// TODO(rescrv):  Dedupe with rpc_pb.
-pub trait Resolver {
-    /// Resolve one Host.
-    fn resolve(&mut self) -> Result<Host, rpc_pb::Error>;
-}

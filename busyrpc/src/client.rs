@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslConnector, SslFiletype, SslMethod};
 use buffertk::{stack_pack, Unpacker};
-use rpc_pb::sd::{Host, HostID};
+use rpc_pb::{Host, HostID, Resolver};
 use sync42::monitor::{Monitor, MonitorCore};
 use sync42::spin_lock::SpinLock;
 use sync42::state_hash_table::{Handle, StateHashTable};
@@ -16,7 +16,6 @@ use sync42::state_hash_table::{Handle, StateHashTable};
 use zerror_core::ErrorCore;
 
 use super::channel::Channel;
-use super::Resolver;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 

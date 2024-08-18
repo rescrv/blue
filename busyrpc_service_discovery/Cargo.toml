@@ -1,0 +1,48 @@
+[package]
+name = "busyrpc_service_discovery"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "busyrpc_service_discovery provides service discovery for rpc_pb." 
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
+[dependencies]
+getopts = { version = "0.2", optional = true }
+
+arrrg = { path = "../arrrg", version = "0.3", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.3", optional = true }
+busyrpc = { path = "../busyrpc", version = "0.3" }
+indicio = { path = "../indicio", version = "0.3" }
+minimal_signals = { path = "../minimal_signals", version = "0.1" }
+prototk = { path = "../prototk", version = "0.6" }
+rpc_pb = { path = "../rpc_pb", version = "0.5" }
+tuple_key = { path = "../tuple_key", version = "0.5" }
+tuple_routing = { path = "../tuple_routing", version = "0.1" }
+zerror_core = { path = "../zerror_core", version = "0.5" }
+
+[[bin]]
+name = "busyrpc-service-discovery-server"
+path = "src/bin/busyrpc-service-discovery-server.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "busyrpc-service-discovery-register"
+path = "src/bin/busyrpc-service-discovery-register.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "busyrpc-service-discovery-resolve"
+path = "src/bin/busyrpc-service-discovery-resolve.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "busyrpc-service-discovery-unregister"
+path = "src/bin/busyrpc-service-discovery-unregister.rs"
+required-features=["binaries"]

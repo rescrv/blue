@@ -609,14 +609,34 @@ pub trait TypedTupleKey: TryFrom<TupleKey> + Into<TupleKey> {}
 
 ////////////////////////////////////////////// Schema //////////////////////////////////////////////
 
-pub struct Schema<T> {
+#[derive(Debug)]
+pub struct Schema<T: Debug> {
     node: T,
     children: HashMap<FieldNumber, Schema<T>>,
+    names: HashMap<String, FieldNumber>,
 }
 
 impl<T: Debug> Schema<T> {
-    pub const fn new(node: T, children: HashMap<FieldNumber, Schema<T>>) -> Self {
-        Self { node, children }
+    pub fn new<I: Iterator<Item = ((FieldNumber, String), Schema<T>)>>(node: T, sub: I) -> Self {
+        let mut children = HashMap::new();
+        let mut names = HashMap::new();
+        for ((field_number, name), schema) in sub {
+            names.insert(name, field_number);
+            children.insert(field_number, schema);
+        }
+        Self {
+            node,
+            children,
+            names,
+        }
+    }
+
+    pub fn field_number(&self, name: impl AsRef<str>) -> Option<FieldNumber> {
+        self.names.get(name.as_ref()).cloned()
+    }
+
+    pub fn child(&self, f: FieldNumber) -> Option<&Schema<T>> {
+        self.children.get(&f)
     }
 
     pub fn is_terminal(&self, tk: &TupleKey) -> Result<bool, Error> {
@@ -629,15 +649,30 @@ impl<T: Debug> Schema<T> {
 
     pub fn schema_for_key<'a>(&'a self, tk: &TupleKey) -> Result<&'a Schema<T>, Error> {
         let mut tkp = TupleKeyParser::new(tk);
-        self.schema_for_key_recurse(&mut tkp, 0)
+        let mut args = vec![];
+        self.schema_for_key_recurse(&mut tkp, 0, &mut args)
+    }
+
+    pub fn args_for_key(&self, tk: &TupleKey) -> Result<Vec<String>, Error> {
+        let mut tkp = TupleKeyParser::new(tk);
+        let mut args = vec![];
+        self.schema_for_key_recurse(&mut tkp, 0, &mut args)?;
+        Ok(args)
     }
 
     fn schema_for_key_recurse<'a>(
         &'a self,
         tkp: &mut TupleKeyParser,
         index: usize,
+        args: &mut Vec<String>,
     ) -> Result<&'a Schema<T>, Error> {
         if let Some((f, k, d)) = tkp.peek_next().map_err(Error::schema_incompatibility)? {
+            let Some(name) = self.names.iter().find(|(_, v)| **v == f) else {
+                return Err(Error::schema_incompatibility(format!(
+                    "unknown field {f} at index {index}"
+                )));
+            };
+            args.push(format!("--{}", name.0));
             if let Some(recurse) = self.children.get(&f) {
                 match k {
                     KeyDataType::unit => {
@@ -645,32 +680,37 @@ impl<T: Debug> Schema<T> {
                             .map_err(Error::schema_incompatibility)?;
                     }
                     KeyDataType::fixed32 => {
-                        let _: u32 = tkp
+                        let v: u32 = tkp
                             .parse_next_with_key(f, d)
                             .map_err(Error::schema_incompatibility)?;
+                        args.push(v.to_string());
                     }
                     KeyDataType::sfixed32 => {
-                        let _: i32 = tkp
+                        let v: i32 = tkp
                             .parse_next_with_key(f, d)
                             .map_err(Error::schema_incompatibility)?;
+                        args.push(v.to_string());
                     }
                     KeyDataType::fixed64 => {
-                        let _: u64 = tkp
+                        let v: u64 = tkp
                             .parse_next_with_key(f, d)
                             .map_err(Error::schema_incompatibility)?;
+                        args.push(v.to_string());
                     }
                     KeyDataType::sfixed64 => {
-                        let _: i64 = tkp
+                        let v: i64 = tkp
                             .parse_next_with_key(f, d)
                             .map_err(Error::schema_incompatibility)?;
+                        args.push(v.to_string());
                     }
                     KeyDataType::string => {
-                        let _: String = tkp
+                        let v: String = tkp
                             .parse_next_with_key(f, d)
                             .map_err(Error::schema_incompatibility)?;
+                        args.push(v.to_string());
                     }
                 };
-                recurse.schema_for_key_recurse(tkp, index + 1)
+                recurse.schema_for_key_recurse(tkp, index + 1, args)
             } else {
                 Err(Error::schema_incompatibility(format!(
                     "unknown field {f} at index {index}"
