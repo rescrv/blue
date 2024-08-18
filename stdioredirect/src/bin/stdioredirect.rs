@@ -32,7 +32,7 @@ pub struct Options {
 fn main() {
     // option parsing
     let (options, free) =
-        Options::from_command_line("USAGE: stdioredirect [--close-$stream|--$stream /file.txt]");
+        Options::from_command_line("USAGE: stdioredirect [--close-$stream|--$stream /file.txt] -- command [args]");
     if options.close_stdin && options.stdin.is_some() {
         eprintln!("mutually exclusive options --close-stdin and --stdin specified");
         std::process::exit(255);

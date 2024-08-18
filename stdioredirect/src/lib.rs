@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
