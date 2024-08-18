@@ -27,8 +27,8 @@ impl<'a> Path<'a> {
     }
 
     /// Convert the path into a std::path::PathBuf.
-    pub fn into_std(self) -> std::path::PathBuf {
-        std::path::PathBuf::from(self.path.into_owned())
+    pub fn into_std(&self) -> &std::path::Path {
+        std::path::Path::new::<str>(self.path.as_ref())
     }
 
     /// Convert the path to a str.
@@ -234,12 +234,6 @@ impl<'a> Path<'a> {
         }
         components.reverse();
         components.into_iter()
-    }
-}
-
-impl<'a> AsRef<Path<'a>> for Path<'a> {
-    fn as_ref(&self) -> &Path<'a> {
-        self
     }
 }
 
