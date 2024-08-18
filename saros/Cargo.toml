@@ -1,6 +1,6 @@
 [package]
 name = "saros"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Saros is a terminal-based time series database."
@@ -13,15 +13,15 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.6" }
-indicio = { path = "../indicio", version = "0.3" }
+biometrics = { path = "../biometrics", version = "0.7" }
+buffertk = { path = "../buffertk", version = "0.7" }
+indicio = { path = "../indicio", version = "0.4" }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
-prototk = { path = "../prototk", version = "0.6" }
+prototk = { path = "../prototk", version = "0.7" }
 prototk_derive = { path = "../prototk_derive", version = "0.6" }
 tatl = { path = "../tatl", version = "0.5" }
 zerror = { path = "../zerror", version = "0.4" }
-zerror_core = { path = "../zerror_core", version = "0.5" }
+zerror_core = { path = "../zerror_core", version = "0.6" }
 zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
 [[example]]

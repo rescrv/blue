@@ -1,6 +1,6 @@
 [package]
 name = "buffertk"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Buffertk provides tooling for serializing and deserializing data."
@@ -16,8 +16,8 @@ binaries = []
 
 [dev-dependencies]
 arrrg = { path = "../arrrg", version = "0.3" }
-guacamole = { path = "../guacamole", version = "0.6" }
-statslicer = { path = "../statslicer", version = "0.2" }
+guacamole = { path = "../guacamole", version = "0.7" }
+statslicer = { path = "../statslicer", version = "0.3" }
 
 [[bin]]
 name = "unvarint"

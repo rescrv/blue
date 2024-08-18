@@ -16,14 +16,14 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 [dependencies]
 crc32c = "0.6"
 
-biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.6" }
-prototk = { path = "../prototk", version = "0.6" }
+biometrics = { path = "../biometrics", version = "0.7" }
+buffertk = { path = "../buffertk", version = "0.7" }
+prototk = { path = "../prototk", version = "0.7" }
 prototk_derive = { path = "../prototk_derive", version = "0.6" }
 tatl = { path = "../tatl", version = "0.5" }
-utilz = { path = "../utilz", version = "0.3" }
+utilz = { path = "../utilz", version = "0.4" }
 zerror = { path = "../zerror", version = "0.4" }
-zerror_core = { path = "../zerror_core", version = "0.5" }
+zerror_core = { path = "../zerror_core", version = "0.6" }
 zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
 getopts = { version = "0.2", optional = true }
@@ -31,8 +31,8 @@ arrrg = { path = "../arrrg", version = "0.3", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.3", optional = true }
 
 [dev-dependencies]
-armnod = { path = "../armnod", version = "0.5" }
-guacamole = { path = "../guacamole", version = "0.6" }
+armnod = { path = "../armnod", version = "0.6" }
+guacamole = { path = "../guacamole", version = "0.7" }
 
 [[bin]]
 name = "mani-append"

@@ -1,6 +1,6 @@
 [package]
 name = "tiny_lfu"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "tiny_lfu provides a cache admission control policy."
 license = "Apache-2.0"
@@ -9,5 +9,5 @@ repository = "https://github.com/rescrv/blue"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.6" }
+biometrics = { path = "../biometrics", version = "0.7" }
 bloomcalc = { path = "../bloomcalc", version = "0.3" }

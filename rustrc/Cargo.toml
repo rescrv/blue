@@ -18,8 +18,8 @@ getopts = { version = "0.2" }
 
 arrrg = { path = "../arrrg", version = "0.3" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
-biometrics = { path = "../biometrics", version = "0.6" }
-indicio = { path = "../indicio", version = "0.3" }
+biometrics = { path = "../biometrics", version = "0.7" }
+indicio = { path = "../indicio", version = "0.4" }
 minimal_signals = { path = "../minimal_signals", version = "0.1" }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
 rc_conf = { path = "../rc_conf", version = "0.1" }

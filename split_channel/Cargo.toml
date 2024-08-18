@@ -1,6 +1,6 @@
 [package]
 name = "split_channel"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "split_channel provides a stream-of-messages abstraction with split send/recv channels."
@@ -18,14 +18,14 @@ libc = "0.2"
 boring = "4.7.0"
 crc32c = "0.6"
 
-biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.6" }
-prototk = { path = "../prototk", version = "0.6" }
+biometrics = { path = "../biometrics", version = "0.7" }
+buffertk = { path = "../buffertk", version = "0.7" }
+prototk = { path = "../prototk", version = "0.7" }
 prototk_derive = { path = "../prototk_derive", version = "0.6" }
-rpc_pb = { path = "../rpc_pb", version = "0.5" }
-utilz = { path = "../utilz", version = "0.3" }
+rpc_pb = { path = "../rpc_pb", version = "0.6" }
+utilz = { path = "../utilz", version = "0.4" }
 zerror = { path = "../zerror", version = "0.4" }
-zerror_core = { path = "../zerror_core", version = "0.5" }
+zerror_core = { path = "../zerror_core", version = "0.6" }
 
 getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.3", optional = true }

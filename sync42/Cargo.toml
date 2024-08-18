@@ -1,6 +1,6 @@
 [package]
 name = "sync42"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "sync42 provides synchronization tools."
@@ -13,10 +13,10 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.6" }
+biometrics = { path = "../biometrics", version = "0.7" }
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.6" }
+guacamole = { path = "../guacamole", version = "0.7" }
 
 [[example]]
 name = "clicker"

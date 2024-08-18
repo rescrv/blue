@@ -1,6 +1,6 @@
 [package]
 name = "statslicer"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Guacamole provides a linearly-seekable random number generator."
@@ -20,7 +20,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
 sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.2" }
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.6" }
+guacamole = { path = "../guacamole", version = "0.7" }
 
 [[bin]]
 name = "statslicer"

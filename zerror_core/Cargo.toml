@@ -1,6 +1,6 @@
 [package]
 name = "zerror_core"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "A complete implementation of the zerror:Z trait."
@@ -8,10 +8,10 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.6" }
-buffertk = { path = "../buffertk", version = "0.6" }
+biometrics = { path = "../biometrics", version = "0.7" }
+buffertk = { path = "../buffertk", version = "0.7" }
 tatl = { path = "../tatl", version = "0.5" }
-prototk = { path = "../prototk", version = "0.6" }
+prototk = { path = "../prototk", version = "0.7" }
 prototk_derive = { path = "../prototk_derive", version = "0.6" }
 zerror = { path = "../zerror", version = "0.4" }
 zerror_derive = { path = "../zerror_derive", version = "0.3" }
