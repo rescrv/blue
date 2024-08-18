@@ -25,6 +25,110 @@ generate_id_prototk! {TraceID}
 generate_id! {ClientID, "client:"}
 generate_id_prototk! {ClientID}
 
+generate_id! {HostID, "host:"}
+generate_id_prototk! {HostID}
+
+/////////////////////////////////////////////// Host ///////////////////////////////////////////////
+
+/// A Host captures a process-unique, stable identifier with its connection string.
+#[derive(Clone, Default, Eq, PartialEq, prototk_derive::Message)]
+pub struct Host {
+    #[prototk(1, message)]
+    host_id: HostID,
+    #[prototk(2, string)]
+    connect: String,
+}
+
+impl Host {
+    pub fn new(host_id: HostID, connect: String) -> Self {
+        Self { host_id, connect }
+    }
+
+    /// Get the ID for this host.
+    pub fn host_id(&self) -> HostID {
+        self.host_id
+    }
+
+    /// Get the connection string for this host.
+    pub fn connect(&self) -> &str {
+        &self.connect
+    }
+
+    /// Get the hostname for this host, inferring if a port can be stripped.
+    pub fn hostname_or_ip(&self) -> &str {
+        let connect = &self.connect;
+        fn strip_port(connect: &str) -> &str {
+            if let Some((host, _)) = connect.rsplit_once(':') {
+                host
+            } else {
+                connect
+            }
+        }
+        if connect.starts_with('[') {
+            let connect = strip_port(connect);
+            if connect.ends_with(']') {
+                &connect[1..connect.len() - 1]
+            } else {
+                &self.connect
+            }
+        } else {
+            strip_port(connect)
+        }
+    }
+}
+
+impl std::str::FromStr for Host {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<String> = s.split('=').map(String::from).collect();
+        if parts.len() != 2 {
+            return Err(Error::ResolveFailure {
+                core: ErrorCore::default(),
+                what: "could not parse string".to_owned(),
+            }
+            .with_info("parts", parts));
+        }
+        let host_id: HostID = match parts[0].parse::<HostID>() {
+            Ok(host_id) => host_id,
+            Err(err) => {
+                return Err(Error::ResolveFailure {
+                    core: ErrorCore::default(),
+                    what: "could not parse HostID".to_owned(),
+                }
+                .with_info("err", err)
+                .with_info("host_id", parts[0].to_owned()));
+            }
+        };
+        Ok(Host {
+            host_id,
+            connect: parts[1].to_owned(),
+        })
+    }
+}
+
+impl std::fmt::Debug for Host {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}={}", self.host_id().human_readable(), self.connect())
+    }
+}
+
+impl std::fmt::Display for Host {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[cfg(feature = "indicio")]
+impl From<Host> for indicio::Value {
+    fn from(host: Host) -> Self {
+        indicio::value!({
+            host_id: host.host_id().prefix_free_readable(),
+            connect: host.connect(),
+        })
+    }
+}
+
 ////////////////////////////////////////////// Context /////////////////////////////////////////////
 
 /// A context passed by the RPC server into a service.
@@ -482,6 +586,14 @@ impl ServerRegistry {
     pub fn get_server(&self, name: &str) -> Option<&dyn Server> {
         self.registry.get(name).map(|x| x.as_ref())
     }
+}
+
+///////////////////////////////////////////// Resolver /////////////////////////////////////////////
+
+/// A trait for resolving hosts.
+pub trait Resolver {
+    /// Resolve one Host.
+    fn resolve(&mut self) -> Result<Host, Error>;
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
