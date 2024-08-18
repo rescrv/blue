@@ -37,7 +37,11 @@ fn close_or_dup2(close: bool, file: Option<String>, fd: libc::c_int, opts: OpenO
             libc::close(fd);
         }
     } else if let Some(file) = file {
-        if !PathBuf::from(&file).parent().unwrap_or(Path::new("..")).exists() {
+        if !PathBuf::from(&file)
+            .parent()
+            .unwrap_or(Path::new(".."))
+            .exists()
+        {
             panic!("could not open {file}: containing directory does not exist");
         }
         let file = opts.open(file).expect("file should open");
@@ -71,16 +75,22 @@ fn main() {
     close_or_dup2(options.close_stdin, options.stdin, libc::STDIN_FILENO, opts);
     // take care of stdout
     let mut opts = OpenOptions::new();
-    opts.write(true)
-        .truncate(true)
-        .create(true);
-    close_or_dup2(options.close_stdout, options.stdout, libc::STDOUT_FILENO, opts);
+    opts.write(true).truncate(true).create(true);
+    close_or_dup2(
+        options.close_stdout,
+        options.stdout,
+        libc::STDOUT_FILENO,
+        opts,
+    );
     // take care of stderr
     let mut opts = OpenOptions::new();
-    opts.write(true)
-        .truncate(true)
-        .create(true);
-    close_or_dup2(options.close_stderr, options.stderr, libc::STDERR_FILENO, opts);
+    opts.write(true).truncate(true).create(true);
+    close_or_dup2(
+        options.close_stderr,
+        options.stderr,
+        libc::STDERR_FILENO,
+        opts,
+    );
     // now exec
     panic!(
         "{:?}",
