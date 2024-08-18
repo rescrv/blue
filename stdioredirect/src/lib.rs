@@ -4,7 +4,13 @@ use std::os::fd::AsRawFd;
 
 use std::path::{Path, PathBuf};
 
-pub fn close_or_dup2(subs: &HashMap<char, String>, close: bool, file: Option<String>, fd: libc::c_int, opts: OpenOptions) {
+pub fn close_or_dup2(
+    subs: &HashMap<char, String>,
+    close: bool,
+    file: Option<String>,
+    fd: libc::c_int,
+    opts: OpenOptions,
+) {
     // take care of stdin
     if close {
         unsafe {
@@ -59,8 +65,14 @@ mod tests {
     #[test]
     fn pct() {
         let subs = HashMap::from([('p', "PID".to_string()), ('s', "TIME".to_string())]);
-        assert_eq!(Some("foobar".to_string()), pct_substitution(&subs, "foobar"));
-        assert_eq!(Some("foobar.PID.TIME".to_string()), pct_substitution(&subs, "foobar.%p.%s"));
+        assert_eq!(
+            Some("foobar".to_string()),
+            pct_substitution(&subs, "foobar")
+        );
+        assert_eq!(
+            Some("foobar.PID.TIME".to_string()),
+            pct_substitution(&subs, "foobar.%p.%s")
+        );
         assert_eq!(None, pct_substitution(&subs, "foobar.%p.%t"));
     }
 }

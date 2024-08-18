@@ -46,7 +46,9 @@ fn main() {
         std::process::exit(254);
     }
     // HashMap of chars to %-notation.
-    let epoch_now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("system time should be ahead of epoch");
+    let epoch_now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("system time should be ahead of epoch");
     let subs = HashMap::from([
         ('p', format!("{}", std::process::id())),
         ('s', format!("{}", epoch_now.as_secs())),
@@ -54,7 +56,13 @@ fn main() {
     // take care of stdin
     let mut opts = OpenOptions::new();
     opts.read(true);
-    close_or_dup2(&subs, options.close_stdin, options.stdin, libc::STDIN_FILENO, opts);
+    close_or_dup2(
+        &subs,
+        options.close_stdin,
+        options.stdin,
+        libc::STDIN_FILENO,
+        opts,
+    );
     // take care of stdout
     let mut opts = OpenOptions::new();
     opts.write(true).truncate(true).create(true);
