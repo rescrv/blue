@@ -118,24 +118,40 @@ impl From<std::ffi::NulError> for Error {
     }
 }
 
-impl From<Error> for indicio::Value {
-    fn from(err: Error) -> Self {
-        fn shvar_to_value(err: shvar::Error) -> indicio::Value {
+impl From<&Error> for indicio::Value {
+    fn from(err: &Error) -> Self {
+        fn shvar_to_value(err: &shvar::Error) -> indicio::Value {
             match err {
-                shvar::Error::OpenSingleQuotes => { indicio::value!({open_single_quotes: true}) },
-                shvar::Error::OpenDoubleQuotes => { indicio::value!({open_double_quotes: true}) },
-                shvar::Error::TrailingRightBrace => { indicio::value!({trailing_right_brace: true}) },
-                shvar::Error::InvalidVariable => { indicio::value!({invalid_variable: true}) },
+                shvar::Error::OpenSingleQuotes => {
+                    indicio::value!({open_single_quotes: true})
+                }
+                shvar::Error::OpenDoubleQuotes => {
+                    indicio::value!({open_double_quotes: true})
+                }
+                shvar::Error::TrailingRightBrace => {
+                    indicio::value!({trailing_right_brace: true})
+                }
+                shvar::Error::InvalidVariable => {
+                    indicio::value!({invalid_variable: true})
+                }
                 shvar::Error::InvalidCharacter {
                     expected,
                     returned: Some(returned),
-                } => { indicio::value!({invalid_charcater: { expected: expected, returned: returned }}) },
+                } => {
+                    indicio::value!({invalid_charcater: { expected: *expected, returned: *returned }})
+                }
                 shvar::Error::InvalidCharacter {
                     expected,
                     returned: None,
-                } => { indicio::value!({invalid_charcater: { expected: expected }}) },
-                shvar::Error::DepthLimitExceeded => { indicio::value!({depth_limit_exceeded: true}) },
-                shvar::Error::Requested(message) => { indicio::value!({requested: message}) },
+                } => {
+                    indicio::value!({invalid_charcater: { expected: *expected }})
+                }
+                shvar::Error::DepthLimitExceeded => {
+                    indicio::value!({depth_limit_exceeded: true})
+                }
+                shvar::Error::Requested(message) => {
+                    indicio::value!({requested: message})
+                }
             }
         }
         match err {
@@ -148,32 +164,32 @@ impl From<Error> for indicio::Value {
                 indicio::value!({
                     unknown_service: true,
                 })
-            },
+            }
             Error::ServiceDisabled => {
                 indicio::value!({
                     service_disabled: true,
                 })
-            },
+            }
             Error::ServiceAlreadyStarted => {
                 indicio::value!({
                     service_already_started: true,
                 })
-            },
+            }
             Error::ServiceError(msg) => {
                 indicio::value!({
                     service_error: msg,
                 })
-            },
+            }
             Error::Io(err) => {
                 indicio::value!({
                     io: format!("{:?}", err),
                 })
-            },
+            }
             Error::Shvar(err) => {
                 indicio::value!({
                     shvar: shvar_to_value(err),
                 })
-            },
+            }
             Error::RcConf(err) => {
                 let inner = match err {
                     rc_conf::Error::FileTooLarge { path } => {
@@ -181,72 +197,85 @@ impl From<Error> for indicio::Value {
                             path: path.as_str(),
                             file_too_large: true,
                         })
-                    },
+                    }
                     rc_conf::Error::TrailingWhack { path } => {
                         indicio::value!({
                             path: path.as_str(),
                             trailing_whack: true,
                         })
-                    },
-                    rc_conf::Error::ProhibitedCharacter { path, line, string, character } => {
+                    }
+                    rc_conf::Error::ProhibitedCharacter {
+                        path,
+                        line,
+                        string,
+                        character,
+                    } => {
                         indicio::value!({
                             path: path.as_str(),
-                            line: line,
+                            line: *line,
                             prohibited_character: {
                                 string: string,
-                                character: character,
+                                character: *character,
                             },
                         })
-                    },
-                    rc_conf::Error::InvalidRcConf { path, line, message } => {
+                    }
+                    rc_conf::Error::InvalidRcConf {
+                        path,
+                        line,
+                        message,
+                    } => {
                         indicio::value!({
                             path: path.as_str(),
-                            line: line,
+                            line: *line,
                             invalid_rc_conf: message,
                         })
-                    },
-                    rc_conf::Error::InvalidRcScript { path, line, message } => {
+                    }
+                    rc_conf::Error::InvalidRcScript {
+                        path,
+                        line,
+                        message,
+                    } => {
                         indicio::value!({
                             path: path.as_str(),
-                            line: line,
+                            line: *line,
                             invalid_rc_Script: message,
                         })
-                    },
+                    }
                     rc_conf::Error::InvalidInvocation { message } => {
                         indicio::value!({
                             invalid_invocation: message,
                         })
-                    },
+                    }
                     rc_conf::Error::IoError(err) => {
                         indicio::value!({
                             io: format!("{:?}", err),
                         })
-                    },
+                    }
                     rc_conf::Error::ShvarError(err) => {
                         indicio::value!({
                             shvar: shvar_to_value(err),
                         })
-                    },
+                    }
                     rc_conf::Error::Utf8Error(err) => {
                         indicio::value!({
                             utf8: format!("{:?}", err),
                         })
-                    },
+                    }
                     rc_conf::Error::FromUtf8Error(err) => {
                         indicio::value!({
                             from_utf8: format!("{:?}", err),
                         })
-                    },
+                    }
                 };
                 indicio::value!({
                     rc_conf: inner,
                 })
-            },
+            }
             Error::NulError => {
                 indicio::value!({
                     generating_execution_id: true,
                 })
-            },
+            }
         }
     }
 }
@@ -445,6 +474,25 @@ impl Pid1State {
 
     fn spawn(
         &mut self,
+        coord: &Pid1Coordination,
+        reclaim: SyncSender<Arc<Execution>>,
+        service: &str,
+        argv: &[&str],
+    ) -> Result<ExecutionID, Error> {
+        let result = self.spawn_inner(reclaim, service, argv);
+        if result.is_err() {
+            let mut backoff = coord.backoff.lock().unwrap();
+            backoff.track(service.to_string(), Duration::ZERO);
+            self.set_backoff(
+                service.to_string(),
+                Instant::now() + backoff.backoff(service),
+            );
+        }
+        result
+    }
+
+    fn spawn_inner(
+        &mut self,
         reclaim: SyncSender<Arc<Execution>>,
         service: &str,
         argv: &[&str],
@@ -606,25 +654,21 @@ impl Pid1 {
                 state.cleanup_backoff(Instant::now());
                 state.converge
             };
-            match Self::converge(&reclaim, &state) {
-                Ok(w) => {
-                    wait = w;
-                    converge = c;
-                },
-                Err(err) => {
-                    clue!(COLLECTOR, ERROR, {
-                        error: indicio::Value::from(err),
-                    });
-                },
+            wait = Duration::from_secs(300);
+            if Self::converge(&coord, &reclaim, &state, &mut wait) {
+                converge = c;
             }
             wait = std::cmp::max(wait, Duration::from_secs(1));
         }
     }
 
     fn converge(
+        coord: &Pid1Coordination,
         reclaim: &SyncSender<Arc<Execution>>,
         state: &Mutex<Pid1State>,
-    ) -> Result<Duration, Error> {
+        wait: &mut Duration,
+    ) -> bool {
+        let mut converged = true;
         CONVERGE.click();
         let (processes, config) = {
             let state = state.lock().unwrap();
@@ -639,7 +683,15 @@ impl Pid1 {
             state.has_process(exec)
         }
         for exec in processes {
-            let current_context = ExecutionContext::new(&config, &exec.service, &[])?;
+            let current_context = match ExecutionContext::new(&config, &exec.service, &[]) {
+                Ok(current_context) => current_context,
+                Err(err) => {
+                    clue!(COLLECTOR, ERROR, {
+                        error: indicio::Value::from(&err),
+                    });
+                    continue;
+                }
+            };
             if current_context != exec.context {
                 let Some(pid) = exec.pid() else {
                     clue!(COLLECTOR, ERROR, {
@@ -663,50 +715,72 @@ impl Pid1 {
                             break;
                         }
                     }
-                    exec.kill(minimal_signals::SIGTERM)?;
+                    let _ = exec.kill(minimal_signals::SIGTERM);
                 }
                 while has_process(state, &exec) {
-                    exec.kill(minimal_signals::SIGKILL)?;
+                    let _ = exec.kill(minimal_signals::SIGKILL);
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
         }
         let now = Instant::now();
-        let mut min = Instant::now() + Duration::from_secs(300);
         for service in config.services.keys() {
             let mut state = state.lock().unwrap();
             if state.is_inhibited(service) {
                 clue!(COLLECTOR, INFO, {
                     started: false,
-                    service: service,
+                    service: service.as_str(),
                     inhibited: true,
                 });
             } else if state.service_switch(service) == SwitchPosition::Yes
                 && !state.is_running(service)
             {
                 RESPAWNING.click();
-                let mut delay = false;
-                if let Some(backoff_until) = state.get_backoff(service) {
-                    if backoff_until > now {
-                        clue!(COLLECTOR, INFO, {
-                            started: false,
-                            service: service,
-                            delayed: format!("{:?}", backoff_until - now),
-                        });
-                        min = std::cmp::min(min, backoff_until);
-                        delay = true;
+                let mut check_backoff = |state: &mut Pid1State, err: Option<Error>| {
+                    if let Some(backoff_until) = state.get_backoff(service) {
+                        if backoff_until > now {
+                            if let Some(err) = err {
+                                clue!(COLLECTOR, ERROR, {
+                                    started: false,
+                                    service: service.as_str(),
+                                    delayed: format!("{:?}", backoff_until - now),
+                                    error: indicio::Value::from(&err),
+                                });
+                            } else {
+                                clue!(COLLECTOR, INFO, {
+                                    started: false,
+                                    service: service.as_str(),
+                                    delayed: format!("{:?}", backoff_until - now),
+                                });
+                            }
+                            *wait =
+                                std::cmp::min(*wait, backoff_until.saturating_duration_since(now));
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
                     }
-                }
-                if !delay {
-                    clue!(COLLECTOR, INFO, {
-                        started: true,
-                        service: service,
-                    });
-                    state.spawn(reclaim.clone(), service, &[])?;
+                };
+                if !check_backoff(&mut state, None) {
+                    let res = state.spawn(coord, reclaim.clone(), service, &[]);
+                    match res {
+                        Ok(_) => {
+                            clue!(COLLECTOR, INFO, {
+                                started: true,
+                                service: service.as_str(),
+                            });
+                        }
+                        Err(err) => {
+                            converged = false;
+                            check_backoff(&mut state, Some(err));
+                        }
+                    };
                 }
             }
         }
-        Ok(min.saturating_duration_since(now))
+        converged
     }
 
     pub fn shutdown(self) -> Result<(), Error> {
@@ -788,14 +862,21 @@ impl Pid1 {
                 let pid: libc::pid_t = *process.pid.lock().unwrap();
                 if pid > 0 {
                     unsafe {
-                        clue!(COLLECTOR, INFO, {
-                            kill: {
-                                pid: pid,
-                                signal: signal.to_string(),
-                            },
-                        });
-                        if libc::kill(pid, signal.into_i32()) < 0 && err.is_ok() {
-                            err = Err(std::io::Error::last_os_error().into());
+                        if libc::kill(pid, signal.into_i32()) < 0 {
+                            let local: Error = std::io::Error::last_os_error().into();
+                            clue!(COLLECTOR, ERROR, {
+                                error: indicio::Value::from(&local),
+                            });
+                            if err.is_ok() {
+                                err = Err(local);
+                            }
+                        } else {
+                            clue!(COLLECTOR, INFO, {
+                                kill: {
+                                    pid: pid,
+                                    signal: signal.to_string(),
+                                },
+                            });
                         }
                     }
                 }
@@ -835,14 +916,14 @@ impl Pid1 {
         match state.service_switch(service) {
             SwitchPosition::Yes => {
                 if !state.is_running(service) {
-                    state.spawn(self.reclaim.clone(), service, &[])?;
+                    state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
                     Ok(())
                 } else {
                     Err(Error::ServiceAlreadyStarted)
                 }
             }
             SwitchPosition::Manual => {
-                state.spawn(self.reclaim.clone(), service, &[])?;
+                state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
                 Ok(())
             }
             SwitchPosition::No => Err(Error::ServiceDisabled),
@@ -862,8 +943,9 @@ impl Pid1 {
         let mut state = self.state.lock().unwrap();
         state.clear_inhibit(service);
         if state.service_switch(service) == SwitchPosition::Manual {
-            state.spawn(self.reclaim.clone(), service, &[])?;
+            state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
         }
+        state.converge += 1;
         self.coord.converge.notify_all();
         Ok(())
     }
@@ -907,7 +989,7 @@ impl Pid1 {
         self.state
             .lock()
             .unwrap()
-            .spawn(self.reclaim.clone(), service, argv)?;
+            .spawn(&self.coord, self.reclaim.clone(), service, argv)?;
         Ok(())
     }
 
@@ -1196,7 +1278,9 @@ impl BackoffTracker {
         *last_tracked = Instant::now();
         fn compound(duration: Duration) -> Duration {
             Duration::from_micros(
-                (duration.as_micros() as f64 * std::f64::consts::E.powf(0.05 * duration.as_secs_f64() / 60.)) as u64,
+                (duration.as_micros() as f64
+                    * std::f64::consts::E.powf(0.05 * duration.as_secs_f64() / 60.))
+                    as u64,
             )
         }
         let old_penalty = *penalty;
