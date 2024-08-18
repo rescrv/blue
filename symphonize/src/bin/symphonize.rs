@@ -89,16 +89,21 @@ fn rc_d_path_recurse(
     Ok(())
 }
 
-fn autoinfer_configuration(options: &Options) -> Result<Pid1Options, std::io::Error> {
+fn autoinfer_configuration(
+    options: &Options,
+) -> Result<(Pid1Options, Path<'static>), std::io::Error> {
     let paths_to_root = paths_to_root()?;
     assert!(!paths_to_root.is_empty());
     let repo = &paths_to_root[0];
     let rc_conf_path = rc_conf_path(&paths_to_root);
     let rc_d_path = rc_d_path(options, repo)?;
-    Ok(Pid1Options {
-        rc_conf_path,
-        rc_d_path,
-    })
+    Ok((
+        Pid1Options {
+            rc_conf_path,
+            rc_d_path,
+        },
+        repo.clone().into_owned(),
+    ))
 }
 
 fn services(_: &Options, pid1: &Pid1, argv: &[&str]) {
@@ -244,7 +249,7 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
                             continue;
                         }
                         let pid1_options = match autoinfer_configuration(&options) {
-                            Ok(pid1_options) => pid1_options,
+                            Ok((pid1_options, _)) => pid1_options,
                             Err(err) => {
                                 eprintln!("error: {err:?}");
                                 continue;
@@ -282,8 +287,13 @@ fn main() {
         eprintln!("symphonize takes no positional arguments");
         std::process::exit(129);
     }
-    let pid1_options =
+    let (pid1_options, root) =
         autoinfer_configuration(&options).expect("should be able to infer configuration");
+
+    // PATH
+    let mut path = std::env::var_os("PATH").unwrap_or_default();
+    path.push(":".to_string() + root.join("target/debug").as_str());
+    std::env::set_var("PATH", path);
 
     // Indicio.
     let emitter = Arc::new(StdioEmitter);
