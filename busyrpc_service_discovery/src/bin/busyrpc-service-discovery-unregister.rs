@@ -1,5 +1,5 @@
 use arrrg::CommandLine;
-use busyrpc::{new_client, ClientOptions, StringResolver};
+use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
 use prototk::FieldNumber;
 use rpc_pb::{Host, IoToZ};
 use tuple_key::{Direction, TupleKey};
@@ -8,7 +8,9 @@ use tuple_routing::{Binding, ServiceDiscovery, UnregisterRequest};
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct Options {
     #[arrrg(nested)]
-    client: ClientOptions,
+    ssl: SslOptions,
+    #[arrrg(nested)]
+    service_discovery_client: ClientOptions,
     #[arrrg(
         required,
         "Host connection string in for ServiceDiscovery in host:ID=hostname:port,host:ID=hostname:port format"
@@ -41,7 +43,11 @@ fn main() {
         Direction::Forward,
     );
     // Request unregistration.
-    let client = new_client(options.client, options.service_discovery_connect.clone());
+    let client = new_client(
+        options.ssl,
+        options.service_discovery_client,
+        options.service_discovery_connect.clone(),
+    );
     let sd = tuple_routing::ServiceDiscoveryClient::new(client);
     let ctx = rpc_pb::Context::default();
     let mut bindings = vec![];

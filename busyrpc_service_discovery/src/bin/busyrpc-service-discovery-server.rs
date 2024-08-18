@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arrrg::CommandLine;
-use busyrpc::{Server, ServerOptions, ServiceRegistry};
+use busyrpc::{Server, ServerOptions, ServiceRegistry, SslOptions};
 use indicio::{
     clue,
     stdio::StdioEmitter,
@@ -11,6 +11,8 @@ use rpc_pb::IoToZ;
 
 #[derive(Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct Options {
+    #[arrrg(nested)]
+    ssl: SslOptions,
     #[arrrg(required, "The routing configuration to use for service discovery.")]
     routing_conf: String,
     #[arrrg(nested)]
@@ -43,7 +45,9 @@ fn main() {
         tuple_routing::ServiceDiscoveryServer::bind(sd),
     );
     // server
-    let (server, cancel) = Server::new(options.server, services).as_z().pretty_unwrap();
+    let (server, cancel) = Server::new(options.ssl, options.server, services)
+        .as_z()
+        .pretty_unwrap();
     let _ = std::thread::spawn(move || {
         loop {
             let signal_set = minimal_signals::SignalSet::new().fill();

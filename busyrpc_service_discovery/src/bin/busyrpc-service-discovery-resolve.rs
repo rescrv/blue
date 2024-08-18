@@ -1,12 +1,14 @@
 use arrrg::CommandLine;
-use busyrpc::{new_client, ClientOptions, StringResolver};
+use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
 use rpc_pb::IoToZ;
 use tuple_routing::{ResolveRequest, ServiceDiscovery};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct Options {
     #[arrrg(nested)]
-    client: ClientOptions,
+    ssl: SslOptions,
+    #[arrrg(nested)]
+    service_discovery_client: ClientOptions,
     #[arrrg(
         required,
         "Host connection string in for ServiceDiscovery in host:ID=hostname:port,host:ID=hostname:port format"
@@ -30,7 +32,11 @@ fn main() {
     let routing_conf = routing_conf.parse::<tuple_routing::RoutingConf>().unwrap();
     let routing_keys = routing_conf.keys(options.routing).unwrap();
     // Request registration.
-    let client = new_client(options.client, options.service_discovery_connect.clone());
+    let client = new_client(
+        options.ssl,
+        options.service_discovery_client,
+        options.service_discovery_connect.clone(),
+    );
     let sd = tuple_routing::ServiceDiscoveryClient::new(client);
     let ctx = rpc_pb::Context::default();
     for routing_key in routing_keys {

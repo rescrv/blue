@@ -16,6 +16,7 @@ use sync42::state_hash_table::{Handle, StateHashTable};
 use zerror_core::ErrorCore;
 
 use super::channel::Channel;
+use super::SslOptions;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -67,15 +68,6 @@ pub struct ClientOptions {
         arrrg(optional, "Number of channels to establish.")
     )]
     pub channels: usize,
-    /// SSL/TLS ca_file.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
-    pub ca_file: String,
-    /// SSL/TLS private key.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
-    pub private_key_file: String,
-    /// SSL/TLS certificate.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
-    pub certificate_file: String,
     /// The user send-buffer size.
     #[cfg_attr(feature = "binaries", arrrg(optional, "Userspace send buffer size."))]
     pub user_send_buffer_size: usize,
@@ -85,9 +77,6 @@ impl Default for ClientOptions {
     fn default() -> Self {
         Self {
             channels: 2,
-            ca_file: "ca.crt".to_string(),
-            private_key_file: "localhost.key".to_string(),
-            certificate_file: "localhost.crt".to_string(),
             user_send_buffer_size: 65536,
         }
     }
@@ -407,7 +396,7 @@ trait ChannelManagerTrait<R: Resolver> {
         Self: 'c;
     type MonitoredChannel;
 
-    fn new(options: ClientOptions, resolver: R) -> Self;
+    fn new(ssl: SslOptions, options: ClientOptions, resolver: R) -> Self;
     fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error>;
     fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
     fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
@@ -417,6 +406,7 @@ trait ChannelManagerTrait<R: Resolver> {
 ////////////////////////////////////////// ChannelManager //////////////////////////////////////////
 
 struct ChannelManager<'a, 'b, R: Resolver> {
+    ssl: SslOptions,
     options: ClientOptions,
     resolver: Mutex<R>,
     // NOTE(rescrv): I like seeing the type, not hiding it.
@@ -429,8 +419,9 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
     type ChannelHandle<'c> = ChannelHandle<'a, 'b, 'c, R> where Self: 'c;
     type MonitoredChannel = MonitoredChannel<'a, 'b>;
 
-    fn new(options: ClientOptions, resolver: R) -> Self {
+    fn new(ssl: SslOptions, options: ClientOptions, resolver: R) -> Self {
         Self {
+            ssl,
             options,
             resolver: Mutex::new(resolver),
             channels: Mutex::default(),
@@ -499,20 +490,20 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
                 what: format!("could not build connector builder: {}", err),
             }
         })?;
-        builder.set_ca_file(&self.options.ca_file).map_err(|err| {
+        builder.set_ca_file(&self.ssl.ca_file).map_err(|err| {
             rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("invalid CA file: {}", err),
             }
         })?;
         builder
-            .set_private_key_file(&self.options.private_key_file, SslFiletype::PEM)
+            .set_private_key_file(&self.ssl.private_key_file, SslFiletype::PEM)
             .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("invalid private key file: {}", err),
             })?;
         builder
-            .set_certificate_file(&self.options.certificate_file, SslFiletype::PEM)
+            .set_certificate_file(&self.ssl.certificate_file, SslFiletype::PEM)
             .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
                 what: format!("invalid certificate file: {}", err),
@@ -573,11 +564,15 @@ where
     // lifetimes on the client, making for beautiful code elsewhere.  Threading around two
     // lifetimes proved to be too much, even for me.
     #[allow(clippy::new_ret_no_self)]
-    fn new(options: ClientOptions, resolver: R) -> Arc<dyn rpc_pb::Client + Send + Sync + 'b> {
+    fn new(
+        ssl: SslOptions,
+        options: ClientOptions,
+        resolver: R,
+    ) -> Arc<dyn rpc_pb::Client + Send + Sync + 'b> {
         Arc::new(Self {
             sequencer: AtomicU64::new(1),
             concurrent_ops: StateHashTable::new(),
-            channels: ChannelManager::new(options, resolver),
+            channels: ChannelManager::new(ssl, options, resolver),
         })
     }
 
@@ -667,8 +662,9 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
 
 /// Create a new client from the options and resolver.
 pub fn new_client<R: Resolver + Send + Sync + 'static>(
+    ssl: SslOptions,
     options: ClientOptions,
     resolver: R,
 ) -> Arc<dyn rpc_pb::Client + Send + Sync> {
-    Client::new(options, resolver)
+    Client::new(ssl, options, resolver)
 }

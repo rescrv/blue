@@ -13,7 +13,7 @@ use zerror_core::ErrorCore;
 use super::builtins;
 use super::channel::Channel;
 use super::poll::{default_pollster, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
-use super::COLLECTOR;
+use super::{SslOptions, COLLECTOR};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -61,15 +61,6 @@ pub fn register_biometrics(collector: &mut Collector) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "binaries", derive(arrrg_derive::CommandLine))]
 pub struct ServerOptions {
-    /// SSL/TLS ca_file.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the CA certificate."))]
-    pub ca_file: String,
-    /// SSL/TLS private key.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the private key file."))]
-    pub private_key_file: String,
-    /// SSL/TLS certificate.
-    #[cfg_attr(feature = "binaries", arrrg(required, "Path to the certificate file."))]
-    pub certificate_file: String,
     /// Bind-to this host.
     #[cfg_attr(
         feature = "binaries",
@@ -86,47 +77,9 @@ pub struct ServerOptions {
 }
 
 impl ServerOptions {
-    /// Build the SSL acceptor or die trying.
-    pub fn must_build_acceptor(&self) -> SslAcceptor {
-        // Setup our SSL preferences.
-        let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        acceptor
-            .set_ca_file(&self.ca_file)
-            .expect("invalid ca file");
-        acceptor
-            .set_private_key_file(&self.private_key_file, SslFiletype::PEM)
-            .expect("invalid private key");
-        acceptor
-            .set_certificate_file(&self.certificate_file, SslFiletype::PEM)
-            .expect("invalid certificate");
-        acceptor.check_private_key().expect("invalid private key");
-        acceptor.set_verify(
-            boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
-        );
-        acceptor.build()
-    }
-
     /// Get the pollster.
     pub fn pollster(&self) -> Result<Box<dyn Pollster>, rpc_pb::Error> {
         default_pollster()
-    }
-
-    /// Set the ca_file.
-    pub fn with_ca_file(mut self, ca_file: &str) -> Self {
-        ca_file.clone_into(&mut self.ca_file);
-        self
-    }
-
-    /// Set the private_key_file.
-    pub fn with_private_key_file(mut self, private_key_file: &str) -> Self {
-        private_key_file.clone_into(&mut self.private_key_file);
-        self
-    }
-
-    /// Set the certificate_file.
-    pub fn with_certificate_file(mut self, certificate_file: &str) -> Self {
-        certificate_file.clone_into(&mut self.certificate_file);
-        self
     }
 
     /// Set the bind_to_host.
@@ -151,9 +104,6 @@ impl ServerOptions {
 impl Default for ServerOptions {
     fn default() -> Self {
         Self {
-            ca_file: "UNSET".to_string(),
-            private_key_file: "UNSET".to_string(),
-            certificate_file: "UNSET".to_string(),
             bind_to: Host::default(),
             thread_pool_size: 64,
             user_send_buffer_size: 65536,
@@ -406,6 +356,7 @@ impl Default for ServiceRegistry {
 
 /// An RPC Server hosts multiple server instances so they may be called.
 pub struct Server {
+    ssl: SslOptions,
     options: ServerOptions,
     internals: Arc<Internals>,
 }
@@ -413,6 +364,7 @@ pub struct Server {
 impl Server {
     /// Create a new server from the options and service registry.
     pub fn new(
+        ssl: SslOptions,
         options: ServerOptions,
         services: ServiceRegistry,
     ) -> Result<(Self, impl FnOnce()), rpc_pb::Error> {
@@ -435,7 +387,14 @@ impl Server {
             }
         };
         let internals = Internals::new(pollster, services, watch);
-        Ok((Self { options, internals }, cancel))
+        Ok((
+            Self {
+                ssl,
+                options,
+                internals,
+            },
+            cancel,
+        ))
     }
 
     /// Return the Host to which this server is bound.
@@ -454,7 +413,7 @@ impl Server {
             }));
         }
         // SSL/TLS acceptor
-        let acceptor = Arc::new(self.options.must_build_acceptor());
+        let acceptor = Arc::new(must_build_acceptor(&self.ssl));
         // Listen for incoming connections.
         let listener = TcpListener::bind(self.options.bind_to.connect()).map_err(|err| {
             rpc_pb::Error::TransportFailure {
@@ -539,4 +498,24 @@ impl Server {
         internals.add_channel(channel);
         Ok(())
     }
+}
+
+//////////////////////////////////////// must_build_acceptor ///////////////////////////////////////
+
+/// Build the SSL acceptor or die trying.
+fn must_build_acceptor(ssl: &SslOptions) -> SslAcceptor {
+    // Setup our SSL preferences.
+    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    acceptor.set_ca_file(&ssl.ca_file).expect("invalid ca file");
+    acceptor
+        .set_private_key_file(&ssl.private_key_file, SslFiletype::PEM)
+        .expect("invalid private key");
+    acceptor
+        .set_certificate_file(&ssl.certificate_file, SslFiletype::PEM)
+        .expect("invalid certificate");
+    acceptor.check_private_key().expect("invalid private key");
+    acceptor.set_verify(
+        boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+    );
+    acceptor.build()
 }

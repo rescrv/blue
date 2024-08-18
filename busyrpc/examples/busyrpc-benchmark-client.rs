@@ -11,7 +11,7 @@ use biometrics::{Collector, PlainTextEmitter};
 use rpc_pb::Client;
 use rpc_pb::{Context, IoToZ};
 
-use busyrpc::{new_client, ClientOptions, StringResolver};
+use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct BenchmarkOptions {
@@ -24,6 +24,8 @@ struct BenchmarkOptions {
     threads: usize,
     #[arrrg(optional, "RPCs to make before exiting.")]
     rpcs: u64,
+    #[arrrg(nested)]
+    ssl: SslOptions,
     #[arrrg(nested)]
     client: ClientOptions,
 }
@@ -64,7 +66,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let client = new_client(options.client, options.connect.clone());
+    let client = new_client(options.ssl, options.client, options.connect.clone());
     let request_counter = Arc::new(AtomicU64::default());
     let mut threads = Vec::new();
     for _ in 0..options.threads {
