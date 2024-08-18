@@ -13,7 +13,7 @@ use zerror_core::ErrorCore;
 use super::builtins;
 use super::channel::Channel;
 use super::poll::{default_pollster, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
-use super::LOGGING;
+use super::COLLECTOR;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -478,7 +478,7 @@ impl Server {
             ];
             let ret = unsafe { libc::poll(pfd.as_mut_ptr(), 2, -1) };
             if pfd[0].revents != 0 {
-                clue!(LOGGING, INFO, {
+                clue!(COLLECTOR, INFO, {
                     serve: {
                         canceled: true,
                     },
@@ -486,7 +486,7 @@ impl Server {
                 break;
             }
             if ret < 0 {
-                clue!(LOGGING, INFO, {
+                clue!(COLLECTOR, INFO, {
                     serve: {
                         error: true,
                     },

@@ -27,4 +27,4 @@ pub fn register_biometrics(collector: &mut Collector) {
 
 ////////////////////////////////////////////// indicio /////////////////////////////////////////////
 
-pub static LOGGING: indicio::Collector = indicio::Collector::new();
+pub static COLLECTOR: indicio::Collector = indicio::Collector::new();
