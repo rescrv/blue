@@ -1,6 +1,4 @@
-//! saros is a simplistic time-series database.  It provides interfaces for storing biometrics data
-//! and querying them.  It is intended to favor simplicity over feature-richness.  Consequently,
-//! it's quite simple.
+#![doc = include_str!("../README.md")]
 
 use std::cmp::Ordering;
 use std::ops::{Add, Bound, RangeBounds, Sub};
