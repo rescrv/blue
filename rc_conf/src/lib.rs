@@ -359,6 +359,7 @@ struct Alias {
 pub struct RcConf {
     items: HashMap<String, String>,
     aliases: HashMap<String, Alias>,
+    values: HashMap<String, RcConf>,
 }
 
 impl RcConf {
@@ -385,7 +386,20 @@ impl RcConf {
                 },
             );
         }
-        Ok(Self { items, aliases })
+        let mut values = HashMap::new();
+        for (varname, values_conf) in items.iter() {
+            let Some(name) = varname.strip_prefix("VALUES_") else {
+                continue;
+            };
+            let mut values_items = HashMap::default();
+            Self::parse_error_on_source(&Path::from(values_conf.clone()), &mut values_items)?;
+            values.insert(name.to_string(), RcConf {
+                items: values_items,
+                aliases: HashMap::default(),
+                values: HashMap::default(),
+            });
+        }
+        Ok(Self { items, aliases, values })
     }
 
     fn parse_recursive(
@@ -405,6 +419,28 @@ impl RcConf {
             if let Some(source) = line.trim().strip_prefix("source ") {
                 Self::parse_recursive(&Path::from(source), seen, items)?;
             } else if let Some((var, val)) = line.split_once('=') {
+                let split = shvar::split(val)?;
+                if split.len() != 1 {
+                    return Err(Error::invalid_rc_conf(path, number, line));
+                }
+                items.insert(var.to_string(), split[0].clone());
+            } else {
+                return Err(Error::invalid_rc_conf(path, number, line));
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_error_on_source(
+        path: &Path,
+        items: &mut HashMap<String, String>,
+    ) -> Result<(), Error> {
+        let contents = std::fs::read_to_string(path.as_str())?;
+        for (number, line, _) in linearize(path, &contents)? {
+            if line.trim().starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some((var, val)) = line.split_once('=') {
                 let split = shvar::split(val)?;
                 if split.len() != 1 {
                     return Err(Error::invalid_rc_conf(path, number, line));
