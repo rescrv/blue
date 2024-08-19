@@ -21,7 +21,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.7" }
 proptest = "1.0"
 
 arrrg = { path = "../arrrg", version = "0.4" }
-guacamole = { path = "../guacamole", version = "0.7" }
+guacamole = { path = "../guacamole", version = "0.8" }
 statslicer = { path = "../statslicer", version = "0.3" }
 
 [[bin]]

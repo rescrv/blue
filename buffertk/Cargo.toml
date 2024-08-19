@@ -16,7 +16,7 @@ binaries = []
 
 [dev-dependencies]
 arrrg = { path = "../arrrg", version = "0.4" }
-guacamole = { path = "../guacamole", version = "0.7" }
+guacamole = { path = "../guacamole", version = "0.8" }
 statslicer = { path = "../statslicer", version = "0.3" }
 
 [[bin]]
