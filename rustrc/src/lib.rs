@@ -385,6 +385,18 @@ impl Pid1Configuration {
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
         Ok(Self { services, rc_conf })
     }
+
+    pub fn services(&self) -> Vec<String> {
+        let mut services = vec![];
+        services.extend(self.services.keys().cloned());
+        services.extend(self.rc_conf.aliases());
+        services
+    }
+
+    fn get_service_path<'a>(&'a self, service: &str) -> Option<Result<Path<'a>, String>> {
+        let service = self.rc_conf.resolve_alias(service);
+        self.services.get(service).cloned()
+    }
 }
 
 ///////////////////////////////////////////// Pid1State ////////////////////////////////////////////
@@ -678,7 +690,7 @@ impl Pid1 {
         };
         clue!(COLLECTOR, INFO, {
             converge: true,
-            services: indicio::Value::from(config.services.keys().collect::<Vec<_>>()),
+            services: indicio::Value::from(config.services()),
         });
         fn has_process(state: &Mutex<Pid1State>, exec: &Arc<Execution>) -> bool {
             let state = state.lock().unwrap();
@@ -726,12 +738,13 @@ impl Pid1 {
             }
         }
         let now = Instant::now();
-        for service in config.services.keys() {
+        for service in config.services() {
+            let service = service.as_str();
             let mut state = state.lock().unwrap();
             if state.is_inhibited(service) {
                 clue!(COLLECTOR, INFO, {
                     started: false,
-                    service: service.as_str(),
+                    service: service,
                     inhibited: true,
                 });
             } else if state.service_switch(service) == SwitchPosition::Yes
@@ -744,14 +757,14 @@ impl Pid1 {
                             if let Some(err) = err {
                                 clue!(COLLECTOR, ERROR, {
                                     started: false,
-                                    service: service.as_str(),
+                                    service: service,
                                     delayed: format!("{:?}", backoff_until - now),
                                     error: indicio::Value::from(&err),
                                 });
                             } else {
                                 clue!(COLLECTOR, INFO, {
                                     started: false,
-                                    service: service.as_str(),
+                                    service: service,
                                     delayed: format!("{:?}", backoff_until - now),
                                 });
                             }
@@ -771,7 +784,7 @@ impl Pid1 {
                         Ok(_) => {
                             clue!(COLLECTOR, INFO, {
                                 started: true,
-                                service: service.as_str(),
+                                service: service,
                             });
                         }
                         Err(err) => {
@@ -893,9 +906,9 @@ impl Pid1 {
             .lock()
             .unwrap()
             .config
-            .services
-            .keys()
-            .cloned()
+            .services()
+            .iter()
+            .map(|s| s.to_string())
             .collect()
     }
 
@@ -904,10 +917,10 @@ impl Pid1 {
         let state = self.state.lock().unwrap();
         state
             .config
-            .services
-            .keys()
+            .services()
+            .iter()
             .filter(|s| state.service_switch(s).is_enabled())
-            .cloned()
+            .map(|s| s.to_string())
             .collect()
     }
 
@@ -1036,7 +1049,7 @@ impl Hash for ExecutionContext {
 impl ExecutionContext {
     pub fn new(config: &Pid1Configuration, service: &str, argv: &[&str]) -> Result<Self, Error> {
         // setup path
-        let Some(path) = config.services.get(service) else {
+        let Some(path) = config.get_service_path(service) else {
             UNKNOWN_SERVICE.click();
             return Err(Error::UnknownService);
         };
@@ -1046,7 +1059,7 @@ impl ExecutionContext {
                 return Err(Error::ServiceError(err.clone()));
             }
         };
-        let bound = config.rc_conf.bind_for_invoke(path)?;
+        let bound = config.rc_conf.bind_for_invoke(service, &path)?;
         let path = CString::new(path.as_str())?;
         // setup wrapper
         let wrapper = config
@@ -1340,6 +1353,23 @@ mod tests {
         let pid1 = Pid1::new(options).expect("pid1 new should work");
         pid1.reload().expect("reload should work");
         pid1.spawn("rustrc-smoke-test", &["--argument", "GOODBYE WORLD"])
+            .expect("spawn should work");
+        pid1.shutdown().expect("shutdown should work");
+    }
+
+    #[test]
+    fn smoking_test() {
+        minimal_signals::block();
+        let options = Pid1Options::default();
+        let pid1 = Pid1::new(options).expect("pid1 new should work");
+        pid1.reload().expect("reload should work");
+        for service in pid1.list_services() {
+            println!("FINDME LIST {service}");
+        }
+        for service in pid1.enabled_services() {
+            println!("FINDME ENABLED {service}");
+        }
+        pid1.spawn("rustrc_smoking_test", &["--argument", "GOODBYE WORLD"])
             .expect("spawn should work");
         pid1.shutdown().expect("shutdown should work");
     }

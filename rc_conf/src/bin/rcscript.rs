@@ -13,9 +13,11 @@ fn main() {
     }
 
     let rc_contents = read_to_string(&args[1]).expect("rcscript should read to string");
-    let rc_script =
+    let mut rc_script =
         RcScript::parse(&Path::from(args[1].clone()), &rc_contents).expect("rcscript should parse");
-
+    if let Ok(argv0) = std::env::var("RCVAR_ARGV0") {
+        rc_script.name = argv0.to_string();
+    }
     if let Err(err) = rc_script.invoke(&args[2..]) {
         eprintln!("error: {err:?}");
         std::process::exit(130);

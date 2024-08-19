@@ -152,7 +152,7 @@ impl SwitchPosition {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RcScript {
-    name: String,
+    pub name: String,
     describe: String,
     command: String,
 }
@@ -174,7 +174,11 @@ impl RcScript {
     }
 
     pub fn parse(path: &Path, contents: &str) -> Result<Self, Error> {
-        let name = name_from_path(path);
+        let name = if let Ok(path) = std::env::var("RCVAR_ARGV0") {
+            path.to_string()
+        } else {
+            name_from_path(path)
+        };
         let mut describe = None;
         let mut command = None;
         for (number, line, _) in linearize(path, contents)? {
@@ -339,11 +343,22 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
     }
 }
 
+/////////////////////////////////////////////// Alias //////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct Alias {
+    // The physical service stub this service aliases.
+    aliases: String,
+    // True if this alias inherits from what it aliases in rc.conf.
+    inherit: bool,
+}
+
 ////////////////////////////////////////////// RcConf //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RcConf {
     items: HashMap<String, String>,
+    aliases: HashMap<String, Alias>,
 }
 
 impl RcConf {
@@ -357,7 +372,20 @@ impl RcConf {
             }
             Self::parse_recursive(&piece, &mut seen, &mut items)?;
         }
-        Ok(Self { items })
+        let mut aliases = HashMap::default();
+        for (varname, alias) in items.iter() {
+            let Some(name) = varname.strip_suffix("_ALIASES") else {
+                continue;
+            };
+            aliases.insert(
+                name.to_string(),
+                Alias {
+                    aliases: alias.clone(),
+                    inherit: false,
+                },
+            );
+        }
+        Ok(Self { items, aliases })
     }
 
     fn parse_recursive(
@@ -450,10 +478,15 @@ impl RcConf {
         }
     }
 
-    pub fn bind_for_invoke(&self, path: &Path) -> Result<HashMap<String, String>, Error> {
+    pub fn bind_for_invoke(
+        &self,
+        service: &str,
+        path: &Path,
+    ) -> Result<HashMap<String, String>, Error> {
         let mut bindings = HashMap::new();
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
+            .env("RCVAR_ARGV0", var_prefix_from_service(service))
             .output()?;
         if !output.status.success() {
             return Err(Error::InvalidInvocation {
@@ -466,9 +499,7 @@ impl RcConf {
                 let value = shvar::expand(self, &value)?;
                 let quoted = shvar::quote(shvar::split(&value)?);
                 bindings.insert(var.to_string(), quoted);
-            } else if let Some(var2) =
-                var.strip_prefix(&(var_prefix_from_service(&name_from_path(path)) + "_"))
-            {
+            } else if let Some(var2) = var.strip_prefix(&(var_prefix_from_service(service) + "_")) {
                 if let Some(value) = self.lookup(var2) {
                     let value = shvar::expand(self, &value)?;
                     let quoted = shvar::quote(shvar::split(&value)?);
@@ -499,27 +530,54 @@ impl RcConf {
     }
 
     pub fn service_switch(&self, service: &str) -> SwitchPosition {
-        let mut enabled = var_prefix_from_service(service);
-        enabled += "_ENABLED";
-        let Some(enable) = self.lookup(&enabled) else {
+        let Some(enable) = self.lookup_suffix(service, "_ENABLED") else {
             // TODO(rescrv): biometrics.
             return SwitchPosition::No;
         };
-        let Ok(mut split) = shvar::split(&enable) else {
+        let Ok(split) = shvar::split(&enable) else {
             // TODO(rescrv): biometrics.
             return SwitchPosition::No;
         };
         let enable = if split.len() == 1 {
             // SAFETY(rescrv): Length is one, so pop will succeed.
-            split.pop().unwrap()
+            &split[0]
         } else {
-            enable
+            &enable
         };
         let Some(switch) = SwitchPosition::from_enable(enable) else {
             // TODO(rescrv): biometrics.
             return SwitchPosition::No;
         };
         switch
+    }
+
+    fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
+        let mut enabled = var_prefix_from_service(service);
+        enabled += suffix;
+        if let Some(enable) = self.lookup(&enabled) {
+            return Some(enable);
+        }
+        if let Some(alias) = self.aliases.get(service) {
+            if alias.inherit {
+                self.lookup_suffix(&alias.aliases, suffix)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn aliases(&self) -> Vec<String> {
+        self.aliases.keys().cloned().collect()
+    }
+
+    pub fn resolve_alias<'a>(&'a self, service: &'a str) -> &'a str {
+        if let Some(alias) = self.aliases.get(service) {
+            self.resolve_alias(&alias.aliases)
+        } else {
+            service
+        }
     }
 }
 
@@ -559,14 +617,29 @@ pub fn load_services(
     Ok(services)
 }
 
-///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
+////////////////////////////////////////////// exec_rc /////////////////////////////////////////////
 
-pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
+pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
     let rc_conf = RcConf::parse(rc_conf_path).expect("rc_conf should parse");
     let rc_d = load_services(rc_d_path).expect("rc.d should parse");
-    let Some(path) = rc_d.get(service) else {
-        eprintln!("expected service to be available via --rc-d-path");
-        std::process::exit(130);
+    if !rc_conf.service_switch(service).is_enabled() {
+        eprintln!("service not enabled");
+        std::process::exit(132);
+    }
+    let mut env = HashMap::new();
+    let path = if let Some(alias) = rc_conf.aliases.get(service) {
+        let Some(path) = rc_d.get(&alias.aliases) else {
+            eprintln!("expected alias of service to be available via --rc-d-path");
+            std::process::exit(130);
+        };
+        env.insert("RCVAR_ARGV0".to_string(), service.to_string());
+        path
+    } else {
+        let Some(path) = rc_d.get(service) else {
+            eprintln!("expected service to be available via --rc-d-path");
+            std::process::exit(130);
+        };
+        path
     };
     let path = match path {
         Ok(path) => path,
@@ -575,13 +648,10 @@ pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str])
             std::process::exit(131);
         }
     };
-    if !rc_conf.service_switch(service).is_enabled() {
-        eprintln!("service not enabled");
-        std::process::exit(132);
-    }
-    let bound = rc_conf
-        .bind_for_invoke(path)
+    let mut bound = rc_conf
+        .bind_for_invoke(service, path)
         .expect("bind for invoke should bind");
+    bound.extend(env);
     let wrapper = rc_conf
         .wrapper(service, "WRAPPER")
         .expect("wrapper should generate");
@@ -589,18 +659,27 @@ pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str])
         Command::new(&wrapper[0])
             .args(&wrapper[1..])
             .arg(path.as_str())
-            .arg("run")
-            .args(args)
+            .args(cmd)
             .envs(bound)
             .exec()
     } else {
-        Command::new(path.as_str())
-            .arg("run")
-            .args(args)
-            .envs(bound)
-            .exec()
+        Command::new(path.as_str()).args(cmd).envs(bound).exec()
     };
     panic!("command unexpectedly failed: {err}");
+}
+
+///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
+
+pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
+    let mut cmd = vec!["run"];
+    cmd.extend(args);
+    exec_rc(rc_conf_path, rc_d_path, service, &cmd)
+}
+
+/////////////////////////////////////////////// rcvar //////////////////////////////////////////////
+
+pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
+    exec_rc(rc_conf_path, rc_d_path, service, &["rcvar"])
 }
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////

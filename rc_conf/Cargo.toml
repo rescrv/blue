@@ -40,6 +40,16 @@ name = "rcinvoke"
 path = "src/bin/rcinvoke.rs"
 required-features=["binaries"]
 
+[[bin]]
+name = "rcvar"
+path = "src/bin/rcvar.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rcdebug"
+path = "src/bin/rcdebug.rs"
+required-features=["binaries"]
+
 [[test]]
 name = "example1"
 path = "tests/example1.rs"
