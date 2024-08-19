@@ -361,8 +361,12 @@ impl From<Error> for indicio::Value {
                 indicio::value!({
                     success: true,
                 })
-            },
-            Error::SerializationError { core: _, err, context } => {
+            }
+            Error::SerializationError {
+                core: _,
+                err,
+                context,
+            } => {
                 indicio::value!({
                     serialization: {
                         // TODO(rescrv): implement indicio::Value for prototk::Error;
@@ -370,17 +374,17 @@ impl From<Error> for indicio::Value {
                         context: context,
                     },
                 })
-            },
+            }
             Error::UnknownServerName { core: _, name } => {
                 indicio::value!({
                     unknown_server: name,
                 })
-            },
+            }
             Error::UnknownMethodName { core: _, name } => {
                 indicio::value!({
                     unknown_method: name,
                 })
-            },
+            }
             Error::RequestTooLarge { core: _, size } => {
                 indicio::value!({
                     request_too_large: {
@@ -388,42 +392,42 @@ impl From<Error> for indicio::Value {
                         limit: MAX_REQUEST_SIZE,
                     },
                 })
-            },
+            }
             Error::TransportFailure { core: _, what } => {
                 indicio::value!({
                     transport_failure: what,
                 })
-            },
+            }
             Error::EncryptionMisconfiguration { core: _, what } => {
                 indicio::value!({
                     encryption_misconfiguration: what,
                 })
-            },
+            }
             Error::UlimitParseError { core: _, what } => {
                 indicio::value!({
                     ulimit_parse_error: what,
                 })
-            },
+            }
             Error::OsError { core: _, what } => {
                 indicio::value!({
                     os_error: what,
                 })
-            },
+            }
             Error::LogicError { core: _, what } => {
                 indicio::value!({
                     logic_error: what,
                 })
-            },
+            }
             Error::NotFound { core: _, what } => {
                 indicio::value!({
                     not_found: what,
                 })
-            },
+            }
             Error::ResolveFailure { core: _, what } => {
                 indicio::value!({
                     resolve_failure: what,
                 })
-            },
+            }
         }
     }
 }

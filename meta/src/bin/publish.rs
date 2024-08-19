@@ -50,10 +50,16 @@ fn dependencies(member: &str) -> Vec<String> {
         .expect("reading cargo toml");
     let cargo_toml = cargo_text.parse::<Table>().expect("parsing cargo toml");
     assert!(cargo_toml.contains_key("dependencies"));
+    let mut deps = Vec::new();
     let dependencies_table = cargo_toml["dependencies"]
         .as_table()
         .expect("parsing dependencies");
-    let mut deps = Vec::new();
+    for dep in dependencies_table {
+        deps.push(dep.0.to_string());
+    }
+    let dependencies_table = cargo_toml["dev-dependencies"]
+        .as_table()
+        .expect("parsing dev-dependencies");
     for dep in dependencies_table {
         deps.push(dep.0.to_string());
     }

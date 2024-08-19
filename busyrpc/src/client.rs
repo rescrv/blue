@@ -4,7 +4,7 @@ use std::net::TcpStream;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration,SystemTime};
+use std::time::{Duration, SystemTime};
 
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslConnector, SslFiletype, SslMethod};
@@ -436,7 +436,11 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
                 let channels = self.channels.lock().unwrap();
                 // TODO(rescrv):  Some pruning of stale channels.
                 if channels.len() >= self.options.channels {
-                    let index = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_micros() as usize % channels.len();
+                    let index = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or(Duration::ZERO)
+                        .as_micros() as usize
+                        % channels.len();
                     if let Some((_, channel)) = &channels[index] {
                         let channel = Arc::clone(channel);
                         return Ok(ChannelHandle {
