@@ -19,7 +19,7 @@ buffertk = { path = "../buffertk", version = "0.8" }
 keyvalint = { path = "../keyvalint", version = "0.5" }
 prototk = { path = "../prototk", version = "0.8" }
 prototk_derive = { path = "../prototk_derive", version = "0.8" }
-tuple_key = { path = "../tuple_key", version = "0.6" }
+tuple_key = { path = "../tuple_key", version = "0.7" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.6" }
 zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.7" }
