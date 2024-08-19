@@ -18,7 +18,7 @@ biometrics = { path = "../biometrics", version = "0.8" }
 buffertk = { path = "../buffertk", version = "0.8", optional = true }
 prototk = { path = "../prototk", version = "0.8", optional = true }
 prototk_derive = { path = "../prototk_derive", version = "0.8", optional = true }
-tatl = { path = "../tatl", version = "0.6" }
+tatl = { path = "../tatl", version = "0.7" }
 
 [[example]]
 name = "macros"
