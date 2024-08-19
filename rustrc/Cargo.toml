@@ -23,7 +23,7 @@ indicio = { path = "../indicio", version = "0.4" }
 minimal_signals = { path = "../minimal_signals", version = "0.2" }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
 rc_conf = { path = "../rc_conf", version = "0.2" }
-shvar = { path = "../shvar", version = "0.1" }
+shvar = { path = "../shvar", version = "0.2" }
 unix_sock = { path = "../unix_sock", version = "0.1" }
 utf8path = { path = "../utf8path", version = "0.2" }
 
