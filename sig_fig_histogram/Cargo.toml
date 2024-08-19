@@ -1,6 +1,6 @@
 [package]
 name = "sig_fig_histogram"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "sig_fig_histogram provides a histogram type that is exponentially distributed and human-friendly."
