@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+import glob
+import os.path
+import re
+import subprocess
+
+EXCLUDE_DIRS = ['.git', 'target', 'meta', 'napkins'];
+
+RE_LOCAL_PACKAGE = re.compile(r'^(?P<crate>[a-zA-Z][a-zA-Z0-0_]*) v[0-9]+\.[0-9]+\.[0-9]+ .*\((?P<path>[a-zA-Z0-9_/]*)\)')
+RE_VERSION = re.compile(r'version = "(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+
+def publication_order(root):
+    crates = {}
+    for crate in os.listdir(root):
+        if crate in EXCLUDE_DIRS:
+            continue
+        path = os.path.join(root, crate)
+        if not os.path.isdir(path):
+            continue
+        deps = subprocess.check_output(('cargo', 'tree', '--all-features', '--prefix', 'none', '--depth', '1'), cwd=path)
+        deps = deps.decode('utf8')
+        deps = [d for d in deps.split('\n') if d]
+        if crate == 'arrrg': print(deps)
+        deps = [RE_LOCAL_PACKAGE.match(d) for d in deps]
+        deps = [d.groupdict() for d in deps if d]
+        crates[crate] = set([d['crate'] for d in deps if d['crate'] != crate])
+    return crates
+
+def topological_sort(crates):
+    seen = set()
+    while set(crates.keys()) - seen:
+        for key in sorted(crates.keys()):
+            if key in seen:
+                continue
+            if crates[key] - seen:
+                continue
+            seen.add(key)
+            yield key
+
+def short_version(version): 
+    if version.count('.') == 2:
+        return version.rsplit('.', 1)[0]
+    else:
+        return version
+
+if __name__ == '__main__':
+    root = os.path.dirname(__file__)
+    crates = publication_order(root)
+    for crate in topological_sort(crates):
+        print(crate)
+    seen = False
+    for crate in topological_sort(crates):
+        if crate == 'keyvalint_bench':
+            seen = True
+        if not seen:
+            continue
+        subprocess.check_call(('git', 'update-index', '--refresh'))
+        subprocess.check_call(('git', 'diff-index', '--quiet', 'HEAD', '--'))
+        version = RE_VERSION.search(open(os.path.join(root, crate, 'Cargo.toml')).read(), re.MULTILINE)
+        assert version is not None
+        old_version = version.groupdict()['version']
+        print()
+        print('working on', crate, old_version)
+        input('press enter to view changelog> ')
+        subprocess.check_call(('git', 'whatchanged', crate), cwd=root)
+        new_version = input('what version to publish> ')
+        try:
+            subprocess.check_output(('git', 'rev-parse', '--verify', 'refs/tags/{}@{}'.format(crate, new_version)))
+            print('revision exists')
+            continue
+        except:
+            pass
+        if not new_version.strip():
+            print('skipping')
+            continue
+        subprocess.check_call((os.path.join(root, 'update-version'), crate, old_version, short_version(old_version), new_version, short_version(new_version)), cwd=root)
+        subprocess.check_call(('git', 'add', *glob.glob('*/Cargo.toml')), cwd=root)
+        subprocess.check_call(('git', 'commit', '-m', '[{}] v{}'.format(crate, new_version)))
+        subprocess.check_call(('git', 'tag', '-a', '-m', '[{}] v{}'.format(crate, new_version), '{}@{}'.format(crate, new_version)))
+        subprocess.check_call(('cargo', 'publish', '-p', crate, '-n'))
+        for x in range(3):
+            if input('enter "twinkling pusheen" to publish> ') == "twinkling pusheen":
+                subprocess.check_call(('cargo', 'publish', '-p', crate))
+                break
+            print('try again or fail three times in total')
