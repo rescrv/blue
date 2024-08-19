@@ -16,7 +16,7 @@ binaries = []
 getopts = "0.2"
 
 arrrg = { path = "../arrrg", version = "0.3" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.4" }
 sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.3" }
 
 [dev-dependencies]

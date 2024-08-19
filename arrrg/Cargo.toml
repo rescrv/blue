@@ -10,4 +10,4 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 getopts = "0.2"
 
-arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.4" }

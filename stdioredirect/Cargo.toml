@@ -17,7 +17,7 @@ getopts = { version = "0.2" }
 libc = "0.2"
 
 arrrg = { path = "../arrrg", version = "0.3" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.3" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.4" }
 
 [[bin]]
 name = "stdioredirect"
