@@ -22,7 +22,7 @@ tuple_key = { path = "../tuple_key", version = "0.6" }
 utf8path = { path = "../utf8path", version = "0.3" }
 zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
-zerror_derive = { path = "../zerror_derive", version = "0.3" }
+zerror_derive = { path = "../zerror_derive", version = "0.4" }
 
 [dev-dependencies]
 proptest = "1.0"
