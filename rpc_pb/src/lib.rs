@@ -354,9 +354,77 @@ impl From<std::io::Error> for Error {
 iotoz! {Error}
 
 #[cfg(feature = "indicio")]
-impl Error {
-    pub fn into_value(&self) -> indicio::Value {
-        todo!();
+impl From<Error> for indicio::Value {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::Success { core: _ } => {
+                indicio::value!({
+                    success: true,
+                })
+            },
+            Error::SerializationError { core: _, err, context } => {
+                indicio::value!({
+                    serialization: {
+                        // TODO(rescrv): implement indicio::Value for prototk::Error;
+                        what: format!("{:?}", err),
+                        context: context,
+                    },
+                })
+            },
+            Error::UnknownServerName { core: _, name } => {
+                indicio::value!({
+                    unknown_server: name,
+                })
+            },
+            Error::UnknownMethodName { core: _, name } => {
+                indicio::value!({
+                    unknown_method: name,
+                })
+            },
+            Error::RequestTooLarge { core: _, size } => {
+                indicio::value!({
+                    request_too_large: {
+                        size: size,
+                        limit: MAX_REQUEST_SIZE,
+                    },
+                })
+            },
+            Error::TransportFailure { core: _, what } => {
+                indicio::value!({
+                    transport_failure: what,
+                })
+            },
+            Error::EncryptionMisconfiguration { core: _, what } => {
+                indicio::value!({
+                    encryption_misconfiguration: what,
+                })
+            },
+            Error::UlimitParseError { core: _, what } => {
+                indicio::value!({
+                    ulimit_parse_error: what,
+                })
+            },
+            Error::OsError { core: _, what } => {
+                indicio::value!({
+                    os_error: what,
+                })
+            },
+            Error::LogicError { core: _, what } => {
+                indicio::value!({
+                    logic_error: what,
+                })
+            },
+            Error::NotFound { core: _, what } => {
+                indicio::value!({
+                    not_found: what,
+                })
+            },
+            Error::ResolveFailure { core: _, what } => {
+                indicio::value!({
+                    resolve_failure: what,
+                })
+            },
+        }
     }
 }
 
