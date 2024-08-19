@@ -28,7 +28,7 @@ zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
 
 getopts = { version = "0.2", optional = true }
-arrrg = { path = "../arrrg", version = "0.3", optional = true }
+arrrg = { path = "../arrrg", version = "0.4", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.4", optional = true }
 
 [[example]]
