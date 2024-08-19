@@ -4,6 +4,7 @@ use std::net::TcpStream;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration,SystemTime};
 
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslConnector, SslFiletype, SslMethod};
@@ -430,23 +431,23 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
     }
 
     fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error> {
-        let resolved = { self.resolver.lock().unwrap().resolve()? };
         loop {
             {
                 let channels = self.channels.lock().unwrap();
-                for (index, channel) in channels.iter().enumerate() {
-                    if let Some((host_id, channel)) = channel {
-                        if *host_id == resolved.host_id() {
-                            let channel = Arc::clone(channel);
-                            return Ok(ChannelHandle {
-                                channel,
-                                manager: self,
-                                index,
-                            });
-                        }
+                // TODO(rescrv):  Some pruning of stale channels.
+                if channels.len() >= self.options.channels {
+                    let index = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_micros() as usize % channels.len();
+                    if let Some((_, channel)) = &channels[index] {
+                        let channel = Arc::clone(channel);
+                        return Ok(ChannelHandle {
+                            channel,
+                            manager: self,
+                            index,
+                        });
                     }
                 }
             }
+            let resolved = { self.resolver.lock().unwrap().resolve()? };
             self.establish_channel(&resolved)?;
         }
     }
