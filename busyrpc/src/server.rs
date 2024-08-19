@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use buffertk::{stack_pack, Unpackable};
-use indicio::{clue, INFO};
+use indicio::{clue, ERROR, INFO, TRACING};
 use rpc_pb::{Context, Error, Host, Request, Response, Status};
 use zerror_core::ErrorCore;
 
@@ -137,11 +137,15 @@ impl Internals {
                 Ok(None) => {
                     continue 'serving;
                 }
-                Err(_err) => {
+                Err(err) => {
                     POLL_ERROR.click();
-                    //Trace::new("busyrpc.poll.error")
-                    //    .with_value::<message<Error>, 1>(err)
-                    //    .finish();
+                    clue!(COLLECTOR, ERROR, {
+                        busyrpc: {
+                            poll: {
+                                error: indicio::Value::from(err),
+                            }
+                        }
+                    });
                     continue 'serving;
                 }
             };
@@ -153,7 +157,11 @@ impl Internals {
                 Some(chan) => chan,
                 None => {
                     GET_CHANNEL_FAILED.click();
-                    //Trace::new("busyrpc.poll.get_channel_failed").finish();
+                    clue!(COLLECTOR, ERROR, {
+                        busyrpc: {
+                            get_channel: false,
+                        }
+                    });
                     continue 'serving;
                 }
             };
@@ -161,11 +169,15 @@ impl Internals {
             if events & POLLOUT != 0 {
                 SAW_POLLOUT.click();
                 events &= !POLLOUT;
-                if let Err(_err) = chan_guard.do_send_work() {
+                if let Err(err) = chan_guard.do_send_work() {
                     SEND_FAILED.click();
-                    //Trace::new("busyrpc.send.error")
-                    //    .with_value::<message<Error>, 1>(err)
-                    //    .finish();
+                    clue!(COLLECTOR, TRACING, {
+                        busyrpc: {
+                            send: {
+                                error: indicio::Value::from(err),
+                            },
+                        },
+                    });
                     events = POLLERR;
                 } else if chan_guard.needs_write() {
                     NEEDS_WRITE.click();
@@ -184,11 +196,15 @@ impl Internals {
                 let fd = chan_guard.as_raw_fd();
                 drop(chan_guard);
                 self.cancel_channel(fd);
-            } else if let Err(_err) = self.pollster.arm(fd, events & POLLOUT != 0) {
+            } else if let Err(err) = self.pollster.arm(fd, events & POLLOUT != 0) {
                 POLL_ERROR.click();
-                //Trace::new("busyrpc.poll.error")
-                //    .with_value::<message<Error>, 1>(err)
-                //    .finish();
+                clue!(COLLECTOR, ERROR, {
+                    busyrpc: {
+                        poll: {
+                            error: indicio::Value::from(err),
+                        }
+                    }
+                });
             }
         }
     }
@@ -199,20 +215,28 @@ impl Internals {
         let channel_p = Arc::clone(&channel);
         self.channels.lock().unwrap().insert(fd, channel);
         let mut chan_guard = channel_p.lock().unwrap();
-        if let Err(_err) = self.pollster.arm(fd, true) {
+        if let Err(err) = self.pollster.arm(fd, true) {
             ADD_CHANNEL_ARM_FAILED.click();
-            //Trace::new("busyrpc.poll.error")
-            //    .with_value::<message<rpc_pb::Error>, 1>(err)
-            //    .finish();
+            clue!(COLLECTOR, ERROR, {
+                busyrpc: {
+                    poll: {
+                        error: indicio::Value::from(err),
+                    }
+                }
+            });
         };
         if self.do_recv_work(&mut chan_guard) {
             ADD_CHANNEL_RECV_FAILED.click();
             self.channels.lock().unwrap().remove(&fd);
-        } else if let Err(_err) = self.pollster.arm(fd, true) {
+        } else if let Err(err) = self.pollster.arm(fd, true) {
             POLL_ERROR.click();
-            //Trace::new("busyrpc.poll.error")
-            //    .with_value::<message<Error>, 1>(err)
-            //    .finish();
+            clue!(COLLECTOR, ERROR, {
+                busyrpc: {
+                    poll: {
+                        error: indicio::Value::from(err),
+                    }
+                }
+            });
         }
     }
 
@@ -234,20 +258,28 @@ impl Internals {
         let mut error = false;
         match chan.do_recv_work(f) {
             Ok(_) => {}
-            Err(_err) => {
+            Err(err) => {
                 RECV_FAILED.click();
-                //Trace::new("busyrpc.recv.error")
-                //    .with_value::<message<Error>, 1>(err)
-                //    .finish();
+                clue!(COLLECTOR, TRACING, {
+                    busyrpc: {
+                        recv: {
+                            error: indicio::Value::from(err),
+                        },
+                    },
+                });
                 error = true;
             }
         };
         for buffer in buffers.into_iter() {
-            if let Err(_err) = self.handle_rpc(chan, buffer) {
+            if let Err(err) = self.handle_rpc(chan, buffer) {
                 HANDLE_RPC_FAILED.click();
-                //Trace::new("busyrpc.rpc.error")
-                //    .with_value::<message<Error>, 1>(err)
-                //    .finish();
+                clue!(COLLECTOR, TRACING, {
+                    busyrpc: {
+                        rpc: {
+                            error: indicio::Value::from(err),
+                        },
+                    },
+                });
                 error = true;
             }
         }
@@ -458,31 +490,43 @@ impl Server {
                     let stream = match acceptor.accept(stream) {
                         Ok(stream) => stream,
                         Err(err) => {
-                            let _err = rpc_pb::Error::TransportFailure {
+                            let err = rpc_pb::Error::TransportFailure {
                                 core: ErrorCore::default(),
                                 what: err.to_string(),
                             };
-                            //Trace::new("busyrpc.accept.error")
-                            //    .with_value::<message<Error>, 1>(err)
-                            //    .finish();
+                            clue!(COLLECTOR, ERROR, {
+                                busyrpc: {
+                                    accept: {
+                                        error: indicio::Value::from(err),
+                                    },
+                                },
+                            });
                             continue 'listening;
                         }
                     };
                     DO_ACCEPT.click();
                     match self.add_channel(stream) {
                         Ok(_) => {}
-                        Err(_err) => {
-                            //Trace::new("busyrpc.add_channel.error")
-                            //    .with_value::<message<Error>, 1>(err)
-                            //    .finish();
+                        Err(err) => {
+                            clue!(COLLECTOR, ERROR, {
+                                busyrpc: {
+                                    add_channel: {
+                                        error: indicio::Value::from(err),
+                                    },
+                                },
+                            });
                             continue 'listening;
                         }
                     };
                 }
-                Err(_err) => {
-                    //Trace::new("busyrpc.listen.error")
-                    //    .with_value::<message<Error>, 1>(err.into())
-                    //    .finish();
+                Err(err) => {
+                    clue!(COLLECTOR, ERROR, {
+                        busyrpc: {
+                            listen: {
+                                error: format!("{}", err),
+                            },
+                        },
+                    });
                 }
             }
         }
