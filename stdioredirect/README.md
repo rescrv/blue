@@ -4,7 +4,7 @@ stdioredirect
 stdioredirect is a simple tool to perform redirection of stdio.  It is intended for use as a wrapper program like
 numactl or env.
 
-```
+```ignore
 USAGE: stdioredirect [--close-$stream|--$stream /file.txt] -- command [args]
 
 Options:
