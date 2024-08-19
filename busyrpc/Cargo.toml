@@ -22,7 +22,7 @@ biometrics = { path = "../biometrics", version = "0.7" }
 buffertk = { path = "../buffertk", version = "0.7" }
 indicio = { path = "../indicio", version = "0.4" }
 prototk = { path = "../prototk", version = "0.7" }
-prototk_derive = { path = "../prototk_derive", version = "0.6" }
+prototk_derive = { path = "../prototk_derive", version = "0.7" }
 rpc_pb = { path = "../rpc_pb", version = "0.6" }
 sync42 = { path = "../sync42", version = "0.7" }
 tatl = { path = "../tatl", version = "0.5" }
