@@ -10,7 +10,7 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 nom = "7.1"
 
-buffertk = { path = "../buffertk", version = "0.7" }
+buffertk = { path = "../buffertk", version = "0.8" }
 busyrpc = { path = "../busyrpc", version = "0.4" }
 indicio = { path = "../indicio", version = "0.4" }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
