@@ -22,7 +22,7 @@ guacamole = { path = "../guacamole", version = "0.8" }
 indicio = { path = "../indicio", version = "0.4", optional = true }
 one_two_eight = { path = "../one_two_eight", version = "0.4" }
 prototk = { path = "../prototk", version = "0.7" }
-prototk_derive = { path = "../prototk_derive", version = "0.7" }
+prototk_derive = { path = "../prototk_derive", version = "0.8" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
