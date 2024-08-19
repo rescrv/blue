@@ -35,7 +35,7 @@ tatl = { path = "../tatl", version = "0.6" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
 zerror_derive = { path = "../zerror_derive", version = "0.3" }
-zerror = { path = "../zerror", version = "0.4" }
+zerror = { path = "../zerror", version = "0.5" }
 
 [dev-dependencies]
 proptest = "1.0"

@@ -24,7 +24,7 @@ prototk = { path = "../prototk", version = "0.7" }
 prototk_derive = { path = "../prototk_derive", version = "0.7" }
 rpc_pb = { path = "../rpc_pb", version = "0.6" }
 utilz = { path = "../utilz", version = "0.5" }
-zerror = { path = "../zerror", version = "0.4" }
+zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
 
 getopts = { version = "0.2", optional = true }

@@ -31,7 +31,7 @@ skipfree = { path = "../skipfree", version = "0.3" }
 sst = { path = "../sst", version = "0.7" }
 sync42 = { path = "../sync42", version = "0.7" }
 utilz = { path = "../utilz", version = "0.5" }
-zerror = { path = "../zerror", version = "0.4" }
+zerror = { path = "../zerror", version = "0.5" }
 zerror_core = { path = "../zerror_core", version = "0.6" }
 zerror_derive = { path = "../zerror_derive", version = "0.3" }
 
