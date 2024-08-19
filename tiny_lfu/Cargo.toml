@@ -9,5 +9,5 @@ repository = "https://github.com/rescrv/blue"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.7" }
+biometrics = { path = "../biometrics", version = "0.8" }
 bloomcalc = { path = "../bloomcalc", version = "0.3" }

@@ -1,6 +1,6 @@
 [package]
 name = "biometrics"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Biometrics provide the vitals of a process in the form of counters, gauges, moments, and T-digests."

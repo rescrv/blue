@@ -18,7 +18,7 @@ libc = "0.2"
 boring = "4.9.1"
 crc32c = "0.6"
 
-biometrics = { path = "../biometrics", version = "0.7" }
+biometrics = { path = "../biometrics", version = "0.8" }
 buffertk = { path = "../buffertk", version = "0.7" }
 indicio = { path = "../indicio", version = "0.4" }
 prototk = { path = "../prototk", version = "0.7" }
