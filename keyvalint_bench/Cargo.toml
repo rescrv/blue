@@ -27,7 +27,7 @@ biometrics_sys = { path = "../biometrics_sys", version = "0.2" }
 guacamole = { path = "../guacamole", version = "0.8" }
 keyvalint = { path = "../keyvalint", version = "0.5" }
 lsmtk = { path = "../lsmtk", version = "0.4" }
-sst = { path = "../sst", version = "0.7" }
+sst = { path = "../sst", version = "0.8" }
 sync42 = { path = "../sync42", version = "0.8" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.5" }
