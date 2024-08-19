@@ -1,7 +1,11 @@
 [package]
 name = "unix_sock"
 version = "0.2.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
+description = "unix_sock provides a unix control socket abstraction."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [features]
 default = ["binaries"]
