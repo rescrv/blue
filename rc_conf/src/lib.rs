@@ -351,6 +351,8 @@ struct Alias {
     aliases: String,
     // True if this alias inherits from what it aliases in rc.conf.
     inherit: bool,
+    // Values to inject into the bound values map.
+    vp: HashMap<String, String>,
 }
 
 ////////////////////////////////////////////// RcConf //////////////////////////////////////////////
@@ -360,6 +362,7 @@ pub struct RcConf {
     items: HashMap<String, String>,
     aliases: HashMap<String, Alias>,
     values: HashMap<String, RcConf>,
+    filters: HashMap<String, RcConf>,
 }
 
 impl RcConf {
@@ -383,6 +386,7 @@ impl RcConf {
                 Alias {
                     aliases: alias.clone(),
                     inherit: false,
+                    vp: HashMap::new(),
                 },
             );
         }
@@ -393,13 +397,136 @@ impl RcConf {
             };
             let mut values_items = HashMap::default();
             Self::parse_error_on_source(&Path::from(values_conf.clone()), &mut values_items)?;
-            values.insert(name.to_string(), RcConf {
-                items: values_items,
-                aliases: HashMap::default(),
-                values: HashMap::default(),
-            });
+            values.insert(
+                name.to_string(),
+                RcConf {
+                    items: values_items,
+                    aliases: HashMap::default(),
+                    values: HashMap::default(),
+                    filters: HashMap::default(),
+                },
+            );
         }
-        Ok(Self { items, aliases, values })
+        let mut filters = HashMap::new();
+        for (varname, filters_conf) in items.iter() {
+            let Some(name) = varname.strip_prefix("FILTER_") else {
+                continue;
+            };
+            let mut filters_items = HashMap::default();
+            Self::parse_error_on_source(&Path::from(filters_conf.clone()), &mut filters_items)?;
+            let filters_conf = Path::from(filters_conf.as_str());
+            let (sep, vars) = split_for_filter(name);
+            let name = vars.join("__");
+            for varname in filters_items.keys() {
+                let pieces = varname.split(&sep).collect::<Vec<_>>();
+                if pieces.len() != vars.len() {
+                    return Err(Error::invalid_rc_conf(
+                        &filters_conf,
+                        0,
+                        format!("{pieces:?} doesn't match format {name:?}"),
+                    ));
+                }
+                for (value, binding) in std::iter::zip(vars.iter(), pieces.iter()) {
+                    let Some(values) = values.get(value) else {
+                        return Err(Error::invalid_rc_conf(
+                            &filters_conf,
+                            0,
+                            format!("VALUES_{value} not declared"),
+                        ));
+                    };
+                    if values.lookup(binding).is_none() {
+                        return Err(Error::invalid_rc_conf(
+                            &filters_conf,
+                            0,
+                            format!("{binding} not declared as {value}"),
+                        ));
+                    }
+                }
+            }
+            filters.insert(
+                name.to_string(),
+                RcConf {
+                    items: filters_items,
+                    aliases: HashMap::default(),
+                    values: HashMap::default(),
+                    filters: HashMap::default(),
+                },
+            );
+        }
+        for (varname, autogen_switch) in items.iter() {
+            let Some(alias) = varname.strip_suffix("_AUTOGEN") else {
+                continue;
+            };
+            if autogen_switch == "NO" {
+                continue;
+            } else if autogen_switch != "YES" {
+                return Err(Error::invalid_rc_conf(
+                    &Path::from(path),
+                    0,
+                    format!("{varname} must be set to YES or NO"),
+                ));
+            }
+            let (template, variables) = strip_prefix_values(&values, alias);
+            if variables.is_empty() {
+                return Err(Error::invalid_rc_conf(
+                    &Path::from(path),
+                    0,
+                    "autogen requires one or more VALUES_-declared variables",
+                ));
+            }
+            let bindings = variables
+                .iter()
+                .filter_map(|v| values.get(v).map(|rc| rc.variables()))
+                .collect::<Vec<_>>();
+            if variables.len() != bindings.len() {
+                return Err(Error::invalid_rc_conf(
+                    &Path::from(path),
+                    0,
+                    "inconsistent autogen statement (you'll have to pull code to debug this one)",
+                ));
+            }
+            let mut cursors = vec![0; bindings.len()];
+            while cursors[0] < bindings[0].len() {
+                let candidate = bindings
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, set)| &set[cursors[idx]])
+                    .collect::<Vec<_>>();
+                let vp = std::iter::zip(variables.iter(), candidate)
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect::<HashMap<_, _>>();
+                let candidate = shvar::expand(&vp, &template)?;
+                if aliases.contains_key(&candidate) {
+                    return Err(Error::invalid_rc_conf(
+                        &Path::from(path),
+                        0,
+                        format!("{candidate} comes from both autogen and alias"),
+                    ));
+                }
+                aliases.insert(
+                    candidate,
+                    Alias {
+                        aliases: alias.to_string(),
+                        inherit: true,
+                        vp,
+                    },
+                );
+                for idx in (0..bindings.len()).rev() {
+                    cursors[idx] = cursors[idx].saturating_add(1);
+                    if idx > 0 && cursors[idx] >= bindings[idx].len() {
+                        cursors[idx] = 0;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            items,
+            aliases,
+            values,
+            filters,
+        })
     }
 
     fn parse_recursive(
@@ -505,7 +632,7 @@ impl RcConf {
     }
 
     pub fn variables(&self) -> Vec<String> {
-        self.items.values().cloned().collect()
+        self.items.keys().cloned().collect()
     }
 
     pub fn merge(&mut self, other: Self) {
@@ -530,16 +657,37 @@ impl RcConf {
             });
         }
         let stdout = String::from_utf8(output.stdout)?;
+        let mut alias_lookup_order = vec![service];
+        let mut direct_alias = service;
+        let mut pre_lookup = HashMap::new();
+        while let Some(alias) = self.aliases.get(direct_alias) {
+            alias_lookup_order.push(&alias.aliases);
+            direct_alias = &alias.aliases;
+            for (k, v) in alias.vp.iter() {
+                if !pre_lookup.contains_key(k) {
+                    pre_lookup.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let vp = (pre_lookup, self);
         for var in stdout.split_whitespace() {
-            if let Some(value) = self.lookup(var) {
-                let value = shvar::expand(self, &value)?;
+            if let Some(value) = vp.lookup(var) {
+                let value = shvar::expand(&vp, &value)?;
                 let quoted = shvar::quote(shvar::split(&value)?);
                 bindings.insert(var.to_string(), quoted);
-            } else if let Some(var2) = var.strip_prefix(&(var_prefix_from_service(service) + "_")) {
-                if let Some(value) = self.lookup(var2) {
-                    let value = shvar::expand(self, &value)?;
-                    let quoted = shvar::quote(shvar::split(&value)?);
-                    bindings.insert(var.to_string(), quoted);
+            } else {
+                let Some(suffix) = var.strip_prefix(&(var_prefix_from_service(service) + "_"))
+                else {
+                    continue;
+                };
+                'alias_iteration: for alias in alias_lookup_order.iter() {
+                    if let Some(value) = vp.lookup(&(var_prefix_from_service(alias) + "_" + suffix))
+                    {
+                        let value = shvar::expand(&vp, &value)?;
+                        let quoted = shvar::quote(shvar::split(&value)?);
+                        bindings.insert(var.to_string(), quoted);
+                        break 'alias_iteration;
+                    }
                 }
             }
         }
@@ -608,6 +756,14 @@ impl RcConf {
         self.aliases.keys().cloned().collect()
     }
 
+    pub fn direct_alias<'a>(&'a self, service: &'a str) -> &'a str {
+        if let Some(alias) = self.aliases.get(service) {
+            &alias.aliases
+        } else {
+            service
+        }
+    }
+
     pub fn resolve_alias<'a>(&'a self, service: &'a str) -> &'a str {
         if let Some(alias) = self.aliases.get(service) {
             self.resolve_alias(&alias.aliases)
@@ -664,7 +820,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
     }
     let mut env = HashMap::new();
     let path = if let Some(alias) = rc_conf.aliases.get(service) {
-        let Some(path) = rc_d.get(&alias.aliases) else {
+        let Some(path) = rc_d.get(rc_conf.resolve_alias(&alias.aliases)) else {
             eprintln!("expected alias of service to be available via --rc-d-path");
             std::process::exit(130);
         };
@@ -781,10 +937,47 @@ pub fn var_prefix_from_service(service: &str) -> String {
         .collect()
 }
 
+////////////////////////////////////////////// filters /////////////////////////////////////////////
+
+fn split_for_filter(var: &str) -> (String, Vec<String>) {
+    if var.contains("__") {
+        (
+            "__".to_string(),
+            var.split("__").map(String::from).collect(),
+        )
+    } else {
+        ("_".to_string(), var.split('_').map(String::from).collect())
+    }
+}
+
+fn strip_prefix_values(values: &HashMap<String, RcConf>, template: &str) -> (String, Vec<String>) {
+    let mut still_pulling_values = true;
+    let mut vars = vec![];
+    let mut built = vec![];
+    let pieces = template.split('_').collect::<Vec<_>>();
+    for piece in pieces.iter() {
+        let contains = values.contains_key(&piece.to_string());
+        if !piece.is_empty() {
+            if contains && still_pulling_values {
+                vars.push(piece.to_string());
+                built.push(format!("${{{piece}}}"));
+            } else if !contains || !still_pulling_values {
+                still_pulling_values = false;
+                built.push(piece.to_string());
+            }
+        } else {
+            built.push(piece.to_string());
+        }
+    }
+    (built.join("_"), vars)
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     mod rc_script {
         use super::super::*;
 
@@ -921,5 +1114,20 @@ bar_ENABLE=YES
                 services
             );
         }
+    }
+
+    #[test]
+    fn strip_prefix_values() {
+        let values = HashMap::from([
+            ("FOO".to_string(), super::RcConf::default()),
+            ("BAR".to_string(), super::RcConf::default()),
+        ]);
+        assert_eq!(
+            (
+                "${FOO}_${BAR}_service".to_string(),
+                vec!["FOO".to_string(), "BAR".to_string()]
+            ),
+            super::strip_prefix_values(&values, "FOO_BAR_service")
+        );
     }
 }
