@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use keyvalint::{Cursor, KeyRef};
+use super::{Cursor, KeyRef};
 
 //////////////////////////////////////// ConcatenatingCursor ///////////////////////////////////////
 

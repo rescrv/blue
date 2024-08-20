@@ -6,7 +6,7 @@ macro_rules! alphabet_tests {
     $(
         #[cfg(test)]
         mod $name {
-            use keyvalint::{Cursor, KeyValueRef};
+            use sst::{Cursor, KeyValueRef};
 
             #[test]
             fn step_the_alphabet_forward() {

@@ -2,11 +2,10 @@ extern crate proptest;
 
 use std::io::Cursor;
 
-use keyvalint::{KeyValuePair, KeyValueRef};
 use proptest::prelude::{ProptestConfig, Strategy};
 
 use sst::log::{LogBuilder, LogIterator, LogOptions, WriteBatch};
-use sst::Builder;
+use sst::{Builder, KeyValuePair, KeyValueRef};
 
 proptest::prop_compose! {
     pub fn arb_string()(str in "[a-zA-Z][_a-zA-Z0-9]{0, 64}") -> String {
@@ -58,7 +57,7 @@ fn still_sized_right(wbs: &Vec<(WriteBatch, Vec<KeyValuePair>)>) -> bool {
     wbs.iter()
         .map(|wb| wb.0.approximate_size() as u64)
         .fold(0, u64::saturating_add)
-        < (keyvalint::TABLE_FULL_SIZE / 64) as u64
+        < (sst::TABLE_FULL_SIZE / 64) as u64
 }
 
 proptest::proptest! {

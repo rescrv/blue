@@ -1,6 +1,6 @@
 //! A MergingCursor merges several cursors together.
 
-use keyvalint::{Cursor, KeyRef};
+use super::{Cursor, KeyRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
 

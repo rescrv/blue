@@ -1,12 +1,10 @@
 //! Reference types for comparing sst and block behavior.
 
-// TODO(rescrv): dedupe with keyvalint.
-
 use std::rc::Rc;
 
-use keyvalint::{Cursor, KeyRef, KeyValuePair};
-
-use super::{check_key_len, check_table_size, check_value_len, Error};
+use super::{
+    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValuePair,
+};
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
 

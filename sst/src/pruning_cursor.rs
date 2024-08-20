@@ -2,13 +2,11 @@
 //! looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
 //! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 //! to create a cursor over an immutable data set.
-use std::cmp::Ordering;
 use std::fmt::Debug;
 
-use keyvalint::{compare_bytes, Cursor, KeyRef};
 use zerror_core::ErrorCore;
 
-use super::Error;
+use super::{Cursor, Error, KeyRef};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
@@ -70,8 +68,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
             if kr.timestamp <= self.timestamp && self.value().is_none() {
                 self.set_skip_key();
             } else if kr.timestamp <= self.timestamp
-                && (self.skip_key.is_none()
-                    || compare_bytes(self.skip_key.as_ref().unwrap(), kr.key) != Ordering::Equal)
+                && (self.skip_key.is_none() || self.skip_key.as_ref().unwrap() != kr.key)
             {
                 self.set_skip_key();
                 return Ok(());
@@ -96,7 +93,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
                     }
                 };
                 // SAFETY(rescrv):  We check is_some() as while invariant.
-                if compare_bytes(self.skip_key.as_ref().unwrap(), kr.key) != Ordering::Equal {
+                if self.skip_key.as_ref().unwrap() != kr.key {
                     self.skip_key = None;
                 } else {
                     self.cursor.prev()?;
@@ -135,9 +132,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
                         break;
                     }
                 };
-                if kr.timestamp > self.timestamp
-                    || compare_bytes(kr.key, &target_key) != Ordering::Equal
-                {
+                if kr.timestamp > self.timestamp || kr.key != target_key {
                     break;
                 }
             }
@@ -150,7 +145,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
             // key must have a lesser timestamp by the continue under kr.timestamp > self.timestamp
             // above.  Thus we can simply seek until we have both fronts.
             while let Some(kr) = self.key() {
-                if kr.timestamp <= self.timestamp && compare_bytes(kr.key, &target_key).is_eq() {
+                if kr.timestamp <= self.timestamp && kr.key == target_key {
                     break;
                 } else {
                     self.cursor.next()?;
@@ -170,7 +165,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
             };
             // SAFETY(rescrv): Ensured by the while loop above.
             assert!(kr.timestamp <= self.timestamp);
-            assert!(compare_bytes(kr.key, &target_key) == Ordering::Equal);
+            assert!(kr.key == target_key);
             // If it's not a tombstone, return the value (and skip it next time)
             // Otherwise, just skip it.
             if self.value().is_some() {
@@ -196,7 +191,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
             } else if kr.timestamp <= self.timestamp
                 && (self.skip_key.is_none()
                     // SAFETY(rescrv):  We check is_none() and short circuit.
-                    || compare_bytes(self.skip_key.as_ref().unwrap(), kr.key) != Ordering::Equal)
+                    || self.skip_key.as_ref().unwrap() != kr.key)
             {
                 self.set_skip_key();
                 return Ok(());

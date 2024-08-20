@@ -1,9 +1,8 @@
 //! Dump key-value pairs from an sst to stdout.
 
 use arrrg::CommandLine;
-use keyvalint::Cursor;
 
-use sst::{Sst, SstOptions};
+use sst::{Cursor, Sst, SstOptions};
 
 fn main() {
     let (opts, args) = SstOptions::from_command_line("Usage: sst-dump [OPTIONS] [SSTs]");

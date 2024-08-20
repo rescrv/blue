@@ -38,9 +38,7 @@ use nom::{
     IResult, Offset,
 };
 
-use keyvalint::{compare_bytes, Cursor, KeyRef, KeyValuePair};
-
-use super::Error;
+use super::{Cursor, Error, KeyRef, KeyValuePair};
 
 ////////////////////////////////////// GarbageCollectionPolicy /////////////////////////////////////
 
@@ -208,7 +206,7 @@ impl GarbageCollector {
                     break 'iterating;
                 }
             };
-            while compare_bytes(&self.key_backing, &kvp.key).is_eq() {
+            while self.key_backing == kvp.key {
                 if kvp.value.is_some() {
                     self.cursor.next()?;
                     if self.determiner.retain(&kvp.key, &tombstones, kvp.timestamp) {
@@ -535,7 +533,7 @@ impl VersionsDeterminer {
 
 impl Determiner for VersionsDeterminer {
     fn retain(&mut self, key: &[u8], tombstones: &[u64], _: u64) -> bool {
-        if !compare_bytes(&self.key, key).is_eq() {
+        if self.key != key {
             self.key.resize(key.len(), 0);
             self.key.copy_from_slice(key);
             if tombstones.is_empty() {
@@ -625,8 +623,6 @@ impl Determiner for AllDeterminer {
 
 #[cfg(test)]
 mod tests {
-    use keyvalint::KeyValuePair;
-
     use super::*;
 
     mod policy {

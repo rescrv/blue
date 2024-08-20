@@ -15,8 +15,6 @@ members = [
     "derive_util",
     "guacamole",
     "indicio",
-    "keyvalint",
-    "keyvalint_bench",
     "listfree",
     "lsmtk",
     "macarunes",

@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use biometrics::{Collector, Counter};
 use buffertk::{stack_pack, v64, Packable, Unpackable};
-use keyvalint::{KeyValuePair, KeyValueRef};
 use prototk_derive::Message;
 use sync42::work_coalescing_queue::{WorkCoalescingCore, WorkCoalescingQueue};
 use zerror::Z;
@@ -18,8 +17,8 @@ use zerror_core::ErrorCore;
 
 use super::setsum::Setsum;
 use super::{
-    check_key_len, check_table_size, check_value_len, compare_key, Builder, Error, KeyValueDel,
-    KeyValueEntry, KeyValuePut, TABLE_FULL_SIZE,
+    check_key_len, check_table_size, check_value_len, Builder, Error, KeyRef, KeyValueDel,
+    KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE,
 };
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -817,7 +816,7 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
         kvrs.push(KeyValuePair::from(kvr));
     }
     fn sort_key(lhs: &KeyValuePair, rhs: &KeyValuePair) -> Ordering {
-        compare_key(&lhs.key, lhs.timestamp, &rhs.key, rhs.timestamp)
+        KeyRef::new(&lhs.key, lhs.timestamp).cmp(&KeyRef::new(&rhs.key, rhs.timestamp))
     }
     kvrs.sort_by(sort_key);
     if kvrs.is_empty() {

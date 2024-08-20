@@ -7,13 +7,12 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
-use keyvalint::{compare_bytes, compare_key, Cursor, KeyRef};
 use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, Builder, Error, KeyValueDel, KeyValueEntry,
-    KeyValuePut, CORRUPTION, LOGIC_ERROR,
+    check_key_len, check_table_size, check_value_len, Builder, Cursor, Error, KeyRef, KeyValueDel,
+    KeyValueEntry, KeyValuePut, CORRUPTION, LOGIC_ERROR,
 };
 use crate::bounds_cursor::BoundsCursor;
 use crate::pruning_cursor::PruningCursor;
@@ -195,7 +194,7 @@ impl Block {
             }
         }
         if let Some(kvr) = cursor.key_value() {
-            if compare_bytes(kvr.key, key).is_eq() {
+            if kvr.key == key {
                 *is_tombstone = kvr.value.is_none();
                 Ok(kvr.value.as_ref().map(|v| v.to_vec()))
             } else {
@@ -292,7 +291,9 @@ impl BlockBuilder {
     }
 
     fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
-        if compare_key(&self.last_key, self.last_timestamp, key, timestamp) != Ordering::Less {
+        if KeyRef::new(&self.last_key, self.last_timestamp).cmp(&KeyRef::new(key, timestamp))
+            != Ordering::Less
+        {
             Err(Error::SortOrder {
                 core: ErrorCore::default(),
                 last_key: self.last_key.clone(),
@@ -615,7 +616,7 @@ impl Cursor for BlockCursor {
                     return Err(err);
                 }
             };
-            match compare_bytes(key, kvp.key) {
+            match key.cmp(kvp.key) {
                 Ordering::Less => {
                     // left     mid     right
                     // |--------|-------|
@@ -669,7 +670,7 @@ impl Cursor for BlockCursor {
         // Scan until we find the key.
         let mut kref = Some(kref);
         while let Some(x) = kref {
-            if compare_bytes(key, x.key).is_gt() {
+            if key > x.key {
                 self.next()?;
                 kref = self.key_ref()?;
             } else {

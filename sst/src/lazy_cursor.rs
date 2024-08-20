@@ -1,8 +1,6 @@
 //! Lazy cursoring, so we can limit the number of files open at once.
 
-use keyvalint::{Cursor, KeyRef};
-
-use super::{Error, SstCursor};
+use super::{Cursor, Error, KeyRef, SstCursor};
 
 ///////////////////////////////////////////// Position /////////////////////////////////////////////
 

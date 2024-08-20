@@ -1,9 +1,10 @@
 //! A Setsum type that's more ergonomic for working with key-value pairs.
 
-use keyvalint::KeyValueRef;
 use setsum::Setsum as RawSetsum;
 
 pub use setsum::SETSUM_BYTES;
+
+use super::KeyValueRef;
 
 ////////////////////////////////////////////// Setsum //////////////////////////////////////////////
 

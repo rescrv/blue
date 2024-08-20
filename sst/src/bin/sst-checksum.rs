@@ -2,10 +2,9 @@
 
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
-use keyvalint::Cursor;
 
 use sst::setsum::Setsum;
-use sst::{Sst, SstOptions};
+use sst::{Cursor, Sst, SstOptions};
 
 fn fast_setsum(opts: SstOptions, sst: &str) -> String {
     let sst = Sst::new(opts, sst).expect("open Sst");

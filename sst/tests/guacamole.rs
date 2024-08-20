@@ -1,11 +1,10 @@
 extern crate sst;
 
 use guacamole::{FromGuacamole, Guacamole};
-use keyvalint::Cursor;
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Error, Sst, SstBuilder, SstCursor};
+use sst::{Builder, Cursor, Error, Sst, SstBuilder, SstCursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 

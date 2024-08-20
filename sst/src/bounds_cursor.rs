@@ -1,12 +1,9 @@
 //! Bounds cursor restricts a general cursor to be between some pair of keys.
 
-use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Bound;
 
-use keyvalint::{compare_bytes, Cursor, KeyRef};
-
-use super::Error;
+use super::{Cursor, Error, KeyRef};
 
 ////////////////////////////////////////////// Bounds //////////////////////////////////////////////
 
@@ -62,12 +59,12 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
         match (self.key(), &self.start_bound) {
             (Some(_), Bound::Unbounded) => {}
             (Some(kr), Bound::Included(key)) => {
-                if compare_bytes(kr.key, key).is_lt() {
+                if kr.key < key {
                     self.bounds = Bounds::BeforeStart;
                 }
             }
             (Some(kr), Bound::Excluded(key)) => {
-                if compare_bytes(kr.key, key).is_le() {
+                if kr.key <= key {
                     self.bounds = Bounds::BeforeStart;
                 }
             }
@@ -79,12 +76,12 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
         match (self.key(), &self.end_bound) {
             (Some(_), Bound::Unbounded) => {}
             (Some(kr), Bound::Included(key)) => {
-                if compare_bytes(kr.key, key).is_gt() {
+                if kr.key > key {
                     self.bounds = Bounds::AfterEnd;
                 }
             }
             (Some(kr), Bound::Excluded(key)) => {
-                if compare_bytes(kr.key, key).is_ge() {
+                if kr.key >= key {
                     self.bounds = Bounds::AfterEnd;
                 }
             }
@@ -128,7 +125,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E>
                 self.bounds = Bounds::AfterEnd;
                 self.cursor.seek(end_bound)?;
                 while let Some(key) = self.cursor.key() {
-                    if compare_bytes(key.key, end_bound) == Ordering::Equal {
+                    if key.key == end_bound {
                         self.cursor.next()?;
                     } else {
                         break;
