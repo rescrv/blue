@@ -57,12 +57,6 @@ fn dependencies(member: &str) -> Vec<String> {
     for dep in dependencies_table {
         deps.push(dep.0.to_string());
     }
-    let dependencies_table = cargo_toml["dev-dependencies"]
-        .as_table()
-        .expect("parsing dev-dependencies");
-    for dep in dependencies_table {
-        deps.push(dep.0.to_string());
-    }
     deps
 }
 
