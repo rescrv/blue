@@ -258,7 +258,7 @@ impl RcScript {
         let name = var_prefix_from_service(&self.name);
         Ok(shvar::rcvar(&self.command)?
             .into_iter()
-            .map(|v| format!("{}_{}", name, v))
+            .map(|v| format!("{}{}", name, v))
             .collect())
     }
 
@@ -297,8 +297,7 @@ impl RcScript {
     }
 
     fn run(&self, args: &[&str]) -> Result<(), Error> {
-        let mut name = var_prefix_from_service(&self.name);
-        name.push('_');
+        let name = var_prefix_from_service(&self.name);
         let evp = EnvironmentVariableProvider::new(Some(name));
         let meta = HashMap::from([("NAME".to_string(), self.name.to_string())]);
         let exp = shvar::expand(&(&meta, &evp), &self.command)?;
@@ -381,11 +380,22 @@ impl RcConf {
             let Some(name) = varname.strip_suffix("_ALIASES") else {
                 continue;
             };
+            let inherit = if let Some(flag) = items.lookup(&(name.to_string() + "_INHERIT")) {
+                if flag == "NO" {
+                    false
+                } else if flag == "YES" {
+                    true
+                } else {
+                    return Err(Error::invalid_rc_conf(&Path::from(path), 0, format!("invalid _INHERIT binding for {name}")));
+                }
+            } else {
+                false
+            };
             aliases.insert(
                 name.to_string(),
                 Alias {
                     aliases: alias.clone(),
-                    inherit: false,
+                    inherit,
                     vp: HashMap::new(),
                 },
             );
@@ -649,7 +659,7 @@ impl RcConf {
         let mut bindings = HashMap::new();
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
-            .env("RCVAR_ARGV0", var_prefix_from_service(service))
+            .env("RCVAR_ARGV0", var_name_from_service(service))
             .output()?;
         if !output.status.success() {
             return Err(Error::InvalidInvocation {
@@ -657,46 +667,30 @@ impl RcConf {
             });
         }
         let stdout = String::from_utf8(output.stdout)?;
-        let mut alias_lookup_order = vec![service];
-        let mut direct_alias = service;
-        let mut pre_lookup = HashMap::new();
-        while let Some(alias) = self.aliases.get(direct_alias) {
-            alias_lookup_order.push(&alias.aliases);
-            direct_alias = &alias.aliases;
-            for (k, v) in alias.vp.iter() {
-                if !pre_lookup.contains_key(k) {
-                    pre_lookup.insert(k.clone(), v.clone());
-                }
-            }
-        }
-        let vp = (pre_lookup, self);
+        let (alias_lookup_order, pre_lookup) = self.alias_lookup_order(service);
+        let vp = alias_lookup_order
+            .iter()
+            .map(|a| PrefixingVariableProvider {
+                nested: self,
+                prefix: var_prefix_from_service(a)
+            })
+            .collect::<Vec<_>>();
+        let vp = (pre_lookup, vp, self);
         for var in stdout.split_whitespace() {
-            if let Some(value) = vp.lookup(var) {
+            let Some(short) = var.strip_prefix(&var_prefix_from_service(service)) else {
+                continue;
+            };
+            if let Some(value) = vp.lookup(short) {
                 let value = shvar::expand(&vp, &value)?;
                 let quoted = shvar::quote(shvar::split(&value)?);
                 bindings.insert(var.to_string(), quoted);
-            } else {
-                let Some(suffix) = var.strip_prefix(&(var_prefix_from_service(service) + "_"))
-                else {
-                    continue;
-                };
-                'alias_iteration: for alias in alias_lookup_order.iter() {
-                    if let Some(value) = vp.lookup(&(var_prefix_from_service(alias) + "_" + suffix))
-                    {
-                        let value = shvar::expand(&vp, &value)?;
-                        let quoted = shvar::quote(shvar::split(&value)?);
-                        bindings.insert(var.to_string(), quoted);
-                        break 'alias_iteration;
-                    }
-                }
             }
         }
         Ok(bindings)
     }
 
     pub fn wrapper(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
-        let mut prefix = var_prefix_from_service(service);
-        prefix.push('_');
+        let prefix = var_prefix_from_service(service);
         let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
         let pvp = PrefixingVariableProvider {
             prefix,
@@ -714,25 +708,30 @@ impl RcConf {
     }
 
     pub fn service_switch(&self, service: &str) -> SwitchPosition {
-        let Some(enable) = self.lookup_suffix(service, "_ENABLED") else {
-            // TODO(rescrv): biometrics.
-            return SwitchPosition::No;
-        };
-        let Ok(split) = shvar::split(&enable) else {
-            // TODO(rescrv): biometrics.
-            return SwitchPosition::No;
-        };
-        let enable = if split.len() == 1 {
-            // SAFETY(rescrv): Length is one, so pop will succeed.
-            &split[0]
-        } else {
-            &enable
-        };
-        let Some(switch) = SwitchPosition::from_enable(enable) else {
-            // TODO(rescrv): biometrics.
-            return SwitchPosition::No;
-        };
-        switch
+        let (alias_lookup_order, _) = self.alias_lookup_order(service);
+        for service in alias_lookup_order {
+            let Some(enable) = self.lookup_suffix(service, "ENABLED") else {
+                // TODO(rescrv): biometrics.
+                continue;
+            };
+            let Ok(split) = shvar::split(&enable) else {
+                // TODO(rescrv): biometrics and indicio.
+                return SwitchPosition::No;
+            };
+            let enable = if split.len() == 1 {
+                // SAFETY(rescrv): Length is one, so pop will succeed.
+                &split[0]
+            } else {
+                &enable
+            };
+            let Some(switch) = SwitchPosition::from_enable(enable) else {
+                // TODO(rescrv): biometrics.
+                return SwitchPosition::No;
+            };
+            return switch;
+        }
+        // TODO(rescrv): biometrics.
+        SwitchPosition::No
     }
 
     fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
@@ -770,6 +769,22 @@ impl RcConf {
         } else {
             service
         }
+    }
+
+    pub fn alias_lookup_order<'a>(&'a self, service: &'a str) -> (Vec<&'a str>, HashMap<String, String>) {
+        let mut alias_lookup_order = vec![service];
+        let mut direct_alias = service;
+        let mut pre_lookup = HashMap::new();
+        while let Some(alias) = self.aliases.get(direct_alias) {
+            alias_lookup_order.push(&alias.aliases);
+            direct_alias = &alias.aliases;
+            for (k, v) in alias.vp.iter() {
+                if !pre_lookup.contains_key(k) {
+                    pre_lookup.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        (alias_lookup_order, pre_lookup)
     }
 }
 
@@ -930,11 +945,15 @@ pub fn name_from_path(path: &Path) -> String {
     path.basename().as_str().to_string()
 }
 
-pub fn var_prefix_from_service(service: &str) -> String {
+pub fn var_name_from_service(service: &str) -> String {
     service
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+pub fn var_prefix_from_service(service: &str) -> String {
+    var_name_from_service(service) + "_"
 }
 
 ////////////////////////////////////////////// filters /////////////////////////////////////////////
