@@ -738,24 +738,21 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
 
 /// A Cursor allows for iterating through data.
 pub trait Cursor {
-    /// The type of error returned by this cursor.
-    type Error: Debug;
-
     /// Seek past the first valid key-value pair to a beginning-of-stream sentinel.
-    fn seek_to_first(&mut self) -> Result<(), Self::Error>;
+    fn seek_to_first(&mut self) -> Result<(), Error>;
 
     /// Seek past the last valid key-value pair to an end-of-stream sentinel.
-    fn seek_to_last(&mut self) -> Result<(), Self::Error>;
+    fn seek_to_last(&mut self) -> Result<(), Error>;
 
     /// Seek to this key.  After a call to seek, the values of [key] and [value] should return the
     /// sought-to key or the key that's lexicographically next after key.
-    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
 
     /// Advance the cursor forward to the lexicographically-previous key.
-    fn prev(&mut self) -> Result<(), Self::Error>;
+    fn prev(&mut self) -> Result<(), Error>;
 
     /// Advance the cursor forward to the lexicographically-next key.
-    fn next(&mut self) -> Result<(), Self::Error>;
+    fn next(&mut self) -> Result<(), Error>;
 
     /// The key where this cursor is positioned, or None if the cursor is positioned at the bounds.
     fn key(&self) -> Option<KeyRef>;
@@ -780,25 +777,23 @@ pub trait Cursor {
 }
 
 impl Cursor for () {
-    type Error = ();
-
-    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
-    fn seek(&mut self, _: &[u8]) -> Result<(), Self::Error> {
+    fn seek(&mut self, _: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Self::Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Self::Error> {
+    fn next(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
@@ -811,26 +806,24 @@ impl Cursor for () {
     }
 }
 
-impl<E: Debug> Cursor for Box<dyn Cursor<Error = E>> {
-    type Error = E;
-
-    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+impl Cursor for Box<dyn Cursor> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.as_mut().seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.as_mut().seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         self.as_mut().seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), Self::Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         self.as_mut().prev()
     }
 
-    fn next(&mut self) -> Result<(), Self::Error> {
+    fn next(&mut self) -> Result<(), Error> {
         self.as_mut().next()
     }
 
@@ -1423,7 +1416,7 @@ impl Sst {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<SstCursor, Error>, Error>, Error> {
+    ) -> Result<BoundsCursor<PruningCursor<SstCursor>>, Error> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -1981,8 +1974,6 @@ impl SstCursor {
 }
 
 impl Cursor for SstCursor {
-    type Error = Error;
-
     fn seek_to_first(&mut self) -> Result<(), Error> {
         SST_CURSOR_SEEK_TO_FIRST.click();
         self.meta_cursor.seek_to_first()?;

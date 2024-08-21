@@ -2,8 +2,6 @@
 //! looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
 //! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 //! to create a cursor over an immutable data set.
-use std::fmt::Debug;
-
 use zerror_core::ErrorCore;
 
 use super::{Cursor, Error, KeyRef};
@@ -11,22 +9,20 @@ use super::{Cursor, Error, KeyRef};
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
 /// A PruningCursor returns the latest value less than or equal to a timestmap.
-pub struct PruningCursor<C: Cursor, E: Debug + From<Error>> {
+pub struct PruningCursor<C: Cursor> {
     cursor: C,
     timestamp: u64,
     skip_key: Option<Vec<u8>>,
-    _phantom_e: std::marker::PhantomData<E>,
 }
 
-impl<E: Debug + From<Error>, C: Cursor<Error = E>> PruningCursor<C, E> {
+impl<C: Cursor> PruningCursor<C> {
     /// Create a new pruning cursor.
-    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, E> {
+    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, Error> {
         cursor.seek_to_first()?;
         Ok(Self {
             cursor,
             timestamp,
             skip_key: None,
-            _phantom_e: std::marker::PhantomData,
         })
     }
 
@@ -42,20 +38,18 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> PruningCursor<C, E> {
     }
 }
 
-impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E> {
-    type Error = E;
-
-    fn seek_to_first(&mut self) -> Result<(), E> {
+impl<C: Cursor> Cursor for PruningCursor<C> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.skip_key = None;
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), E> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.skip_key = None;
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), E> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         self.skip_key = None;
         self.cursor.seek(key)?;
         loop {
@@ -77,7 +71,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
         }
     }
 
-    fn prev(&mut self) -> Result<(), E> {
+    fn prev(&mut self) -> Result<(), Error> {
         if self.key().is_none() {
             self.skip_key = None;
         }
@@ -160,7 +154,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
                         core: ErrorCore::default(),
                         context: "should be positioned at some key with a value".to_string(),
                     };
-                    return Err(err.into());
+                    return Err(err);
                 }
             };
             // SAFETY(rescrv): Ensured by the while loop above.
@@ -177,7 +171,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for PruningCursor<C, E
         }
     }
 
-    fn next(&mut self) -> Result<(), E> {
+    fn next(&mut self) -> Result<(), Error> {
         loop {
             self.cursor.next()?;
             let kr = match self.key() {

@@ -82,12 +82,12 @@ pub enum GarbageCollectionPolicy {
 impl GarbageCollectionPolicy {
     /// Take a cursor _positioned at the first key to be considered for garbage collection_ and
     /// return a garbage collector that will run the cursor until it returns key() == None.
-    pub fn collector<C: Cursor<Error = Error> + 'static>(
+    pub fn collector<C: Cursor + 'static>(
         &self,
         cursor: C,
         now_micros: u64,
     ) -> Result<GarbageCollector, Error> {
-        let cursor: Box<dyn Cursor<Error = Error>> = Box::new(cursor) as _;
+        let cursor: Box<dyn Cursor> = Box::new(cursor) as _;
         let determiner = self.determiner(now_micros);
         let key_backing = if let Some(key) = cursor.key() {
             key.key.to_vec()
@@ -182,7 +182,7 @@ impl Display for GarbageCollectionPolicy {
 /// Determine which keys in the constructed cursor should be retained.
 /// Can only be built by the `collector` method on a policy.
 pub struct GarbageCollector {
-    cursor: Box<dyn Cursor<Error = Error>>,
+    cursor: Box<dyn Cursor>,
     determiner: Box<dyn Determiner>,
     key_backing: Vec<u8>,
     key_return: Option<u64>,
@@ -748,8 +748,6 @@ mod tests {
     }
 
     impl Cursor for SampleCursor {
-        type Error = Error;
-
         fn next(&mut self) -> Result<(), Error> {
             if self.index < self.entries.len() {
                 self.index += 1;

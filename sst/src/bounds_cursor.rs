@@ -1,6 +1,5 @@
 //! Bounds cursor restricts a general cursor to be between some pair of keys.
 
-use std::fmt::Debug;
 use std::ops::Bound;
 
 use super::{Cursor, Error, KeyRef};
@@ -17,22 +16,21 @@ enum Bounds {
 /////////////////////////////////////////// BoundsCursor ///////////////////////////////////////////
 
 /// A BoundsCursor restricts another cursor to be between the provided start and end bounds.
-pub struct BoundsCursor<C: Cursor, E: Debug + From<Error>> {
+pub struct BoundsCursor<C: Cursor> {
     cursor: C,
     bounds: Bounds,
     // TODO(rescrv): I don't like that I have to allocate here.
     start_bound: Bound<Vec<u8>>,
     end_bound: Bound<Vec<u8>>,
-    _phantom_e: std::marker::PhantomData<E>,
 }
 
-impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
+impl<C: Cursor> BoundsCursor<C> {
     /// Create a new [BoundsCursor] with the prescribed `start_bound` and `end_bound`.
     pub fn new<T: AsRef<[u8]>>(
         cursor: C,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<Self, E> {
+    ) -> Result<Self, Error> {
         fn as_ref_to_vec<U: AsRef<[u8]>>(b: &Bound<U>) -> Bound<Vec<u8>> {
             match b {
                 Bound::Included(key) => Bound::Included(key.as_ref().to_vec()),
@@ -47,14 +45,13 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
             bounds: Bounds::BeforeStart,
             start_bound,
             end_bound,
-            _phantom_e: std::marker::PhantomData,
         };
         cursor.seek_to_first()?;
         Ok(cursor)
     }
 }
 
-impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
+impl<C: Cursor> BoundsCursor<C> {
     fn check_for_start_bound_exceeded(&mut self) {
         match (self.key(), &self.start_bound) {
             (Some(_), Bound::Unbounded) => {}
@@ -90,10 +87,8 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> BoundsCursor<C, E> {
     }
 }
 
-impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E> {
-    type Error = E;
-
-    fn seek_to_first(&mut self) -> Result<(), E> {
+impl<C: Cursor> Cursor for BoundsCursor<C> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         match &self.start_bound {
             Bound::Unbounded => {
                 self.bounds = Bounds::BeforeStart;
@@ -115,7 +110,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E>
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), E> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         match &self.end_bound {
             Bound::Unbounded => {
                 self.bounds = Bounds::AfterEnd;
@@ -141,7 +136,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E>
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), E> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         self.bounds = Bounds::Positioned;
         self.cursor.seek(key)?;
         self.check_for_end_bound_exceeded();
@@ -153,7 +148,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E>
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), E> {
+    fn prev(&mut self) -> Result<(), Error> {
         if self.bounds != Bounds::BeforeStart {
             self.cursor.prev()?;
             self.bounds = Bounds::Positioned;
@@ -162,7 +157,7 @@ impl<E: Debug + From<Error>, C: Cursor<Error = E>> Cursor for BoundsCursor<C, E>
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), E> {
+    fn next(&mut self) -> Result<(), Error> {
         if self.bounds != Bounds::AfterEnd {
             self.cursor.next()?;
             self.bounds = Bounds::Positioned;

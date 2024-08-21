@@ -210,7 +210,7 @@ impl Block {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<BlockCursor, Error>, Error>, Error> {
+    ) -> Result<BoundsCursor<PruningCursor<BlockCursor>>, Error> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -575,8 +575,6 @@ impl BlockCursor {
 }
 
 impl Cursor for BlockCursor {
-    type Error = Error;
-
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = CursorPosition::First;
         Ok(())

@@ -1,6 +1,6 @@
 //! A MergingCursor merges several cursors together.
 
-use super::{Cursor, KeyRef};
+use super::{Cursor, Error, KeyRef};
 
 //////////////////////////////////////////// Comparator ////////////////////////////////////////////
 
@@ -58,7 +58,7 @@ impl<C: Cursor + Clone> Clone for MergingCursor<C> {
 
 impl<C: Cursor> MergingCursor<C> {
     /// Create a new MergingCursor that wraps `cursors`.
-    pub fn new(cursors: Vec<C>) -> Result<Self, C::Error> {
+    pub fn new(cursors: Vec<C>) -> Result<Self, Error> {
         let mut cursor = Self {
             comparator: Comparator::Forward,
             cursors,
@@ -118,9 +118,7 @@ impl<C: Cursor> MergingCursor<C> {
 }
 
 impl<C: Cursor> Cursor for MergingCursor<C> {
-    type Error = C::Error;
-
-    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_first()?;
@@ -133,7 +131,7 @@ impl<C: Cursor> Cursor for MergingCursor<C> {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.comparator = Comparator::Reverse;
         for cursor in self.cursors.iter_mut() {
             cursor.seek_to_last()?;
@@ -146,7 +144,7 @@ impl<C: Cursor> Cursor for MergingCursor<C> {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         self.comparator = Comparator::Forward;
         for cursor in self.cursors.iter_mut() {
             cursor.seek(key)?;
@@ -155,7 +153,7 @@ impl<C: Cursor> Cursor for MergingCursor<C> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Self::Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         if self.comparator == Comparator::Forward {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K <= C.value() && prev(C) < K
@@ -171,7 +169,7 @@ impl<C: Cursor> Cursor for MergingCursor<C> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Self::Error> {
+    fn next(&mut self) -> Result<(), Error> {
         if self.comparator == Comparator::Reverse {
             // We are positioned at a key K such that:
             // \forall C \in self.cursors: K >= C.value() && next(C) > K

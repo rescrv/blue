@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use super::{Cursor, KeyRef};
+use super::{Cursor, Error, KeyRef};
 
 //////////////////////////////////////// ConcatenatingCursor ///////////////////////////////////////
 
@@ -11,14 +11,14 @@ pub struct ConcatenatingCursor<C: Cursor> {
 }
 
 impl<C: Cursor> ConcatenatingCursor<C> {
-    pub fn new(mut cursors: Vec<C>) -> Result<Self, C::Error> {
+    pub fn new(mut cursors: Vec<C>) -> Result<Self, Error> {
         assert!(!cursors.is_empty());
         let position = 0;
         cursors[0].seek_to_first()?;
         Ok(Self { cursors, position })
     }
 
-    fn reposition(&mut self, idx: usize) -> Result<(), C::Error> {
+    fn reposition(&mut self, idx: usize) -> Result<(), Error> {
         assert!(!self.cursors.is_empty());
         if self.position != idx {
             // Seek to first on the current cursor to allow e.g. the lazy cursor to clean up state.
@@ -32,19 +32,17 @@ impl<C: Cursor> ConcatenatingCursor<C> {
 }
 
 impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
-    type Error = C::Error;
-
-    fn seek_to_first(&mut self) -> Result<(), C::Error> {
+    fn seek_to_first(&mut self) -> Result<(), Error> {
         self.reposition(0)?;
         self.cursors[self.position].seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), C::Error> {
+    fn seek_to_last(&mut self) -> Result<(), Error> {
         self.reposition(self.cursors.len() - 1)?;
         self.cursors[self.position].seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), C::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
         let kref = KeyRef {
             key,
             timestamp: u64::MAX,
@@ -78,7 +76,7 @@ impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
         self.cursors[self.position].seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), C::Error> {
+    fn prev(&mut self) -> Result<(), Error> {
         loop {
             self.cursors[self.position].prev()?;
             if self.cursors[self.position].key().is_none() && self.position > 0 {
@@ -91,7 +89,7 @@ impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), C::Error> {
+    fn next(&mut self) -> Result<(), Error> {
         loop {
             self.cursors[self.position].next()?;
             if self.cursors[self.position].value().is_none()

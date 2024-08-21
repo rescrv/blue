@@ -40,8 +40,6 @@ impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
 }
 
 impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
-    type Error = Error;
-
     fn seek_to_first(&mut self) -> Result<(), Error> {
         self.position = Position::First;
         Ok(())

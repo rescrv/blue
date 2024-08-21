@@ -4,11 +4,10 @@ use std::ops::Bound;
 
 use sst::bounds_cursor::BoundsCursor;
 use sst::reference::{ReferenceBuilder, ReferenceCursor};
-use sst::Error;
 
 mod alphabet;
 
-fn bounds_cursor_no_bounds(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_no_bounds(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
@@ -48,7 +47,7 @@ alphabet_tests! {
     bounds_cursor_no_bounds: crate::bounds_cursor_no_bounds,
 }
 
-fn bounds_cursor_start_bound_included(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_start_bound_included(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("@".as_bytes(), 0, "@".as_bytes()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
@@ -89,7 +88,7 @@ alphabet_tests! {
     bounds_cursor_start_bound_included: crate::bounds_cursor_start_bound_included,
 }
 
-fn bounds_cursor_start_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_start_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("@".as_bytes(), 0, "@".as_bytes()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
@@ -130,7 +129,7 @@ alphabet_tests! {
     bounds_cursor_start_bound_excluded: crate::bounds_cursor_start_bound_excluded,
 }
 
-fn bounds_cursor_end_bound_included(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_end_bound_included(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
@@ -171,7 +170,7 @@ alphabet_tests! {
     bounds_cursor_end_bound_included: crate::bounds_cursor_end_bound_included,
 }
 
-fn bounds_cursor_end_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_end_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
     builder.put("B".as_bytes(), 0, "b".as_bytes()).unwrap();
@@ -212,7 +211,7 @@ alphabet_tests! {
     bounds_cursor_end_bound_excluded: crate::bounds_cursor_end_bound_excluded,
 }
 
-fn bounds_cursor_both_bound_included(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_both_bound_included(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("@".as_bytes(), 0, "@".as_bytes()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
@@ -254,7 +253,7 @@ alphabet_tests! {
     bounds_cursor_both_bound_included: crate::bounds_cursor_both_bound_included,
 }
 
-fn bounds_cursor_both_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor, Error> {
+fn bounds_cursor_both_bound_excluded(_: &str) -> BoundsCursor<ReferenceCursor> {
     let mut builder = ReferenceBuilder::default();
     builder.put("@".as_bytes(), 0, "@".as_bytes()).unwrap();
     builder.put("A".as_bytes(), 0, "a".as_bytes()).unwrap();
