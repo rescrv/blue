@@ -339,11 +339,7 @@ pub struct PrefixingVariableProvider<P: VariableProvider> {
 impl<P: VariableProvider> VariableProvider for PrefixingVariableProvider<P> {
     fn lookup(&self, var: &str) -> Option<String> {
         let prefixed = self.prefix.clone() + var;
-        if let Some(value) = self.nested.lookup(&prefixed) {
-            Some(value)
-        } else {
-            self.nested.lookup(var)
-        }
+        self.nested.lookup(&prefixed)
     }
 }
 
