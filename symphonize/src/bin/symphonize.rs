@@ -1,3 +1,4 @@
+use std::fs::create_dir_all;
 use std::sync::Arc;
 
 use arrrg::CommandLine;
@@ -8,105 +9,11 @@ use rustyline::history::FileHistory;
 use rustyline::{Config, Editor};
 use utf8path::Path;
 
-use rustrc::{Pid1, Pid1Options, Target, COLLECTOR};
+use rustrc::{Pid1, Target, COLLECTOR};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
-pub struct Options {}
+use symphonize::{autoinfer_configuration, rebuild_cargo, rebuild_release, SymphonizeOptions};
 
-fn paths_to_root() -> Result<Vec<Path<'static>>, std::io::Error> {
-    let mut cwd = Path::try_from(std::env::current_dir()?).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "current working directory not unicode",
-        )
-    })?;
-    if !cwd.is_abs() && !cwd.has_root() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "current working directory absolute",
-        ));
-    }
-    let mut candidates = vec![];
-    while cwd != Path::from("/") {
-        candidates.push(cwd.clone().into_owned());
-        if cwd.join(".git").exists() {
-            candidates.reverse();
-            return Ok(candidates);
-        }
-        cwd = cwd.dirname().into_owned();
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "no git directory found",
-    ))
-}
-
-fn rc_conf_path(candidates: &[Path]) -> String {
-    let mut rc_conf_path = String::new();
-    for candidate in candidates {
-        if !rc_conf_path.is_empty() {
-            rc_conf_path.push(':');
-        }
-        rc_conf_path += candidate.join("rc.conf").as_str();
-    }
-    rc_conf_path
-}
-
-fn rc_d_path(options: &Options, root: &Path) -> Result<String, std::io::Error> {
-    let mut rc_d_paths = vec![];
-    rc_d_path_recurse(options, root, &mut rc_d_paths)?;
-    Ok(rc_d_paths
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<_>>()
-        .join(":"))
-}
-
-// TODO(rescrv): address this
-#[allow(clippy::only_used_in_recursion)]
-fn rc_d_path_recurse(
-    options: &Options,
-    root: &Path,
-    rc_d_paths: &mut Vec<Path<'static>>,
-) -> Result<(), std::io::Error> {
-    if root.is_dir() {
-        let mut entries = vec![];
-        for entry in std::fs::read_dir(root.clone().into_std())? {
-            let entry = entry?;
-            let Ok(path) = Path::try_from(entry.path()) else {
-                continue;
-            };
-            entries.push(path.into_owned());
-        }
-        entries.sort();
-        for entry in entries.into_iter() {
-            if entry.as_str().ends_with("/rc.d") {
-                rc_d_paths.push(entry.clone());
-            }
-            rc_d_path_recurse(options, &entry, rc_d_paths)?;
-        }
-    }
-    Ok(())
-}
-
-fn autoinfer_configuration(
-    options: &Options,
-) -> Result<(Pid1Options, Path<'static>), std::io::Error> {
-    let paths_to_root = paths_to_root()?;
-    assert!(!paths_to_root.is_empty());
-    let repo = &paths_to_root[0];
-    let rc_conf_path = rc_conf_path(&paths_to_root);
-    let rc_d_path = rc_d_path(options, repo)?;
-    Ok((
-        Pid1Options {
-            rc_conf_path,
-            rc_d_path,
-        },
-        repo.clone().into_owned(),
-    ))
-}
-
-fn services(_: &Options, pid1: &Pid1, argv: &[&str]) {
+fn services(_: &SymphonizeOptions, pid1: &Pid1, argv: &[&str]) {
     let mut opts = getopts::Options::new();
     opts.parsing_style(getopts::ParsingStyle::StopAtFirstFree);
     opts.optflag("l", "list", "List all possible services.");
@@ -183,7 +90,12 @@ fn services(_: &Options, pid1: &Pid1, argv: &[&str]) {
     }
 }
 
-fn shell(options: Options, pid1: Arc<Pid1>) {
+fn shell(
+    options: SymphonizeOptions,
+    pid1: Arc<Pid1>,
+    rebuild: impl Fn(&Path<'static>) -> Result<(), std::io::Error>,
+    rebuild_dir: Path<'static>,
+) {
     // Create the line editor.
     let config = Config::builder()
         .max_history_size(1_000_000)
@@ -227,25 +139,8 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
                         services(&options, &pid1, &args[1..]);
                     }
                     "reload" => {
-                        let mut child = match std::process::Command::new("cargo")
-                            .args(["build", "--workspace", "--bins"])
-                            .spawn()
-                        {
-                            Ok(child) => child,
-                            Err(err) => {
-                                eprintln!("error: {err:?}");
-                                continue;
-                            }
-                        };
-                        let status = match child.wait() {
-                            Ok(status) => status,
-                            Err(err) => {
-                                eprintln!("error: {err:?}");
-                                continue;
-                            }
-                        };
-                        if !status.success() {
-                            eprintln!("error: reload incomplete");
+                        if let Err(err) = rebuild(&rebuild_dir) {
+                            eprintln!("failed to rebuild: {err:?}");
                             continue;
                         }
                         let pid1_options = match autoinfer_configuration(&options) {
@@ -276,23 +171,47 @@ fn shell(options: Options, pid1: Arc<Pid1>) {
             }
         }
     }
+    rl.save_history(&history)
+        .expect("should be able to save history");
 }
 
 fn main() {
     minimal_signals::block();
 
     // Parse options.
-    let (options, free) = Options::from_command_line("USAGE: symphonize");
+    let (options, free) = SymphonizeOptions::from_command_line("USAGE: symphonize");
     if !free.is_empty() {
         eprintln!("symphonize takes no positional arguments");
         std::process::exit(129);
     }
+    if options.debug && options.release {
+        eprintln!("symphonize cannot run debug and release simultaneously");
+        std::process::exit(130);
+    }
     let (pid1_options, root) =
         autoinfer_configuration(&options).expect("should be able to infer configuration");
 
+    // Working directory
+    let workdir: Path<'static> = if let Some(workdir) = options.workdir.as_ref() {
+        Path::from(workdir.as_str()).into_owned()
+    } else {
+        root.join(".symphonize").into_owned()
+    };
+    create_dir_all(&workdir).expect("symphonize dir should create");
+    create_dir_all(workdir.join("vendor")).expect("vendor dir should create");
+    create_dir_all(workdir.join("pkg")).expect("pkg dir should create");
+
     // PATH
     let mut path = std::env::var_os("PATH").unwrap_or_default();
-    path.push(":".to_string() + root.join("target/debug").as_str());
+    if options.release {
+        todo!();
+    } else {
+        path.push(":");
+        path.push(workdir.join("pkg/bin").as_str());
+        path.push(":");
+        let bindir = root.join("target/debug");
+        path.push(bindir.as_str());
+    }
     std::env::set_var("PATH", path);
 
     // Indicio.
@@ -325,7 +244,11 @@ fn main() {
 
     // Create a new interactive shell.
     let shell_pid1 = Arc::clone(&pid1);
-    let server = std::thread::spawn(move || shell(options, shell_pid1));
+    let server = if options.release {
+        std::thread::spawn(move || shell(options, shell_pid1, rebuild_release, workdir))
+    } else {
+        std::thread::spawn(move || shell(options, shell_pid1, rebuild_cargo, workdir))
+    };
 
     // Cleanup
     server.join().unwrap();
