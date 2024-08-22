@@ -154,6 +154,19 @@ fn shell(
                             eprintln!("error: {err:?}");
                         }
                     }
+                    "cargo" => {
+                        let mut child = match std::process::Command::new("cargo")
+                            .args(&args[1..])
+                            .spawn()
+                        {
+                            Ok(child) => child,
+                            Err(err) => {
+                                eprintln!("error: {err:?}");
+                                continue;
+                            },
+                        };
+                        let _ = child.wait();
+                    }
                     "exit" => {
                         break;
                     }
@@ -207,10 +220,9 @@ fn main() {
         todo!();
     } else {
         path.push(":");
-        path.push(workdir.join("pkg/bin").as_str());
+        path.push(root.join("target/debug").as_str());
         path.push(":");
-        let bindir = root.join("target/debug");
-        path.push(bindir.as_str());
+        path.push(workdir.join("pkg/bin").as_str());
     }
     std::env::set_var("PATH", path);
 
