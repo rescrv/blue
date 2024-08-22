@@ -237,6 +237,12 @@ impl<'a> Path<'a> {
     }
 }
 
+impl<'a> AsRef<std::path::Path> for Path<'a> {
+    fn as_ref(&self) -> &std::path::Path {
+        std::path::Path::new(self.as_str())
+    }
+}
+
 impl<'a> Borrow<std::path::Path> for Path<'a> {
     fn borrow(&self) -> &std::path::Path {
         std::path::Path::new(self.as_str())
