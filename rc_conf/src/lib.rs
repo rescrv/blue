@@ -386,7 +386,11 @@ impl RcConf {
                 } else if flag == "YES" {
                     true
                 } else {
-                    return Err(Error::invalid_rc_conf(&Path::from(path), 0, format!("invalid _INHERIT binding for {name}")));
+                    return Err(Error::invalid_rc_conf(
+                        &Path::from(path),
+                        0,
+                        format!("invalid _INHERIT binding for {name}"),
+                    ));
                 }
             } else {
                 false
@@ -672,7 +676,7 @@ impl RcConf {
             .iter()
             .map(|a| PrefixingVariableProvider {
                 nested: self,
-                prefix: var_prefix_from_service(a)
+                prefix: var_prefix_from_service(a),
             })
             .collect::<Vec<_>>();
         let vp = (pre_lookup, vp, self);
@@ -697,7 +701,7 @@ impl RcConf {
             nested: self,
         };
         let vp = (&meta, &pvp);
-        let Some(wrapper) = vp.lookup(variable) else {
+        let Some(wrapper) = self.lookup_suffix(service, variable) else {
             return Ok(vec![]);
         };
         let wrapper = shvar::expand(&vp, &wrapper)?;
@@ -735,10 +739,10 @@ impl RcConf {
     }
 
     fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
-        let mut enabled = var_prefix_from_service(service);
-        enabled += suffix;
-        if let Some(enable) = self.lookup(&enabled) {
-            return Some(enable);
+        let mut varname = var_prefix_from_service(service);
+        varname += suffix;
+        if let Some(value) = self.lookup(&varname) {
+            return Some(value);
         }
         if let Some(alias) = self.aliases.get(service) {
             if alias.inherit {
@@ -771,7 +775,10 @@ impl RcConf {
         }
     }
 
-    pub fn alias_lookup_order<'a>(&'a self, service: &'a str) -> (Vec<&'a str>, HashMap<String, String>) {
+    pub fn alias_lookup_order<'a>(
+        &'a self,
+        service: &'a str,
+    ) -> (Vec<&'a str>, HashMap<String, String>) {
         let mut alias_lookup_order = vec![service];
         let mut direct_alias = service;
         let mut pre_lookup = HashMap::new();
