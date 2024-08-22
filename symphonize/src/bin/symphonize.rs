@@ -138,7 +138,7 @@ fn shell(
                     "services" | "service" => {
                         services(&options, &pid1, &args[1..]);
                     }
-                    "reload" => {
+                    "rebootstrap" => {
                         if let Err(err) = rebuild(&rebuild_dir) {
                             eprintln!("failed to rebuild: {err:?}");
                             continue;
