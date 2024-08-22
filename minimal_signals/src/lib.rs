@@ -180,6 +180,16 @@ pub fn block() {
     };
 }
 
+////////////////////////////////////////////// unblock /////////////////////////////////////////////
+
+pub fn unblock() {
+    let signals = SignalSet::new().empty();
+    // SAFETY(rescrv):  We know this is safe because empty empties the set using libc functions.
+    unsafe {
+        libc::sigprocmask(libc::SIG_SETMASK, &signals.sigset, std::ptr::null_mut());
+    };
+}
+
 /////////////////////////////////////////////// wait ///////////////////////////////////////////////
 
 pub fn wait(set: SignalSet) -> Option<Signal> {
