@@ -321,6 +321,7 @@ impl RcScript {
 /// the prefix exists, it will be preferred.  Note that it is necessary to check both foo_VAR and
 /// VAR for prefix foo_ in order to have global values in an rc.conf.  Consider the case of setting
 /// all logging options in one parameter that gets expanded to the universally-agreed-upon value.
+#[derive(Debug)]
 pub struct EnvironmentVariableProvider {
     prefix: Option<String>,
 }

@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::iter::{Enumerate, Peekable};
 use std::str::Chars;
@@ -229,7 +230,7 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
 /// A VariableProvider provides a way to lookup the value of a variable.
 ///
 /// It is expected that the provider do no expansion of its own.
-pub trait VariableProvider {
+pub trait VariableProvider: std::fmt::Debug {
     fn lookup(&self, ident: &str) -> Option<String>;
 }
 
@@ -239,7 +240,7 @@ impl VariableProvider for () {
     }
 }
 
-impl<K: Borrow<str> + Eq + Hash, V: AsRef<str>> VariableProvider for HashMap<K, V> {
+impl<K: Borrow<str> + Eq + Hash + Debug, V: AsRef<str> + Debug> VariableProvider for HashMap<K, V> {
     fn lookup(&self, ident: &str) -> Option<String> {
         self.get(ident).map(|s| s.as_ref().to_string())
     }
@@ -277,7 +278,9 @@ impl<T: VariableProvider> VariableProvider for Arc<T> {
 macro_rules! impl_tuple_provider {
     ($($name:ident)+) => {
         #[allow(non_snake_case)]
-        impl<$($name: VariableProvider),+> VariableProvider for ($($name,)+) {
+        impl<$($name: VariableProvider),+> VariableProvider for ($($name,)+)
+        where ($($name,)+): Debug,
+        {
             fn lookup(&self, ident: &str) -> Option<String> {
                 let ($(ref $name,)+) = *self;
                 $(if let Some(value) = $name.lookup(ident) { return Some(value); })+
@@ -316,6 +319,7 @@ impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
 
 //////////////////////////////////////// EnvironmentProvider ///////////////////////////////////////
 
+#[derive(Debug)]
 pub struct EnvironmentProvider;
 
 impl VariableProvider for EnvironmentProvider {
@@ -326,6 +330,7 @@ impl VariableProvider for EnvironmentProvider {
 
 ///////////////////////////////////// PrefixingVariableProvider ////////////////////////////////////
 
+#[derive(Debug)]
 pub struct PrefixingVariableProvider<P: VariableProvider> {
     pub nested: P,
     pub prefix: String,
