@@ -671,14 +671,20 @@ impl RcConf {
             });
         }
         let stdout = String::from_utf8(output.stdout)?;
+        // NOTE(rescrv):  Don't use lookup_suffix here because we need the full variable provider
+        // to be able to expand the suffix.
         let (alias_lookup_order, pre_lookup) = self.alias_lookup_order(service);
-        let vp = alias_lookup_order
-            .iter()
-            .map(|a| PrefixingVariableProvider {
+        let mut vp = Vec::with_capacity(alias_lookup_order.len());
+        for a in alias_lookup_order.iter() {
+            vp.push(
+                PrefixingVariableProvider {
                 nested: self,
                 prefix: var_prefix_from_service(a),
-            })
-            .collect::<Vec<_>>();
+            });
+            if !self.aliases.get(a.to_string().as_str()).map(|a| a.inherit).unwrap_or(false) {
+                break;
+            }
+        }
         let vp = (pre_lookup, vp, self);
         for var in stdout.split_whitespace() {
             let Some(short) = var.strip_prefix(&var_prefix_from_service(service)) else {
@@ -714,7 +720,7 @@ impl RcConf {
     pub fn service_switch(&self, service: &str) -> SwitchPosition {
         let (alias_lookup_order, _) = self.alias_lookup_order(service);
         for service in alias_lookup_order {
-            let Some(enable) = self.lookup_suffix(service, "ENABLED") else {
+            let Some(enable) = self.lookup_suffix_direct(service, "ENABLED") else {
                 // TODO(rescrv): biometrics.
                 continue;
             };
@@ -748,11 +754,17 @@ impl RcConf {
             if alias.inherit {
                 self.lookup_suffix(&alias.aliases, suffix)
             } else {
-                None
+                self.lookup(suffix)
             }
         } else {
-            None
+            self.lookup(suffix)
         }
+    }
+
+    fn lookup_suffix_direct(&self, service: &str, suffix: &str) -> Option<String> {
+        let mut varname = var_prefix_from_service(service);
+        varname += suffix;
+        self.lookup(&varname)
     }
 
     pub fn aliases(&self) -> Vec<String> {
@@ -846,7 +858,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
             eprintln!("expected alias of service to be available via --rc-d-path");
             std::process::exit(130);
         };
-        env.insert("RCVAR_ARGV0".to_string(), service.to_string());
+        env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
         path
     } else {
         let Some(path) = rc_d.get(service) else {
