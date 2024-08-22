@@ -49,12 +49,7 @@ if __name__ == '__main__':
     crates = publication_order(root)
     for crate in topological_sort(crates):
         print(crate)
-    seen = False
     for crate in topological_sort(crates):
-        if crate == 'keyvalint_bench':
-            seen = True
-        if not seen:
-            continue
         subprocess.check_call(('git', 'update-index', '--refresh'))
         subprocess.check_call(('git', 'diff-index', '--quiet', 'HEAD', '--'))
         version = RE_VERSION.search(open(os.path.join(root, crate, 'Cargo.toml')).read(), re.MULTILINE)

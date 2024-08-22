@@ -8,7 +8,6 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::Counter;
 use indicio::{clue, INFO};
-use keyvalint::{compare_bytes, Cursor, KeyRef};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -18,7 +17,7 @@ use sst::file_manager::FileManager;
 use sst::lazy_cursor::LazyCursor;
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
-use sst::{Builder, Sst, SstCursor, SstMetadata, SstMultiBuilder};
+use sst::{Builder, Cursor, KeyRef, Sst, SstCursor, SstMetadata, SstMultiBuilder};
 use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
 use zerror::Z;
 use zerror_core::ErrorCore;
@@ -147,13 +146,11 @@ impl Level {
     }
 
     fn lower_bound(&self, key: &[u8]) -> usize {
-        self.ssts
-            .partition_point(|x| compare_bytes(key, &x.last_key) == Ordering::Greater)
+        self.ssts.partition_point(|x| key > &x.last_key)
     }
 
     fn upper_bound(&self, key: &[u8]) -> usize {
-        self.ssts
-            .partition_point(|x| compare_bytes(key, &x.first_key) != Ordering::Less)
+        self.ssts.partition_point(|x| key >= &x.first_key)
     }
 }
 
@@ -185,8 +182,8 @@ impl CompactionCore {
     fn overlapping(lhs: &Self, rhs: &Self) -> bool {
         lhs.lower_level <= rhs.upper_level
             && rhs.lower_level <= lhs.upper_level
-            && compare_bytes(&lhs.first_key, &rhs.last_key) != Ordering::Greater
-            && compare_bytes(&rhs.first_key, &lhs.last_key) != Ordering::Greater
+            && lhs.first_key <= rhs.last_key
+            && rhs.first_key <= lhs.last_key
     }
 }
 
@@ -235,9 +232,8 @@ pub(crate) struct Version {
     ongoing: Arc<Mutex<Vec<Arc<CompactionCore>>>>,
 }
 
-// TODO(rescrv): make compare_bytes this signature.
 fn compare_for_min_max(lhs: &&[u8], rhs: &&[u8]) -> Ordering {
-    compare_bytes(lhs, rhs)
+    lhs.cmp(rhs)
 }
 
 impl Version {
@@ -357,7 +353,7 @@ impl Version {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, sst::Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor>>, sst::Error> {
         fn lazy_cursor(
             fm: &FileManager,
             sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
@@ -379,7 +375,7 @@ impl Version {
                 Ok(sst.cursor())
             }
         }
-        let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = vec![];
+        let mut cursors: Vec<Box<dyn Cursor>> = vec![];
         for sst in self.levels[0].ssts.iter() {
             let fm = Arc::clone(fm);
             let sc = Arc::clone(sc);
@@ -408,11 +404,11 @@ impl Version {
                 (Bound::Unbounded, Bound::Included(_)) => true,
                 (Bound::Unbounded, Bound::Excluded(_)) => true,
                 (Bound::Included(_), Bound::Unbounded) => true,
-                (Bound::Included(x), Bound::Included(y)) => compare_bytes(x, y).is_le(),
-                (Bound::Included(x), Bound::Excluded(y)) => compare_bytes(x, y).is_lt(),
+                (Bound::Included(x), Bound::Included(y)) => x <= y,
+                (Bound::Included(x), Bound::Excluded(y)) => x < y,
                 (Bound::Excluded(_), Bound::Unbounded) => true,
-                (Bound::Excluded(x), Bound::Included(y)) => compare_bytes(x, y).is_lt(),
-                (Bound::Excluded(x), Bound::Excluded(y)) => compare_bytes(x, y).is_lt(),
+                (Bound::Excluded(x), Bound::Included(y)) => x < y,
+                (Bound::Excluded(x), Bound::Excluded(y)) => x < y,
             }
         }
         for level in self.levels[1..].iter() {
@@ -657,11 +653,11 @@ impl Version {
                 assert!(this_level
                     .ssts
                     .iter()
-                    .all(|x| compare_bytes(first_key, &x.first_key) != Ordering::Greater));
+                    .all(|x| first_key <= x.first_key.as_slice()));
                 assert!(this_level
                     .ssts
                     .iter()
-                    .all(|x| compare_bytes(&x.last_key, last_key) != Ordering::Greater));
+                    .all(|x| x.last_key.as_slice() <= last_key));
                 bounds.push(LevelSlice {
                     lower_bound,
                     upper_bound,
@@ -676,14 +672,13 @@ impl Version {
                 while !fixed_point {
                     fixed_point = true;
                     if lower_bound < this_level.ssts.len()
-                        && compare_bytes(&this_level.ssts[lower_bound].first_key, first_key).is_lt()
+                        && this_level.ssts[lower_bound].first_key.as_slice() < first_key
                     {
                         fixed_point = false;
                         first_key = this_level.ssts[lower_bound].first_key.as_slice();
                     }
                     if upper_bound > lower_bound
-                        && compare_bytes(&this_level.ssts[upper_bound - 1].last_key, last_key)
-                            .is_gt()
+                        && this_level.ssts[upper_bound - 1].last_key.as_slice() > last_key
                     {
                         fixed_point = false;
                         last_key = this_level.ssts[upper_bound - 1].last_key.as_slice();
@@ -809,12 +804,8 @@ impl Version {
             for idx in lower_bound..upper_bound {
                 overlap[upper_level] =
                     overlap[upper_level].saturating_add(this_level.ssts[idx].file_size as i64);
-                assert!(
-                    compare_bytes(first_key, &this_level.ssts[idx].first_key) != Ordering::Greater
-                );
-                assert!(
-                    compare_bytes(&this_level.ssts[idx].last_key, last_key) != Ordering::Greater
-                );
+                assert!(first_key <= this_level.ssts[idx].first_key.as_slice());
+                assert!(this_level.ssts[idx].last_key.as_slice() <= last_key);
                 inputs.push(Setsum::from_digest(this_level.ssts[idx].setsum));
                 FIND_BEST_COMPACTION_ADD_INPUT.click();
             }
@@ -883,8 +874,8 @@ impl Version {
                 {
                     return;
                 }
-                if compare_bytes(first_key, &sst.first_key) != Ordering::Greater
-                    && compare_bytes(&sst.last_key, last_key) != Ordering::Greater
+                if first_key <= sst.first_key.as_slice()
+                    && sst.last_key.as_slice() <= last_key
                     && !compaction.inputs.contains(&Setsum::from_digest(sst.setsum))
                 {
                     to_add.push(sst);
@@ -1000,14 +991,12 @@ impl SplitHint {
                 }
             }
         }
-        keyvalint::MAX_KEY
+        sst::MAX_KEY
     }
 
     fn witness(&mut self, key: &[u8]) -> bool {
         let mut should_split = false;
-        while self.index() < self.ssts().len()
-            && compare_bytes(key, self.hint_key()) == Ordering::Greater
-        {
+        while self.index() < self.ssts().len() && key > self.hint_key() {
             match self.index {
                 SplitKey::First(x) => {
                     self.index = SplitKey::Last(x);
@@ -1075,7 +1064,7 @@ impl<'a> VersionRef<'a> {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor<Error = sst::Error>>>, sst::Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor>>, sst::Error> {
         self.version.range_scan(
             &self.tree.file_manager,
             &self.tree.sst_cache,
@@ -1626,25 +1615,22 @@ impl LsmTree {
             }
         }
     }
-}
 
-impl keyvalint::KeyValueLoad for LsmTree {
-    type Error = sst::Error;
-    type RangeScan<'a> = BoundsCursor<
-        PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>,
-        sst::Error,
-    >;
-
-    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
-        let version = self.take_snapshot();
-        version.load(key, u64::MAX, is_tombstone)
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        let mut is_tombstone = false;
+        self.load(key, &mut is_tombstone)
     }
 
-    fn range_scan<T: AsRef<[u8]>>(
+    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Error> {
+        let version = self.take_snapshot();
+        Ok(version.load(key, u64::MAX, is_tombstone)?)
+    }
+
+    pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+    ) -> Result<impl Cursor, Error> {
         let version = self.take_snapshot();
         let version_scan = version.range_scan(start_bound, end_bound, u64::MAX)?;
         let cursor = PruningCursor::new(version_scan, u64::MAX)?;

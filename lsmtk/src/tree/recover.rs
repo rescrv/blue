@@ -14,8 +14,7 @@ use super::*;
 ///////////////////////////////////////// key_range_overlap ////////////////////////////////////////
 
 fn key_range_overlap(lhs: &SstMetadata, rhs: &SstMetadata) -> bool {
-    compare_bytes(&lhs.first_key, &rhs.last_key) != Ordering::Greater
-        && compare_bytes(&rhs.first_key, &lhs.last_key) != Ordering::Greater
+    lhs.first_key <= rhs.last_key && rhs.first_key <= lhs.last_key
 }
 
 ////////////////////////////////////////////// Vertex //////////////////////////////////////////////
@@ -153,12 +152,8 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Vers
         // NOTE(rescrv):  This is a little sloppy.
         // It assumes the graph algorithm is correct, so comparison by smallest key is sufficient.
         level.ssts.sort_by(|lhs, rhs| {
-            keyvalint::compare_key(
-                &lhs.first_key,
-                lhs.smallest_timestamp,
-                &rhs.first_key,
-                rhs.smallest_timestamp,
-            )
+            KeyRef::new(&lhs.first_key, lhs.smallest_timestamp)
+                .cmp(&KeyRef::new(&rhs.first_key, rhs.smallest_timestamp))
         });
     }
     // Return a new tree.

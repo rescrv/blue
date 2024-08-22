@@ -15,11 +15,10 @@ use std::fs::{read_dir, remove_file};
 use std::path::{Path, PathBuf};
 
 use biometrics::{Collector, Counter};
-use keyvalint::Cursor;
 use mani::{Edit, Manifest, ManifestIterator};
 use setsum::Setsum;
 use sst::merging_cursor::MergingCursor;
-use sst::{Sst, SstCursor};
+use sst::{Cursor, Sst, SstCursor};
 use zerror::Z;
 use zerror_core::ErrorCore;
 

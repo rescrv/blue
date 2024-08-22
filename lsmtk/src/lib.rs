@@ -553,9 +553,8 @@ mod test_util {
 
 #[cfg(test)]
 mod tests {
-    use keyvalint::Cursor;
     use mani::{Edit, Manifest};
-    use sst::Builder;
+    use sst::{Builder, Cursor};
 
     use super::*;
 

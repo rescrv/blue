@@ -3,14 +3,13 @@ use std::ops::Bound;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-use keyvalint::{Cursor, KeyValuePair, KeyValueRef};
 use mani::{Edit, Manifest};
 use setsum::Setsum;
 use sst::bounds_cursor::BoundsCursor;
 use sst::log::{ConcurrentLogBuilder, LogOptions};
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
-use sst::{check_key_len, check_value_len, Builder, SstBuilder};
+use sst::{check_key_len, check_value_len, Builder, Cursor, KeyValuePair, KeyValueRef, SstBuilder};
 use sync42::wait_list::WaitList;
 use zerror::Z;
 use zerror_core::ErrorCore;
@@ -36,6 +35,22 @@ impl WriteBatch {
         Self { entries }
     }
 
+    pub fn put(&mut self, key: &[u8], value: &[u8]) {
+        self.entries.push(KeyValuePair {
+            key: key.into(),
+            timestamp: 0,
+            value: Some(value.into()),
+        });
+    }
+
+    pub fn del(&mut self, key: &[u8]) {
+        self.entries.push(KeyValuePair {
+            key: key.into(),
+            timestamp: 0,
+            value: None,
+        });
+    }
+
     fn _put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) {
         self.entries.push(KeyValuePair {
             key: key.into(),
@@ -48,42 +63,6 @@ impl WriteBatch {
         self.entries.push(KeyValuePair {
             key: key.into(),
             timestamp,
-            value: None,
-        });
-    }
-}
-
-impl keyvalint::WriteBatch for WriteBatch {
-    fn put(&mut self, key: &[u8], value: &[u8]) {
-        self.entries.push(KeyValuePair {
-            key: key.into(),
-            timestamp: 0,
-            value: Some(value.into()),
-        });
-    }
-
-    fn del(&mut self, key: &[u8]) {
-        self.entries.push(KeyValuePair {
-            key: key.into(),
-            timestamp: 0,
-            value: None,
-        });
-    }
-}
-
-impl<'a> keyvalint::WriteBatch for &'a mut WriteBatch {
-    fn put(&mut self, key: &[u8], value: &[u8]) {
-        self.entries.push(KeyValuePair {
-            key: key.into(),
-            timestamp: 0,
-            value: Some(value.into()),
-        });
-    }
-
-    fn del(&mut self, key: &[u8]) {
-        self.entries.push(KeyValuePair {
-            key: key.into(),
-            timestamp: 0,
             value: None,
         });
     }
@@ -329,13 +308,8 @@ impl KeyValueStore {
         // TODO(rescrv): Actually poison here.
         res.map_err(|e| e.into())
     }
-}
 
-impl keyvalint::KeyValueStore for KeyValueStore {
-    type Error = Error;
-    type WriteBatch<'a> = WriteBatch;
-
-    fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         check_value_len(value)?;
@@ -350,7 +324,7 @@ impl keyvalint::KeyValueStore for KeyValueStore {
         self.write(wb)
     }
 
-    fn del(&self, key: &[u8]) -> Result<(), Error> {
+    pub fn del(&self, key: &[u8]) -> Result<(), Error> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         let key = key.to_vec();
@@ -364,7 +338,7 @@ impl keyvalint::KeyValueStore for KeyValueStore {
         self.write(wb)
     }
 
-    fn write(&self, mut batch: Self::WriteBatch<'_>) -> Result<(), Error> {
+    pub fn write(&self, mut batch: WriteBatch) -> Result<(), Error> {
         let (mut wait_guard, memtable, log) = {
             let mut state = self.state.lock().unwrap();
             let wait_guard = self.wait_list.link(());
@@ -398,16 +372,8 @@ impl keyvalint::KeyValueStore for KeyValueStore {
         self.wait_list.notify_head();
         Ok(())
     }
-}
 
-impl keyvalint::KeyValueLoad for KeyValueStore {
-    type Error = sst::Error;
-    type RangeScan<'a> = BoundsCursor<
-        PruningCursor<MergingCursor<Box<dyn keyvalint::Cursor<Error = sst::Error>>>, sst::Error>,
-        sst::Error,
-    >;
-
-    fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Self::Error> {
+    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Error> {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
@@ -430,11 +396,11 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
         Ok(ret)
     }
 
-    fn range_scan<T: AsRef<[u8]>>(
+    pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<Self::RangeScan<'_>, Self::Error> {
+    ) -> Result<impl Cursor, Error> {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
@@ -442,7 +408,7 @@ impl keyvalint::KeyValueLoad for KeyValueStore {
             let version = self.tree.take_snapshot();
             (mem, imm, version, state.seq_no)
         };
-        let mut cursors: Vec<Box<dyn Cursor<Error = sst::Error>>> = Vec::with_capacity(3);
+        let mut cursors: Vec<Box<dyn Cursor>> = Vec::with_capacity(3);
         let mut mem_scan = mem.range_scan(start_bound, end_bound, timestamp)?;
         mem_scan.seek_to_first()?;
         cursors.push(Box::new(mem_scan));

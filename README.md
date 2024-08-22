@@ -39,7 +39,6 @@ Eventually it will be a distributed key-value store.
 - bloomcalc:  A calculator for figuring out bloom filter parameters.
 - guacamole:  A linearly-seekable random number generator.
 - armnod:  A random strings generator.
-- keyvalint:  KEY-VALue INTerface traits for key-value stores.
 - prototk_derive:  Derive macro for prototk::Message.
 - setsum:  An order-agnostic/set-of-strings hash function.
 - skipfree:  A lock-free skip list.
@@ -63,6 +62,5 @@ Eventually it will be a distributed key-value store.
 - split_channel:  Bidirectional pipes.
 - sst:  A sorted-string tables library.
 - lsmtk:  An LSM-tree with triangular compaction.
-- keyvalint_bench:  Benchmarks for interfaces implementing keyvalint.
 - tuple_key:  Lexicographical tuple encoding for keys.
 - biometrics_pb:  Protocol buffers definitions for biometrics.

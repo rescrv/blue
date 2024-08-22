@@ -1,10 +1,10 @@
 use std::ops::Bound;
 use std::sync::atomic::{self, AtomicUsize};
 
-use keyvalint::{compare_bytes, Cursor, Key, KeyRef};
 use skipfree::{SkipList, SkipListIterator};
 use sst::bounds_cursor::BoundsCursor;
 use sst::pruning_cursor::PruningCursor;
+use sst::{Cursor, Key, KeyRef};
 
 use super::WriteBatch;
 use crate::Error;
@@ -52,7 +52,7 @@ impl MemTable {
             key: key.to_vec(),
             timestamp,
         });
-        if cursor.is_valid() && compare_bytes(cursor.key().key.as_slice(), key).is_eq() {
+        if cursor.is_valid() && cursor.key().key.as_slice() == key {
             *is_tombstone = cursor.value().is_none();
             Ok(cursor.value().clone())
         } else {
@@ -81,19 +81,17 @@ pub struct SkipListIteratorWrapper {
 }
 
 impl Cursor for SkipListIteratorWrapper {
-    type Error = sst::Error;
-
-    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_first(&mut self) -> Result<(), sst::Error> {
         self.iter.seek_to_first();
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_last(&mut self) -> Result<(), sst::Error> {
         self.iter.seek_to_last();
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), sst::Error> {
         self.iter.seek(&Key {
             key: key.into(),
             timestamp: u64::MAX,
@@ -101,17 +99,17 @@ impl Cursor for SkipListIteratorWrapper {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Self::Error> {
+    fn prev(&mut self) -> Result<(), sst::Error> {
         self.iter.prev();
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Self::Error> {
+    fn next(&mut self) -> Result<(), sst::Error> {
         self.iter.next();
         Ok(())
     }
 
-    fn key(&self) -> Option<keyvalint::KeyRef<'_>> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if self.iter.is_valid() {
             Some(KeyRef::from(self.iter.key()))
         } else {
@@ -131,33 +129,31 @@ impl Cursor for SkipListIteratorWrapper {
 ////////////////////////////////////////// MemTableCursor //////////////////////////////////////////
 
 pub struct MemTableCursor {
-    cursor: BoundsCursor<PruningCursor<SkipListIteratorWrapper, sst::Error>, sst::Error>,
+    cursor: BoundsCursor<PruningCursor<SkipListIteratorWrapper>>,
 }
 
 impl Cursor for MemTableCursor {
-    type Error = sst::Error;
-
-    fn seek_to_first(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_first(&mut self) -> Result<(), sst::Error> {
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Self::Error> {
+    fn seek_to_last(&mut self) -> Result<(), sst::Error> {
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Self::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), sst::Error> {
         self.cursor.seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), Self::Error> {
+    fn prev(&mut self) -> Result<(), sst::Error> {
         self.cursor.prev()
     }
 
-    fn next(&mut self) -> Result<(), Self::Error> {
+    fn next(&mut self) -> Result<(), sst::Error> {
         self.cursor.next()
     }
 
-    fn key(&self) -> Option<keyvalint::KeyRef<'_>> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         self.cursor.key()
     }
 
