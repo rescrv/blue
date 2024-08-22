@@ -155,16 +155,14 @@ fn shell(
                         }
                     }
                     "cargo" => {
-                        let mut child = match std::process::Command::new("cargo")
-                            .args(&args[1..])
-                            .spawn()
-                        {
-                            Ok(child) => child,
-                            Err(err) => {
-                                eprintln!("error: {err:?}");
-                                continue;
-                            },
-                        };
+                        let mut child =
+                            match std::process::Command::new("cargo").args(&args[1..]).spawn() {
+                                Ok(child) => child,
+                                Err(err) => {
+                                    eprintln!("error: {err:?}");
+                                    continue;
+                                }
+                            };
                         let _ = child.wait();
                     }
                     "exit" => {

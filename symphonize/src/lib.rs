@@ -1,3 +1,5 @@
+use std::os::unix::process::CommandExt;
+
 use utf8path::Path;
 
 use rustrc::Pid1Options;
@@ -124,16 +126,30 @@ pub fn autoinfer_configuration(
 ////////////////////////////////////////////// rebuild /////////////////////////////////////////////
 
 fn rebuild_deps(workdir: &Path) -> Result<(), std::io::Error> {
-    let mut child = std::process::Command::new("cargo")
-        .args(["vendor", workdir.join("vendor").as_str()])
-        .spawn()?;
+    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
+    let mut child = unsafe {
+        std::process::Command::new("cargo")
+            .args(["vendor", workdir.join("vendor").as_str()])
+            .pre_exec(|| {
+                minimal_signals::unblock();
+                Ok(())
+            })
+            .spawn()?
+    };
     let status = child.wait()?;
     if !status.success() {
         return Err(std::io::Error::other("cargo vendor failed"));
     }
-    let output = std::process::Command::new("cargo")
-        .args(["tree", "--all-features", "--prefix", "none", "--quiet"])
-        .output()?;
+    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
+    let output = unsafe {
+        std::process::Command::new("cargo")
+            .args(["tree", "--all-features", "--prefix", "none", "--quiet"])
+            .pre_exec(|| {
+                minimal_signals::unblock();
+                Ok(())
+            })
+            .output()?
+    };
     for dep in String::from_utf8_lossy(&output.stdout).split_terminator('\n') {
         // TODO(rescrv): Hacky as all get-out.
         if dep.contains("(/") {
@@ -142,15 +158,22 @@ fn rebuild_deps(workdir: &Path) -> Result<(), std::io::Error> {
         let Some(dep) = dep.split(' ').next() else {
             continue;
         };
-        let output = std::process::Command::new("cargo")
-            .args([
-                "install",
-                dep,
-                "--force",
-                "--root",
-                workdir.join(".symphonize/pkg").as_str(),
-            ])
-            .output()?;
+        // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
+        let output = unsafe {
+            std::process::Command::new("cargo")
+                .args([
+                    "install",
+                    dep,
+                    "--force",
+                    "--root",
+                    workdir.join(".symphonize/pkg").as_str(),
+                ])
+                .pre_exec(|| {
+                    minimal_signals::unblock();
+                    Ok(())
+                })
+                .output()?
+        };
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() && !stderr.contains("there is nothing to install in") {
             return Err(std::io::Error::other(format!(
@@ -163,9 +186,16 @@ fn rebuild_deps(workdir: &Path) -> Result<(), std::io::Error> {
 
 pub fn rebuild_cargo(workdir: &Path<'static>) -> Result<(), std::io::Error> {
     rebuild_deps(workdir)?;
-    let mut child = std::process::Command::new("cargo")
-        .args(["build", "--workspace", "--bins"])
-        .spawn()?;
+    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
+    let mut child = unsafe {
+        std::process::Command::new("cargo")
+            .args(["build", "--workspace", "--bins"])
+            .pre_exec(|| {
+                minimal_signals::unblock();
+                Ok(())
+            })
+            .spawn()?
+    };
     let status = child.wait()?;
     if !status.success() {
         return Err(std::io::Error::other("cargo build failed"));
@@ -173,7 +203,6 @@ pub fn rebuild_cargo(workdir: &Path<'static>) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub fn rebuild_release(workdir: &Path<'static>) -> Result<(), std::io::Error> {
-    rebuild_deps(workdir)?;
+pub fn rebuild_release(_workdir: &Path<'static>) -> Result<(), std::io::Error> {
     todo!("release mode not yet supported");
 }
