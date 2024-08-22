@@ -1363,13 +1363,18 @@ mod tests {
         let options = Pid1Options::default();
         let pid1 = Pid1::new(options).expect("pid1 new should work");
         pid1.reload().expect("reload should work");
-        for service in pid1.list_services() {
-            println!("FINDME LIST {service}");
-        }
-        for service in pid1.enabled_services() {
-            println!("FINDME ENABLED {service}");
-        }
         pid1.spawn("rustrc_smoking_test", &["--argument", "GOODBYE WORLD"])
+            .expect("spawn should work");
+        pid1.shutdown().expect("shutdown should work");
+    }
+
+    #[test]
+    fn smoking_wrapper() {
+        minimal_signals::block();
+        let options = Pid1Options::default();
+        let pid1 = Pid1::new(options).expect("pid1 new should work");
+        pid1.reload().expect("reload should work");
+        pid1.spawn("rustrc_smoking_wrapper", &["--argument", "FROM THE ARGS"])
             .expect("spawn should work");
         pid1.shutdown().expect("shutdown should work");
     }
