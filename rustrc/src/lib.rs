@@ -1075,7 +1075,10 @@ impl ExecutionContext {
             .collect::<Result<Vec<_>, std::ffi::NulError>>()?;
         // setup env
         let mut env: Vec<CString> = vec![];
-        env.push(CString::new(format!("RCVAR_ARGV0={}", rc_conf::var_name_from_service(service)))?);
+        env.push(CString::new(format!(
+            "RCVAR_ARGV0={}",
+            rc_conf::var_name_from_service(service)
+        ))?);
         for (key, value) in bound.iter() {
             env.push(CString::new(format!("{}={}", key, value))?);
         }

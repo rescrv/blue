@@ -677,12 +677,16 @@ impl RcConf {
         let (alias_lookup_order, pre_lookup) = self.alias_lookup_order(service);
         let mut vp = Vec::with_capacity(alias_lookup_order.len());
         for a in alias_lookup_order.iter() {
-            vp.push(
-                PrefixingVariableProvider {
+            vp.push(PrefixingVariableProvider {
                 nested: self,
                 prefix: var_prefix_from_service(a),
             });
-            if !self.aliases.get(a.to_string().as_str()).map(|a| a.inherit).unwrap_or(false) {
+            if !self
+                .aliases
+                .get(a.to_string().as_str())
+                .map(|a| a.inherit)
+                .unwrap_or(false)
+            {
                 break;
             }
         }
