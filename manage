@@ -21,7 +21,6 @@ def publication_order(root):
         deps = subprocess.check_output(('cargo', 'tree', '--all-features', '--prefix', 'none', '--depth', '1'), cwd=path)
         deps = deps.decode('utf8')
         deps = [d for d in deps.split('\n') if d]
-        if crate == 'arrrg': print(deps)
         deps = [RE_LOCAL_PACKAGE.match(d) for d in deps]
         deps = [d.groupdict() for d in deps if d]
         crates[crate] = set([d['crate'] for d in deps if d['crate'] != crate])
