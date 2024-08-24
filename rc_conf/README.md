@@ -56,7 +56,7 @@ default host for all services that can be overridden, specify `HOST=default.exam
 
 To spin up a second memcached on 22122, we can add this to our `rc.conf`:
 
-```
+```text
 memcached_two_INHERIT="YES"
 memcached_two_ALIASES="memcached"
 memcached_two_PORT="22122"
