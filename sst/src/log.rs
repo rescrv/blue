@@ -592,6 +592,12 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     }
 }
 
+impl<W: Write> std::fmt::Debug for ConcurrentLogBuilder<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "ConcurrentLogBuilder")
+    }
+}
+
 //////////////////////////////////////////// LogIterator ///////////////////////////////////////////
 
 /// An iterator over logs.
