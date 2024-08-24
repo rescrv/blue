@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -319,6 +321,7 @@ impl_tuple_provider! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
 
 //////////////////////////////////////// EnvironmentProvider ///////////////////////////////////////
 
+/// A VariableProvider that reads variable values from the environment.
 #[derive(Debug)]
 pub struct EnvironmentProvider;
 
@@ -330,9 +333,12 @@ impl VariableProvider for EnvironmentProvider {
 
 ///////////////////////////////////// PrefixingVariableProvider ////////////////////////////////////
 
+/// A VariableProvider that prepends a prefix before lookup.
 #[derive(Debug)]
 pub struct PrefixingVariableProvider<P: VariableProvider> {
+    /// Lookup the prefixed queries in this variable provider.
     pub nested: P,
+    /// Prepend this prefix to the variable key upon lookup.
     pub prefix: String,
 }
 
