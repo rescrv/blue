@@ -42,6 +42,7 @@ static STOP: biometrics::Counter = biometrics::Counter::new("rustrc.api.stop");
 static EXECUTION_KILL: biometrics::Counter = biometrics::Counter::new("rustrc.execution.kill");
 static EXECUTION_EXEC: biometrics::Counter = biometrics::Counter::new("rustrc.execution.exec");
 
+/// Register biometrics with the given collector.
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&IO_ERROR);
     collector.register_counter(&SHVAR_ERROR);
@@ -71,6 +72,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
 
 ////////////////////////////////////////////// indicio /////////////////////////////////////////////
 
+/// An indicio clue-collector hook point.
 pub static COLLECTOR: indicio::Collector = indicio::Collector::new();
 
 //////////////////////////////////////////// ExecutionID ///////////////////////////////////////////
@@ -79,16 +81,26 @@ generate_id! {ExecutionID, "execution:"}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// The Error type.
 #[derive(Debug)]
 pub enum Error {
+    /// There was an error generating enough randomness for an ExecutionID.
     GeneratingExecutionID,
+    /// The named service is not known to rustrc.
     UnknownService,
+    /// The service is disabled.
     ServiceDisabled,
+    /// The service is already started.
     ServiceAlreadyStarted,
+    /// There's a persistent error with the service.
     ServiceError(String),
+    /// An error returned by IO.
     Io(std::io::Error),
+    /// An error returned by shvar.
     Shvar(shvar::Error),
+    /// An error returned by rc_conf.
     RcConf(rc_conf::Error),
+    /// A NulError relating to CString.
     NulError,
 }
 
@@ -284,6 +296,7 @@ impl From<&Error> for indicio::Value {
 
 ////////////////////////////////////////////// Target //////////////////////////////////////////////
 
+/// The target to kill.
 #[derive(Clone, Debug, Default)]
 pub enum Target {
     #[default]
@@ -293,7 +306,7 @@ pub enum Target {
 }
 
 impl Target {
-    pub fn matches(&mut self, e: &Execution) -> bool {
+    fn matches(&mut self, e: &Execution) -> bool {
         match self {
             Target::All => true,
             Target::One(s) => *s == e.service,
@@ -301,6 +314,7 @@ impl Target {
         }
     }
 
+    /// True if the execution matches the provided name.
     pub fn matches_name(&mut self, name: impl AsRef<str>) -> bool {
         match self {
             Target::All => true,
@@ -345,6 +359,7 @@ impl From<&Target> for indicio::Value {
 
 //////////////////////////////////////////// Pid1Options ///////////////////////////////////////////
 
+/// Pid1Options captures the rc_conf and rc.d PATH variables.
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Pid1Options {
     #[arrrg(optional, "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override.")]
@@ -373,6 +388,7 @@ impl From<&Pid1Options> for indicio::Value {
 
 ///////////////////////////////////////// Pid1Configuration ////////////////////////////////////////
 
+/// Pre-parse the rc_conf and rc.d paths to a data structure that can be accessed without I/O.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pid1Configuration {
     services: HashMap<String, Result<Path<'static>, String>>,
@@ -380,12 +396,14 @@ pub struct Pid1Configuration {
 }
 
 impl Pid1Configuration {
+    /// Create a new Pid1Configuration using the options.
     pub fn from_options(options: &Pid1Options) -> Result<Self, rc_conf::Error> {
         let services = load_services(&options.rc_d_path)?;
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
         Ok(Self { services, rc_conf })
     }
 
+    /// The services and aliases available from the combination of the rc_conf and rc.d.
     pub fn services(&self) -> Vec<String> {
         let mut services = vec![];
         services.extend(self.services.keys().cloned());
@@ -565,6 +583,7 @@ struct Pid1Coordination {
 
 /////////////////////////////////////////////// Pid1 ///////////////////////////////////////////////
 
+/// Pid1 provides process supervision over processes specified by rc_conf and rc.d.
 #[derive(Debug)]
 pub struct Pid1 {
     options: Mutex<Pid1Options>,
@@ -578,6 +597,7 @@ pub struct Pid1 {
 }
 
 impl Pid1 {
+    /// Create a new Pid1 from the provided options.
     pub fn new(options: Pid1Options) -> Result<Self, Error> {
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
         let state = Arc::new(Mutex::new(Pid1State::new(config)));
@@ -798,6 +818,8 @@ impl Pid1 {
         converged
     }
 
+    /// Consume the pid1 and shut it down properly.  First processes get the SIGTERM, then they get
+    /// the SIGKILL.  Will return only after all resources are reclaimed.
     pub fn shutdown(self) -> Result<(), Error> {
         {
             let mut state = self.state.lock().unwrap();
@@ -831,6 +853,8 @@ impl Pid1 {
         Ok(())
     }
 
+    /// Reconfigure the Pid1 to use the new options.  This will call reload after loading the new
+    /// options.
     pub fn reconfigure(&self, options: Pid1Options) -> Result<(), Error> {
         RECONFIGURE.click();
         clue!(COLLECTOR, INFO, {
@@ -843,6 +867,8 @@ impl Pid1 {
         self.reload()
     }
 
+    /// Reload the configuration from the rc_conf and rc.d paths provided as of the last
+    /// configuration.
     pub fn reload(&self) -> Result<(), Error> {
         RELOAD.click();
         clue!(COLLECTOR, INFO, {
@@ -862,6 +888,7 @@ impl Pid1 {
         Ok(())
     }
 
+    /// Send the specified signal to all processes that match the target.
     pub fn kill(&self, mut target: Target, signal: minimal_signals::Signal) -> Result<(), Error> {
         KILL.click();
         clue!(COLLECTOR, INFO, {
@@ -900,6 +927,7 @@ impl Pid1 {
         err
     }
 
+    /// List the available services.
     pub fn list_services(&self) -> Vec<String> {
         LIST_SERVICES.click();
         self.state
@@ -912,6 +940,7 @@ impl Pid1 {
             .collect()
     }
 
+    /// List the enabled services.
     pub fn enabled_services(&self) -> Vec<String> {
         ENABLED_SERVICES.click();
         let state = self.state.lock().unwrap();
@@ -919,11 +948,12 @@ impl Pid1 {
             .config
             .services()
             .iter()
-            .filter(|s| state.service_switch(s).is_enabled())
+            .filter(|s| state.service_switch(s).can_be_started())
             .map(|s| s.to_string())
             .collect()
     }
 
+    /// Start the named service.
     pub fn start(&self, service: &str) -> Result<(), Error> {
         START.click();
         let mut state = self.state.lock().unwrap();
@@ -945,6 +975,7 @@ impl Pid1 {
         }
     }
 
+    /// Stop then start the named service.
     pub fn restart(&self, service: &str) -> Result<(), Error> {
         RESTART.click();
         let switch = {
@@ -965,6 +996,7 @@ impl Pid1 {
         Ok(())
     }
 
+    /// Stop the named service.
     pub fn stop(&self, service: &str) -> Result<(), Error> {
         STOP.click();
         let service_string = service.to_string();
@@ -1019,12 +1051,18 @@ impl Pid1 {
 
 ///////////////////////////////////////// ExecutionContext /////////////////////////////////////////
 
+/// The set of facts about a service that get used for determining when to restart a process.
 #[derive(Clone, Debug, Eq)]
 pub struct ExecutionContext {
+    /// The path to the executable.
     pub path: CString,
+    /// The wrapper to execute with.
     pub wrapper: Vec<CString>,
+    /// The args to provide to the command.
     pub argv: Vec<CString>,
+    /// The environment to set.
     pub env: Vec<CString>,
+    /// The instant that it started (not used for equality or hashing).
     pub started: Instant,
 }
 
@@ -1047,6 +1085,7 @@ impl Hash for ExecutionContext {
 }
 
 impl ExecutionContext {
+    /// Create a new execution context for a service and argument.
     pub fn new(config: &Pid1Configuration, service: &str, argv: &[&str]) -> Result<Self, Error> {
         // setup path
         let Some(path) = config.get_service_path(service) else {
@@ -1122,9 +1161,7 @@ impl From<&ExecutionContext> for indicio::Value {
 ///////////////////////////////////////////// Execution ////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct Execution {
-    execution_id: ExecutionID,
-    config: Arc<Pid1Configuration>,
+struct Execution {
     service: String,
     context: ExecutionContext,
     pid: Mutex<libc::pid_t>,
@@ -1133,9 +1170,9 @@ pub struct Execution {
 }
 
 impl Execution {
-    pub fn new(
-        execution_id: ExecutionID,
-        config: Arc<Pid1Configuration>,
+    fn new(
+        _execution_id: ExecutionID,
+        _config: Arc<Pid1Configuration>,
         service: String,
         context: ExecutionContext,
     ) -> Self {
@@ -1143,8 +1180,6 @@ impl Execution {
         let pid_set = Condvar::new();
         let thread = Mutex::new(None);
         Self {
-            execution_id,
-            config,
             service,
             context,
             pid,
@@ -1153,23 +1188,7 @@ impl Execution {
         }
     }
 
-    pub fn id(&self) -> ExecutionID {
-        self.execution_id
-    }
-
-    pub fn config(&self) -> &Arc<Pid1Configuration> {
-        &self.config
-    }
-
-    pub fn service(&self) -> &str {
-        &self.service
-    }
-
-    pub fn context(&self) -> &ExecutionContext {
-        &self.context
-    }
-
-    pub fn pid(&self) -> Option<i32> {
+    fn pid(&self) -> Option<i32> {
         let pid = self.pid.lock().unwrap();
         if *pid > 0 {
             Some(*pid)
@@ -1178,7 +1197,7 @@ impl Execution {
         }
     }
 
-    pub fn kill(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
+    fn kill(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
         EXECUTION_KILL.click();
         clue!(COLLECTOR, INFO, {
             kill: indicio::Value::from(&self.context),
