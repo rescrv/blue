@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::os::unix::process::CommandExt;
@@ -12,52 +14,79 @@ const RESTRICTED_VARIABLES: &[&str] = &["NAME"];
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// The Error type.
 #[derive(Debug)]
 pub enum Error {
+    /// The file specified by `path` is too large to parse.
     FileTooLarge {
+        /// The path that's too large to parse.
         path: Path<'static>,
     },
+    /// The file specified by `path` ends with a r"\" or r"\\n".
     TrailingWhack {
+        /// The path with a trailing \.
         path: Path<'static>,
     },
+    /// The file specified by `path` contails the prohibited `character` in `string` on `line`.
     ProhibitedCharacter {
+        /// The path with a prohibited character.
         path: Path<'static>,
+        /// The line with a prohibited character.
         line: u32,
+        /// The string with a prohibited characater.
         string: String,
+        /// The prohibited character.
         character: char,
     },
+    /// The file specified by `path` is invalid in the way specified by `message` on `line`.
     InvalidRcConf {
+        /// The invalid rc_conf file.
         path: Path<'static>,
+        /// The line that's invalid.
         line: u32,
+        /// The reason for it being invalid.
         message: String,
     },
+    /// An error for an invalid rc script.
     InvalidRcScript {
+        /// The invalid rc.d service stub.
         path: Path<'static>,
+        /// The line that's invalid.
         line: u32,
+        /// The reason for it being invalid.
         message: String,
     },
+    /// The invocation failed.
     InvalidInvocation {
+        /// The reason the invocation failed.
         message: String,
     },
+    /// An error from the standard library.
     IoError(std::io::Error),
+    /// An error parsing variables or splitting strings.
     ShvarError(shvar::Error),
+    /// An error relating to utf8.
     Utf8Error(std::str::Utf8Error),
+    /// An error relating to utf8.
     FromUtf8Error(std::string::FromUtf8Error),
 }
 
 impl Error {
+    /// Construct a new "FileTooLarge" variant.
     pub fn file_too_large(file: &Path) -> Self {
         Self::FileTooLarge {
             path: file.clone().into_owned(),
         }
     }
 
+    /// Construct a new "TrailingWhack" variant.
     pub fn trailing_whack(file: &Path) -> Self {
         Self::TrailingWhack {
             path: file.clone().into_owned(),
         }
     }
 
+    /// Construct a new "ProhibitedCharacter" variant.
     pub fn prohibited_character(
         file: &Path,
         line: u32,
@@ -72,6 +101,7 @@ impl Error {
         }
     }
 
+    /// Construct a new "InvalidRcConf" variant.
     pub fn invalid_rc_conf(file: &Path, line: u32, message: impl AsRef<str>) -> Self {
         Self::InvalidRcConf {
             path: file.clone().into_owned(),
@@ -80,6 +110,7 @@ impl Error {
         }
     }
 
+    /// Construct a new "InvalidRcScript" variant.
     pub fn invalid_rc_script(file: &Path, line: u32, message: impl AsRef<str>) -> Self {
         Self::InvalidRcScript {
             path: file.clone().into_owned(),
@@ -88,6 +119,7 @@ impl Error {
         }
     }
 
+    /// Construct a new "InvalidInvocation" variant.
     pub fn invalid_invocation(message: impl AsRef<str>) -> Self {
         Self::InvalidInvocation {
             message: message.as_ref().to_string(),
@@ -121,14 +153,21 @@ impl From<std::string::FromUtf8Error> for Error {
 
 ////////////////////////////////////////// SwitchPosition //////////////////////////////////////////
 
+/// An enum representing the valid values for _ENABLED variables.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SwitchPosition {
+    /// The service is disabled.  It cannot be run.  Even manually.
     No,
+    /// The service is enabled.  It should be starated automatically.
     Yes,
+    /// The service is provisionally enabled.  It will not be run automatically, but can be started
+    /// manually or programmatically (e.g. by a cron-like daemon).
     Manual,
 }
 
 impl SwitchPosition {
+    /// Parse the literal strings "YES", "NO", or "MANUAL" (no lowercasing) into a valid
+    /// SwitchPosition enum.
     pub fn from_enable<S: AsRef<str>>(s: S) -> Option<Self> {
         let s = s.as_ref();
         match s {
@@ -139,7 +178,8 @@ impl SwitchPosition {
         }
     }
 
-    pub fn is_enabled(self) -> bool {
+    /// True if the service can run.
+    pub fn can_be_started(self) -> bool {
         match self {
             Self::Yes => true,
             Self::Manual => true,
@@ -150,6 +190,7 @@ impl SwitchPosition {
 
 ///////////////////////////////////////////// RcScript /////////////////////////////////////////////
 
+/// An RcScript implements the rc.d service interface in a declarative way.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RcScript {
     pub name: String,
@@ -158,6 +199,7 @@ pub struct RcScript {
 }
 
 impl RcScript {
+    /// Create a new RcScript using the provided name, description, and command.
     pub fn new(
         name: impl Into<String>,
         describe: impl Into<String>,
@@ -173,6 +215,7 @@ impl RcScript {
         }
     }
 
+    /// Parse the file at path assuming its contents are contents.  It will not re-read path.
     pub fn parse(path: &Path, contents: &str) -> Result<Self, Error> {
         let name = if let Ok(path) = std::env::var("RCVAR_ARGV0") {
             path.to_string()
@@ -246,14 +289,17 @@ impl RcScript {
         }
     }
 
+    /// The description of the command provided in the RcScript.
     pub fn describe(&self) -> &str {
         &self.describe
     }
 
+    /// The command to be run, interpreted as a shell-quoted string suitable for splitting.
     pub fn command(&self) -> &str {
         &self.command
     }
 
+    /// Return the set of rc_conf variables to be set for this service stub.
     pub fn rcvar(&self) -> Result<Vec<String>, Error> {
         let name = var_prefix_from_service(&self.name);
         Ok(shvar::rcvar(&self.command)?
@@ -262,6 +308,9 @@ impl RcScript {
             .collect())
     }
 
+    /// Invoke the RcScript, providing args to the invocation.  If args is non-empty, it will be
+    /// appened with an additional '--' to separate it from the args interpreted from the RcScript
+    /// command field.
     pub fn invoke(&self, args: &[impl AsRef<str>]) -> Result<(), Error> {
         if args.is_empty() {
             Err(Error::invalid_invocation("must provide arguments"))
@@ -357,6 +406,8 @@ struct Alias {
 
 ////////////////////////////////////////////// RcConf //////////////////////////////////////////////
 
+/// An RcConf is a parsed RcFile.  All IO happens in parse, so behavior should be deterministc
+/// after parsing.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RcConf {
     items: HashMap<String, String>,
@@ -366,6 +417,7 @@ pub struct RcConf {
 }
 
 impl RcConf {
+    /// Parse `path` to get a new RcConf.
     pub fn parse(path: &str) -> Result<Self, Error> {
         let mut seen = HashSet::default();
         let mut items = HashMap::default();
@@ -595,6 +647,7 @@ impl RcConf {
         Ok(())
     }
 
+    /// Examine the rc_conf and output the rc_conf as a string, showing how the parser sees it.
     pub fn examine(path: &str) -> Result<String, Error> {
         let mut seen = HashSet::default();
         let mut rc_conf = String::new();
@@ -646,16 +699,24 @@ impl RcConf {
         Ok(())
     }
 
+    /// The variables defined within this RcConf.
     pub fn variables(&self) -> Vec<String> {
         self.items.keys().cloned().collect()
     }
 
+    /// Merge the other rc_conf into this one, overwriting values where necessary.
+    ///
+    /// Note that merge does not perform parameter expansion on the variables, so merging
+    /// "${FOO:+${FOO} more foo}" won't do anything except overwrite the value of FOO to be a
+    /// self-referential expansion.
     pub fn merge(&mut self, other: Self) {
         for (key, value) in other.items.into_iter() {
             self.items.insert(key, value);
         }
     }
 
+    /// Generate the set of rcvariables that are expected by the script at `path` when invoked as
+    /// `service`.
     pub fn bind_for_invoke(
         &self,
         service: &str,
@@ -704,7 +765,8 @@ impl RcConf {
         Ok(bindings)
     }
 
-    pub fn wrapper(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
+    /// Return a vector of strings suitable for passing to exec.
+    pub fn argv(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
         let prefix = var_prefix_from_service(service);
         let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
         let pvp = PrefixingVariableProvider {
@@ -712,16 +774,17 @@ impl RcConf {
             nested: self,
         };
         let vp = (&meta, &pvp);
-        let Some(wrapper) = self.lookup_suffix(service, variable) else {
+        let Some(argv) = self.lookup_suffix(service, variable) else {
             return Ok(vec![]);
         };
-        let wrapper = shvar::expand(&vp, &wrapper)?;
-        if wrapper.trim().is_empty() {
+        let argv = shvar::expand(&vp, &argv)?;
+        if argv.trim().is_empty() {
             return Ok(vec![]);
         }
-        Ok(shvar::split(&wrapper)?)
+        Ok(shvar::split(&argv)?)
     }
 
+    /// Lookup the service switch for `service`.
     pub fn service_switch(&self, service: &str) -> SwitchPosition {
         let (alias_lookup_order, _) = self.alias_lookup_order(service);
         for service in alias_lookup_order {
@@ -772,10 +835,12 @@ impl RcConf {
         self.lookup(&varname)
     }
 
+    /// Return the list of aliases.
     pub fn aliases(&self) -> Vec<String> {
         self.aliases.keys().cloned().collect()
     }
 
+    /// Resolve the alias `service` one-hop.
     pub fn direct_alias<'a>(&'a self, service: &'a str) -> &'a str {
         if let Some(alias) = self.aliases.get(service) {
             &alias.aliases
@@ -784,6 +849,7 @@ impl RcConf {
         }
     }
 
+    /// Recursively resolve the alias `service`.
     pub fn resolve_alias<'a>(&'a self, service: &'a str) -> &'a str {
         if let Some(alias) = self.aliases.get(service) {
             self.resolve_alias(&alias.aliases)
@@ -792,6 +858,7 @@ impl RcConf {
         }
     }
 
+    /// Generate the alias lookup order for `service` and a cascade of variables.
     pub fn alias_lookup_order<'a>(
         &'a self,
         service: &'a str,
@@ -820,6 +887,7 @@ impl shvar::VariableProvider for RcConf {
 
 /////////////////////////////////////////////// rc.d ///////////////////////////////////////////////
 
+/// Load the rc.d services from a given rc.d path.
 pub fn load_services(
     rc_d_path: &str,
 ) -> Result<HashMap<String, Result<Path<'static>, String>>, Error> {
@@ -850,10 +918,13 @@ pub fn load_services(
 
 ////////////////////////////////////////////// exec_rc /////////////////////////////////////////////
 
+/// Exec a service using the provided rc_conf_path, rc_d_path, service name, and command arguments.
+///
+/// This does not return.
 pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
     let rc_conf = RcConf::parse(rc_conf_path).expect("rc_conf should parse");
     let rc_d = load_services(rc_d_path).expect("rc.d should parse");
-    if !rc_conf.service_switch(service).is_enabled() {
+    if !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -883,12 +954,12 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
         .bind_for_invoke(service, path)
         .expect("bind for invoke should bind");
     bound.extend(env);
-    let wrapper = rc_conf
-        .wrapper(service, "WRAPPER")
-        .expect("wrapper should generate");
-    let err = if !wrapper.is_empty() {
-        Command::new(&wrapper[0])
-            .args(&wrapper[1..])
+    let argv = rc_conf
+        .argv(service, "WRAPPER")
+        .expect("argv should generate");
+    let err = if !argv.is_empty() {
+        Command::new(&argv[0])
+            .args(&argv[1..])
             .arg(path.as_str())
             .args(cmd)
             .envs(bound)
@@ -901,6 +972,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
 
 ///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
 
+/// exec_rc the service in a way that runs it.
 pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
     let mut cmd = vec!["run"];
     cmd.extend(args);
@@ -909,6 +981,7 @@ pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str])
 
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
+/// exec_rc the service in a way that prints rcvariables.
 pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
     exec_rc(rc_conf_path, rc_d_path, service, &["rcvar"])
 }
@@ -969,6 +1042,7 @@ pub fn name_from_path(path: &Path) -> String {
     path.basename().as_str().to_string()
 }
 
+/// Return the var name for a service.  Converts non-alphanumerics to underscores.
 pub fn var_name_from_service(service: &str) -> String {
     service
         .chars()
@@ -976,6 +1050,7 @@ pub fn var_name_from_service(service: &str) -> String {
         .collect()
 }
 
+/// Return the variable prefix for a service or alias.
 pub fn var_prefix_from_service(service: &str) -> String {
     var_name_from_service(service) + "_"
 }
