@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::os::unix::process::CommandExt;
 
 use utf8path::Path;
@@ -6,6 +8,8 @@ use rustrc::Pid1Options;
 
 ///////////////////////////////////////// SymphonizeOptions ////////////////////////////////////////
 
+/// SymphonizeOptions provides the options to symphonize.  Provide it with a working directory and
+/// release or debug mode.  Only debug mode is supported at the moment.
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct SymphonizeOptions {
     #[arrrg(
@@ -52,6 +56,7 @@ fn paths_to_root() -> Result<Vec<Path<'static>>, std::io::Error> {
     ))
 }
 
+/// Automatically detect the rc_conf path given a path of candidates.
 pub fn rc_conf_path(candidates: &[Path]) -> String {
     let mut rc_conf_path = String::new();
     for candidate in candidates {
@@ -63,6 +68,7 @@ pub fn rc_conf_path(candidates: &[Path]) -> String {
     rc_conf_path
 }
 
+/// Automatically detect the rc.d path for a given root with options.
 pub fn rc_d_path(options: &SymphonizeOptions, root: &Path) -> Result<String, std::io::Error> {
     let mut rc_d_paths = vec![];
     rc_d_path_recurse(options, root, &mut rc_d_paths)?;
@@ -100,6 +106,7 @@ fn rc_d_path_recurse(
     Ok(())
 }
 
+/// Automatically infer a Pid1Options from the SymphonizeOptions.
 pub fn autoinfer_configuration(
     options: &SymphonizeOptions,
 ) -> Result<(Pid1Options, Path<'static>), std::io::Error> {
@@ -184,6 +191,7 @@ fn rebuild_deps(workdir: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// Rebuild the .symphonize directory in workdir.
 pub fn rebuild_cargo(workdir: &Path<'static>) -> Result<(), std::io::Error> {
     rebuild_deps(workdir)?;
     // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
@@ -203,6 +211,7 @@ pub fn rebuild_cargo(workdir: &Path<'static>) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// TODO(rescrv): implement.
 pub fn rebuild_release(_workdir: &Path<'static>) -> Result<(), std::io::Error> {
     todo!("release mode not yet supported");
 }
