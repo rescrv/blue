@@ -269,6 +269,14 @@ impl<'a> From<Path<'a>> for String {
     }
 }
 
+impl<'a> From<&'a String> for Path<'a> {
+    fn from(s: &'a String) -> Self {
+        Self {
+            path: Cow::Borrowed(s),
+        }
+    }
+}
+
 impl<'a> From<&'a str> for Path<'a> {
     fn from(s: &'a str) -> Self {
         Self {
