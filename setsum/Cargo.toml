@@ -16,6 +16,6 @@ binaries = []
 sha3 = "0.10"
 
 [[bin]]
-name = "setsum-inverse"
-path = "src/bin/setsum-inverse.rs"
+name = "setsum-calculator"
+path = "src/bin/setsum-calculator.rs"
 required-features = ["binaries"]
