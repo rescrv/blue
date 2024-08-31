@@ -650,7 +650,7 @@ impl Display for Clue {
     }
 }
 
-///////////////////////////////////////////// the macro ////////////////////////////////////////////
+////////////////////////////////////////// the clue macro //////////////////////////////////////////
 
 /// Emit the specified value if and only if the collector is logging.
 ///
@@ -662,6 +662,77 @@ macro_rules! clue {
             let loc = concat!(module_path!(), " ", file!());
             $collector.emit(loc, line!(), $level, $crate::value!({ $($value)* }));
         }
+    };
+}
+
+////////////////////////////////////// the puzzle_piece macro //////////////////////////////////////
+
+/// Match a "shape" of a clue and flatten it.
+#[macro_export]
+macro_rules! puzzle_piece {
+    ($type_name:ident { $($tt:tt)* }) => {
+        puzzle_piece!(@struct [$type_name] {} ($($tt)*));
+        impl $type_name {
+            pub fn extract(value: &indicio::Value) -> Option<Self> {
+                let mut this = Self::default();
+                puzzle_piece!(@extract this value [] ($($tt)*));
+                Some(this)
+            }
+        }
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ()) => {
+        #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+        pub struct $type_name {
+            $($field: $ty,)*
+        }
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: $new_ty:path, $($tt:tt)*)) => {
+        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* $new_field: $new_ty, } ($($tt)*));
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* })) => {
+        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* },)) => {
+        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* }, $($tt2:tt)*)) => {
+        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)* $($tt2)*));
+    };
+
+    (@extract $this:ident $value:ident [] ()) => {
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] $new_field:ident) => {
+        let v = $value;
+        $(let v = v.lookup(stringify!($key))?;)*
+        $this.$new_field = v.try_into().ok()?;
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:path,)) => {
+        puzzle_piece!(@extract $this $value [$($key)* $new_field] $new_field);
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:path, $($tt:tt)*)) => {
+        puzzle_piece!(@extract $this $value [$($key)* $new_field] $new_field);
+        puzzle_piece!(@extract $this $value [$($key)*] ($($tt)*));
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* }, $($tt2:tt)*)) => {
+        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt1)*));
+        puzzle_piece!(@extract $this $value [$($key)*] ($($tt2)*));
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* })) => {
+        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt)*));
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* },)) => {
+        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt)*));
     };
 }
 
