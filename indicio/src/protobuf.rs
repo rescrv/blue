@@ -85,6 +85,33 @@ impl ProtobufEmitter {
         state.file = None;
         state.size = 0;
     }
+
+    fn drain(&self, state: &mut OutputState) {
+        let buffer = std::mem::take(&mut state.buffer);
+        if buffer.is_empty() {
+            return;
+        }
+        'retry: for _ in 0..3 {
+            if state.file.is_none() {
+                self.open(state);
+            }
+            let size = state.size;
+            if let Some(file) = state.file.as_mut() {
+                if size >= self.target {
+                    self.close(state);
+                    continue;
+                } else {
+                    if file.write_all(&buffer).is_err() {
+                        break 'retry;
+                    }
+                    state.size += buffer.len() as u64;
+                    return;
+                }
+            }
+        }
+        EMITTER_FAILURE.click();
+        self.close(state);
+    }
 }
 
 impl Emitter for ProtobufEmitter {
@@ -109,32 +136,13 @@ impl Emitter for ProtobufEmitter {
         state.timestamp = frame.clue.timestamp;
         stack_pack(&frame).append_to_vec(&mut state.buffer);
         if state.buffer.len() > 1 << 16 {
-            let buffer = std::mem::take(&mut state.buffer);
-            'retry: for _ in 0..3 {
-                if state.file.is_none() {
-                    self.open(&mut state);
-                }
-                let size = state.size;
-                if let Some(file) = state.file.as_mut() {
-                    if size >= self.target {
-                        self.close(&mut state);
-                        continue;
-                    } else {
-                        if file.write_all(&buffer).is_err() {
-                            break 'retry;
-                        }
-                        state.size += buffer.len() as u64;
-                        return;
-                    }
-                }
-            }
-            EMITTER_FAILURE.click();
-            self.close(&mut state);
+            self.drain(&mut state);
         }
     }
 
     fn flush(&self) {
         let mut state = self.state.lock().unwrap();
+        self.drain(&mut state);
         if let Some(file) = state.file.as_mut() {
             let _ = file.flush();
         }
