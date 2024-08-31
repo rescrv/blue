@@ -486,6 +486,24 @@ impl<E: Emitter + Sync> Emitter for Arc<E> {
     }
 }
 
+/// An emitter that filters log messages above a log level.
+pub struct LevelFilter<E: Emitter> {
+    pub level: u64,
+    pub wrap: E,
+}
+
+impl<E: Emitter> Emitter for LevelFilter<E> {
+    fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
+        if level <= self.level {
+            self.wrap.emit(file, line, level, value);
+        }
+    }
+
+    fn flush(&self) {
+        self.wrap.flush()
+    }
+}
+
 macro_rules! impl_tuple_emitter {
     ($($name:ident)+) => {
         #[allow(non_snake_case)]
