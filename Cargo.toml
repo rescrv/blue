@@ -56,6 +56,9 @@ members = [
     "zerror_core",
 ]
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
 debug = true
 lto = true
