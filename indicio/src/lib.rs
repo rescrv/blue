@@ -208,6 +208,18 @@ impl From<bool> for Value {
     }
 }
 
+impl TryFrom<&Value> for bool {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, ()> {
+        if let Value::Bool(x) = value {
+            Ok(*x)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl From<i32> for Value {
     fn from(x: i32) -> Self {
         Self::I64(x as i64)
@@ -226,9 +238,33 @@ impl From<i64> for Value {
     }
 }
 
+impl TryFrom<&Value> for i64 {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, ()> {
+        if let Value::I64(x) = value {
+            Ok(*x)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl From<u64> for Value {
     fn from(x: u64) -> Self {
         Self::U64(x)
+    }
+}
+
+impl TryFrom<&Value> for u64 {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, ()> {
+        if let Value::U64(x) = value {
+            Ok(*x)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -244,6 +280,18 @@ impl From<f64> for Value {
     }
 }
 
+impl TryFrom<&Value> for f64 {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, ()> {
+        if let Value::F64(x) = value {
+            Ok(*x)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
         Self::String(s.to_string())
@@ -253,6 +301,18 @@ impl From<&str> for Value {
 impl From<String> for Value {
     fn from(s: String) -> Self {
         Self::String(s)
+    }
+}
+
+impl TryFrom<&Value> for String {
+    type Error = ();
+
+    fn try_from(value: &Value) -> Result<Self, ()> {
+        if let Value::String(s) = value {
+            Ok(s.to_string())
+        } else {
+            Err(())
+        }
     }
 }
 
