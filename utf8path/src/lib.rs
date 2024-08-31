@@ -255,6 +255,12 @@ impl<'a> std::fmt::Debug for Path<'a> {
     }
 }
 
+impl<'a> std::fmt::Display for Path<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(f, "{}", self.path)
+    }
+}
+
 impl<'a> From<String> for Path<'a> {
     fn from(s: String) -> Self {
         Self {
