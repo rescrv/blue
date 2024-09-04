@@ -1,9 +1,6 @@
 use indicio::puzzle_piece;
 
-puzzle_piece!(
-    Type1 {
-    }
-);
+puzzle_piece!(Type1 {});
 
 #[test]
 fn type1() {
@@ -11,12 +8,10 @@ fn type1() {
     assert_eq!(Some(type1), Type1::extract(&indicio::value!({})));
 }
 
-puzzle_piece!(
-    Type2 {
-        foo: String,
-        bar: String,
-    }
-);
+puzzle_piece!(Type2 {
+    foo: String,
+    bar: String,
+});
 
 #[test]
 fn type2() {
@@ -24,10 +19,13 @@ fn type2() {
         foo: "foo".to_string(),
         bar: "bar".to_string(),
     };
-    assert_eq!(Some(type2), Type2::extract(&indicio::value!({
-        foo: "foo",
-        bar: "bar",
-    })));
+    assert_eq!(
+        Some(type2),
+        Type2::extract(&indicio::value!({
+            foo: "foo",
+            bar: "bar",
+        }))
+    );
 }
 
 puzzle_piece!(
@@ -47,13 +45,16 @@ fn type3() {
         bar: "bar".to_string(),
         baz: "baz".to_string(),
     };
-    assert_eq!(Some(type3), Type3::extract(&indicio::value!({
-        field1: {
-            foo: "foo",
-            bar: "bar",
-        },
-        baz: "baz",
-    })));
+    assert_eq!(
+        Some(type3),
+        Type3::extract(&indicio::value!({
+            field1: {
+                foo: "foo",
+                bar: "bar",
+            },
+            baz: "baz",
+        }))
+    );
 }
 
 puzzle_piece!(
@@ -73,11 +74,14 @@ fn type4() {
         bar: "bar".to_string(),
         baz: "baz".to_string(),
     };
-    assert_eq!(Some(type4), Type4::extract(&indicio::value!({
-        baz: "baz",
-        field2: {
-            foo: "foo",
-            bar: "bar",
-        },
-    })));
+    assert_eq!(
+        Some(type4),
+        Type4::extract(&indicio::value!({
+            baz: "baz",
+            field2: {
+                foo: "foo",
+                bar: "bar",
+            },
+        }))
+    );
 }

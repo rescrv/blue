@@ -6,7 +6,11 @@ use setsum::Setsum;
 
 fn print(stack: &[Setsum]) {
     if stack.len() > 1 {
-        println!("{} (+{} more value(s) on the stack)", stack[stack.len() - 1].hexdigest(), stack.len() - 1);
+        println!(
+            "{} (+{} more value(s) on the stack)",
+            stack[stack.len() - 1].hexdigest(),
+            stack.len() - 1
+        );
     } else if !stack.is_empty() {
         println!("{}", stack[0].hexdigest());
     } else {
