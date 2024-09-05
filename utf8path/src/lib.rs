@@ -235,6 +235,10 @@ impl<'a> Path<'a> {
         components.reverse();
         components.into_iter()
     }
+
+    pub fn cwd() -> Option<Path<'a>> {
+        Path::try_from(std::env::current_dir().ok()?).ok()
+    }
 }
 
 impl<'a> AsRef<std::path::Path> for Path<'a> {
