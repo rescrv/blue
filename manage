@@ -56,6 +56,13 @@ if __name__ == '__main__':
         old_version = version.groupdict()['version']
         print()
         print('working on', crate, old_version)
+        stdout = subprocess.check_output(('git', 'whatchanged', crate), cwd=root)
+        assert stdout.startswith(b'commit')
+        headref = stdout.split(b'\n')[0][7:]
+        tagref = subprocess.check_output(('git', 'rev-list', '-n', '1', 'refs/tags/{}@{}'.format(crate, old_version)))
+        if headref.strip() == tagref.strip():
+            print('revision at latest; continuing')
+            continue
         input('press enter to view changelog> ')
         subprocess.check_call(('git', 'whatchanged', crate), cwd=root)
         new_version = input('what version to publish> ')
