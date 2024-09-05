@@ -1179,12 +1179,7 @@ impl State {
                 date_time_to_string(end_time),
                 file_number
             );
-            convert_clues_to_analogize(
-                &mut syms,
-                start_time,
-                clues,
-                &self.data.join(&output_path),
-            )?;
+            convert_clues_to_analogize(&mut syms, start_time, clues, self.data.join(&output_path))?;
             let syms_tmp = format!("symbols.{}", Utc::now().timestamp());
             let syms_tmp = self.data.join(syms_tmp);
             syms.to_file(&syms_tmp)?;
