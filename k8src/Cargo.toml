@@ -1,0 +1,34 @@
+[package]
+name = "k8src"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "k8src is the kubernetes rc scripting language"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
+[dependencies]
+getopts = { version = "0.2", optional = true }
+yaml-rust = "0.4"
+
+arrrg = { path = "../arrrg", version = "0.4", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.4", optional = true }
+rc_conf = { path = "../rc_conf", version = "0.4" }
+shvar = { path = "../shvar", version = "0.3" }
+utf8path = { path = "../utf8path", version = "0.4" }
+
+[[bin]]
+name = "k8src"
+path = "src/bin/k8src.rs"
+required-features=["binaries"]
+
+[[test]]
+name = "specs"
+path = "tests/specs.rs"
+harness = false

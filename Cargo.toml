@@ -15,6 +15,7 @@ members = [
     "derive_util",
     "guacamole",
     "indicio",
+    "k8src",
     "listfree",
     "lsmtk",
     "macarunes",
