@@ -271,6 +271,12 @@ impl<T: VariableProvider> VariableProvider for Box<T> {
     }
 }
 
+impl VariableProvider for Box<dyn VariableProvider> {
+    fn lookup(&self, ident: &str) -> Option<String> {
+        self.as_ref().lookup(ident)
+    }
+}
+
 impl<T: VariableProvider> VariableProvider for Arc<T> {
     fn lookup(&self, ident: &str) -> Option<String> {
         self.as_ref().lookup(ident)
