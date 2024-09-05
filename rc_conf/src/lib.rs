@@ -715,24 +715,12 @@ impl RcConf {
         }
     }
 
-    /// Generate the set of rcvariables that are expected by the script at `path` when invoked as
+    /// Create a variable provider that will lookup variables for service.
     /// `service`.
-    pub fn bind_for_invoke(
+    pub fn variable_provider_for(
         &self,
         service: &str,
-        path: &Path,
-    ) -> Result<HashMap<String, String>, Error> {
-        let mut bindings = HashMap::new();
-        let output = Command::new(path.clone().into_std())
-            .arg("rcvar")
-            .env("RCVAR_ARGV0", var_name_from_service(service))
-            .output()?;
-        if !output.status.success() {
-            return Err(Error::InvalidInvocation {
-                message: "rcvar command failed".to_string(),
-            });
-        }
-        let stdout = String::from_utf8(output.stdout)?;
+    ) -> Result<impl VariableProvider + '_, Error> {
         // NOTE(rescrv):  Don't use lookup_suffix here because we need the full variable provider
         // to be able to expand the suffix.
         let (alias_lookup_order, pre_lookup) = self.alias_lookup_order(service);
@@ -752,6 +740,28 @@ impl RcConf {
             }
         }
         let vp = (pre_lookup, vp, self);
+        Ok(vp)
+    }
+
+    /// Generate the set of rcvariables that are expected by the script at `path` when invoked as
+    /// `service`.
+    pub fn bind_for_invoke(
+        &self,
+        service: &str,
+        path: &Path,
+    ) -> Result<HashMap<String, String>, Error> {
+        let mut bindings = HashMap::new();
+        let output = Command::new(path.clone().into_std())
+            .arg("rcvar")
+            .env("RCVAR_ARGV0", var_name_from_service(service))
+            .output()?;
+        if !output.status.success() {
+            return Err(Error::InvalidInvocation {
+                message: "rcvar command failed".to_string(),
+            });
+        }
+        let stdout = String::from_utf8(output.stdout)?;
+        let vp = self.variable_provider_for(service)?;
         for var in stdout.split_whitespace() {
             let Some(short) = var.strip_prefix(&var_prefix_from_service(service)) else {
                 continue;
@@ -812,7 +822,8 @@ impl RcConf {
         SwitchPosition::No
     }
 
-    fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
+    /// Lookup the value of the variable as service_SUFFIX, any alias_SUFFIX, and finally SUFFIX.
+    pub fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
         let mut varname = var_prefix_from_service(service);
         varname += suffix;
         if let Some(value) = self.lookup(&varname) {
@@ -1047,6 +1058,14 @@ pub fn var_name_from_service(service: &str) -> String {
     service
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Return _a_ canonical service name from a variable name.
+pub fn service_from_var_name(var_name: &str) -> String {
+    var_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect()
 }
 
