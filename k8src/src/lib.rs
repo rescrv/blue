@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::HashMap;
 
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
