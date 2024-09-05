@@ -47,7 +47,7 @@ fn main() {
                 eprintln!("need at least two items on the stack to subtract");
             }
         } else if line.trim() == "!" {
-            if stack.len() >= 1 {
+            if !stack.is_empty() {
                 // SAFETY(rescrv):  stack.len() >= 2.
                 let lhs = stack.pop().unwrap();
                 stack.push(Setsum::default() - lhs);
