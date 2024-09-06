@@ -10,7 +10,44 @@ use utf8path::Path;
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
-const SERVICE_DEFAULT_YAML: &str = r#"
+const SERVICE_DEFAULT_YAML: &str = r#"apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE:?SERVICE not defined}
+  namespace: ${NAMESPACE:?NAMESPACE not defined}
+  labels:
+    app: ${SERVICE:?SERVICE not defined}
+spec:
+  replicas: ${REPLICAS:?}
+  selector:
+    matchLabels:
+      app: ${SERVICE:?SERVICE not defined}
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE:?SERVICE not defined}
+    spec:
+      containers:
+      - name: ${SERVICE:?SERVICE not defined}
+        image: ${IMAGE:?IMAGE not defined}
+        ports:
+        - containerPort: ${PORT:?PORT not defined}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE:?SERVICE not defined}
+  namespace: ${NAMESPACE:?NAMESPACE not defined}
+  labels:
+    app: ${SERVICE:?SERVICE not defined}
+spec:
+  type: NodeIP
+  ports:
+  - port: ${PORT:?PORT not defined}
+    protocol: TCP
+    targetPort: ${PORT:?PORT not defined}
+  selector:
+    app: ${SERVICE:?SERVICE not defined}
 "#;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -168,8 +205,17 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     let rc_confs = restrict_to_terminals(find_rc_confs(&root)?);
     for rc_conf in rc_confs.into_iter() {
         let candidates = candidates(&root, &rc_conf);
+        let Some(relative) = candidates[candidates.len() - 1].strip_prefix(root.as_str()) else {
+            panic!("there's a logic error; this should be unreachable");
+        };
         let rc_conf_path = rc_conf_path(&candidates);
         let rc_conf = RcConf::parse(&rc_conf_path)?;
+        let mut root_yaml = r#"apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+"#
+        .to_string();
+        let mut extended = false;
         for var in rc_conf.variables() {
             if let Some(service) = var.strip_suffix("_ENABLED") {
                 let service = rc_conf::service_from_var_name(service);
@@ -191,31 +237,34 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
                 let locals = HashMap::from_iter([("SERVICE", &service)]);
                 let vp = (&locals, &rcvp);
                 let yaml = _rewrite(&vp, &yaml)?;
-                let Some(relative) = candidates[candidates.len() - 1].strip_prefix(root.as_str())
-                else {
-                    panic!("there's a logic error; this should be unreachable");
-                };
                 let output = Path::from(format!("manifests/{relative}/herd/{service}.yaml",));
                 if output.exists() {
                     return Err(Error::ManifestExists(output.into_owned()));
                 }
                 std::fs::create_dir_all(output.dirname())?;
-                std::fs::write(output, yaml)?;
+                std::fs::write(&output, yaml)?;
+                root_yaml += &format!("- {}.yaml\n", service);
+                extended = true;
             }
         }
+        if extended {
+            std::fs::write("manifests/herd/kustomization.yaml", root_yaml)?;
+        }
+        let mut have_pets = false;
         for candidate in candidates.iter().rev() {
             let pets = candidate.join("pets");
             if !pets.exists() {
                 eprintln!("skipping pets in {pets:?}");
                 continue;
             }
-            fn copy_pets_from_dir(root: &Path, pets: &Path) -> Result<(), Error> {
+            fn copy_pets_from_dir(root: &Path, pets: &Path) -> Result<bool, Error> {
+                let mut copied = false;
                 for pet in std::fs::read_dir(pets)? {
                     let pet = pet?;
                     let pet =
                         Path::try_from(pet.path()).map_err(|_| Error::NonUtf8Path(pet.path()))?;
                     if pet.is_dir() {
-                        copy_pets_from_dir(root, &pet)?;
+                        copied |= copy_pets_from_dir(root, &pet)?;
                         continue;
                     }
                     if !pet.as_str().ends_with(".yaml") {
@@ -226,19 +275,46 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
                         panic!("there's a logic error; this should be unreachable");
                     };
                     let source = pet.clone();
-                    let Some(pet) = pet.strip_prefix(root.as_str()) else {
-                        panic!("there's a logic error; this should be unreachable");
-                    };
-                    let output = Path::from(format!("manifests/{relative}/{pet}",));
+                    let output = Path::from(format!("manifests/{relative}",));
                     if output.exists() {
                         return Err(Error::ManifestExists(output.into_owned()));
                     }
                     std::fs::create_dir_all(output.dirname())?;
                     std::fs::copy(source, output)?;
+                    copied = true;
                 }
-                Ok(())
+                Ok(copied)
             }
-            copy_pets_from_dir(&root, &pets)?;
+            have_pets |= copy_pets_from_dir(&root, &pets)?;
+        }
+        if extended && have_pets {
+            std::fs::write(
+                "manifests/kustomization.yaml",
+                r#"apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - herd
+  - pets
+"#,
+            )?;
+        } else if extended {
+            std::fs::write(
+                "manifests/kustomization.yaml",
+                r#"apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - herd
+"#,
+            )?;
+        } else if have_pets {
+            std::fs::write(
+                "manifests/kustomization.yaml",
+                r#"apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - pets
+"#,
+            )?;
         }
     }
     Ok(())
