@@ -715,6 +715,35 @@ impl RcConf {
         }
     }
 
+    /// List all services and aliases inferrable from the rc.conf.
+    pub fn list(&self) -> Result<impl Iterator<Item = String> + '_, Error> {
+        let mut services = vec![];
+        for var in self.variables() {
+            if let Some(service) = var.strip_suffix("_ENABLED") {
+                services.push(service_from_var_name(service));
+            }
+        }
+        services.extend(self.aliases.keys().cloned());
+        services.sort();
+        Ok(services.into_iter())
+    }
+
+    /// List the services with the ServiceSwitch::Yes flag.  This will return the canonical service
+    /// name for each _ENABLED="YES" variable or alias.
+    pub fn list_services(&self) -> Result<impl Iterator<Item = String> + '_, Error> {
+        Ok(self
+            .list()?
+            .filter(|s| self.service_switch(s) == SwitchPosition::Yes))
+    }
+
+    /// List the tasks with the ServiceSwitch::Manual flag.  This will return the canonical service
+    /// name for each _ENABLED="YES" variable or alias.
+    pub fn list_tasks(&self) -> Result<impl Iterator<Item = String> + '_, Error> {
+        Ok(self
+            .list()?
+            .filter(|s| self.service_switch(s) == SwitchPosition::Manual))
+    }
+
     /// Create a variable provider that will lookup variables for service.
     /// `service`.
     pub fn variable_provider_for(
@@ -1065,7 +1094,13 @@ pub fn var_name_from_service(service: &str) -> String {
 pub fn service_from_var_name(var_name: &str) -> String {
     var_name
         .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .flat_map(|c| {
+            if c.is_alphanumeric() {
+                c.to_lowercase()
+            } else {
+                '-'.to_lowercase()
+            }
+        })
         .collect()
 }
 

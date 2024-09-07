@@ -1,0 +1,2 @@
+source: this is bar7 template
+salutation: ${SALUTATION:-<UNSET>}

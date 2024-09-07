@@ -1,0 +1,2 @@
+source: this is the generic template
+salutation: ${SALUTATION:-<UNSET>}

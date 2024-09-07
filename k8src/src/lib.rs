@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
-use rc_conf::{RcConf, SwitchPosition};
+use rc_conf::RcConf;
 use shvar::VariableProvider;
 use utf8path::Path;
 
@@ -64,6 +64,9 @@ pub enum Error {
     InvalidCurrentDirectory,
     ManifestsDirectoryExists,
     ManifestExists(Path<'static>),
+    ManifestMissing(Path<'static>),
+    BadOptions(String),
+    VerificationError(Path<'static>),
 }
 
 impl From<std::io::Error> for Error {
@@ -188,10 +191,52 @@ pub struct RegenerateOptions {
         feature = "command_line",
         arrrg(optional, "Root of the k8src repository.")
     )]
-    root: Option<String>,
+    pub root: Option<String>,
+    #[cfg_attr(feature = "command_line", arrrg(optional, "Root of the k8src output."))]
+    pub output: Option<String>,
+    #[cfg_attr(feature = "command_line", arrrg(flag, "Overwrite the existing files."))]
+    pub overwrite: bool,
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(flag, "Verify the existing files rather than generating.")
+    )]
+    pub verify: bool,
 }
 
 //////////////////////////////////////////// regenerate ////////////////////////////////////////////
+
+fn write_yaml(
+    options: &RegenerateOptions,
+    output: Path,
+    yaml: &str,
+    tracking: &mut Vec<Path>,
+) -> Result<(), Error> {
+    if options.verify && options.overwrite {
+        Err(Error::BadOptions(
+            "--verify and --overwrite are mutually exclusive".to_string(),
+        ))
+    } else if options.verify {
+        if !output.exists() {
+            return Err(Error::ManifestMissing(output.into_owned()));
+        }
+        let returned = yaml;
+        let expected = std::fs::read_to_string(&output)?;
+        if expected != returned {
+            Err(Error::VerificationError(output.into_owned()))
+        } else {
+            tracking.push(output.into_owned());
+            Ok(())
+        }
+    } else {
+        if output.exists() && !options.overwrite {
+            return Err(Error::ManifestExists(output.into_owned()));
+        }
+        std::fs::create_dir_all(output.dirname())?;
+        std::fs::write(&output, yaml)?;
+        tracking.push(output.into_owned());
+        Ok(())
+    }
+}
 
 pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     let root = if let Some(root) = options.root.as_ref() {
@@ -199,7 +244,12 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     } else {
         Path::cwd().ok_or(Error::InvalidCurrentDirectory)?
     };
-    if Path::from("manifests").exists() {
+    let output = if let Some(output) = options.output.as_ref() {
+        Path::from(output)
+    } else {
+        root.join("manifests")
+    };
+    if !options.verify && Path::from("manifests").exists() {
         return Err(Error::ManifestsDirectoryExists);
     }
     let rc_confs = restrict_to_terminals(find_rc_confs(&root)?);
@@ -216,55 +266,49 @@ resources:
 "#
         .to_string();
         let mut extended = false;
-        for var in rc_conf.variables() {
-            if let Some(service) = var.strip_suffix("_ENABLED") {
-                let service = rc_conf::service_from_var_name(service);
-                match rc_conf.service_switch(&service) {
-                    SwitchPosition::Yes => {}
-                    SwitchPosition::No => {
-                        eprintln!("{service:?} disabled");
-                        continue;
-                    }
-                    SwitchPosition::Manual => {
-                        todo!();
-                    }
-                };
-                let yaml = match template_for_service(&candidates, &service) {
-                    Some(template) => std::fs::read_to_string(template)?,
-                    None => SERVICE_DEFAULT_YAML.to_string(),
-                };
-                let rcvp = rc_conf.variable_provider_for(&service)?;
-                let locals = HashMap::from_iter([("SERVICE", &service)]);
-                let vp = (&locals, &rcvp);
-                let yaml = _rewrite(&vp, &yaml)?;
-                let output = Path::from(format!("manifests/{relative}/herd/{service}.yaml",));
-                if output.exists() {
-                    return Err(Error::ManifestExists(output.into_owned()));
-                }
-                std::fs::create_dir_all(output.dirname())?;
-                std::fs::write(&output, yaml)?;
-                root_yaml += &format!("- {}.yaml\n", service);
-                extended = true;
-            }
+        let mut tracking = vec![];
+        for service in rc_conf.list_services()? {
+            let yaml = match template_for_service(&candidates, &service) {
+                Some(template) => std::fs::read_to_string(template)?,
+                None => SERVICE_DEFAULT_YAML.to_string(),
+            };
+            let rcvp = rc_conf.variable_provider_for(&service)?;
+            let locals = HashMap::from_iter([("SERVICE", &service)]);
+            let vp = (&locals, &rcvp);
+            let yaml = _rewrite(&vp, &yaml)?;
+            let output = output.join(Path::from(format!("{relative}/herd/{service}.yaml")));
+            write_yaml(&options, output, &yaml, &mut tracking)?;
+            root_yaml += &format!("- {}.yaml\n", service);
+            extended = true;
         }
         if extended {
-            std::fs::write("manifests/herd/kustomization.yaml", root_yaml)?;
+            write_yaml(
+                &options,
+                output.join(Path::from("herd/kustomization.yaml")),
+                &root_yaml,
+                &mut tracking,
+            )?;
         }
         let mut have_pets = false;
         for candidate in candidates.iter().rev() {
             let pets = candidate.join("pets");
             if !pets.exists() {
-                eprintln!("skipping pets in {pets:?}");
                 continue;
             }
-            fn copy_pets_from_dir(root: &Path, pets: &Path) -> Result<bool, Error> {
+            fn copy_pets_from_dir(
+                options: &RegenerateOptions,
+                root: &Path,
+                output: &Path,
+                pets: &Path,
+                tracking: &mut Vec<Path>,
+            ) -> Result<bool, Error> {
                 let mut copied = false;
                 for pet in std::fs::read_dir(pets)? {
                     let pet = pet?;
                     let pet =
                         Path::try_from(pet.path()).map_err(|_| Error::NonUtf8Path(pet.path()))?;
                     if pet.is_dir() {
-                        copied |= copy_pets_from_dir(root, &pet)?;
+                        copied |= copy_pets_from_dir(options, root, output, &pet, tracking)?;
                         continue;
                     }
                     if !pet.as_str().ends_with(".yaml") {
@@ -275,45 +319,47 @@ resources:
                         panic!("there's a logic error; this should be unreachable");
                     };
                     let source = pet.clone();
-                    let output = Path::from(format!("manifests/{relative}",));
-                    if output.exists() {
-                        return Err(Error::ManifestExists(output.into_owned()));
-                    }
-                    std::fs::create_dir_all(output.dirname())?;
-                    std::fs::copy(source, output)?;
+                    let output = output.join(Path::from(format!("{relative}")));
+                    write_yaml(options, output, &std::fs::read_to_string(source)?, tracking)?;
                     copied = true;
                 }
                 Ok(copied)
             }
-            have_pets |= copy_pets_from_dir(&root, &pets)?;
+            have_pets |= copy_pets_from_dir(&options, &root, &output, &pets, &mut tracking)?;
         }
         if extended && have_pets {
-            std::fs::write(
-                "manifests/kustomization.yaml",
+            write_yaml(
+                &options,
+                output.join(Path::from("kustomization.yaml")),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - herd
   - pets
 "#,
+                &mut tracking,
             )?;
         } else if extended {
-            std::fs::write(
-                "manifests/kustomization.yaml",
+            write_yaml(
+                &options,
+                output.join(Path::from("kustomization.yaml")),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - herd
 "#,
+                &mut tracking,
             )?;
         } else if have_pets {
-            std::fs::write(
-                "manifests/kustomization.yaml",
+            write_yaml(
+                &options,
+                output.join(Path::from("kustomization.yaml")),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - pets
 "#,
+                &mut tracking,
             )?;
         }
     }

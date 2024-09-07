@@ -1,0 +1,2 @@
+source: this is foo1 template
+salutation: ${SALUTATION:-<UNSET>}

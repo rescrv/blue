@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memcached_two
+  namespace: memcached
+  labels:
+    app: memcached_two
+spec:
+  selector:
+    matchLabels:
+      app: memcached_two
+  template:
+    metadata:
+      labels:
+        app: memcached_two
+    spec:
+      containers:
+        - name: memcached_two
+          image: "memcached:latest"
+          ports:
+            - containerPort: 22122
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memcached_two
+  namespace: memcached
+  labels:
+    app: memcached_two
+spec:
+  type: NodeIP
+  ports:
+    - port: 22122
+      protocol: TCP
+      targetPort: 22122
+  selector:
+    app: memcached_two

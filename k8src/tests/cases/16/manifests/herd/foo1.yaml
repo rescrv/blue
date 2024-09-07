@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foo1
+  namespace: symphhonize
+  labels:
+    app: foo1
+spec:
+  selector:
+    matchLabels:
+      app: foo1
+  template:
+    metadata:
+      labels:
+        app: foo1
+    spec:
+      containers:
+        - name: foo1
+          image: "foo1:latest"
+          ports:
+            - containerPort: 6600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: foo1
+  namespace: symphhonize
+  labels:
+    app: foo1
+spec:
+  type: NodeIP
+  ports:
+    - port: 6600
+      protocol: TCP
+      targetPort: 6600
+  selector:
+    app: foo1
