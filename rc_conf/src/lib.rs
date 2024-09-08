@@ -412,6 +412,7 @@ struct Alias {
 pub struct RcConf {
     items: HashMap<String, String>,
     aliases: HashMap<String, Alias>,
+    autogens: HashSet<String>,
     values: HashMap<String, RcConf>,
     filters: HashMap<String, RcConf>,
 }
@@ -429,6 +430,7 @@ impl RcConf {
             Self::parse_recursive(&piece, &mut seen, &mut items)?;
         }
         let mut aliases = HashMap::default();
+        let mut autogens = HashSet::default();
         for (varname, alias) in items.iter() {
             let Some(name) = varname.strip_suffix("_ALIASES") else {
                 continue;
@@ -448,6 +450,9 @@ impl RcConf {
             } else {
                 false
             };
+            if items.lookup(&(name.to_string() + "_AUTOGEN")).is_some() {
+                autogens.insert(name.to_string());
+            }
             aliases.insert(
                 name.to_string(),
                 Alias {
@@ -469,6 +474,7 @@ impl RcConf {
                 RcConf {
                     items: values_items,
                     aliases: HashMap::default(),
+                    autogens: HashSet::default(),
                     values: HashMap::default(),
                     filters: HashMap::default(),
                 },
@@ -483,7 +489,7 @@ impl RcConf {
             Self::parse_error_on_source(&Path::from(filters_conf.clone()), &mut filters_items)?;
             let filters_conf = Path::from(filters_conf.as_str());
             let (sep, vars) = split_for_filter(name);
-            let name = vars.join("__");
+            let name = vars.join(&sep);
             for varname in filters_items.keys() {
                 let pieces = varname.split(&sep).collect::<Vec<_>>();
                 if pieces.len() != vars.len() {
@@ -515,6 +521,7 @@ impl RcConf {
                 RcConf {
                     items: filters_items,
                     aliases: HashMap::default(),
+                    autogens: HashSet::default(),
                     values: HashMap::default(),
                     filters: HashMap::default(),
                 },
@@ -533,7 +540,7 @@ impl RcConf {
                     format!("{varname} must be set to YES or NO"),
                 ));
             }
-            let (template, variables) = strip_prefix_values(&values, alias);
+            let (template, variables, filter) = strip_prefix_values(&values, alias);
             if variables.is_empty() {
                 return Err(Error::invalid_rc_conf(
                     &Path::from(path),
@@ -541,6 +548,7 @@ impl RcConf {
                     "autogen requires one or more VALUES_-declared variables",
                 ));
             }
+            let filter_rc_conf = filters.get(&variables.join("_"));
             let bindings = variables
                 .iter()
                 .filter_map(|v| values.get(v).map(|rc| rc.variables()))
@@ -563,6 +571,7 @@ impl RcConf {
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect::<HashMap<_, _>>();
                 let candidate = shvar::expand(&vp, &template)?;
+                let filter_key = shvar::expand(&vp, &filter)?;
                 if aliases.contains_key(&candidate) {
                     return Err(Error::invalid_rc_conf(
                         &Path::from(path),
@@ -570,14 +579,21 @@ impl RcConf {
                         format!("{candidate} comes from both autogen and alias"),
                     ));
                 }
-                aliases.insert(
-                    candidate,
-                    Alias {
-                        aliases: alias.to_string(),
-                        inherit: true,
-                        vp,
-                    },
-                );
+                let insert = if let Some(filter_rc_conf) = filter_rc_conf.as_ref() {
+                    filter_rc_conf.lookup(&filter_key).is_some()
+                } else {
+                    true
+                };
+                if insert {
+                    aliases.insert(
+                        candidate,
+                        Alias {
+                            aliases: alias.to_string(),
+                            inherit: true,
+                            vp,
+                        },
+                    );
+                }
                 for idx in (0..bindings.len()).rev() {
                     cursors[idx] = cursors[idx].saturating_add(1);
                     if idx > 0 && cursors[idx] >= bindings[idx].len() {
@@ -591,6 +607,7 @@ impl RcConf {
         Ok(Self {
             items,
             aliases,
+            autogens,
             values,
             filters,
         })
@@ -720,10 +737,13 @@ impl RcConf {
         let mut services = vec![];
         for var in self.variables() {
             if let Some(service) = var.strip_suffix("_ENABLED") {
+                if self.lookup_suffix_direct(service, "AUTOGEN").is_some() {
+                    continue;
+                }
                 services.push(service_from_var_name(service));
             }
         }
-        services.extend(self.aliases.keys().cloned());
+        services.extend(self.aliases());
         services.sort();
         Ok(services.into_iter())
     }
@@ -877,7 +897,14 @@ impl RcConf {
 
     /// Return the list of aliases.
     pub fn aliases(&self) -> Vec<String> {
-        self.aliases.keys().cloned().collect()
+        let mut aliases = self
+            .aliases
+            .keys()
+            .filter(|a| !self.autogens.contains(*a))
+            .cloned()
+            .collect::<Vec<_>>();
+        aliases.sort();
+        aliases
     }
 
     /// Resolve the alias `service` one-hop.
@@ -1122,17 +1149,23 @@ fn split_for_filter(var: &str) -> (String, Vec<String>) {
     }
 }
 
-fn strip_prefix_values(values: &HashMap<String, RcConf>, template: &str) -> (String, Vec<String>) {
+fn strip_prefix_values(
+    values: &HashMap<String, RcConf>,
+    template: &str,
+) -> (String, Vec<String>, String) {
     let mut still_pulling_values = true;
     let mut vars = vec![];
     let mut built = vec![];
+    let mut filter = vec![];
     let pieces = template.split('_').collect::<Vec<_>>();
     for piece in pieces.iter() {
         let contains = values.contains_key(&piece.to_string());
         if !piece.is_empty() {
             if contains && still_pulling_values {
                 vars.push(piece.to_string());
-                built.push(format!("${{{piece}}}"));
+                let var = format!("${{{piece}}}");
+                built.push(var.clone());
+                filter.push(var);
             } else if !contains || !still_pulling_values {
                 still_pulling_values = false;
                 built.push(piece.to_string());
@@ -1141,7 +1174,7 @@ fn strip_prefix_values(values: &HashMap<String, RcConf>, template: &str) -> (Str
             built.push(piece.to_string());
         }
     }
-    (built.join("_"), vars)
+    (built.join("_"), vars, filter.join("_"))
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -1297,9 +1330,39 @@ bar_ENABLE=YES
         assert_eq!(
             (
                 "${FOO}_${BAR}_service".to_string(),
-                vec!["FOO".to_string(), "BAR".to_string()]
+                vec!["FOO".to_string(), "BAR".to_string()],
+                "${FOO}_${BAR}".to_string(),
             ),
             super::strip_prefix_values(&values, "FOO_BAR_service")
+        );
+    }
+
+    #[test]
+    fn fragmented_services() {
+        let rc_conf = super::RcConf::parse("rc.conf").unwrap();
+        assert_eq!(
+            vec![
+                "Jfk_PlanetExpress_example4",
+                "Jfk_TyrellCorp_example4",
+                "Sac_Acme_example4",
+                "Sfo_ApertureScience_example4",
+                "Sjc_CyberDyne_example4",
+                "example3",
+            ],
+            rc_conf.aliases(),
+        );
+        assert_eq!(
+            vec![
+                "Jfk_PlanetExpress_example4",
+                "Jfk_TyrellCorp_example4",
+                "Sac_Acme_example4",
+                "Sfo_ApertureScience_example4",
+                "Sjc_CyberDyne_example4",
+                "example1",
+                "example2",
+                "example3",
+            ],
+            rc_conf.list().unwrap().collect::<Vec<_>>()
         );
     }
 }
