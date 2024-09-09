@@ -1103,7 +1103,7 @@ impl ExecutionContext {
         // setup wrapper
         let wrapper = config
             .rc_conf
-            .argv(service, "WRAPPER")?
+            .argv(service, "WRAPPER", &())?
             .into_iter()
             .map(|a| CString::new(a.as_bytes()))
             .collect::<Result<Vec<_>, std::ffi::NulError>>()?;

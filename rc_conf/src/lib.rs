@@ -825,14 +825,19 @@ impl RcConf {
     }
 
     /// Return a vector of strings suitable for passing to exec.
-    pub fn argv(&self, service: &str, variable: &str) -> Result<Vec<String>, Error> {
+    pub fn argv(
+        &self,
+        service: &str,
+        variable: &str,
+        additional: &impl VariableProvider,
+    ) -> Result<Vec<String>, Error> {
         let prefix = var_prefix_from_service(service);
         let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
         let pvp = PrefixingVariableProvider {
             prefix,
             nested: self,
         };
-        let vp = (&meta, &pvp);
+        let vp = (additional, &meta, &pvp);
         let Some(argv) = self.lookup_suffix(service, variable) else {
             return Ok(vec![]);
         };
@@ -1022,7 +1027,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
         .expect("bind for invoke should bind");
     bound.extend(env);
     let argv = rc_conf
-        .argv(service, "WRAPPER")
+        .argv(service, "WRAPPER", &())
         .expect("argv should generate");
     let err = if !argv.is_empty() {
         Command::new(&argv[0])
