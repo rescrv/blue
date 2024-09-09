@@ -193,6 +193,7 @@ impl SwitchPosition {
 /// An RcScript implements the rc.d service interface in a declarative way.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RcScript {
+    /// The name of the rcscript.
     pub name: String,
     describe: String,
     command: String,
@@ -376,6 +377,8 @@ pub struct EnvironmentVariableProvider {
 }
 
 impl EnvironmentVariableProvider {
+    /// Create a new environmental variable provider that looks values up in the environment,
+    /// optionally under some prefix.
     pub const fn new(prefix: Option<String>) -> Self {
         Self { prefix }
     }

@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: rcdebug <rc_conf_path>
+//! ```
+
 use rc_conf::RcConf;
 
 fn main() {

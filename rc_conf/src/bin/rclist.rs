@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: rclist <rc_d_path>
+//! ```
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let mut first = true;

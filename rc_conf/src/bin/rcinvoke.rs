@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: rcinvoke [OPTIONS] <service> [ARGS]
+//! ```
+
 use arrrg::CommandLine;
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]

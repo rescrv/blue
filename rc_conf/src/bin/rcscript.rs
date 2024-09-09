@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: RCVAR_ARGV0=${RCVAR_ARGV0} rcscript [--arguments-to-pass]
+//! ```
+
 use std::fs::read_to_string;
 
 use utf8path::Path;

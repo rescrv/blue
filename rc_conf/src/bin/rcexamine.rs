@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: rcexamine <rc_conf_path>
+//! ```
+
 use rc_conf::RcConf;
 
 fn main() {

@@ -1,3 +1,7 @@
+//! ```
+//! USAGE: rcvar [OPTIONS] <service>
+//! ```
+
 use arrrg::CommandLine;
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
