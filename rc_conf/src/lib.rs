@@ -831,13 +831,9 @@ impl RcConf {
         variable: &str,
         additional: &impl VariableProvider,
     ) -> Result<Vec<String>, Error> {
-        let prefix = var_prefix_from_service(service);
         let meta = HashMap::from([("NAME".to_string(), service.to_string())]);
-        let pvp = PrefixingVariableProvider {
-            prefix,
-            nested: self,
-        };
-        let vp = (additional, &meta, &pvp);
+        let vp = self.variable_provider_for(service)?;
+        let vp = (additional, &meta, &vp);
         let Some(argv) = self.lookup_suffix(service, variable) else {
             return Ok(vec![]);
         };
