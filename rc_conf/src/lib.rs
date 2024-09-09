@@ -757,7 +757,7 @@ impl RcConf {
     }
 
     /// List the tasks with the ServiceSwitch::Manual flag.  This will return the canonical service
-    /// name for each _ENABLED="YES" variable or alias.
+    /// name for each _ENABLED="MANUAL" variable or alias.
     pub fn list_tasks(&self) -> Result<impl Iterator<Item = String> + '_, Error> {
         Ok(self
             .list()?
