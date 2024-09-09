@@ -182,7 +182,9 @@ impl Symphonize {
                 .truncate(true)
                 .open(self.target_dir().join(".k8srcignore"))?,
         );
-        std::fs::remove_dir_all(self.target_dir().join("manifests"))?;
+        if self.target_dir().join("manifests").exists() {
+            std::fs::remove_dir_all(self.target_dir().join("manifests"))?;
+        }
         k8src::regenerate(options)?;
         Ok(())
     }
