@@ -1,10 +1,38 @@
 #![doc = include_str!("../README.md")]
 
-use std::os::unix::process::CommandExt;
+use std::collections::HashMap;
+use std::fs::OpenOptions;
 
+use rc_conf::RcConf;
+use shvar::VariableProvider;
 use utf8path::Path;
 
-use rustrc::Pid1Options;
+/////////////////////////////////////////////// Error //////////////////////////////////////////////
+
+#[derive(Debug)]
+pub enum Error {
+    Io(std::io::Error),
+    RcConf(rc_conf::Error),
+    K8sRc(k8src::Error),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl From<rc_conf::Error> for Error {
+    fn from(err: rc_conf::Error) -> Self {
+        Self::RcConf(err)
+    }
+}
+
+impl From<k8src::Error> for Error {
+    fn from(err: k8src::Error) -> Self {
+        Self::K8sRc(err)
+    }
+}
 
 ///////////////////////////////////////// SymphonizeOptions ////////////////////////////////////////
 
@@ -12,23 +40,13 @@ use rustrc::Pid1Options;
 /// release or debug mode.  Only debug mode is supported at the moment.
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct SymphonizeOptions {
-    #[arrrg(
-        flag,
-        "Run using cargo build --debug and the binaries in target/debug."
-    )]
-    pub debug: bool,
-    #[arrrg(
-        flag,
-        "Run using release binaries and put the binaries under --workdir."
-    )]
-    pub release: bool,
-    #[arrrg(optional, "Set the symphonize working directory.")]
-    pub workdir: Option<String>,
+    #[arrrg(flag, "Do everything up to calling kubectl apply")]
+    dry_run: bool,
 }
 
-////////////////////////////////////// autoinfer_configuration /////////////////////////////////////
+///////////////////////////////////// auto_infer_configuration /////////////////////////////////////
 
-fn paths_to_root() -> Result<Vec<Path<'static>>, std::io::Error> {
+pub fn paths_to_root(_options: &SymphonizeOptions) -> Result<Vec<Path<'static>>, std::io::Error> {
     let mut cwd = Path::try_from(std::env::current_dir()?).map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -56,162 +74,161 @@ fn paths_to_root() -> Result<Vec<Path<'static>>, std::io::Error> {
     ))
 }
 
-/// Automatically detect the rc_conf path given a path of candidates.
-pub fn rc_conf_path(candidates: &[Path]) -> String {
-    let mut rc_conf_path = String::new();
-    for candidate in candidates {
-        if !rc_conf_path.is_empty() {
-            rc_conf_path.push(':');
-        }
-        rc_conf_path += candidate.join("rc.conf").as_str();
-    }
-    rc_conf_path
-}
-
-/// Automatically detect the rc.d path for a given root with options.
-pub fn rc_d_path(options: &SymphonizeOptions, root: &Path) -> Result<String, std::io::Error> {
-    let mut rc_d_paths = vec![];
-    rc_d_path_recurse(options, root, &mut rc_d_paths)?;
-    Ok(rc_d_paths
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<_>>()
-        .join(":"))
-}
-
-// TODO(rescrv): address this
-#[allow(clippy::only_used_in_recursion)]
-fn rc_d_path_recurse(
-    options: &SymphonizeOptions,
-    root: &Path,
-    rc_d_paths: &mut Vec<Path<'static>>,
-) -> Result<(), std::io::Error> {
-    if root.is_dir() {
-        let mut entries = vec![];
-        for entry in std::fs::read_dir(root.clone().into_std())? {
-            let entry = entry?;
-            let Ok(path) = Path::try_from(entry.path()) else {
-                continue;
-            };
-            entries.push(path.into_owned());
-        }
-        entries.sort();
-        for entry in entries.into_iter() {
-            if entry.as_str().ends_with("/rc.d") {
-                rc_d_paths.push(entry.clone());
-            }
-            rc_d_path_recurse(options, &entry, rc_d_paths)?;
-        }
-    }
-    Ok(())
-}
+////////////////////////////////////// autoinfer_configuration /////////////////////////////////////
 
 /// Automatically infer a Pid1Options from the SymphonizeOptions.
 pub fn autoinfer_configuration(
-    options: &SymphonizeOptions,
-) -> Result<(Pid1Options, Path<'static>), std::io::Error> {
-    let paths_to_root = paths_to_root()?;
+    _options: &SymphonizeOptions,
+    paths_to_root: &[Path],
+) -> Result<String, Error> {
     if paths_to_root.is_empty() {
-        return Err(std::io::Error::other(
-            "run symphonize within a git repository",
-        ));
+        return Err(std::io::Error::other("run symphonize within a git repository").into());
     }
     let repo = &paths_to_root[0];
-    let mut rc_conf_path = rc_conf_path(&paths_to_root);
+    let mut rc_conf_path = k8src::rc_conf_path(paths_to_root);
     rc_conf_path += ":";
     rc_conf_path += repo.join("rc.local").as_str();
-    let rc_d_path = rc_d_path(options, repo)?;
-    Ok((
-        Pid1Options {
-            rc_conf_path,
-            rc_d_path,
-        },
-        repo.clone().into_owned(),
-    ))
+    Ok(rc_conf_path)
 }
 
-////////////////////////////////////////////// rebuild /////////////////////////////////////////////
+//////////////////////////////////////////// Symphonize ////////////////////////////////////////////
 
-fn rebuild_deps(workdir: &Path) -> Result<(), std::io::Error> {
-    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
-    let mut child = unsafe {
-        std::process::Command::new("cargo")
-            .args(["vendor", workdir.join("vendor").as_str()])
-            .pre_exec(|| {
-                minimal_signals::unblock();
-                Ok(())
-            })
-            .spawn()?
-    };
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(std::io::Error::other("cargo vendor failed"));
-    }
-    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
-    let output = unsafe {
-        std::process::Command::new("cargo")
-            .args(["tree", "--all-features", "--prefix", "none", "--quiet"])
-            .pre_exec(|| {
-                minimal_signals::unblock();
-                Ok(())
-            })
-            .output()?
-    };
-    for dep in String::from_utf8_lossy(&output.stdout).split_terminator('\n') {
-        // TODO(rescrv): Hacky as all get-out.
-        if dep.contains("(/") {
-            continue;
-        }
-        let Some(dep) = dep.split(' ').next() else {
-            continue;
-        };
-        // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
-        let output = unsafe {
-            std::process::Command::new("cargo")
-                .args([
-                    "install",
-                    dep,
-                    "--force",
-                    "--root",
-                    workdir.join(".symphonize/pkg").as_str(),
-                ])
-                .pre_exec(|| {
-                    minimal_signals::unblock();
-                    Ok(())
-                })
-                .output()?
-        };
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success() && !stderr.contains("there is nothing to install in") {
-            return Err(std::io::Error::other(format!(
-                "cargo install failed:\n{stderr}"
-            )));
+pub struct Symphonize {
+    root: Path<'static>,
+    options: SymphonizeOptions,
+    rc_conf: RcConf,
+}
+
+impl Symphonize {
+    pub fn new(options: SymphonizeOptions, root: Path, rc_conf: RcConf) -> Self {
+        Self {
+            root: root.into_owned(),
+            options,
+            rc_conf,
         }
     }
-    Ok(())
-}
 
-/// Rebuild the .symphonize directory in workdir.
-pub fn rebuild_cargo(workdir: &Path<'static>) -> Result<(), std::io::Error> {
-    rebuild_deps(workdir)?;
-    // SAFETY(rescrv):  Manipulating sigprocmask is allowed between fork and exec.
-    let mut child = unsafe {
-        std::process::Command::new("cargo")
-            .args(["build", "--workspace", "--bins"])
-            .pre_exec(|| {
-                minimal_signals::unblock();
-                Ok(())
-            })
-            .spawn()?
-    };
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(std::io::Error::other("cargo build failed"));
+    pub fn apply(&mut self) -> Result<(), Error> {
+        self.build_images()?;
+        self.build_manifests()?;
+        if !self.options.dry_run {
+            self.apply_manifests()?;
+        }
+        Ok(())
     }
-    Ok(())
-}
 
-/// TODO(rescrv): implement.
-pub fn rebuild_release(_workdir: &Path<'static>) -> Result<(), std::io::Error> {
-    todo!("release mode not yet supported");
+    pub fn build_images(&mut self) -> Result<(), Error> {
+        for containerfile in self.rc_conf.variables() {
+            let Some(prefix) = containerfile.strip_suffix("_CONTAINERFILE") else {
+                continue;
+            };
+            let Some(containerfile) = self.rc_conf.lookup(&containerfile) else {
+                continue;
+            };
+            let mut containerfile = Path::from(containerfile);
+            if containerfile.has_app_defined() {
+                containerfile = self.root.join(&containerfile.as_str()[2..]).into_owned();
+            }
+            let service = rc_conf::service_from_var_name(prefix);
+            let Some(image) = self.rc_conf.lookup_suffix(prefix, "IMAGE") else {
+                todo!();
+            };
+            let extra = HashMap::from_iter([
+                ("IMAGE", image.clone()),
+                ("CONTAINERFILE", containerfile.to_string()),
+                ("CONTAINERFILE_DIRNAME", containerfile.dirname().to_string()),
+            ]);
+            // Build the image.
+            let build = self.rc_conf.argv(&service, "IMAGE_BUILD", &extra)?;
+            if build.is_empty() {
+                todo!();
+            }
+            eprintln!("running {build:?}");
+            let child = std::process::Command::new(&build[0])
+                .args(&build[1..])
+                .spawn()?
+                .wait()?;
+            if !child.success() {
+                todo!();
+            }
+            // Push the image.
+            let push = self.rc_conf.argv(&service, "IMAGE_PUSH", &extra)?;
+            if push.is_empty() {
+                todo!();
+            }
+            eprintln!("running {push:?}");
+            let child = std::process::Command::new(&push[0])
+                .args(&push[1..])
+                .spawn()?
+                .wait()?;
+            if !child.success() {
+                todo!();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn build_manifests(&mut self) -> Result<(), Error> {
+        let options = k8src::RegenerateOptions {
+            output: Some(self.target_dir().join("manifests").as_str().to_string()),
+            root: Some(self.root.as_str().to_string()),
+            overwrite: false,
+            verify: false,
+        };
+        drop(
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(self.target_dir().join(".k8srcignore"))?,
+        );
+        std::fs::remove_dir_all(self.target_dir().join("manifests"))?;
+        k8src::regenerate(options)?;
+        Ok(())
+    }
+
+    pub fn apply_manifests(&mut self) -> Result<(), Error> {
+        let cwd = Path::try_from(std::env::current_dir()?).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "current working directory not unicode",
+            )
+        })?;
+        if !cwd.is_abs() && !cwd.has_root() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "current working directory absolute",
+            )
+            .into());
+        }
+        let Some(relative) = cwd.as_str().strip_prefix(self.root.as_str()) else {
+            todo!();
+        };
+        let relative = relative.trim_start_matches('/');
+        let output = self.target_dir().join("manifests").join(relative);
+        let status = std::process::Command::new("kubectl")
+            .arg("apply")
+            .arg("-k")
+            .arg(output.as_str())
+            .spawn()?
+            .wait()?;
+        if status.success() {
+            Ok(())
+        } else {
+            todo!();
+        }
+    }
+
+    fn target_dir(&self) -> Path<'static> {
+        if let Some(target_dir) = self.rc_conf.lookup("SYMPHONIZE_TARGET_DIR") {
+            let target_dir = Path::from(target_dir);
+            if target_dir.has_app_defined() {
+                self.root.join(&target_dir.as_str()[2..]).into_owned()
+            } else {
+                target_dir
+            }
+        } else {
+            self.root.join("target/symphonize")
+        }
+    }
 }

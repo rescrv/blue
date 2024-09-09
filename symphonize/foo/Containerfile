@@ -1,0 +1,14 @@
+# Create the builder
+FROM docker.io/rust:1 as build-env
+RUN cargo install rc_conf --root /usr/local
+
+# Install your application here.
+# This demo installs rustrc for rustrc-smoketest, which will demonstrate the interface.
+RUN cargo install rustrc --root /usr/local
+
+# Create the distroless container
+FROM gcr.io/distroless/cc-debian12:debug
+COPY --from=build-env /usr/local /
+COPY example1 /bin/example1
+ENTRYPOINT ["/bin/example1"]
+CMD ["run"]

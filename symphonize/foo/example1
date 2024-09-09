@@ -1,0 +1,4 @@
+#!/bin/rcscript
+
+DESCRIBE=example1 rcscript
+COMMAND=rustrc-smoke-test ${MESSAGE:+--environment "${MESSAGE}"}

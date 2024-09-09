@@ -1,13 +1,13 @@
 symphonize
 ==========
 
-symphonize is a tool for orchestrating services for unit testing.  Built upon `rc_conf` and `rustrc`, it's simple and
-intended for rust mono repos.
+symphonize is a tool for orchestrating services for unit testing.  Built upon `rc_conf` and `k8src`, it's simple and
+intended for rust mono repos to bring up services on a k8s cluster.
 
 Status
 ------
 
-Maintenance track.  The library is considered stable and will be put into maintenance mode if unchanged for one year.
+Active development.  Since pivoting to k8s, it's been made active.
 
 Scope
 -----
