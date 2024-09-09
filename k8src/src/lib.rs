@@ -175,8 +175,12 @@ fn transform(vp: &dyn VariableProvider, yaml: Yaml) -> Result<Option<Yaml>, Erro
     }
 
     match yaml {
-        Yaml::String(s) => match shvar::expand(vp, &s) {
-            Ok(expanded) => Ok(Some(Yaml::from_str(&expanded))),
+        Yaml::String(s) => match shvar::expand_recursive(vp, &s) {
+            Ok(expanded) => {
+                let pieces = shvar::split(&expanded)?;
+                let quoted = shvar::quote(pieces);
+                Ok(Some(Yaml::from_str(&quoted)))
+            }
             Err(shvar::Error::Requested(msg)) => {
                 if msg.is_empty() {
                     Ok(None)

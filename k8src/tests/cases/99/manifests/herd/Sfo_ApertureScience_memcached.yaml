@@ -1,5 +1,5 @@
 ---
-host: "${CUSTOMER}.${METRO}.memcached.example.org"
+host: ApertureScience.Sfo.memcached.example.org
 port: 11211
 ---
 apiVersion: v1
