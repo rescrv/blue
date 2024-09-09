@@ -29,6 +29,11 @@ name = "k8src"
 path = "src/bin/k8src.rs"
 required-features=["binaries"]
 
+[[example]]
+name = "generate-tests"
+path = "examples/generate-tests.rs"
+required-features=["binaries"]
+
 [[test]]
 name = "specs"
 path = "tests/specs.rs"
