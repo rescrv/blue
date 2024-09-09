@@ -350,7 +350,7 @@ impl RcScript {
         let name = var_prefix_from_service(&self.name);
         let evp = EnvironmentVariableProvider::new(Some(name));
         let meta = HashMap::from([("NAME".to_string(), self.name.to_string())]);
-        let exp = shvar::expand(&(&meta, &evp), &self.command)?;
+        let exp = shvar::expand_recursive(&(&meta, &evp), &self.command)?;
         let mut cmd = shvar::split(&exp)?;
         if !args.is_empty() {
             cmd.push("--".to_string());
@@ -573,8 +573,8 @@ impl RcConf {
                 let vp = std::iter::zip(variables.iter(), candidate)
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect::<HashMap<_, _>>();
-                let candidate = shvar::expand(&vp, &template)?;
-                let filter_key = shvar::expand(&vp, &filter)?;
+                let candidate = shvar::expand_recursive(&vp, &template)?;
+                let filter_key = shvar::expand_recursive(&vp, &filter)?;
                 if aliases.contains_key(&candidate) {
                     return Err(Error::invalid_rc_conf(
                         &Path::from(path),
@@ -830,7 +830,7 @@ impl RcConf {
                 continue;
             };
             if let Some(value) = vp.lookup(short) {
-                let value = shvar::expand(&vp, &value)?;
+                let value = shvar::expand_recursive(&vp, &value)?;
                 let quoted = shvar::quote(shvar::split(&value)?);
                 bindings.insert(var.to_string(), quoted);
             }
@@ -851,7 +851,7 @@ impl RcConf {
         let Some(argv) = self.lookup_suffix(service, variable) else {
             return Ok(vec![]);
         };
-        let argv = shvar::expand(&vp, &argv)?;
+        let argv = shvar::expand_recursive(&vp, &argv)?;
         if argv.trim().is_empty() {
             return Ok(vec![]);
         }
