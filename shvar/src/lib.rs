@@ -751,6 +751,36 @@ pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error>
     Ok(output.into_string().trim().to_string())
 }
 
+///////////////////////////////////////// expand_recursive /////////////////////////////////////////
+
+pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
+    fn generate_witnesses(
+        vars: &dyn VariableProvider,
+        input: &str,
+    ) -> Result<HashSet<String>, Error> {
+        let mut witnesses = HashSet::default();
+        let mut tokens = Tokenize::new(input);
+        let mut output = Builder::default();
+        parse_statement(true, 0, vars, &mut witnesses, &mut tokens, &mut output)?;
+        Ok(witnesses)
+    }
+    let mut witnesses = generate_witnesses(vars, input)?;
+    let mut input = input.to_string();
+    for _ in 0..128 {
+        let once = expand(vars, &input)?;
+        if once == input {
+            return Ok(once);
+        }
+        let new_witnesses = generate_witnesses(vars, &once)?;
+        if witnesses.is_subset(&new_witnesses) {
+            return Err(Error::DepthLimitExceeded);
+        }
+        input = once;
+        witnesses = new_witnesses;
+    }
+    Err(Error::DepthLimitExceeded)
+}
+
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
 /// Return a vector of the variables in use by this script.
@@ -962,6 +992,19 @@ mod tests {
                 "QUUX".to_string()
             ],
             rcvar("${FOO}-${BAR}-${BAZ}-${QUUX}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn expand_recursive() {
+        let vp = HashMap::from_iter([
+            ("HOST", "${METRO}.${CUSTOMER}.example.org"),
+            ("METRO", "sjc"),
+            ("CUSTOMER", "CyberDyne"),
+        ]);
+        assert_eq!(
+            "sjc.CyberDyne.example.org",
+            super::expand_recursive(&vp, "${HOST}").unwrap()
         );
     }
 }
