@@ -799,7 +799,6 @@ impl RcConf {
         service: &str,
         path: &Path,
     ) -> Result<HashMap<String, String>, Error> {
-        let mut bindings = HashMap::new();
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
             .env("RCVAR_ARGV0", var_name_from_service(service))
@@ -809,10 +808,22 @@ impl RcConf {
                 message: "rcvar command failed".to_string(),
             });
         }
-        let stdout = String::from_utf8(output.stdout)?;
+        let keys = String::from_utf8(output.stdout)?;
+        let keys = keys.split_whitespace().collect::<Vec<_>>();
+        self.generate_rcvars(service, &keys)
+    }
+
+    /// Generate the set of rcvariables from the provided set of keys.
+    pub fn generate_rcvars(
+        &self,
+        service: &str,
+        keys: &[&str],
+    ) -> Result<HashMap<String, String>, Error> {
+        let mut bindings = HashMap::new();
         let vp = self.variable_provider_for(service)?;
-        for var in stdout.split_whitespace() {
-            let Some(short) = var.strip_prefix(&var_prefix_from_service(service)) else {
+        let prefix = var_prefix_from_service(service);
+        for var in keys {
+            let Some(short) = var.strip_prefix(&prefix) else {
                 continue;
             };
             if let Some(value) = vp.lookup(short) {
