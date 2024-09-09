@@ -10,6 +10,8 @@ use utf8path::Path;
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
+const K8SIGNORE: &str = ".k8srcignore";
+
 const SERVICE_DEFAULT_YAML: &str = r#"apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -307,6 +309,9 @@ resources:
                     let pet = pet?;
                     let pet =
                         Path::try_from(pet.path()).map_err(|_| Error::NonUtf8Path(pet.path()))?;
+                    if pet.join(K8SIGNORE).exists() {
+                        continue;
+                    }
                     if pet.is_dir() {
                         copied |= copy_pets_from_dir(options, root, output, &pet, tracking)?;
                         continue;
@@ -368,6 +373,9 @@ resources:
 
 fn find_rc_confs(root: &Path) -> Result<Vec<Path<'static>>, Error> {
     let mut paths = vec![];
+    if root.join(K8SIGNORE).exists() {
+        return Ok(paths);
+    }
     for dirent in std::fs::read_dir(root)? {
         let dirent = dirent?;
         let path = Path::try_from(dirent.path()).map_err(|_| Error::NonUtf8Path(dirent.path()))?;
