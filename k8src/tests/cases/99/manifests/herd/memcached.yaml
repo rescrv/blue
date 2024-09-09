@@ -20,6 +20,12 @@ spec:
           image: "memcached:latest"
           ports:
             - containerPort: 11211
+          envFrom:
+            - configMapRef:
+                name: config-map-35252952829341738756343521914189205639
+          env:
+            - name: RCVAR_ARGV0
+              value: memcached
 ---
 apiVersion: v1
 kind: Service
@@ -36,3 +42,10 @@ spec:
       targetPort: 11211
   selector:
     app: memcached
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-map-35252952829341738756343521914189205639
+  namespace: memcached
+data: ~

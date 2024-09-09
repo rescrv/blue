@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 use std::collections::HashMap;
+use std::hash::Hash;
 
+use siphasher::sip128::{Hasher128, SipHasher24};
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
 use rc_conf::RcConf;
@@ -34,6 +36,12 @@ spec:
         image: ${IMAGE:?IMAGE not defined}
         ports:
         - containerPort: ${PORT:?PORT not defined}
+        envFrom:
+        - configMapRef:
+            name: ${RCVARS:?RCVARS not defined}
+        env:
+        - name: RCVAR_ARGV0
+          value: ${SERVICE:?SERVICE not defined}
 ---
 apiVersion: v1
 kind: Service
@@ -271,12 +279,61 @@ resources:
         let mut extended = false;
         let mut tracking = vec![];
         for service in rc_conf.list_services()? {
-            let yaml = match template_for_service(&candidates, &service) {
+            let Some(image) = rc_conf.lookup_suffix(&service, "IMAGE") else {
+                todo!();
+            };
+            let extra =
+                HashMap::from_iter([("IMAGE", image.clone()), ("RCVAR_ARGV0", service.clone())]);
+            let rcvar = rc_conf.argv(&service, "IMAGE_RCVAR", &extra)?;
+            let rcvars = if !rcvar.is_empty() {
+                let rcvar = std::process::Command::new(&rcvar[0])
+                    .args(&rcvar[1..])
+                    .output()?;
+                let rckeys = String::from_utf8_lossy(&rcvar.stdout);
+                let mut rckeys = rckeys
+                    .split_whitespace()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>();
+                rckeys.sort();
+                let mut rcvars = rc_conf
+                    .generate_rcvars(&service, &rckeys)?
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                rcvars.sort();
+                rcvars
+            } else {
+                vec![]
+            };
+            let mut yaml = match template_for_service(&candidates, &service) {
                 Some(template) => std::fs::read_to_string(template)?,
                 None => SERVICE_DEFAULT_YAML.to_string(),
             };
+            const MAGIC_KEY: &[u8; 16] = &[
+                173, 14, 53, 145, 150, 207, 208, 116, 119, 25, 149, 255, 4, 53, 29, 50,
+            ];
+            let mut hasher = SipHasher24::new_with_key(MAGIC_KEY);
+            service.hash(&mut hasher);
+            rcvars.hash(&mut hasher);
+            let sig = hasher.finish128().as_u128();
+            let mut config_map = format!(
+                r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-map-{sig}
+  namespace: ${{NAMESPACE:?NAMESPACE not defined}}
+data:
+"#
+            );
+            for (key, value) in rcvars {
+                config_map += &format!("  {key}: {value:?}");
+            }
+            yaml += "---\n";
+            yaml += &config_map;
             let rcvp = rc_conf.variable_provider_for(&service)?;
-            let locals = HashMap::from_iter([("SERVICE", &service)]);
+            let locals = HashMap::from_iter([
+                ("SERVICE", service.clone()),
+                ("RCVARS", format!("config-map-{sig}")),
+            ]);
             let vp = (&locals, &rcvp);
             let yaml = _rewrite(&vp, &yaml)?;
             let output = output.join(Path::from(format!("{relative}/herd/{service}.yaml")));

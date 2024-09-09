@@ -20,6 +20,12 @@ spec:
           image: "memcached:latest"
           ports:
             - containerPort: 4242
+          envFrom:
+            - configMapRef:
+                name: config-map-230798029412078013039591180262730952271
+          env:
+            - name: RCVAR_ARGV0
+              value: Jfk_PlanetExpress_memcached
 ---
 apiVersion: v1
 kind: Service
@@ -36,3 +42,10 @@ spec:
       targetPort: 4242
   selector:
     app: Jfk_PlanetExpress_memcached
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-map-230798029412078013039591180262730952271
+  namespace: memcached
+data: ~

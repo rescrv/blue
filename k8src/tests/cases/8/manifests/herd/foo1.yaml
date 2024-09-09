@@ -20,6 +20,12 @@ spec:
           image: "foo1:latest"
           ports:
             - containerPort: 6600
+          envFrom:
+            - configMapRef:
+                name: config-map-43481688782351957739423696898826794767
+          env:
+            - name: RCVAR_ARGV0
+              value: foo1
 ---
 apiVersion: v1
 kind: Service
@@ -36,3 +42,10 @@ spec:
       targetPort: 6600
   selector:
     app: foo1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-map-43481688782351957739423696898826794767
+  namespace: symphhonize
+data: ~
