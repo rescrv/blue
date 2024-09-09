@@ -20,7 +20,7 @@ smtpd_PORT=587
 smtpd_REPLICAS=2
 ```
 
-and have k8src translate this to a set of kubernetes manifests.
+to a set of kubernetes manifests.
 
 At its core, k8src is simply a shell-like substitution library for YAML.  Given an `rc.conf`, it will substitute all
 values according to the cascading rules of rc into the YAML.

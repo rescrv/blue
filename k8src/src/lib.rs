@@ -304,7 +304,7 @@ resources:
             } else {
                 vec![]
             };
-            let mut yaml = match template_for_service(&candidates, &service) {
+            let mut yaml = match template_for_service(&candidates, &rc_conf, &service) {
                 Some(template) => std::fs::read_to_string(template)?,
                 None => SERVICE_DEFAULT_YAML.to_string(),
             };
@@ -492,13 +492,26 @@ pub fn rc_conf_path(candidates: &[Path]) -> String {
     rc_conf_path
 }
 
-fn template_for_service(candidates: &[Path], service: &str) -> Option<Path<'static>> {
-    for candidate in candidates.iter().rev() {
-        let candidate = candidate
-            .join("templates/rc.d")
-            .join(format!("{service}.yaml.template"));
-        if candidate.exists() {
-            return Some(candidate.into_owned());
+fn template_for_service(
+    candidates: &[Path],
+    rc_conf: &RcConf,
+    service: &str,
+) -> Option<Path<'static>> {
+    let mut service = service.to_string();
+    loop {
+        for candidate in candidates.iter().rev() {
+            let candidate = candidate
+                .join("templates/rc.d")
+                .join(format!("{service}.yaml.template"));
+            if candidate.exists() {
+                return Some(candidate.into_owned());
+            }
+        }
+        let direct_alias = rc_conf.direct_alias(&service);
+        if direct_alias == service {
+            break;
+        } else {
+            service = direct_alias.to_string();
         }
     }
     for candidate in candidates.iter().rev() {
