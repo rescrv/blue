@@ -236,6 +236,8 @@ impl<'a> Path<'a> {
         components.into_iter()
     }
 
+    /// Return the current working directory, if it can be fetched and converted to unicode without
+    /// error.
     pub fn cwd() -> Option<Path<'a>> {
         Path::try_from(std::env::current_dir().ok()?).ok()
     }
