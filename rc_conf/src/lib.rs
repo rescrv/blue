@@ -874,20 +874,7 @@ impl RcConf {
 
     /// Lookup the value of the variable as service_SUFFIX, any alias_SUFFIX, and finally SUFFIX.
     pub fn lookup_suffix(&self, service: &str, suffix: &str) -> Option<String> {
-        let mut varname = var_prefix_from_service(service);
-        varname += suffix;
-        if let Some(value) = self.lookup(&varname) {
-            return Some(value);
-        }
-        if let Some(alias) = self.aliases.get(service) {
-            if alias.inherit {
-                self.lookup_suffix(&alias.aliases, suffix)
-            } else {
-                self.lookup(suffix)
-            }
-        } else {
-            self.lookup(suffix)
-        }
+        self.variable_provider_for(service).ok()?.lookup(suffix)
     }
 
     fn lookup_suffix_direct(&self, service: &str, suffix: &str) -> Option<String> {
