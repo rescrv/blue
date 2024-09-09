@@ -29,7 +29,7 @@ metadata:
   labels:
     app: memcached
 spec:
-  type: NodeIP
+  type: NodePort
   ports:
     - port: 11211
       protocol: TCP

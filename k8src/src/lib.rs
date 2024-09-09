@@ -43,7 +43,7 @@ metadata:
   labels:
     app: ${SERVICE:?SERVICE not defined}
 spec:
-  type: NodeIP
+  type: NodePort
   ports:
   - port: ${PORT:?PORT not defined}
     protocol: TCP

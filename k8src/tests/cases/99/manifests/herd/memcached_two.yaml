@@ -29,7 +29,7 @@ metadata:
   labels:
     app: memcached_two
 spec:
-  type: NodeIP
+  type: NodePort
   ports:
     - port: 22122
       protocol: TCP

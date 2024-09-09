@@ -29,7 +29,7 @@ metadata:
   labels:
     app: foo1
 spec:
-  type: NodeIP
+  type: NodePort
   ports:
     - port: 6600
       protocol: TCP

@@ -29,7 +29,7 @@ metadata:
   labels:
     app: Jfk_PlanetExpress_memcached
 spec:
-  type: NodeIP
+  type: NodePort
   ports:
     - port: 4242
       protocol: TCP
