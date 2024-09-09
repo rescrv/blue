@@ -50,6 +50,7 @@ pub enum Error {
 //
 //      $      `     "     \     \n
 //
+/// Quote the string using double quotes, single quotes, or awkward quotes.
 pub fn quote_string(s: &str) -> String {
     let has_whitespace = !s.is_empty() && s.chars().any(|c| c.is_whitespace());
     let has_single_quote = !s.is_empty() && s.chars().any(|c| c == '\'');
@@ -233,6 +234,7 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
 ///
 /// It is expected that the provider do no expansion of its own.
 pub trait VariableProvider: std::fmt::Debug {
+    /// Return the value for the rcvar `ident`.
     fn lookup(&self, ident: &str) -> Option<String>;
 }
 
@@ -359,6 +361,7 @@ impl<P: VariableProvider> VariableProvider for PrefixingVariableProvider<P> {
 
 /// A VariableWitness collects the identifiers of variables in use in a string.
 pub trait VariableWitness {
+    /// Called everytime `ident` is witnessed in the expansion.
     fn witness(&mut self, ident: &str);
 }
 
