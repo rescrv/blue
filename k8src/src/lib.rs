@@ -401,7 +401,7 @@ fn restrict_to_terminals(mut rc_confs: Vec<Path<'static>>) -> Vec<Path<'static>>
     restricted
 }
 
-fn candidates(root: &Path, rc_conf: &Path) -> Vec<Path<'static>> {
+pub fn candidates(root: &Path, rc_conf: &Path) -> Vec<Path<'static>> {
     assert!(rc_conf.as_str().starts_with(root.as_str()));
     let mut rc_conf = rc_conf.dirname();
     let mut candidates = vec![];
@@ -414,7 +414,7 @@ fn candidates(root: &Path, rc_conf: &Path) -> Vec<Path<'static>> {
     candidates
 }
 
-fn rc_conf_path(candidates: &[Path]) -> String {
+pub fn rc_conf_path(candidates: &[Path]) -> String {
     let mut rc_conf_path = String::new();
     for candidate in candidates {
         if !rc_conf_path.is_empty() {
