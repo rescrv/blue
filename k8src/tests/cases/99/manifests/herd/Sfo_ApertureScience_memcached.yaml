@@ -1,47 +1,6 @@
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: Sfo_ApertureScience_memcached
-  namespace: memcached
-  labels:
-    app: Sfo_ApertureScience_memcached
-spec:
-  selector:
-    matchLabels:
-      app: Sfo_ApertureScience_memcached
-  template:
-    metadata:
-      labels:
-        app: Sfo_ApertureScience_memcached
-    spec:
-      containers:
-        - name: Sfo_ApertureScience_memcached
-          image: "memcached:latest"
-          ports:
-            - containerPort: 11211
-          envFrom:
-            - configMapRef:
-                name: config-map-95385495627308895187691534885191424753
-          env:
-            - name: RCVAR_ARGV0
-              value: Sfo_ApertureScience_memcached
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: Sfo_ApertureScience_memcached
-  namespace: memcached
-  labels:
-    app: Sfo_ApertureScience_memcached
-spec:
-  type: NodePort
-  ports:
-    - port: 11211
-      protocol: TCP
-      targetPort: 11211
-  selector:
-    app: Sfo_ApertureScience_memcached
+host: "${CUSTOMER}.${METRO}.memcached.example.org"
+port: 11211
 ---
 apiVersion: v1
 kind: ConfigMap

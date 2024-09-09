@@ -1,47 +1,6 @@
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: Jfk_TyrellCorp_memcached
-  namespace: memcached
-  labels:
-    app: Jfk_TyrellCorp_memcached
-spec:
-  selector:
-    matchLabels:
-      app: Jfk_TyrellCorp_memcached
-  template:
-    metadata:
-      labels:
-        app: Jfk_TyrellCorp_memcached
-    spec:
-      containers:
-        - name: Jfk_TyrellCorp_memcached
-          image: "memcached:latest"
-          ports:
-            - containerPort: 11211
-          envFrom:
-            - configMapRef:
-                name: config-map-67662248005596223230290573062391191974
-          env:
-            - name: RCVAR_ARGV0
-              value: Jfk_TyrellCorp_memcached
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: Jfk_TyrellCorp_memcached
-  namespace: memcached
-  labels:
-    app: Jfk_TyrellCorp_memcached
-spec:
-  type: NodePort
-  ports:
-    - port: 11211
-      protocol: TCP
-      targetPort: 11211
-  selector:
-    app: Jfk_TyrellCorp_memcached
+host: "${CUSTOMER}.${METRO}.memcached.example.org"
+port: 11211
 ---
 apiVersion: v1
 kind: ConfigMap

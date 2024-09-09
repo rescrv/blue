@@ -1,47 +1,6 @@
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: memcached
-  namespace: memcached
-  labels:
-    app: memcached
-spec:
-  selector:
-    matchLabels:
-      app: memcached
-  template:
-    metadata:
-      labels:
-        app: memcached
-    spec:
-      containers:
-        - name: memcached
-          image: "memcached:latest"
-          ports:
-            - containerPort: 11211
-          envFrom:
-            - configMapRef:
-                name: config-map-35252952829341738756343521914189205639
-          env:
-            - name: RCVAR_ARGV0
-              value: memcached
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: memcached
-  namespace: memcached
-  labels:
-    app: memcached
-spec:
-  type: NodePort
-  ports:
-    - port: 11211
-      protocol: TCP
-      targetPort: 11211
-  selector:
-    app: memcached
+host: memcached.example.org
+port: 11211
 ---
 apiVersion: v1
 kind: ConfigMap
