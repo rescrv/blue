@@ -286,7 +286,7 @@ resources:
         if extended {
             write_yaml(
                 &options,
-                output.join(Path::from("herd/kustomization.yaml")),
+                output.join(Path::from(format!("{relative}/herd/kustomization.yaml"))),
                 &root_yaml,
                 &mut tracking,
             )?;
@@ -335,7 +335,7 @@ resources:
         if extended && have_pets {
             write_yaml(
                 &options,
-                output.join(Path::from("kustomization.yaml")),
+                output.join(Path::from(format!("{relative}/kustomization.yaml"))),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -347,7 +347,7 @@ resources:
         } else if extended {
             write_yaml(
                 &options,
-                output.join(Path::from("kustomization.yaml")),
+                output.join(Path::from(format!("{relative}/kustomization.yaml"))),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -358,7 +358,7 @@ resources:
         } else if have_pets {
             write_yaml(
                 &options,
-                output.join(Path::from("kustomization.yaml")),
+                output.join(Path::from(format!("{relative}/kustomization.yaml"))),
                 r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
