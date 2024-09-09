@@ -260,6 +260,7 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
         let Some(relative) = candidates[candidates.len() - 1].strip_prefix(root.as_str()) else {
             panic!("there's a logic error; this should be unreachable");
         };
+        let relative = Path::from(relative.as_str().trim_start_matches('/'));
         let rc_conf_path = rc_conf_path(&candidates);
         let rc_conf = RcConf::parse(&rc_conf_path)?;
         let mut root_yaml = r#"apiVersion: kustomize.config.k8s.io/v1beta1
@@ -323,6 +324,7 @@ resources:
                     let Some(relative) = pet.strip_prefix(root.as_str()) else {
                         panic!("there's a logic error; this should be unreachable");
                     };
+                    let relative = Path::from(relative.as_str().trim_start_matches('/'));
                     let source = pet.clone();
                     let output = output.join(Path::from(format!("{relative}")));
                     write_yaml(options, output, &std::fs::read_to_string(source)?, tracking)?;
