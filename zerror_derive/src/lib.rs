@@ -56,27 +56,6 @@ pub fn derive_command_line_old(input: proc_macro::TokenStream) -> proc_macro::To
                 format!("{}\n", self) + &self.core().long_form()
             }
 
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-                self.core_mut().set_token(identifier, value);
-                self
-            }
-
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-                self.core_mut().set_url(identifier, url);
-                self
-            }
-
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_variable<X: ::std::fmt::Debug>(mut self, variable: &str, x: X) -> Self::Error
-            where
-                X: ::std::fmt::Debug,
-            {
-                self.core_mut().set_variable(variable, x);
-                self
-            }
-
             fn with_info<X: ::std::fmt::Debug>(mut self, name: &str, value: X) -> Self::Error {
                 self.core_mut().set_info(name, value);
                 self
