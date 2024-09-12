@@ -55,6 +55,7 @@ members = [
     "zerror",
     "zerror_derive",
     "zerror_core",
+    "zerror_full",
 ]
 
 [profile.dev]

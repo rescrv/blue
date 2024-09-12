@@ -15,8 +15,8 @@ use prototk_derive::Message;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
-static DEFAULT_ERROR_CORE: Counter = Counter::new("zerror_core.default");
-static DEFAULT_ERROR_CORE_MONITOR: Stationary =
+pub static DEFAULT_ERROR_CORE: Counter = Counter::new("zerror_core.default");
+pub static DEFAULT_ERROR_CORE_MONITOR: Stationary =
     Stationary::new("zerror_core.default", &DEFAULT_ERROR_CORE);
 
 /// Register the monitors for this crate.
