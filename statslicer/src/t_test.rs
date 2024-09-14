@@ -122,7 +122,7 @@ const STUDENT_T: &[[f64; 6]] = &[
 pub fn summarize(hist: &Histogram) -> Moments {
     let mut m = Moments::new();
     let sfb = SigFigBucketizer::new(hist.sig_figs());
-    for (idx, count) in hist.iter().enumerate() {
+    for (idx, (_, count)) in hist.iter().enumerate() {
         // SAFETY(rescrv):  I want it to crash if someone has more than 2**31 buckets.
         let value = sfb.boundary_for(idx.try_into().unwrap());
         for _ in 0..count {

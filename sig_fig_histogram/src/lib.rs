@@ -69,6 +69,11 @@ impl SigFigBucketizer {
         let exponent = 10.0_f64.powi(trunc as i32);
         (x * offset / exponent + buckets * trunc - offset).round() as usize
     }
+
+    /// Iterate over the value assigned to each bucket.
+    pub fn iter(&self) -> impl Iterator<Item = f64> + '_ {
+        (0..i32::MAX).map(|idx| self.boundary_for(idx))
+    }
 }
 
 ///////////////////////////////////////////// Histogram ////////////////////////////////////////////
@@ -121,14 +126,14 @@ impl Histogram {
     }
 
     /// Return an iterator over this bucket.
-    pub fn iter(&self) -> impl Iterator<Item = u64> + '_ {
-        self.buckets.iter().copied()
+    pub fn iter(&self) -> impl Iterator<Item = (f64, u64)> + '_ {
+        std::iter::zip(self.sfb.iter(), self.buckets.iter().copied())
     }
 
     /// Dump a histogram to the specified writer.
     pub fn dump<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
         writeln!(w, "{}", self.sfb.sig_figs)?;
-        for bucket in self.iter() {
+        for (_, bucket) in self.iter() {
             writeln!(w, "{}", bucket)?;
         }
         Ok(())
@@ -179,7 +184,7 @@ impl Histogram {
         assert!(sig_figs < 5);
         assert!(sig_figs <= self.sfb.sig_figs);
         let mut histogram = Self::new(sig_figs);
-        for (idx, count) in self.iter().enumerate() {
+        for (idx, (_, count)) in self.iter().enumerate() {
             let boundary = self.sfb.boundary_for(idx as i32);
             histogram
                 .observe_n(boundary, count)
@@ -199,10 +204,10 @@ impl Histogram {
             sfb: one.sfb,
             buckets: vec![0; std::cmp::max(one.buckets.len(), two.buckets.len())],
         };
-        for (idx, bucket) in one.iter().enumerate() {
+        for (idx, (_, bucket)) in one.iter().enumerate() {
             three.buckets[idx] += bucket;
         }
-        for (idx, bucket) in two.iter().enumerate() {
+        for (idx, (_, bucket)) in two.iter().enumerate() {
             three.buckets[idx] += bucket;
         }
         three
@@ -224,7 +229,7 @@ impl<const N: usize> LockFreeHistogram<N> {
     /// # Panics
     ///
     /// Under the same conditions as [SigFigBucketizer::new].
-    pub fn new(sig_figs: i32) -> Self {
+    pub const fn new(sig_figs: i32) -> Self {
         let sfb = SigFigBucketizer::new(sig_figs);
         let buckets = [0u64; N];
         // SAFETY(rescrv):  Everything is aligned and of the same size.
@@ -240,7 +245,7 @@ impl<const N: usize> LockFreeHistogram<N> {
     /// Observe a value x and increment the bucket for x.
     ///
     /// This will fail with [Error::ExceedsMax] if the bucket exceeds template parameter N.
-    pub fn observe(&mut self, x: f64) -> Result<(), Error> {
+    pub fn observe(&self, x: f64) -> Result<(), Error> {
         self.observe_n(x, 1)
     }
 

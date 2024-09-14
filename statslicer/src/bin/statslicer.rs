@@ -122,10 +122,10 @@ fn cdf_write(
             .open(&output)
             .expect("should be able to open output");
         let sfb = sig_fig_histogram::SigFigBucketizer::new(cdf.sig_figs);
-        let total = hist.iter().fold(0, u64::saturating_add);
+        let total = hist.iter().map(|x| x.1).fold(0, u64::saturating_add);
         let mut sum = 0;
         writeln!(output, "0 0").expect("write should succeed");
-        for (idx, value) in hist.iter().enumerate() {
+        for (idx, (_, value)) in hist.iter().enumerate() {
             sum += value;
             writeln!(
                 output,
