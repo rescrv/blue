@@ -130,6 +130,96 @@ impl Sensor for Moments {
     }
 }
 
+///////////////////////////////////////////// Histogram ////////////////////////////////////////////
+
+pub trait HistogramImpl: Send + Sync {
+    fn observe(&self, x: f64) -> Result<(), sig_fig_histogram::Error>;
+    fn observe_n(&self, x: f64, n: u64) -> Result<(), sig_fig_histogram::Error>;
+    fn to_histogram(&self) -> sig_fig_histogram::Histogram;
+}
+
+impl<const N: usize> HistogramImpl for sig_fig_histogram::LockFreeHistogram<N> {
+    fn observe(&self, x: f64) -> Result<(), sig_fig_histogram::Error> {
+        sig_fig_histogram::LockFreeHistogram::<N>::observe(self, x)
+    }
+
+    fn observe_n(&self, x: f64, n: u64) -> Result<(), sig_fig_histogram::Error> {
+        sig_fig_histogram::LockFreeHistogram::<N>::observe_n(self, x, n)
+    }
+
+    fn to_histogram(&self) -> sig_fig_histogram::Histogram {
+        sig_fig_histogram::LockFreeHistogram::<N>::to_histogram(self)
+    }
+}
+
+pub struct Histogram {
+    label: &'static str,
+    histogram: &'static dyn HistogramImpl,
+    exceeds_max: Counter,
+    is_negative: Counter,
+}
+
+impl Histogram {
+    pub const fn new(label: &'static str, histogram: &'static dyn HistogramImpl) -> Self {
+        let exceeds_max = Counter::new(label);
+        let is_negative = Counter::new(label);
+        Self {
+            label,
+            histogram,
+            exceeds_max,
+            is_negative,
+        }
+    }
+}
+
+impl Histogram {
+    pub fn exceeds_max(&self) -> &Counter {
+        &self.exceeds_max
+    }
+
+    pub fn is_negative(&self) -> &Counter {
+        &self.is_negative
+    }
+
+    pub fn observe(&self, x: f64) {
+        match self.histogram.observe(x) {
+            Ok(()) => {}
+            Err(sig_fig_histogram::Error::ExceedsMax) => {
+                self.exceeds_max.click();
+            }
+            Err(sig_fig_histogram::Error::IsNegative) => {
+                self.is_negative.click();
+            }
+        }
+    }
+
+    pub fn observe_n(&self, x: f64, n: u64) {
+        match self.histogram.observe_n(x, n) {
+            Ok(()) => {}
+            Err(sig_fig_histogram::Error::ExceedsMax) => {
+                self.exceeds_max.click();
+            }
+            Err(sig_fig_histogram::Error::IsNegative) => {
+                self.is_negative.click();
+            }
+        }
+    }
+}
+
+impl Sensor for Histogram {
+    type Reading = sig_fig_histogram::Histogram;
+
+    #[inline(always)]
+    fn label(&self) -> &'static str {
+        self.label
+    }
+
+    #[inline(always)]
+    fn read(&self) -> sig_fig_histogram::Histogram {
+        self.histogram.to_histogram()
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]

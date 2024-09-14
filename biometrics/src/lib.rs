@@ -9,6 +9,7 @@ mod sensors;
 
 pub use sensors::Counter;
 pub use sensors::Gauge;
+pub use sensors::Histogram;
 pub use sensors::Moments;
 
 ////////////////////////////////////////////// Sensor //////////////////////////////////////////////
@@ -98,14 +99,18 @@ pub struct Collector {
     counters: SensorRegistry<Counter>,
     gauges: SensorRegistry<Gauge>,
     moments: SensorRegistry<Moments>,
+    histograms: SensorRegistry<Histogram>,
 }
 
 static COLLECTOR_REGISTER_COUNTER: Counter = Counter::new("biometrics.collector.register.counter");
 static COLLECTOR_REGISTER_GAUGE: Counter = Counter::new("biometrics.collector.register.gauge");
 static COLLECTOR_REGISTER_MOMENTS: Counter = Counter::new("biometrics.collector.register.moments");
+static COLLECTOR_REGISTER_HISTOGRAM: Counter =
+    Counter::new("biometrics.collector.register.histogram");
 static COLLECTOR_EMIT_COUNTER: Counter = Counter::new("biometrics.collector.emit.counter");
 static COLLECTOR_EMIT_GAUGE: Counter = Counter::new("biometrics.collector.emit.gauge");
 static COLLECTOR_EMIT_MOMENTS: Counter = Counter::new("biometrics.collector.emit.moments");
+static COLLECTOR_EMIT_HISTOGRAM: Counter = Counter::new("biometrics.collector.emit.histogram");
 static COLLECTOR_EMIT_FAILURE: Counter = Counter::new("biometrics.collector.emit.failure");
 static COLLECTOR_TIME_FAILURE: Counter = Counter::new("biometrics.collector.time.failure");
 
@@ -129,14 +134,21 @@ impl Collector {
                 &COLLECTOR_EMIT_MOMENTS,
                 &COLLECTOR_EMIT_FAILURE,
             ),
+            histograms: SensorRegistry::new(
+                &COLLECTOR_REGISTER_HISTOGRAM,
+                &COLLECTOR_EMIT_HISTOGRAM,
+                &COLLECTOR_EMIT_FAILURE,
+            ),
         };
         // Register counters with the collector.
         collector.register_counter(&COLLECTOR_REGISTER_COUNTER);
         collector.register_counter(&COLLECTOR_REGISTER_GAUGE);
         collector.register_counter(&COLLECTOR_REGISTER_MOMENTS);
+        collector.register_counter(&COLLECTOR_REGISTER_HISTOGRAM);
         collector.register_counter(&COLLECTOR_EMIT_COUNTER);
         collector.register_counter(&COLLECTOR_EMIT_GAUGE);
         collector.register_counter(&COLLECTOR_EMIT_MOMENTS);
+        collector.register_counter(&COLLECTOR_EMIT_HISTOGRAM);
         collector.register_counter(&COLLECTOR_EMIT_FAILURE);
         collector.register_counter(&COLLECTOR_TIME_FAILURE);
         // Return the collector with counters initialized.
@@ -158,6 +170,11 @@ impl Collector {
         self.moments.register(moments);
     }
 
+    /// Register `moments` with the Collector.
+    pub fn register_histogram(&self, histogram: &'static Histogram) {
+        self.histograms.register(histogram);
+    }
+
     /// Output the sensors registered to this emitter.
     pub fn emit<EM: Emitter<Error = ERR>, ERR: std::fmt::Debug>(
         &self,
@@ -167,7 +184,8 @@ impl Collector {
         let result = Ok(());
         let result = result.and(self.counters.emit(emitter, EM::emit_counter, now));
         let result = result.and(self.gauges.emit(emitter, EM::emit_gauge, now));
-        result.and(self.moments.emit(emitter, EM::emit_moments, now))
+        let result = result.and(self.moments.emit(emitter, EM::emit_moments, now));
+        result.and(self.histograms.emit(emitter, EM::emit_histogram, now))
     }
 }
 
@@ -190,6 +208,9 @@ pub trait Emitter {
     fn emit_gauge(&mut self, gauge: &Gauge, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Moments].
     fn emit_moments(&mut self, moments: &Moments, now_millis: u64) -> Result<(), Self::Error>;
+    /// Read the provided [Histogram].
+    fn emit_histogram(&mut self, histogram: &Histogram, now_millis: u64)
+        -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////
@@ -230,6 +251,15 @@ impl Emitter for PlainTextEmitter {
             "{} {} {} {} {} {} {}\n",
             label, now, moments.n, moments.m1, moments.m2, moments.m3, moments.m4,
         ))
+    }
+
+    fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
+        let label = histogram.label();
+        for (bucket, count) in histogram.read().iter() {
+            self.output
+                .write_fmt(format_args!("{} {now} {{approx={bucket}}} {count}", label,))?;
+        }
+        Ok(())
     }
 }
 
