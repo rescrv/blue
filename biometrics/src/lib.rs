@@ -64,7 +64,7 @@ impl<S: Sensor + 'static> SensorRegistry<S> {
     fn emit<EM: Emitter<Error = ERR>, ERR>(
         &self,
         emitter: &mut EM,
-        emit: &dyn Fn(&mut EM, &'static S, u64) -> Result<(), ERR>,
+        emit: impl Fn(&mut EM, &S, u64) -> Result<(), ERR>,
         now: u64,
     ) -> Result<(), ERR> {
         let num_sensors = { self.sensors.lock().unwrap().len() };
@@ -165,9 +165,9 @@ impl Collector {
         now: u64,
     ) -> Result<(), ERR> {
         let result = Ok(());
-        let result = result.and(self.counters.emit(emitter, &EM::emit_counter, now));
-        let result = result.and(self.gauges.emit(emitter, &EM::emit_gauge, now));
-        result.and(self.moments.emit(emitter, &EM::emit_moments, now))
+        let result = result.and(self.counters.emit(emitter, EM::emit_counter, now));
+        let result = result.and(self.gauges.emit(emitter, EM::emit_gauge, now));
+        result.and(self.moments.emit(emitter, EM::emit_moments, now))
     }
 }
 
