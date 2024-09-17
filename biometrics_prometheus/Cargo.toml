@@ -8,6 +8,8 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
+libc = "0.2"
+
 biometrics = { path = "../biometrics", version = "0.8" }
 utf8path = { path = "../utf8path", version = "0.5" }
 

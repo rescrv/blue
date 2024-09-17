@@ -1,46 +1,138 @@
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Write};
+use std::os::fd::AsRawFd;
+use std::time::{Duration, Instant};
+
 use biometrics::{Counter, Gauge, Histogram, Moments, Sensor};
 use utf8path::Path;
 
-pub struct Emitter<'a> {
-    #[allow(dead_code)]
-    path: Path<'a>,
+////////////////////////////////////////////// Options /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Options {
+    pub segment_size: usize,
+    pub flush_interval: Duration,
+    pub prefix: Path<'static>,
 }
 
-impl<'a> Emitter<'a> {
-    pub fn new(path: Path<'a>) -> Self {
-        Self { path }
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            segment_size: 64 * 1048576,
+            flush_interval: Duration::from_secs(30),
+            prefix: Path::new("biometrics."),
+        }
     }
 }
 
-#[allow(deprecated)]
-impl<'a> biometrics::Emitter for Emitter<'a> {
+////////////////////////////////////////////// Emitter /////////////////////////////////////////////
+
+pub struct Emitter {
+    options: Options,
+    output: Option<BufWriter<File>>,
+    written: usize,
+    last_flush: Instant,
+}
+
+impl Emitter {
+    pub fn new(options: Options) -> Self {
+        let output = None;
+        let written = 0;
+        let last_flush = Instant::now();
+        Self {
+            options,
+            output,
+            written,
+            last_flush,
+        }
+    }
+
+    pub fn flush(&mut self) -> Result<(), std::io::Error> {
+        if let Some(output) = self.output.as_mut() {
+            output.flush()?;
+        }
+        Ok(())
+    }
+
+    fn write_line(&mut self, line: impl AsRef<str>, now_millis: u64) -> Result<(), std::io::Error> {
+        let options = self.options.clone();
+        let last_flush = self.last_flush;
+        self.written += line.as_ref().as_bytes().len();
+        let written = self.written;
+        let output = self.get_output(now_millis)?;
+        output.write_all(line.as_ref().as_bytes())?;
+        if written > options.segment_size || last_flush.elapsed() > options.flush_interval {
+            output.flush()?;
+            self.output.take();
+            self.written = 0;
+        }
+        Ok(())
+    }
+
+    fn get_output(&mut self, now_millis: u64) -> Result<&mut dyn std::io::Write, std::io::Error> {
+        if self.output.is_none() {
+            let path = self.options.prefix.as_str().to_owned() + &format!("{}.prom", now_millis);
+            let file = OpenOptions::new().create_new(true).write(true).open(path)?;
+            // NOTE(rescrv): l_type,l_whence is 16 bits on some platforms and 32 bits on others.
+            // The annotations here are for cross-platform compatibility.
+            #[allow(clippy::useless_conversion)]
+            #[allow(clippy::unnecessary_cast)]
+            let flock = libc::flock {
+                l_type: libc::F_WRLCK as i16,
+                l_whence: libc::SEEK_SET as i16,
+                l_start: 0,
+                l_len: 0,
+                l_pid: 0,
+                #[cfg(target_os = "freebsd")]
+                l_sysid: 0,
+            };
+            // NOTE(rescrv):  This should never fail, as others will only acquire the lock when the
+            // file size is non-zero.  Just bail impolitely if it does.
+            if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &flock) < 0 } {
+                return Err(std::io::Error::last_os_error());
+            }
+            let output = BufWriter::new(file);
+            self.output = Some(output);
+        }
+        Ok(self.output.as_mut().unwrap())
+    }
+}
+
+impl biometrics::Emitter for Emitter {
     type Error = std::io::Error;
 
     fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
         let label = counter.label();
         let reading = counter.read();
-        println!(
-            "# TYPE {label} counter
-{label} {reading} {now}"
-        );
+        self.write_line(
+            format!(
+                "# TYPE {label} counter
+{label} {reading} {now}",
+            ),
+            now,
+        )?;
         Ok(())
     }
 
     fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
         let label = gauge.label();
         let reading = gauge.read();
-        println!(
-            "# TYPE {label} gauge
+        self.write_line(
+            format!(
+                "# TYPE {label} gauge
 {label} {reading} {now}"
-        );
+            ),
+            now,
+        )?;
         Ok(())
     }
 
     fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let reading = moments.read();
-        println!(
-            "# TYPE {label}_count counter
+        self.write_line(
+            format!(
+                "# TYPE {label}_count counter
 {label}_count {} {now}
 # TYPE {label}_mean gauge
 {label}_mean {} {now}
@@ -50,31 +142,183 @@ impl<'a> biometrics::Emitter for Emitter<'a> {
 {label}_skewness {} {now}
 # TYPE {label}_kurtosis gauge
 {label}_kurtosis {} {now}",
-            reading.n(),
-            reading.mean(),
-            reading.variance(),
-            reading.skewness(),
-            reading.kurtosis(),
-        );
+                reading.n(),
+                reading.mean(),
+                reading.variance(),
+                reading.skewness(),
+                reading.kurtosis(),
+            ),
+            now,
+        )?;
         Ok(())
     }
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
         let label = histogram.label();
-        println!("# TYPE {label} histogram");
+        self.write_line(format!("# TYPE {label} histogram"), now)?;
         let mut total = 0;
         let mut acc = 0.0;
         for (bucket, count) in histogram.read().iter() {
             total += count;
             acc += bucket * count as f64;
-            println!("{label}_bucket{{le=\"{bucket:0.4}\"}} {total} {now}");
+            self.write_line(
+                format!("{label}_bucket{{le=\"{bucket:0.4}\"}} {total} {now}"),
+                now,
+            )?;
         }
-        println!("{label}_sum {acc} {now}");
-        println!("{label}_count {total} {now}");
+        self.write_line(format!("{label}_sum {acc} {now}"), now)?;
+        self.write_line(format!("{label}_count {total} {now}"), now)?;
         let exceeds_max = histogram.exceeds_max().read();
-        println!("{label}_exceeds_max {exceeds_max} {now}");
+        self.write_line(format!("{label}_exceeds_max {exceeds_max} {now}"), now)?;
         let is_negative = histogram.is_negative().read();
-        println!("{label}_is_negative {is_negative} {now}");
+        self.write_line(format!("{label}_is_negative {is_negative} {now}"), now)?;
         Ok(())
+    }
+}
+
+////////////////////////////////////////////// Reader //////////////////////////////////////////////
+
+#[derive(Debug)]
+pub struct Reader(Path<'static>, File);
+
+impl Reader {
+    pub fn open(path: Path) -> Result<Self, std::io::Error> {
+        Self::_open(path, libc::F_SETLKW)
+    }
+
+    fn _open(path: Path, cmd: libc::c_int) -> Result<Self, std::io::Error> {
+        let path = path.into_owned();
+        let file = OpenOptions::new().read(true).open(&path)?;
+        // NOTE(rescrv): l_type,l_whence is 16 bits on some platforms and 32 bits on others.
+        // The annotations here are for cross-platform compatibility.
+        #[allow(clippy::useless_conversion)]
+        #[allow(clippy::unnecessary_cast)]
+        let flock = libc::flock {
+            l_type: libc::F_RDLCK as i16,
+            l_whence: libc::SEEK_SET as i16,
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+            #[cfg(target_os = "freebsd")]
+            l_sysid: 0,
+        };
+        // NOTE(rescrv):  This should never fail, as others will only acquire the lock when the
+        // file size is non-zero.  Just bail impolitely if it does.
+        if unsafe { libc::fcntl(file.as_raw_fd(), cmd, &flock) < 0 } {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self(path, file))
+    }
+
+    pub fn path(&self) -> &Path<'static> {
+        &self.0
+    }
+
+    pub fn unlink(self) -> Result<(), std::io::Error> {
+        std::fs::remove_file(self.path())
+    }
+}
+
+impl std::ops::Deref for Reader {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+////////////////////////////////////////////// Watcher /////////////////////////////////////////////
+
+pub struct Watcher {
+    path: Path<'static>,
+}
+
+impl Watcher {
+    pub fn new(path: Path) -> Self {
+        let path = path.into_owned();
+        Self { path }
+    }
+
+    /// Ingest the least recently modified file in the directory, subject to locking rules.  If the
+    /// lock cannot be acquired, the function will pass over the file.  Once one call is made to
+    /// `process`, the function returns Ok(()).  If the `process` function does not use
+    /// `reader.unlink`, the next call to ingest_one will process the same file with high
+    /// probability.
+    pub fn ingest_one<E: From<std::io::Error>>(
+        &self,
+        mut process: impl FnMut(Reader) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut path_and_timestamp = vec![];
+        for dirent in std::fs::read_dir(&self.path)? {
+            let dirent = dirent?;
+            let metadata = dirent.metadata()?;
+            let path = Path::try_from(dirent.path()).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path: not UTF-8")
+            })?;
+            path_and_timestamp.push((metadata.modified()?, path));
+        }
+        path_and_timestamp.sort_by_key(|(timestamp, _)| *timestamp);
+        for (_, path) in path_and_timestamp.into_iter() {
+            let reader = match Reader::_open(path, libc::F_SETLK) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::WouldBlock {
+                        continue;
+                    }
+                    return Err(err.into());
+                }
+            };
+            return process(reader);
+        }
+        Ok(())
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use std::fs::remove_file;
+
+    use biometrics::Emitter as EmitterTrait;
+
+    use super::*;
+
+    #[test]
+    fn emitter() {
+        remove_file("tmp.foo.42.prom").unwrap();
+        let mut emitter = Emitter::new(Options {
+            segment_size: 1024,
+            flush_interval: Duration::from_secs(1),
+            prefix: Path::new("tmp.foo."),
+        });
+        emitter.emit_counter(&Counter::new("foo"), 42).unwrap();
+        drop(emitter);
+    }
+
+    #[test]
+    fn reader() {
+        let _reader = Reader::open(Path::new("README.md")).unwrap();
+    }
+
+    #[test]
+    fn watcher() {
+        let watcher = Watcher::new(Path::new("."));
+        let mut watched = vec![];
+        watcher
+            .ingest_one(|reader| {
+                watched.push(reader);
+                Ok::<(), std::io::Error>(())
+            })
+            .unwrap();
+        let found = watched[0].0.clone();
+        assert!(
+            found.as_str().starts_with("README.md")
+                || found.basename().as_str().starts_with("Cargo.toml")
+                || found.basename().as_str().starts_with("k8s.metrics")
+                || found.basename().as_str().starts_with("src")
+                || found.basename().as_str().starts_with("tmp.foo."),
+            "found: {found:?}",
+        );
     }
 }
