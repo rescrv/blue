@@ -13,6 +13,16 @@ pub trait Z {
     /// Convert an error to a string free from "="*80.
     fn long_form(&self) -> String;
 
+    /// Add a token.
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
+    fn with_token(self, identifier: &str, value: &str) -> Self::Error;
+    /// Add a URL.
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
+    fn with_url(self, identifier: &str, url: &str) -> Self::Error;
+    /// Add debug formatting of a local variable.
+    #[deprecated(since = "0.4.0", note = "use with_info instead")]
+    fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error;
+
     /// Add debug formatting of a local variable.
     fn with_info<X: Debug>(self, name: &str, value: X) -> Self::Error;
     /// Add debug formatting using a closure.
@@ -28,6 +38,30 @@ impl<T, E: Z<Error = E>> Z for Result<T, E> {
                 panic!("called long_form() on Ok Result");
             }
             Err(e) => e.long_form(),
+        }
+    }
+
+    #[allow(deprecated)]
+    fn with_token(self, identifier: &str, value: &str) -> Self::Error {
+        match self {
+            Ok(_) => self,
+            Err(e) => Err(e.with_token(identifier, value)),
+        }
+    }
+
+    #[allow(deprecated)]
+    fn with_url(self, identifier: &str, url: &str) -> Self::Error {
+        match self {
+            Ok(_) => self,
+            Err(e) => Err(e.with_url(identifier, url)),
+        }
+    }
+
+    #[allow(deprecated)]
+    fn with_variable<X: Debug>(self, variable: &str, x: X) -> Self::Error {
+        match self {
+            Ok(_) => self,
+            Err(e) => Err(e.with_variable(variable, x)),
         }
     }
 

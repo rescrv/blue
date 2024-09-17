@@ -24,6 +24,19 @@ impl Z for SampleError {
         "long form".to_owned()
     }
 
+    fn with_token(self, _identifier: &str, _value: &str) -> Self::Error {
+        todo!();
+    }
+
+    fn with_url(self, _identifier: &str, _url: &str) -> Self::Error {
+        todo!();
+    }
+
+    fn with_variable<X: Debug>(mut self, variable: &str, x: X) -> Self::Error {
+        self.var.push(format!("{}: {:?}", variable, x));
+        self
+    }
+
     fn with_info<X: Debug>(mut self, name: &str, value: X) -> Self::Error {
         self.var.push(format!("{}: {:?}", name, value));
         self
