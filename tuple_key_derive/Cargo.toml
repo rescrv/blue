@@ -16,4 +16,4 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 buffertk = { path = "../buffertk", version = "0.9" }
-prototk = { path = "../prototk", version = "0.8" }
+prototk = { path = "../prototk", version = "0.9" }
