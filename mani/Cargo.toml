@@ -24,7 +24,7 @@ tatl = { path = "../tatl", version = "0.7" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.6" }
 zerror_core = { path = "../zerror_core", version = "0.7" }
-zerror_derive = { path = "../zerror_derive", version = "0.4" }
+zerror_derive = { path = "../zerror_derive", version = "0.5" }
 
 getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.4", optional = true }
