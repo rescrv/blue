@@ -14,7 +14,7 @@ binaries = []
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.9" }
-buffertk = { path = "../buffertk", version = "0.8" }
+buffertk = { path = "../buffertk", version = "0.9" }
 indicio = { path = "../indicio", version = "0.6" }
 one_two_eight = { path = "../one_two_eight", version = "0.5" }
 prototk = { path = "../prototk", version = "0.8" }
