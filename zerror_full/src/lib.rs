@@ -57,6 +57,18 @@ macro_rules! zerror {
                 format!("{}\n", self) + &self.core().long_form()
             }
 
+            fn with_token(self, name: &str, value: &str) -> Self::Error {
+                self
+            }
+
+            fn with_url(self, name: &str, value: &str) -> Self::Error {
+                self
+            }
+
+            fn with_variable<X: ::std::fmt::Debug>(self, name: &str, value: X) -> Self::Error {
+                self
+            }
+
             fn with_info<X: ::std::fmt::Debug>(mut self, name: &str, value: X) -> Self::Error {
                 self.core_mut().set_info(name, value);
                 self
