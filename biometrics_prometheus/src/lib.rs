@@ -299,7 +299,9 @@ mod tests {
 
     #[test]
     fn emitter() {
-        remove_file("tmp.foo.42.prom").unwrap();
+        if Path::from("tmp.foo.42.prom").exists() {
+            remove_file("tmp.foo.42.prom").unwrap();
+        }
         let mut emitter = Emitter::new(Options {
             segment_size: 1024,
             flush_interval: Duration::from_secs(1),
@@ -326,7 +328,7 @@ mod tests {
             .unwrap();
         let found = watched[0].0.clone();
         assert!(
-            found.as_str().starts_with("README.md")
+            found.basename().as_str().starts_with("README.md")
                 || found.basename().as_str().starts_with("Cargo.toml")
                 || found.basename().as_str().starts_with("k8s.metrics")
                 || found.basename().as_str().starts_with("src")
