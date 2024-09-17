@@ -17,7 +17,7 @@ getopts = "0.2"
 
 arrrg = { path = "../arrrg", version = "0.4" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.4" }
-sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.3" }
+sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.4" }
 
 [dev-dependencies]
 guacamole = { path = "../guacamole", version = "0.8" }

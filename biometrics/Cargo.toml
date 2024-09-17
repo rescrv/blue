@@ -8,4 +8,4 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
-sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.3" }
+sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.4" }
