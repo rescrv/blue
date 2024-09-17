@@ -26,7 +26,7 @@ guacamole = { path = "../guacamole", version = "0.8" }
 indicio = { path = "../indicio", version = "0.6", features = ["prototk"] }
 mani = { path = "../mani", version = "0.4" }
 prototk = { path = "../prototk", version = "0.8" }
-prototk_derive = { path = "../prototk_derive", version = "0.8" }
+prototk_derive = { path = "../prototk_derive", version = "0.9" }
 scrunch = { path = "../scrunch", version = "0.4" }
 zerror = { path = "../zerror", version = "0.6" }
 zerror_core = { path = "../zerror_core", version = "0.7" }
