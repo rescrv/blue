@@ -1,8 +1,10 @@
 biometrics
 ==========
 
-Biometrics provide the vitals of a process in the form of counters, gauges, moments, and T-digests.  Collectively, these
+Biometrics provide the vitals of a process in the form of counters, gauges, moments, and histograms.  Collectively, these
 sensors paint a picture of what's happening within a process in timeseries form.
+
+For a prometheus-compatible emitter, see [biometrics_prometheus](https://crates.io/crates/biometrics_prometheus).
 
 Status
 ------
