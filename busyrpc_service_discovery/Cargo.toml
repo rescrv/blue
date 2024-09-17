@@ -19,7 +19,7 @@ getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.4", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.4", optional = true }
 busyrpc = { path = "../busyrpc", version = "0.6" }
-indicio = { path = "../indicio", version = "0.6" }
+indicio = { path = "../indicio", version = "0.7" }
 minimal_signals = { path = "../minimal_signals", version = "0.3" }
 prototk = { path = "../prototk", version = "0.9" }
 rpc_pb = { path = "../rpc_pb", version = "0.8" }
