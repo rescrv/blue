@@ -32,6 +32,7 @@ pub struct Emitter {
     output: Option<BufWriter<File>>,
     written: usize,
     last_flush: Instant,
+    flush_trigger: Option<u64>,
 }
 
 impl Emitter {
@@ -39,11 +40,13 @@ impl Emitter {
         let output = None;
         let written = 0;
         let last_flush = Instant::now();
+        let flush_trigger = None;
         Self {
             options,
             output,
             written,
             last_flush,
+            flush_trigger,
         }
     }
 
@@ -55,16 +58,26 @@ impl Emitter {
     }
 
     fn write_line(&mut self, line: impl AsRef<str>, now_millis: u64) -> Result<(), std::io::Error> {
+        if let Some(flush_trigger) = self.flush_trigger {
+            if now_millis > flush_trigger {
+                self.flush()?;
+                self.output.take();
+                self.written = 0;
+                self.last_flush = Instant::now();
+                self.flush_trigger = None;
+            }
+        }
         let options = self.options.clone();
+        let flush_trigger = self.flush_trigger;
         let last_flush = self.last_flush;
         self.written += line.as_ref().as_bytes().len();
         let written = self.written;
         let output = self.get_output(now_millis)?;
         output.write_all(line.as_ref().as_bytes())?;
-        if written > options.segment_size || last_flush.elapsed() > options.flush_interval {
-            output.flush()?;
-            self.output.take();
-            self.written = 0;
+        if flush_trigger.is_none() && written > options.segment_size
+            || last_flush.elapsed() > options.flush_interval
+        {
+            self.flush_trigger = Some(now_millis);
         }
         Ok(())
     }
@@ -107,7 +120,7 @@ impl biometrics::Emitter for Emitter {
         self.write_line(
             format!(
                 "# TYPE {label} counter
-{label} {reading} {now}",
+{label} {reading} {now}\n",
             ),
             now,
         )?;
@@ -120,7 +133,7 @@ impl biometrics::Emitter for Emitter {
         self.write_line(
             format!(
                 "# TYPE {label} gauge
-{label} {reading} {now}"
+{label} {reading} {now}\n"
             ),
             now,
         )?;
@@ -141,7 +154,7 @@ impl biometrics::Emitter for Emitter {
 # TYPE {label}_skewness gauge
 {label}_skewness {} {now}
 # TYPE {label}_kurtosis gauge
-{label}_kurtosis {} {now}",
+{label}_kurtosis {} {now}\n",
                 reading.n(),
                 reading.mean(),
                 reading.variance(),
@@ -155,23 +168,23 @@ impl biometrics::Emitter for Emitter {
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
         let label = histogram.label();
-        self.write_line(format!("# TYPE {label} histogram"), now)?;
+        self.write_line(format!("# TYPE {label} histogram\n"), now)?;
         let mut total = 0;
         let mut acc = 0.0;
         for (bucket, count) in histogram.read().iter() {
             total += count;
             acc += bucket * count as f64;
             self.write_line(
-                format!("{label}_bucket{{le=\"{bucket:0.4}\"}} {total} {now}"),
+                format!("{label}_bucket{{le=\"{bucket:0.4}\"}} {total} {now}\n"),
                 now,
             )?;
         }
-        self.write_line(format!("{label}_sum {acc} {now}"), now)?;
-        self.write_line(format!("{label}_count {total} {now}"), now)?;
+        self.write_line(format!("{label}_sum {acc} {now}\n"), now)?;
+        self.write_line(format!("{label}_count {total} {now}\n"), now)?;
         let exceeds_max = histogram.exceeds_max().read();
-        self.write_line(format!("{label}_exceeds_max {exceeds_max} {now}"), now)?;
+        self.write_line(format!("{label}_exceeds_max {exceeds_max} {now}\n"), now)?;
         let is_negative = histogram.is_negative().read();
-        self.write_line(format!("{label}_is_negative {is_negative} {now}"), now)?;
+        self.write_line(format!("{label}_is_negative {is_negative} {now}\n"), now)?;
         Ok(())
     }
 }
