@@ -292,12 +292,24 @@ fn parse_meta_one(attr: &syn::Attribute) -> Option<FlagMeta> {
         }
     };
     let help_string = if meta_list.nested.len() > 1 {
-        meta_list.nested[1].clone().into_token_stream().to_string()
+        meta_list.nested[1]
+            .clone()
+            .into_token_stream()
+            .to_string()
+            .trim_matches('"')
+            .to_string()
     } else {
         "default help text".to_string()
     };
     let hint_text = if meta_list.nested.len() > 2 {
-        Some(meta_list.nested[2].clone().into_token_stream().to_string())
+        Some(
+            meta_list.nested[2]
+                .clone()
+                .into_token_stream()
+                .to_string()
+                .trim_matches('"')
+                .to_string(),
+        )
     } else {
         None
     };
