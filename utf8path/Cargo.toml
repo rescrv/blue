@@ -1,6 +1,6 @@
 [package]
 name = "utf8path"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "utf8path provides a String-friendly path type"
