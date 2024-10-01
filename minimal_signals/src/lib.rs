@@ -123,6 +123,29 @@ impl SignalSet {
         maybe_add(SIGUSR2);
         members.into_iter()
     }
+
+    pub fn block(&self) -> Result<(), std::io::Error> {
+        // SAFETY(rescrv):  We know this is safe because we manipulate the set using libc functions.
+        unsafe {
+            if libc::sigprocmask(libc::SIG_SETMASK, &self.sigset, std::ptr::null_mut()) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        };
+        Ok(())
+    }
+
+    pub fn install(&self) -> Result<(), std::io::Error> {
+        let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+        sa.sa_sigaction = nop as usize;
+        sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
+        for signal in self.iter() {
+            // SAFETY(rescrv):  We know this is safe because we manipulate the set using libc functions.
+            if unsafe { libc::sigaction(signal.0, &sa, std::ptr::null_mut()) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for SignalSet {
@@ -173,21 +196,29 @@ impl From<Signal> for SignalSet {
 /////////////////////////////////////////////// block //////////////////////////////////////////////
 
 pub fn block() {
-    let signals = SignalSet::new().fill();
-    // SAFETY(rescrv):  We know this is safe because fill fills the set using libc functions.
-    unsafe {
-        libc::sigprocmask(libc::SIG_SETMASK, &signals.sigset, std::ptr::null_mut());
-    };
+    SignalSet::new()
+        .fill()
+        .block()
+        .expect("block should never fail");
 }
 
 ////////////////////////////////////////////// unblock /////////////////////////////////////////////
 
 pub fn unblock() {
-    let signals = SignalSet::new().empty();
-    // SAFETY(rescrv):  We know this is safe because empty empties the set using libc functions.
-    unsafe {
-        libc::sigprocmask(libc::SIG_SETMASK, &signals.sigset, std::ptr::null_mut());
-    };
+    SignalSet::new()
+        .empty()
+        .block()
+        .expect("unblock should never fail");
+}
+
+////////////////////////////////////////////// unblock /////////////////////////////////////////////
+
+pub fn install() {
+    SignalSet::new()
+        .fill()
+        .del(SIGKILL)
+        .install()
+        .expect("install should never fail");
 }
 
 /////////////////////////////////////////////// wait ///////////////////////////////////////////////
@@ -199,6 +230,20 @@ pub fn wait(set: SignalSet) -> Option<Signal> {
     };
     Signal::from_i32(signal)
 }
+
+////////////////////////////////////////////// pending /////////////////////////////////////////////
+
+pub fn pending() -> SignalSet {
+    let mut set = SignalSet::new();
+    unsafe {
+        libc::sigpending(&mut set.sigset);
+    };
+    set
+}
+
+//////////////////////////////////////////////// nop ///////////////////////////////////////////////
+
+extern "C" fn nop(_: i32, _: *mut libc::siginfo_t, _: *mut libc::c_void) {}
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
