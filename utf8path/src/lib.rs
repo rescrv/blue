@@ -243,6 +243,13 @@ impl<'a> Path<'a> {
     }
 }
 
+impl<'a> AsRef<std::ffi::OsStr> for Path<'a> {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        let path: &std::ffi::OsStr = self.as_str().as_ref();
+        path
+    }
+}
+
 impl<'a> AsRef<std::path::Path> for Path<'a> {
     fn as_ref(&self) -> &std::path::Path {
         std::path::Path::new(self.as_str())
