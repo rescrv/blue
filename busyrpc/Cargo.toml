@@ -27,7 +27,7 @@ rpc_pb = { path = "../rpc_pb", version = "0.9" }
 sync42 = { path = "../sync42", version = "0.10" }
 tatl = { path = "../tatl", version = "0.8" }
 utilz = { path = "../utilz", version = "0.5" }
-zerror = { path = "../zerror", version = "0.6" }
+zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.8" }
 
 getopts = { version = "0.2", optional = true }

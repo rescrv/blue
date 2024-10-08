@@ -14,4 +14,4 @@ buffertk = { path = "../buffertk", version = "0.9" }
 prototk_derive = { path = "../prototk_derive", version = "0.9" }
 prototk = { path = "../prototk", version = "0.9" }
 zerror_core = { path = "../zerror_core", version = "0.8" }
-zerror = { path = "../zerror", version = "0.6" }
+zerror = { path = "../zerror", version = "0.7" }
