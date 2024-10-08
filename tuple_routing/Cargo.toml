@@ -15,7 +15,7 @@ busyrpc = { path = "../busyrpc", version = "0.7" }
 indicio = { path = "../indicio", version = "0.7" }
 one_two_eight = { path = "../one_two_eight", version = "0.6" }
 prototk = { path = "../prototk", version = "0.9" }
-prototk_derive = { path = "../prototk_derive", version = "0.9" }
+prototk_derive = { path = "../prototk_derive", version = "0.10" }
 rpc_pb = { path = "../rpc_pb", version = "0.9" }
 sync42 = { path = "../sync42", version = "0.11" }
 tuple_key = { path = "../tuple_key", version = "0.8" }
