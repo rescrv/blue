@@ -24,7 +24,7 @@ minimal_signals = { path = "../minimal_signals", version = "0.4" }
 prototk = { path = "../prototk", version = "0.10" }
 rpc_pb = { path = "../rpc_pb", version = "0.10" }
 tuple_key = { path = "../tuple_key", version = "0.9" }
-tuple_routing = { path = "../tuple_routing", version = "0.3" }
+tuple_routing = { path = "../tuple_routing", version = "0.4" }
 zerror_core = { path = "../zerror_core", version = "0.9" }
 
 [[bin]]
