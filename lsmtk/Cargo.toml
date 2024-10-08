@@ -28,7 +28,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.9" }
 setsum = { path = "../setsum", version = "0.7" }
 skipfree = { path = "../skipfree", version = "0.5" }
 sst = { path = "../sst", version = "0.11" }
-sync42 = { path = "../sync42", version = "0.10" }
+sync42 = { path = "../sync42", version = "0.11" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.8" }
