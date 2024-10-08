@@ -11,4 +11,4 @@ repository = "https://github.com/rescrv/blue"
 rand = "0.7"
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.8" }
+guacamole = { path = "../guacamole", version = "0.9" }

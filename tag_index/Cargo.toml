@@ -22,7 +22,7 @@ scrunch = { path = "../scrunch", version = "0.5" }
 
 [dev-dependencies]
 arrrg = { path = "../arrrg", version = "0.5" }
-guacamole = { path = "../guacamole", version = "0.8" }
+guacamole = { path = "../guacamole", version = "0.9" }
 statslicer = { path = "../statslicer", version = "0.5" }
 
 [[bin]]
