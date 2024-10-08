@@ -528,7 +528,7 @@ mod test_util {
                 let options = sst::LogOptions::default();
                 let mut log_builder = sst::LogBuilder::new(options, &tmp).as_z().pretty_unwrap();
                 $(log_builder.put($key.as_bytes(), 1, $val.as_bytes()).as_z().pretty_unwrap();)*
-                let setsum = log_builder.seal().as_z().pretty_unwrap();
+                let setsum = log_builder.seal().as_z().pretty_unwrap().0;
                 std::fs::rename(&tmp, &output_file).as_z().pretty_unwrap();
                 setsum
             }

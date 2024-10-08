@@ -95,7 +95,7 @@ impl Jester {
     fn rollover_builder(&mut self) -> Result<(), Error> {
         if self.builder.is_some() {
             let builder = self.builder.take().unwrap();
-            let setsum = builder.seal()?;
+            let setsum = builder.seal()?.0;
             let recent = self.recent.take().unwrap();
             self.convert_builder(recent, setsum)?;
         }

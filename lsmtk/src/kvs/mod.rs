@@ -245,7 +245,7 @@ impl KeyValueStore {
                 });
             }
             let imm_setsum = match Arc::try_unwrap(imm_log) {
-                Ok(log) => self.poison(log.seal())?.into_inner(),
+                Ok(log) => self.poison(log.seal())?.0.into_inner(),
                 Err(_) => {
                     return Err(Error::LogicError {
                         core: ErrorCore::default(),

@@ -368,7 +368,7 @@ impl<W: Write> LogBuilder<W> {
 }
 
 impl<W: Write> Builder for LogBuilder<W> {
-    type Sealed = Setsum;
+    type Sealed = (Setsum, W);
 
     fn approximate_size(&self) -> usize {
         self.bytes_written as usize
@@ -390,7 +390,13 @@ impl<W: Write> Builder for LogBuilder<W> {
 
     fn seal(mut self) -> Result<Self::Sealed, Error> {
         self.flush()?;
-        Ok(self.setsum)
+        Ok((
+            self.setsum,
+            self.output.into_inner().map_err(|_| Error::LogicError {
+                core: ErrorCore::default(),
+                context: "failed to get inner".to_string(),
+            })?,
+        ))
     }
 }
 
@@ -594,7 +600,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     }
 
     /// Seal the log and return its setsum.
-    pub fn seal(self) -> Result<Setsum, Error> {
+    pub fn seal(self) -> Result<(Setsum, W), Error> {
         let core = self.write_cq.into_inner();
         core.builder.seal()
     }
