@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
-buffertk = { path = "../buffertk", version = "0.9" }
+buffertk = { path = "../buffertk", version = "0.10" }
 guacamole = { path = "../guacamole", version = "0.9" }
 one_two_eight = { path = "../one_two_eight", version = "0.6" }
 prototk = { path = "../prototk", version = "0.9" }
