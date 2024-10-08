@@ -16,4 +16,4 @@ prototk_derive = { path = "../prototk_derive", version = "0.9" }
 rpc_pb = { path = "../rpc_pb", version = "0.9" }
 zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.8" }
-zerror_derive = { path = "../zerror_derive", version = "0.5" }
+zerror_derive = { path = "../zerror_derive", version = "0.6" }
