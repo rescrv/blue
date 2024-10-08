@@ -10,4 +10,4 @@ repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.9" }
-bloomcalc = { path = "../bloomcalc", version = "0.4" }
+bloomcalc = { path = "../bloomcalc", version = "0.5" }
