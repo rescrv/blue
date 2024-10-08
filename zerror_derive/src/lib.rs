@@ -19,15 +19,6 @@ use derive_util::EnumVisitor;
 /// for it.
 #[proc_macro_derive(Z, attributes())]
 pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    #[allow(deprecated)]
-    derive_command_line_old(input)
-}
-
-/// Derive ZerrorCore for an error.  This assumes a type has a core, and makes the with_* methods
-/// for it.
-#[deprecated(since = "0.3.0", note = "derive Z instead")]
-#[proc_macro_derive(ZerrorCore, attributes())]
-pub fn derive_command_line_old(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     // `ty_name` holds the type's identifier.
     let ty_name = input.ident;
@@ -54,27 +45,6 @@ pub fn derive_command_line_old(input: proc_macro::TokenStream) -> proc_macro::To
 
             fn long_form(&self) -> String {
                 format!("{}\n", self) + &self.core().long_form()
-            }
-
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_token(mut self, identifier: &str, value: &str) -> Self::Error {
-                self.core_mut().set_token(identifier, value);
-                self
-            }
-
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_url(mut self, identifier: &str, url: &str) -> Self::Error {
-                self.core_mut().set_url(identifier, url);
-                self
-            }
-
-            #[deprecated(since="0.3.0", note="use set_info instead")]
-            fn with_variable<X: ::std::fmt::Debug>(mut self, variable: &str, x: X) -> Self::Error
-            where
-                X: ::std::fmt::Debug,
-            {
-                self.core_mut().set_variable(variable, x);
-                self
             }
 
             fn with_info<X: ::std::fmt::Debug>(mut self, name: &str, value: X) -> Self::Error {

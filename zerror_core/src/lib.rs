@@ -32,30 +32,6 @@ pub fn register_biometrics(collector: Collector) {
 ///////////////////////////////////////////// ErrorCore ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
-struct Token {
-    #[prototk(1, string)]
-    identifier: String,
-    #[prototk(2, string)]
-    value: String,
-}
-
-#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
-struct Url {
-    #[prototk(1, string)]
-    identifier: String,
-    #[prototk(2, string)]
-    url: String,
-}
-
-#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
-struct Variable {
-    #[prototk(1, string)]
-    identifier: String,
-    #[prototk(2, string)]
-    value: String,
-}
-
-#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
 struct Info {
     #[prototk(1, string)]
     name: String,
@@ -69,12 +45,6 @@ struct Internals {
     // reserved 2: short
     #[prototk(3, string)]
     backtrace: String,
-    #[prototk(4, message)]
-    toks: Vec<Token>,
-    #[prototk(5, message)]
-    urls: Vec<Url>,
-    #[prototk(6, message)]
-    vars: Vec<Variable>,
     #[prototk(7, message)]
     info: Vec<Info>,
 }
@@ -93,12 +63,8 @@ impl ErrorCore {
     pub fn new(counter: &'static Counter) -> Self {
         counter.click();
         let backtrace = format!("{}", Backtrace::force_capture());
-        #[allow(deprecated)]
         let internals = Internals {
             backtrace,
-            toks: Vec::new(),
-            urls: Vec::new(),
-            vars: Vec::new(),
             info: Vec::new(),
         };
         Self {
@@ -109,26 +75,6 @@ impl ErrorCore {
     /// Print the long-form of the error.
     pub fn long_form(&self) -> String {
         let mut s = String::default();
-        #[allow(deprecated)]
-        for token in self.internals.toks.iter() {
-            s += &format!("\n{}: {}", token.identifier, token.value);
-        }
-        #[allow(deprecated)]
-        if !self.internals.urls.is_empty() {
-            s += "\n";
-            #[allow(deprecated)]
-            for url in self.internals.urls.iter() {
-                s += &format!("\n{}: {}", url.identifier, url.url);
-            }
-        }
-        #[allow(deprecated)]
-        if !self.internals.vars.is_empty() {
-            s += "\n";
-            #[allow(deprecated)]
-            for variable in self.internals.vars.iter() {
-                s += &format!("\n{} = {}", variable.identifier, variable.value);
-            }
-        }
         if !self.internals.info.is_empty() {
             for info in self.internals.info.iter() {
                 s += &format!("\n{} = {}", info.name, info.value);
@@ -136,36 +82,6 @@ impl ErrorCore {
         }
         s += &format!("\n\nbacktrace:\n{}", self.internals.backtrace);
         s.trim().to_owned() + "\n"
-    }
-
-    /// Set the token associated with identifier.
-    #[deprecated(since = "0.5.0", note = "use set_info instead")]
-    pub fn set_token(&mut self, identifier: &str, value: &str) {
-        #[allow(deprecated)]
-        self.internals.toks.push(Token {
-            identifier: identifier.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-
-    /// Sets a URL under an identifier.
-    #[deprecated(since = "0.5.0", note = "use set_info instead")]
-    pub fn set_url(&mut self, identifier: &str, url: &str) {
-        #[allow(deprecated)]
-        self.internals.urls.push(Url {
-            identifier: identifier.to_owned(),
-            url: url.to_owned(),
-        });
-    }
-
-    /// Sets a variable that's debug-printable.
-    #[deprecated(since = "0.5.0", note = "use set_info instead")]
-    pub fn set_variable<X: Debug>(&mut self, variable: &str, x: X) {
-        #[allow(deprecated)]
-        self.internals.vars.push(Variable {
-            identifier: variable.to_owned(),
-            value: format!("{:?}", x),
-        });
     }
 
     /// Add debug formatting of a local variable.
