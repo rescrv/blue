@@ -459,7 +459,15 @@ impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
             std::iter::repeat(true).take(taken)
         } else {
             // SAFETY(rescrv):  The worst thing that can happen is we fsync on a fd that's not ours.
-            let ret = unsafe { libc::fdatasync(self.raw_builder) } >= 0;
+            #[cfg(not(target_os = "linux"))]
+            fn fsync(fd: RawFd) -> bool {
+                (unsafe { libc::fsync(fd) }) >= 0
+            }
+            #[cfg(target_os = "linux")]
+            fn fsync(fd: RawFd) -> bool {
+                (unsafe { libc::fdatasync(fd) }) >= 0
+            }
+            let ret = fsync(self.raw_builder);
             if ret {
                 self.synced = acc;
             }
