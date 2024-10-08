@@ -31,7 +31,7 @@ sst = { path = "../sst", version = "0.11" }
 sync42 = { path = "../sync42", version = "0.11" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.7" }
-zerror_core = { path = "../zerror_core", version = "0.8" }
+zerror_core = { path = "../zerror_core", version = "0.9" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 
 [[bin]]

@@ -25,7 +25,7 @@ prototk = { path = "../prototk", version = "0.10" }
 rpc_pb = { path = "../rpc_pb", version = "0.9" }
 tuple_key = { path = "../tuple_key", version = "0.8" }
 tuple_routing = { path = "../tuple_routing", version = "0.3" }
-zerror_core = { path = "../zerror_core", version = "0.8" }
+zerror_core = { path = "../zerror_core", version = "0.9" }
 
 [[bin]]
 name = "busyrpc-service-discovery-server"
