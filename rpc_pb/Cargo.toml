@@ -19,7 +19,7 @@ crc32c = "0.6"
 biometrics = { path = "../biometrics", version = "0.9" }
 buffertk = { path = "../buffertk", version = "0.10" }
 guacamole = { path = "../guacamole", version = "0.9" }
-indicio = { path = "../indicio", version = "0.7", optional = true }
+indicio = { path = "../indicio", version = "0.8", optional = true }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }

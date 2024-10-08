@@ -12,7 +12,7 @@ nom = "7.1"
 
 buffertk = { path = "../buffertk", version = "0.10" }
 busyrpc = { path = "../busyrpc", version = "0.7" }
-indicio = { path = "../indicio", version = "0.7" }
+indicio = { path = "../indicio", version = "0.8" }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }
