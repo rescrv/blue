@@ -29,13 +29,15 @@ fn main() {
     {
         if cmdline.truncate {
             if let Some(truncate_to) = cmdline.truncate_to {
-                if offset != truncate_to || offset > i64::MAX as u64 {
+                if offset != truncate_to || offset > i32::MAX as u64 {
                     eprintln!(
                         "not truncating: required offset={offset}, specified offset={truncate_to}"
                     );
                     std::process::exit(2);
-                } else if unsafe { libc::truncate64(args[0].as_ptr() as *const i8, offset as i64) }
-                    < 0
+                // SAFETY(rescrv):  libc call with valid pointer and try_into with check above.
+                } else if unsafe {
+                    libc::truncate(args[0].as_ptr() as *const i8, offset.try_into().unwrap())
+                } < 0
                 {
                     Err::<(), Error>(std::io::Error::last_os_error().into())
                         .as_z()
