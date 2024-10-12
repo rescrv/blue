@@ -258,4 +258,14 @@ mod tests {
         assert_eq!(MOMENTS.read().n(), 3);
         assert_eq!(MOMENTS.read().mean(), 5.0);
     }
+
+    #[test]
+    fn histogram() {
+        static HISTOGRAM: sig_fig_histogram::LockFreeHistogram<1000> =
+            sig_fig_histogram::LockFreeHistogram::new(3);
+        static HISTOGRAM_SENSOR: Histogram = Histogram::new("histogram", &HISTOGRAM);
+        HISTOGRAM_SENSOR.observe(0.0);
+        HISTOGRAM_SENSOR.observe(5.0);
+        HISTOGRAM_SENSOR.observe(10.0);
+    }
 }
