@@ -12,17 +12,17 @@ use std::sync::Arc;
 
 use rand::Rng;
 
-const MAX_HEIGHT: usize = 12;
+const DEFAULT_MAX_HEIGHT: usize = 12;
 
 /////////////////////////////////////////////// Node ///////////////////////////////////////////////
 
-struct Node<K, V> {
+struct Node<K, V, const MAX_HEIGHT: usize = DEFAULT_MAX_HEIGHT> {
     key: K,
     value: V,
-    pointers: Vec<AtomicPtr<Node<K, V>>>,
+    pointers: Vec<AtomicPtr<Node<K, V, MAX_HEIGHT>>>,
 }
 
-impl<K, V> Node<K, V> {
+impl<K, V, const MAX_HEIGHT: usize> Node<K, V, MAX_HEIGHT> {
     fn new(key: K, value: V, height: usize) -> Self {
         let mut pointers = Vec::with_capacity(height);
         for _ in 0..height {
@@ -35,17 +35,22 @@ impl<K, V> Node<K, V> {
         }
     }
 
-    fn set_next(&self, level: usize, x: *mut Node<K, V>) {
+    fn set_next(&self, level: usize, x: *mut Node<K, V, MAX_HEIGHT>) {
         assert!(level < self.pointers.len());
         self.pointers[level].store(x, Ordering::Release);
     }
 
-    fn get_next(&self, level: usize) -> *mut Node<K, V> {
+    fn get_next(&self, level: usize) -> *mut Node<K, V, MAX_HEIGHT> {
         assert!(level < self.pointers.len());
         self.pointers[level].load(Ordering::Acquire)
     }
 
-    fn cas_next(&self, level: usize, old_node: *mut Node<K, V>, new_node: *mut Node<K, V>) -> bool {
+    fn cas_next(
+        &self,
+        level: usize,
+        old_node: *mut Node<K, V, MAX_HEIGHT>,
+        new_node: *mut Node<K, V, MAX_HEIGHT>,
+    ) -> bool {
         assert!(level < self.pointers.len());
         self.pointers[level].compare_exchange(
             old_node,
@@ -59,31 +64,44 @@ impl<K, V> Node<K, V> {
 mod node_ptr {
     use super::Node;
 
-    fn deref<'a, K, V>(ptr: *mut Node<K, V>) -> &'a Node<K, V> {
+    fn deref<'a, K, V, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
+    ) -> &'a Node<K, V, MAX_HEIGHT> {
         unsafe { &*ptr }
     }
 
-    pub(crate) fn key<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a K {
+    pub(crate) fn key<'a, K: 'a, V: 'a, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
+    ) -> &'a K {
         &deref(ptr).key
     }
 
-    pub(crate) fn value<'a, K: 'a, V: 'a>(ptr: *mut Node<K, V>) -> &'a V {
+    pub(crate) fn value<'a, K: 'a, V: 'a, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
+    ) -> &'a V {
         &deref(ptr).value
     }
 
-    pub(crate) fn set_next<K, V>(ptr: *mut Node<K, V>, level: usize, next: *mut Node<K, V>) {
+    pub(crate) fn set_next<K, V, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
+        level: usize,
+        next: *mut Node<K, V, MAX_HEIGHT>,
+    ) {
         deref(ptr).set_next(level, next);
     }
 
-    pub(crate) fn get_next<K, V>(ptr: *mut Node<K, V>, level: usize) -> *mut Node<K, V> {
+    pub(crate) fn get_next<K, V, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
+        level: usize,
+    ) -> *mut Node<K, V, MAX_HEIGHT> {
         deref(ptr).get_next(level)
     }
 
-    pub(crate) fn cas_next<K, V>(
-        ptr: *mut Node<K, V>,
+    pub(crate) fn cas_next<K, V, const MAX_HEIGHT: usize>(
+        ptr: *mut Node<K, V, MAX_HEIGHT>,
         level: usize,
-        old_node: *mut Node<K, V>,
-        new_node: *mut Node<K, V>,
+        old_node: *mut Node<K, V, MAX_HEIGHT>,
+        new_node: *mut Node<K, V, MAX_HEIGHT>,
     ) -> bool {
         deref(ptr).cas_next(level, old_node, new_node)
     }
@@ -92,11 +110,11 @@ mod node_ptr {
 ///////////////////////////////////////////// SkipList /////////////////////////////////////////////
 
 /// A lock-free skip list, generic over keys and values.
-pub struct SkipList<K, V> {
-    head: Arc<AtomicPtr<Node<K, V>>>,
+pub struct SkipList<K, V, const MAX_HEIGHT: usize = DEFAULT_MAX_HEIGHT> {
+    head: Arc<AtomicPtr<Node<K, V, MAX_HEIGHT>>>,
 }
 
-impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
+impl<K: Eq + Ord + Default, V: Default, const MAX_HEIGHT: usize> SkipList<K, V, MAX_HEIGHT> {
     /// Insert the provided key and value into the skiplist.
     pub fn insert(&self, key: K, value: V) {
         let (existing, mut prev, mut obs) =
@@ -133,14 +151,14 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     ///
     /// This iterator will keep the body of the skiplist in-memory even after the skiplist itself
     /// goes out of scope.
-    pub fn iter(&self) -> SkipListIterator<K, V> {
+    pub fn iter(&self) -> SkipListIterator<K, V, MAX_HEIGHT> {
         SkipListIterator {
             head: Arc::clone(&self.head),
             node: std::ptr::null_mut(),
         }
     }
 
-    fn new_node(key: K, value: V, height: usize) -> *mut Node<K, V> {
+    fn new_node(key: K, value: V, height: usize) -> *mut Node<K, V, MAX_HEIGHT> {
         assert!(height > 0);
         assert!(height <= MAX_HEIGHT);
         Box::leak(Box::new(Node::new(key, value, height)))
@@ -158,11 +176,14 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         height
     }
 
-    fn key_is_after_node(key: &K, node: *mut Node<K, V>) -> bool {
+    fn key_is_after_node(key: &K, node: *mut Node<K, V, MAX_HEIGHT>) -> bool {
         !node.is_null() && node_ptr::key(node) < key
     }
 
-    fn find_greater_or_equal(head: &AtomicPtr<Node<K, V>>, key: &K) -> *mut Node<K, V> {
+    fn find_greater_or_equal(
+        head: &AtomicPtr<Node<K, V, MAX_HEIGHT>>,
+        key: &K,
+    ) -> *mut Node<K, V, MAX_HEIGHT> {
         let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
@@ -180,9 +201,13 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     // NOTE(rescrv):  I don't want a simpler type.  I want a 3-tuple that I can destructure.
     #[allow(clippy::type_complexity)]
     fn find_greater_or_equal_and_pointers(
-        head: &AtomicPtr<Node<K, V>>,
+        head: &AtomicPtr<Node<K, V, MAX_HEIGHT>>,
         key: &K,
-    ) -> (*mut Node<K, V>, Vec<*mut Node<K, V>>, Vec<*mut Node<K, V>>) {
+    ) -> (
+        *mut Node<K, V, MAX_HEIGHT>,
+        Vec<*mut Node<K, V, MAX_HEIGHT>>,
+        Vec<*mut Node<K, V, MAX_HEIGHT>>,
+    ) {
         let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         let mut prev = Vec::with_capacity(MAX_HEIGHT);
@@ -208,7 +233,10 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         (found, prev, obs)
     }
 
-    fn find_less_than(head: &AtomicPtr<Node<K, V>>, key: &K) -> *mut Node<K, V> {
+    fn find_less_than(
+        head: &AtomicPtr<Node<K, V, MAX_HEIGHT>>,
+        key: &K,
+    ) -> *mut Node<K, V, MAX_HEIGHT> {
         let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
@@ -226,7 +254,7 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
         }
     }
 
-    fn find_last(head: &AtomicPtr<Node<K, V>>) -> *mut Node<K, V> {
+    fn find_last(head: &AtomicPtr<Node<K, V, MAX_HEIGHT>>) -> *mut Node<K, V, MAX_HEIGHT> {
         let mut x = head.load(Ordering::Acquire);
         let mut level = MAX_HEIGHT - 1;
         loop {
@@ -244,7 +272,9 @@ impl<K: Eq + Ord + Default, V: Default> SkipList<K, V> {
     }
 }
 
-impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
+impl<K: Eq + Ord + Default, V: Default, const MAX_HEIGHT: usize> Default
+    for SkipList<K, V, MAX_HEIGHT>
+{
     fn default() -> Self {
         let head = Self::new_node(K::default(), V::default(), MAX_HEIGHT);
         for idx in 0..MAX_HEIGHT {
@@ -255,7 +285,7 @@ impl<K: Eq + Ord + Default, V: Default> Default for SkipList<K, V> {
     }
 }
 
-impl<K, V> Drop for SkipList<K, V> {
+impl<K, V, const MAX_HEIGHT: usize> Drop for SkipList<K, V, MAX_HEIGHT> {
     fn drop(&mut self) {
         let mut ptr = self.head.load(Ordering::Acquire);
         while !ptr.is_null() {
@@ -270,12 +300,14 @@ impl<K, V> Drop for SkipList<K, V> {
 
 /// A SkipList iterator.  Will outlast the skip list it comes from if so chosen.
 #[derive(Clone)]
-pub struct SkipListIterator<K, V> {
-    head: Arc<AtomicPtr<Node<K, V>>>,
-    node: *mut Node<K, V>,
+pub struct SkipListIterator<K, V, const MAX_HEIGHT: usize = DEFAULT_MAX_HEIGHT> {
+    head: Arc<AtomicPtr<Node<K, V, MAX_HEIGHT>>>,
+    node: *mut Node<K, V, MAX_HEIGHT>,
 }
 
-impl<K: Eq + Ord + Default, V: Default> SkipListIterator<K, V> {
+impl<K: Eq + Ord + Default, V: Default, const MAX_HEIGHT: usize>
+    SkipListIterator<K, V, MAX_HEIGHT>
+{
     /// Returns true if the skip list is positioned at a key-value pair.
     pub fn is_valid(&self) -> bool {
         !self.node.is_null() && self.node != self.head.load(Ordering::Relaxed)
