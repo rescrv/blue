@@ -44,7 +44,7 @@ impl<'a> Tag<'a> {
         }
     }
 
-    pub fn to_owned(self) -> Tag<'static> {
+    pub fn into_owned(self) -> Tag<'static> {
         Tag {
             key: Cow::Owned(self.key.into_owned()),
             value: Cow::Owned(self.value.into_owned()),
@@ -86,7 +86,7 @@ impl<'a> Tags<'a> {
         Some(Tags { tags })
     }
 
-    pub fn to_owned(self) -> Tags<'static> {
+    pub fn into_owned(self) -> Tags<'static> {
         Tags {
             tags: Cow::Owned(self.tags.into_owned()),
         }
@@ -260,7 +260,7 @@ impl<'a> TagIndex for CompressedTagIndex<'a> {
             let record: String = record.iter().flat_map(|c| char::from_u32(*c)).collect();
             let record = record.trim();
             if let Some(t) = Tags::new(record) {
-                let t = t.to_owned();
+                let t = t.into_owned();
                 tags.push(t)
             }
         }
@@ -289,7 +289,7 @@ pub struct InvertedTagIndex {
 
 impl InvertedTagIndex {
     pub fn insert(&self, tags: Tags) {
-        let tags = Arc::new(tags.to_owned());
+        let tags = Arc::new(tags.into_owned());
         let mut by_tag = self.by_tag.lock().unwrap();
         for tag in tags.tags() {
             let list = by_tag.entry(tag.to_string()).or_default();
@@ -339,9 +339,9 @@ mod tests {
     use super::{CompressedTagIndex, Tag, TagIndex, Tags};
 
     #[test]
-    fn tag_to_owned() {
+    fn tag_into_owned() {
         let tag = Tag::new("key", "value").unwrap();
-        let tag = tag.to_owned();
+        let tag = tag.into_owned();
         assert!(matches!(tag.key, Cow::Owned(_)));
         assert!(matches!(tag.value, Cow::Owned(_)));
         assert_eq!("key", tag.key);
@@ -362,9 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn tags_to_owned() {
+    fn tags_into_owned() {
         let tags = Tags::new(":tag1=foo:tag2=bar:").unwrap();
-        let tags = tags.to_owned();
+        let tags = tags.into_owned();
         assert!(matches!(tags.tags, Cow::Owned(_)));
         assert_eq!(":tag1=foo:tag2=bar:", tags.tags);
     }
