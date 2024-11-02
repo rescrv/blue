@@ -126,6 +126,22 @@ impl<'a> Tags<'a> {
     }
 }
 
+impl<'a> From<Vec<Tag<'a>>> for Tags<'static> {
+    fn from(tags: Vec<Tag<'a>>) -> Self {
+        let mut s = String::new();
+        for tag in tags {
+            s.push(':');
+            s.push_str(tag.key());
+            s.push('=');
+            s.push_str(tag.value());
+        }
+        s.push(':');
+        Tags {
+            tags: Cow::Owned(s),
+        }
+    }
+}
+
 impl<'a> Debug for Tags<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.tags)
