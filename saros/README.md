@@ -1,7 +1,7 @@
 saros
 =====
 
-saros is a time series database.
+saros is a time series database and plotting front-end.
 
 Status
 ------
@@ -11,7 +11,10 @@ Active development.
 Scope
 -----
 
-This library provides the saros library and dashboard combinators.
+This tool provides everything necessary to ingest data and plot it.
+
+Warts
+-----
 
 Documentation
 -------------

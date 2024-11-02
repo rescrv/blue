@@ -13,18 +13,30 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
+chrono = "0.4"
+getopts = "0.2"
+nom = "7.1"
+
+arrrg = { path = "../arrrg", version = "0.5" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.5" }
 biometrics = { path = "../biometrics", version = "0.9" }
 buffertk = { path = "../buffertk", version = "0.10" }
 indicio = { path = "../indicio", version = "0.8" }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }
+rpc_pb = { path = "../rpc_pb", version = "0.10" }
+shvar = { path = "../shvar", version = "0.5" }
+tag_index = { path = "../tag_index", version = "0.4" }
 tatl = { path = "../tatl", version = "0.9" }
+utf8path = { path = "../utf8path", version = "0.6" }
 zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.9" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 
-[[example]]
-name = "saros-generate-waves"
-path = "examples/saros-generate-waves.rs"
-required-features=["binaries"]
+[dev-dependencies]
+proptest = "1.0"
+
+biometrics_prometheus = { path = "../biometrics_prometheus", version = "0.4" }
+guacamole = { path = "../guacamole", version = "0.9" }
+sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.4" }

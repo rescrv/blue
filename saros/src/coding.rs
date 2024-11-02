@@ -1,8 +1,11 @@
-#![allow(dead_code)]
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
+pub const MAX_BITS_FOR_GAMMA: usize = 128;
+pub const MAX_BITS_FOR_DELTA: usize = 77;
 
 ////////////////////////////////////////// gamma encoding //////////////////////////////////////////
 
-fn gamma(x: u64) -> (u128, usize) {
+pub fn gamma(x: u64) -> (u128, usize) {
     assert!(x < u64::MAX);
     let x: u64 = x + 1;
     let zeros: u32 = x.leading_zeros();
@@ -15,16 +18,21 @@ fn gamma(x: u64) -> (u128, usize) {
     (x, width as usize * 2)
 }
 
-fn ungamma(x: u128) -> (u64, usize) {
+pub fn ungamma(x: u128) -> (u64, usize) {
     let width = x.trailing_zeros();
     let x: u64 = (x >> width) as u64;
     let x: u64 = x.reverse_bits();
     ((x >> (64 - width)) - 1, 2 * width as usize)
 }
 
+pub fn is_gamma(x: u128, x_sz: usize) -> bool {
+    let width = x.trailing_zeros();
+    x_sz >= width as usize * 2 && width > 0
+}
+
 ////////////////////////////////////////// delta encoding //////////////////////////////////////////
 
-fn delta(x: u64) -> (u128, usize) {
+pub fn delta(x: u64) -> (u128, usize) {
     let zeros: u32 = x.leading_zeros();
     let width = 64 - zeros;
     let (mut gamma, gamma_width) = gamma(width.into());
@@ -39,13 +47,31 @@ fn delta(x: u64) -> (u128, usize) {
     }
 }
 
-fn undelta(x: u128) -> (u64, usize) {
+pub fn undelta(x: u128) -> (u64, usize) {
     let (width, consumed) = ungamma(x);
     if width == 0 {
         (0, consumed)
     } else {
         let x: u64 = (x >> consumed) as u64;
+        let x = if width > 0 && width < 64 {
+            x & ((1 << width) - 1)
+        } else {
+            x
+        };
         (x | (1 << (width - 1)), width as usize + consumed - 1)
+    }
+}
+
+pub fn is_delta(x: u128, x_sz: usize) -> bool {
+    if is_gamma(x, x_sz) {
+        let (width, consumed) = ungamma(x);
+        if width == 0 {
+            consumed <= x_sz
+        } else {
+            width + consumed as u64 - 1 <= x_sz as u64
+        }
+    } else {
+        false
     }
 }
 
@@ -64,6 +90,12 @@ mod tests {
             let (ret_x, ret_w) = ungamma(exp_g);
             assert_eq!(x, ret_x);
             assert_eq!(exp_w, ret_w);
+            for w in 0..exp_w {
+                assert!(!is_gamma(exp_g, w));
+            }
+            for w in exp_w..128 {
+                assert!(is_gamma(exp_g, w));
+            }
         }
         round_trip(0, 2, 2);
         round_trip(1, 4, 4);
@@ -136,6 +168,12 @@ mod tests {
             let (ret_x, ret_w) = undelta(ret_d);
             assert_eq!(x, ret_x);
             assert_eq!(exp_w, ret_w);
+            for w in 0..exp_w {
+                assert!(!is_delta(exp_d, w));
+            }
+            for w in exp_w..128 {
+                assert!(is_delta(exp_d, w));
+            }
         }
         round_trip(1, 4, 4);
         round_trip(2, 12, 5);
@@ -190,5 +228,24 @@ mod tests {
 
         round_trip(18446744073709551614, 151115727451828646813824, 77);
         round_trip(18446744073709551615, 151115727451828646830208, 77);
+
+        // Cases that tickled bugs.
+        round_trip(18014398509481984, 448, 66);
+        round_trip(7184726270831141472, 42156691495383098458240, 76);
+    }
+
+    #[test]
+    fn delta_undelta_overrun_bug() {
+        // This bug happens when a valid prefix code has subsequent bits.
+        const TICKLER: u64 = 18014398509481984;
+        let (encoded, width) = delta(TICKLER);
+        assert_eq!(448, encoded);
+        assert_eq!(66, width);
+        let (decoded, width) = undelta(encoded);
+        assert_eq!(TICKLER, decoded);
+        assert_eq!(66, width);
+        let (decoded, width) = undelta(147573952589676413376);
+        assert_eq!(TICKLER, decoded);
+        assert_eq!(66, width);
     }
 }
