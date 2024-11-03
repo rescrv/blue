@@ -1,0 +1,20 @@
+[package]
+name = "handled"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "handled is an error handling library"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = []
+[dependencies]
+biometrics = { path = "../biometrics", version = "0.9" }
+
+[[example]]
+name = "error-main"
+path = "examples/error-main.rs"
+required-features = ["binaries"]

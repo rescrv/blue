@@ -15,6 +15,7 @@ members = [
     "busyrpc_service_discovery",
     "derive_util",
     "guacamole",
+    "handled",
     "indicio",
     "k8src",
     "listfree",
