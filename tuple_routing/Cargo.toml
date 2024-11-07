@@ -17,7 +17,7 @@ one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }
 rpc_pb = { path = "../rpc_pb", version = "0.10" }
-sync42 = { path = "../sync42", version = "0.11" }
+sync42 = { path = "../sync42", version = "0.12" }
 tuple_key = { path = "../tuple_key", version = "0.9" }
 utf8path = { path = "../utf8path", version = "0.6" }
 zerror = { path = "../zerror", version = "0.7" }

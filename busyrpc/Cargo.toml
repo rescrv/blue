@@ -24,7 +24,7 @@ indicio = { path = "../indicio", version = "0.8" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }
 rpc_pb = { path = "../rpc_pb", version = "0.10" }
-sync42 = { path = "../sync42", version = "0.11" }
+sync42 = { path = "../sync42", version = "0.12" }
 tatl = { path = "../tatl", version = "0.9" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.7" }
