@@ -21,7 +21,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.5", optional = true }
 biometrics = { path = "../biometrics", version = "0.10" }
 buffertk = { path = "../buffertk", version = "0.10" }
 indicio = { path = "../indicio", version = "0.9" }
-mani = { path = "../mani", version = "0.6" }
+mani = { path = "../mani", version = "0.7" }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.10" }

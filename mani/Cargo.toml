@@ -1,6 +1,6 @@
 [package]
 name = "mani"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Mani provides an in-memory manifest of related files."
