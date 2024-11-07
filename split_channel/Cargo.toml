@@ -1,6 +1,6 @@
 [package]
 name = "split_channel"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "split_channel provides a stream-of-messages abstraction with split send/recv channels."
