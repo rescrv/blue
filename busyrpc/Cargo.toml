@@ -28,7 +28,7 @@ sync42 = { path = "../sync42", version = "0.12" }
 tatl = { path = "../tatl", version = "0.10" }
 utilz = { path = "../utilz", version = "0.5" }
 zerror = { path = "../zerror", version = "0.7" }
-zerror_core = { path = "../zerror_core", version = "0.9" }
+zerror_core = { path = "../zerror_core", version = "0.10" }
 
 getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.5", optional = true }

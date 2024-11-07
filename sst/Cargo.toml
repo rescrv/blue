@@ -32,7 +32,7 @@ setsum = { path = "../setsum", version = "0.7" }
 sync42 = { path = "../sync42", version = "0.12" }
 tatl = { path = "../tatl", version = "0.10" }
 utilz = { path = "../utilz", version = "0.5" }
-zerror_core = { path = "../zerror_core", version = "0.9" }
+zerror_core = { path = "../zerror_core", version = "0.10" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 zerror = { path = "../zerror", version = "0.7" }
 
