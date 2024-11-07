@@ -14,4 +14,4 @@ biometrics = { path = "../biometrics", version = "0.10" }
 utf8path = { path = "../utf8path", version = "0.6" }
 
 [dev-dependencies]
-biometrics_sys = { path = "../biometrics_sys", version = "0.3" }
+biometrics_sys = { path = "../biometrics_sys", version = "0.4" }
