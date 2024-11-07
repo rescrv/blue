@@ -40,3 +40,23 @@ proptest = "1.0"
 biometrics_prometheus = { path = "../biometrics_prometheus", version = "0.4" }
 guacamole = { path = "../guacamole", version = "0.9" }
 sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.4" }
+
+[[bin]]
+name = "sarosd-recovery"
+path = "src/bin/sarosd-recovery.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "saros-query-parse"
+path = "src/bin/saros-query-parse.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "saros-prometheus-verify"
+path = "src/bin/saros-prometheus-verify.rs"
+required-features = ["binaries"]
+
+[[example]]
+name = "saros-generate-prometheus-testdata"
+path = "examples/saros-generate-prometheus-testdata.rs"
+required-features = ["binaries"]
