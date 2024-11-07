@@ -1,10 +1,7 @@
-
 use arrrg::CommandLine;
 use saros::query::QueryParams;
 use saros::recovery::RecoveryBiometricsStore;
-use saros::{
-    QueryEngine, Time, Window,
-};
+use saros::{QueryEngine, Time, Window};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct WindowOptions {
