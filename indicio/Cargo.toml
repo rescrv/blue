@@ -1,6 +1,6 @@
 [package]
 name = "indicio"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Indicio provides a framework for emitting clues that may be used for debugging."
