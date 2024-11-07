@@ -146,6 +146,14 @@ impl<'a, K: Key, V: Value> Handle<'a, K, V> {
         Self { table, key, value }
     }
 
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
+    pub fn value(&self) -> &V {
+        &self.value
+    }
+
     /// True if and only if both handles point to the same table and state.
     pub fn is_same(lhs: &Self, rhs: &Self) -> bool {
         std::ptr::eq(lhs.table, rhs.table)
