@@ -33,7 +33,7 @@ fn generator<'a>(
             None
         } else {
             idx += 1;
-            Tag::new(key, &strings(set_index(idx - 1))).map(Tag::to_owned)
+            Tag::new(key, &strings(set_index(idx - 1))).map(Tag::into_owned)
         }
     }
 }
@@ -43,11 +43,11 @@ fn materialize(guac: &mut Guacamole, tag: Tag) -> Vec<Tag<'static>> {
         let mut ret = vec![];
         let mut gen = generator(tag.key(), tag.value());
         while let Some(tag) = gen(guac) {
-            ret.push(tag.to_owned());
+            ret.push(tag.into_owned());
         }
         ret
     } else {
-        vec![tag.to_owned()]
+        vec![tag.into_owned()]
     }
 }
 

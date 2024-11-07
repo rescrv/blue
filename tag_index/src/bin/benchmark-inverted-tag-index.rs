@@ -20,7 +20,7 @@ fn parse_queries(queries: &str) -> Vec<Tag> {
     let mut queries = vec![];
     for line in reader.lines() {
         let line = line.unwrap();
-        queries.extend(Tags::new(&line).unwrap().tags().map(Tag::to_owned));
+        queries.extend(Tags::new(&line).unwrap().tags().map(Tag::into_owned));
     }
     queries
 }
