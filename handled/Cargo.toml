@@ -12,7 +12,7 @@ default = ["binaries"]
 
 binaries = []
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.9" }
+biometrics = { path = "../biometrics", version = "0.10" }
 
 [[example]]
 name = "error-main"
