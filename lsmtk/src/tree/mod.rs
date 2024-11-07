@@ -329,7 +329,7 @@ impl Version {
         is_tombstone: &mut bool,
     ) -> Result<Option<Vec<u8>>, sst::Error> {
         let setsum = Setsum::from_digest(md.setsum);
-        let sst = if let Some(sst) = sc.lookup(setsum) {
+        let sst = if let Some(sst) = sc.lookup(&setsum) {
             sst.ptr
         } else {
             let sst_path = SST_FILE(&self.options.path, setsum);
@@ -360,7 +360,7 @@ impl Version {
             root: &str,
             setsum: Setsum,
         ) -> Result<SstCursor, sst::Error> {
-            if let Some(sst) = sc.lookup(setsum) {
+            if let Some(sst) = sc.lookup(&setsum) {
                 Ok(sst.ptr.cursor())
             } else {
                 let sst_path = SST_FILE(root, setsum);
@@ -1564,7 +1564,7 @@ impl LsmTree {
 
     // TODO(rescrv): Dedupe with tree.
     fn open_sst(&self, setsum: Setsum) -> Result<Arc<Sst>, Error> {
-        if let Some(sst) = self.sst_cache.lookup(setsum) {
+        if let Some(sst) = self.sst_cache.lookup(&setsum) {
             Ok(sst.ptr)
         } else {
             let sst_path = SST_FILE(&self.root, setsum);

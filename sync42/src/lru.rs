@@ -72,13 +72,41 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     pub fn insert(&self, key: K, value: V) {
         let ptr = Node::new(key.clone(), value);
         let mut state = self.state.lock().unwrap();
-        // Put this in a block so that `node` will drop before the calls to `remove_lru`.
-        {
-            // SAFETY(rescrv):
-            // We are the only one who can dereference pointers right now.
-            let node = unsafe { &mut *ptr };
-            match state.keys.entry(key) {
-                Entry::Occupied(entry) => {
+        state = self.insert_helper(state, ptr, key);
+        while state.size > self.capacity && !state.head.is_null() {
+            // SAFETY(rescrv):  We only held a reference to `node` and we dropped it before this.
+            state = unsafe { self.remove_lru(state) };
+        }
+    }
+
+    /// Insert (K, V) into the LRU, overwriting any existing key/value, and not evicting any
+    /// entries.
+    pub fn insert_no_evict(&self, key: K, value: V) {
+        let ptr = Node::new(key.clone(), value);
+        let state = self.state.lock().unwrap();
+        drop(self.insert_helper(state, ptr, key));
+    }
+
+    /// Return the size of the LRU.
+    pub fn approximate_size(&self) -> usize {
+        // SAFETY(rescrv):  Mutex poisoning.
+        self.state.lock().unwrap().size
+    }
+
+    /// Insert the node into the LRU, overwriting any existing key/value, but not evicting
+    /// anything.
+    fn insert_helper<'a>(
+        &self,
+        mut state: MutexGuard<'a, State<K, V>>,
+        ptr: *mut Node<K, V>,
+        key: K,
+    ) -> MutexGuard<'a, State<K, V>> {
+        // SAFETY(rescrv):
+        // We are the only one who can dereference pointers right now.
+        match state.keys.entry(key) {
+            Entry::Occupied(entry) => {
+                {
+                    let node = unsafe { &mut *ptr };
                     let existing_ptr = entry.get();
                     // SAFETY(rescrv):
                     // We are the only one who can dereference pointers right now.
@@ -86,41 +114,55 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
                     std::mem::swap(&mut node.value, &mut existing_node.value);
                     state.size += existing_node.value.approximate_size();
                     state.size -= node.value.approximate_size();
-                    // SAFETY(rescrv): We won't access ptr after this access.
-                    unsafe {
-                        Node::drop(ptr);
-                    }
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(ptr);
-                    state.size += node.value.approximate_size() + std::mem::size_of::<Node<K, V>>();
-                    if state.head.is_null() {
-                        assert_eq!(std::ptr::null_mut(), state.tail);
-                        node.next = std::ptr::null_mut();
-                        node.prev = std::ptr::null_mut();
-                        state.head = ptr;
-                        state.tail = ptr;
-                    } else {
-                        node.next = state.head;
-                        node.prev = std::ptr::null_mut();
-                        // SAFETY(rescrv):  We know ptr and head are not aliased, so it is safe to
-                        // bring this reference into existence.  No one else is derefing pointers.
-                        let head = unsafe { &mut *state.head };
-                        head.prev = ptr;
-                        state.head = ptr;
-                    }
+                // SAFETY(rescrv): We won't access ptr after this access.
+                unsafe {
+                    Node::drop(ptr);
+                }
+            }
+            Entry::Vacant(entry) => {
+                let node = unsafe { &mut *ptr };
+                entry.insert(ptr);
+                state.size += node.value.approximate_size();
+                if state.head.is_null() {
+                    assert_eq!(std::ptr::null_mut(), state.tail);
+                    node.next = std::ptr::null_mut();
+                    node.prev = std::ptr::null_mut();
+                    state.head = ptr;
+                    state.tail = ptr;
+                } else {
+                    node.next = state.head;
+                    node.prev = std::ptr::null_mut();
+                    // SAFETY(rescrv):  We know ptr and head are not aliased, so it is safe to
+                    // bring this reference into existence.  No one else is derefing pointers.
+                    let head = unsafe { &mut *state.head };
+                    head.prev = ptr;
+                    state.head = ptr;
                 }
             }
         }
-        while state.size > self.capacity && !state.head.is_null() {
-            // SAFETY(rescrv):  We only held a reference to `node` and we dropped it before this.
-            state = unsafe { self.remove_lru(state) };
+        state
+    }
+
+    /// Remove K if it exists.
+    pub fn remove(&self, key: &K) {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let mut state = self.state.lock().unwrap();
+        if let Some(ptr) = state.keys.get(key) {
+            let ptr = *ptr;
+            // SAFETY(rescrv):  These functions are safe because we hold the mutex and no
+            // outstanding references to data.
+            unsafe {
+                state = self.move_lru_to_back(state, ptr);
+                drop(self.remove_lru(state));
+            }
         }
     }
 
-    pub fn lookup(&self, key: K) -> Option<V> {
+    /// Lookup K if it exists.
+    pub fn lookup(&self, key: &K) -> Option<V> {
         let state = self.state.lock().unwrap();
-        let ptr = *state.keys.get(&key)?;
+        let ptr = *state.keys.get(key)?;
         let value = {
             // SAFETY(rescrv):  Mutual exclusion of state guarantees no one else will make a reference.
             let node = unsafe { &mut *ptr };
@@ -131,6 +173,26 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             self.move_lru_to_front(state, ptr);
         }
         Some(value)
+    }
+
+    /// Pop (K, V) from the LRU, if there is one.
+    pub fn pop(&self) -> Option<(K, V)> {
+        let mut state = self.state.lock().unwrap();
+        if !state.tail.is_null() {
+            let (k, v) = {
+                // SAFETY(rescrv):  We do this under a block and when we're the one holding the
+                // lock.  That means we're the one who dereferences pointers.
+                let tail = unsafe { &mut *state.tail };
+                (tail.key.clone(), tail.value.clone())
+            };
+            // SAFETY(rescrv):  This is safe because we hold no references to tail.
+            unsafe {
+                drop(self.remove_lru(state));
+            }
+            Some((k, v))
+        } else {
+            None
+        }
     }
 
     // The caller must make sure no references to linked nodes remain.
@@ -195,6 +257,38 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             head.prev = ptr;
             state.head = ptr;
         }
+    }
+
+    // The caller must make sure no references to linked nodes remain.
+    unsafe fn move_lru_to_back<'a>(
+        &self,
+        mut state: MutexGuard<'a, State<K, V>>,
+        ptr: *mut Node<K, V>,
+    ) -> MutexGuard<'a, State<K, V>> {
+        if ptr != state.tail {
+            // SAFETY(rescrv):  No references exist outside this function, and this is our first.
+            let node = &mut *ptr;
+            // SAFETY(rescrv):  We are not the tail, so there must be a next to adapt.
+            assert_ne!(std::ptr::null_mut(), node.next);
+            let next = &mut *node.next;
+            next.prev = node.prev;
+            if !node.prev.is_null() {
+                let prev = &mut *node.prev;
+                prev.next = node.next;
+            } else {
+                // SAFETY(rescrv):  Our prev is none, so we must be the head.
+                assert_eq!(state.head, ptr);
+                state.head = node.next;
+            }
+            node.prev = state.tail;
+            node.next = std::ptr::null_mut();
+            // SAFETY(rescrv):  We know ptr and head are not aliased, so it is safe to
+            // bring this reference into existence.  No one else is derefing pointers.
+            let tail = unsafe { &mut *state.tail };
+            tail.next = ptr;
+            state.tail = ptr;
+        }
+        state
     }
 }
 
@@ -270,17 +364,20 @@ mod tests {
     fn insert_one() {
         let lru = LeastRecentlyUsedCache::<String, String>::new(128);
         lru.insert("Hello".to_string(), "World".to_string());
-        assert_eq!(Some("World".to_string()), lru.lookup("Hello".to_string()));
+        assert_eq!(Some("World".to_string()), lru.lookup(&"Hello".to_string()));
     }
 
     #[test]
     fn bump_one() {
-        let lru = LeastRecentlyUsedCache::<String, String>::new(136);
+        let lru = LeastRecentlyUsedCache::<String, String>::new(6);
         lru.insert("Hello".to_string(), "World".to_string());
-        assert_eq!(Some("World".to_string()), lru.lookup("Hello".to_string()));
+        assert_eq!(Some("World".to_string()), lru.lookup(&"Hello".to_string()));
         lru.insert("Goodbye".to_string(), "World".to_string());
-        assert_eq!(None, lru.lookup("Hello".to_string()));
-        assert_eq!(Some("World".to_string()), lru.lookup("Goodbye".to_string()));
+        assert_eq!(None, lru.lookup(&"Hello".to_string()));
+        assert_eq!(
+            Some("World".to_string()),
+            lru.lookup(&"Goodbye".to_string())
+        );
     }
 
     fn guacamole_thread(
@@ -293,7 +390,7 @@ mod tests {
             let k = u64::from_guacamole(&mut (), &mut guac);
             let v = u64::from_guacamole(&mut (), &mut guac);
             lru.insert(k, v);
-            lru.lookup(k);
+            lru.lookup(&k);
             count.fetch_add(1, Ordering::Relaxed);
         }
     }
