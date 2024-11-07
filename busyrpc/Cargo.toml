@@ -1,6 +1,6 @@
 [package]
 name = "busyrpc"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "busyrpc provides synchronous/thread-pool implementations of rpc_pb."
