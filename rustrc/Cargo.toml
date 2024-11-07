@@ -1,6 +1,6 @@
 [package]
 name = "rustrc"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "rustrc is an rc-inspired init system as a library"
