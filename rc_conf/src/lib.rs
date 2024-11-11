@@ -1299,6 +1299,7 @@ bar_ENABLE=YES
                 HashMap::from([
                     ("example1".to_string(), Ok(Path::from("rc.d/example1"))),
                     ("example2".to_string(), Ok(Path::from("rc.d/example2"))),
+                    ("runbook1".to_string(), Ok(Path::from("rc.d/runbook1"))),
                 ]),
                 services
             );
@@ -1316,6 +1317,10 @@ bar_ENABLE=YES
                     ),
                     (
                         "example2".to_string(),
+                        Err("duplicate service definition".to_string())
+                    ),
+                    (
+                        "runbook1".to_string(),
                         Err("duplicate service definition".to_string())
                     ),
                 ]),
@@ -1364,6 +1369,7 @@ bar_ENABLE=YES
                 "example1",
                 "example2",
                 "example3",
+                "runbook1",
             ],
             rc_conf.list().unwrap().collect::<Vec<_>>()
         );
