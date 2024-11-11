@@ -1010,6 +1010,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
             eprintln!("expected service to be available via --rc-d-path");
             std::process::exit(130);
         };
+        env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
         path
     };
     let path = match path {
