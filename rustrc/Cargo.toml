@@ -22,7 +22,7 @@ biometrics = { path = "../biometrics", version = "0.10" }
 indicio = { path = "../indicio", version = "0.9" }
 minimal_signals = { path = "../minimal_signals", version = "0.4" }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
-rc_conf = { path = "../rc_conf", version = "0.7" }
+rc_conf = { path = "../rc_conf", version = "0.8" }
 shvar = { path = "../shvar", version = "0.5" }
 unix_sock = { path = "../unix_sock", version = "0.7" }
 utf8path = { path = "../utf8path", version = "0.6" }
