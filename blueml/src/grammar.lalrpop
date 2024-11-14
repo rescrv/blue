@@ -1,0 +1,59 @@
+use std::str::FromStr;
+
+use crate::lexer::{self, Token};
+use crate::{Atom, AtomOrData, Block, Data, Type};
+
+grammar;
+
+pub Types: Vec<Type> = Type*;
+
+pub Type: Type = {
+    <a:atom> <b:Block> => Type::AtomBlock(a.try_into().unwrap(), b),
+    <a:atom> "=" <d:Data> => Type::Assignment(a.try_into().unwrap(), d),
+    <a:atom> <d:Data> => Type::AtomData(a.try_into().unwrap(), d),
+}
+
+pub Block: Block = {
+    "{" <types:Type*> <datas:KwArg*> "}" => Block { types, datas },
+}
+
+pub KwArg: (AtomOrData, AtomOrData) = {
+    <k:atom> ":" <v:Data> "," => (AtomOrData::Atom(k.try_into().unwrap()), AtomOrData::Data(v)),
+    <k:atom> ":" <v:atom> "," => (AtomOrData::Atom(k.try_into().unwrap()), AtomOrData::Atom(v.try_into().unwrap())),
+    <k:Data> ":" <v:Data> "," => (AtomOrData::Data(k), AtomOrData::Data(v)),
+    <k:Data> ":" <v:atom> "," => (AtomOrData::Data(k), AtomOrData::Atom(v.try_into().unwrap())),
+};
+
+pub Data: Data = {
+    <x:sqs> => x.try_into().unwrap(),
+    <x:tqs> => x.try_into().unwrap(),
+    <x:f64> => x.try_into().unwrap(),
+    "$" <x:atom> => {
+        match x {
+            Token::Atom(x) => Data::Variable(x),
+            _ => unreachable!(),
+        }
+    }
+};
+
+extern {
+    type Location = usize;
+    type Error = lexer::LexicalError;
+
+    enum lexer::Token {
+        "," => Token::Comma,
+        "%" => Token::Percent,
+        "=" => Token::Equals,
+        ":" => Token::Colon,
+        "$" => Token::DollarSign,
+        "{" => Token::LeftBrace,
+        "}" => Token::RightBrace,
+        "[" => Token::LeftBracket,
+        "]" => Token::RightBracket,
+        atom => Token::Atom(String),
+        sqs => Token::SingleQuotedString(String),
+        tqs => Token::TripleQuotedString(String),
+        f64 => Token::F64(f64),
+        comment => Token::Comment(String),
+    }
+}
