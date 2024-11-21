@@ -1,27 +1,36 @@
-use std::str::FromStr;
-
 use crate::lexer::{self, Token};
-use crate::{Atom, AtomOrData, Block, Data, Type};
+use crate::{Block, Data, Dictionary, Statement};
 
 grammar;
 
-pub Types: Vec<Type> = Type*;
+pub Statements: Vec<Statement> = Statement*;
 
-pub Type: Type = {
-    <a:atom> <b:Block> => Type::AtomBlock(a.try_into().unwrap(), b),
-    <a:atom> "=" <d:Data> => Type::Assignment(a.try_into().unwrap(), d),
-    <a:atom> <d:Data> => Type::AtomData(a.try_into().unwrap(), d),
+pub Statement: Statement = {
+    <a:atom> "=" <d:Data> => Statement::Assignment(a.try_into().unwrap(), d),
+    <b:Block> => Statement::Block(b),
+    <a:atom> ":" <d:Data> "," => Statement::AtomData(a.try_into().unwrap(), d),
+    <k:Data> ":" <v:Data> "," => Statement::DataData(k, v),
+    <a:atom> ":" <d:Dictionary> => Statement::AtomDictionary(a.try_into().unwrap(), d),
+    <k:Data> ":" <v:Dictionary> => Statement::DataDictionary(k, v),
+    <a:atom> "," => Statement::Atom(a.try_into().unwrap()),
 }
 
 pub Block: Block = {
-    "{" <types:Type*> <datas:KwArg*> "}" => Block { types, datas },
-}
+    <a:atom> <s:sqs?> <d:Dictionary> => {
+        Block {
+            r#type: a.try_into().unwrap(),
+            label: s.map(|s| s.try_into().unwrap()),
+            dict: d,
+        }
+    }
+};
 
-pub KwArg: (AtomOrData, AtomOrData) = {
-    <k:atom> ":" <v:Data> "," => (AtomOrData::Atom(k.try_into().unwrap()), AtomOrData::Data(v)),
-    <k:atom> ":" <v:atom> "," => (AtomOrData::Atom(k.try_into().unwrap()), AtomOrData::Atom(v.try_into().unwrap())),
-    <k:Data> ":" <v:Data> "," => (AtomOrData::Data(k), AtomOrData::Data(v)),
-    <k:Data> ":" <v:atom> "," => (AtomOrData::Data(k), AtomOrData::Atom(v.try_into().unwrap())),
+pub Dictionary: Dictionary = {
+    "{" <s:Statement*> "}" => {
+        Dictionary {
+            items: s,
+        }
+    }
 };
 
 pub Data: Data = {
@@ -37,7 +46,7 @@ pub Data: Data = {
 };
 
 extern {
-    type Location = usize;
+    type Location = lexer::Location;
     type Error = lexer::LexicalError;
 
     enum lexer::Token {
@@ -50,10 +59,10 @@ extern {
         "}" => Token::RightBrace,
         "[" => Token::LeftBracket,
         "]" => Token::RightBracket,
-        atom => Token::Atom(String),
-        sqs => Token::SingleQuotedString(String),
-        tqs => Token::TripleQuotedString(String),
-        f64 => Token::F64(f64),
-        comment => Token::Comment(String),
+        atom => Token::Atom(_),
+        sqs => Token::SingleQuotedString(_),
+        tqs => Token::TripleQuotedString(_),
+        f64 => Token::F64(_),
+        comment => Token::Comment(_),
     }
 }

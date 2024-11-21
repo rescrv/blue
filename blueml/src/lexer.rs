@@ -2,8 +2,6 @@ use std::fmt::Display;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use crate::{Data, Error};
-
 #[derive(Clone, Debug)]
 pub enum LexicalError {}
 
@@ -296,6 +294,25 @@ impl<'a> Lexer<'a> {
     }
 }
 
+///////////////////////////////////////////// Location /////////////////////////////////////////////
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Location {
+    pub offset: usize,
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Default for Location {
+    fn default() -> Self {
+        Location {
+            offset: 1,
+            line: 1,
+            column: 1,
+        }
+    }
+}
+
 /////////////////////////////////////////////// utils //////////////////////////////////////////////
 
 fn escape(input: &str) -> String {
@@ -397,13 +414,21 @@ fn parse_single_string(input: &str) -> Option<String> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<(usize, Token, usize), LexicalError>;
+    type Item = Result<(Location, Token, Location), LexicalError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let start = self.offset;
+        let start = Location {
+            offset: self.offset,
+            line: self.line,
+            column: self.column,
+        };
         self.advance();
         let token = self.current();
-        let limit = self.offset;
+        let limit = Location {
+            offset: self.offset,
+            line: self.line,
+            column: self.column,
+        };
         token.map(|t| Ok((start, t, limit)))
     }
 }
