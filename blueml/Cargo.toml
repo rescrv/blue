@@ -1,6 +1,6 @@
 [package]
 name = "blueml"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "blueml provides the blue markup langauge."
