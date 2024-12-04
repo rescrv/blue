@@ -20,7 +20,7 @@ prototk_derive = { path = "../prototk_derive", version = "0.10" }
 [dev-dependencies]
 proptest = "1.0"
 
-arrrg = { path = "../arrrg", version = "0.5" }
+arrrg = { path = "../arrrg", version = "0.6" }
 guacamole = { path = "../guacamole", version = "0.9" }
 statslicer = { path = "../statslicer", version = "0.6" }
 

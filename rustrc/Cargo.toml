@@ -16,7 +16,7 @@ binaries = []
 libc = "0.2"
 getopts = { version = "0.2" }
 
-arrrg = { path = "../arrrg", version = "0.5" }
+arrrg = { path = "../arrrg", version = "0.6" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.6" }
 biometrics = { path = "../biometrics", version = "0.10" }
 indicio = { path = "../indicio", version = "0.9" }
