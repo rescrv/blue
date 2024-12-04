@@ -46,6 +46,11 @@ path = "src/bin/rcvar.rs"
 required-features=["binaries"]
 
 [[bin]]
+name = "rccat"
+path = "src/bin/rccat.rs"
+required-features=["binaries"]
+
+[[bin]]
 name = "rcdebug"
 path = "src/bin/rcdebug.rs"
 required-features=["binaries"]
