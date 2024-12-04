@@ -29,7 +29,7 @@ zerror_core = { path = "../zerror_core", version = "0.10" }
 
 getopts = { version = "0.2", optional = true }
 arrrg = { path = "../arrrg", version = "0.5", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.5", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.6", optional = true }
 
 [[example]]
 name = "split_channel-benchmark-client"
