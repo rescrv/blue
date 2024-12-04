@@ -1,6 +1,6 @@
 [package]
 name = "statslicer"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Guacamole provides a linearly-seekable random number generator."
