@@ -26,7 +26,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.6", optional = true }
 biometrics = { path = "../biometrics", version = "0.10" }
 buffertk = { path = "../buffertk", version = "0.11" }
 guacamole = { path = "../guacamole", version = "0.10" }
-prototk_derive = { path = "../prototk_derive", version = "0.10" }
+prototk_derive = { path = "../prototk_derive", version = "0.11" }
 prototk = { path = "../prototk", version = "0.10" }
 setsum = { path = "../setsum", version = "0.7" }
 sync42 = { path = "../sync42", version = "0.13" }

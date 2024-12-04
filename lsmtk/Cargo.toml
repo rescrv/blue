@@ -24,7 +24,7 @@ indicio = { path = "../indicio", version = "0.9" }
 mani = { path = "../mani", version = "0.7" }
 one_two_eight = { path = "../one_two_eight", version = "0.7" }
 prototk = { path = "../prototk", version = "0.10" }
-prototk_derive = { path = "../prototk_derive", version = "0.10" }
+prototk_derive = { path = "../prototk_derive", version = "0.11" }
 setsum = { path = "../setsum", version = "0.7" }
 skipfree = { path = "../skipfree", version = "0.7" }
 sst = { path = "../sst", version = "0.14" }
