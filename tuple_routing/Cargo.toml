@@ -16,7 +16,7 @@ indicio = { path = "../indicio", version = "0.10" }
 one_two_eight = { path = "../one_two_eight", version = "0.8" }
 prototk = { path = "../prototk", version = "0.11" }
 prototk_derive = { path = "../prototk_derive", version = "0.11" }
-rpc_pb = { path = "../rpc_pb", version = "0.11" }
+rpc_pb = { path = "../rpc_pb", version = "0.12" }
 sync42 = { path = "../sync42", version = "0.13" }
 tuple_key = { path = "../tuple_key", version = "0.10" }
 utf8path = { path = "../utf8path", version = "0.6" }
