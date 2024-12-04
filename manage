@@ -66,8 +66,8 @@ if __name__ == '__main__':
                 continue
         except:
             pass
-        input('press enter to view changelog> ')
-        subprocess.check_call(('git', 'whatchanged', crate), cwd=root)
+        #input('press enter to view changelog> ')
+        #subprocess.check_call(('git', 'whatchanged', crate), cwd=root)
         new_version = input('what version to publish> ')
         try:
             subprocess.check_output(('git', 'rev-parse', '--verify', 'refs/tags/{}@{}'.format(crate, new_version)))
