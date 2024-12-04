@@ -15,7 +15,7 @@ use derive_util::StructVisitor;
 ////////////////////////////////////// #[derive(CommandLine)] ///////////////////////////////////
 
 /// Derive the CommandLine trait for a given struct.
-#[proc_macro_derive(CommandLine, attributes(arrrg, help))]
+#[proc_macro_derive(CommandLine, attributes(arrrg))]
 pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     // `ty_name` holds the type's identifier.
@@ -238,7 +238,7 @@ impl StructVisitor for CommandLineVisitor {
 
 //////////////////////////////////////////// attributes ////////////////////////////////////////////
 
-const USAGE: &str = "must provide attributes of the form `arrrg(flag)`, `arrrg(opt)`, `arrrg(req)`, or `arrrg(nested)`";
+const USAGE: &str = "must provide attributes of the form `arrrg(flag, help)`, `arrrg(opt, help)`, `arrrg(req, help)`, or `arrrg(nested)`";
 const META_PATH: &str = "arrrg";
 
 #[derive(Debug, Eq, PartialEq)]
