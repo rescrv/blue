@@ -6007,144 +6007,160 @@ mod __parse__Statements {
 #[allow(unused_imports)]
 pub use self::__parse__Statements::StatementsParser;
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action0<
->(
-    (_, __0, _): (lexer::Location, Vec<Statement>, lexer::Location),
-) -> Vec<Statement>
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action0((_, __0, _): (lexer::Location, Vec<Statement>, lexer::Location)) -> Vec<Statement> {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action1<
->(
-    (_, __0, _): (lexer::Location, Statement, lexer::Location),
-) -> Statement
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action1((_, __0, _): (lexer::Location, Statement, lexer::Location)) -> Statement {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action2<
->(
-    (_, __0, _): (lexer::Location, Block, lexer::Location),
-) -> Block
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action2((_, __0, _): (lexer::Location, Block, lexer::Location)) -> Block {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action3<
->(
-    (_, __0, _): (lexer::Location, Dictionary, lexer::Location),
-) -> Dictionary
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action3((_, __0, _): (lexer::Location, Dictionary, lexer::Location)) -> Dictionary {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action4<
->(
-    (_, __0, _): (lexer::Location, Data, lexer::Location),
-) -> Data
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action4((_, __0, _): (lexer::Location, Data, lexer::Location)) -> Data {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action5<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action5(
     (_, __0, _): (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
-) -> Vec<Statement>
-{
+) -> Vec<Statement> {
     __0
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action6<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action6(
     (_, a, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, d, _): (lexer::Location, Data, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::Assignment(a.try_into().unwrap(), d)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action7<
->(
-    (_, b, _): (lexer::Location, Block, lexer::Location),
-) -> Statement
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action7((_, b, _): (lexer::Location, Block, lexer::Location)) -> Statement {
     Statement::Block(b)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action8<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action8(
     (_, a, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, d, _): (lexer::Location, Data, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::AtomData(a.try_into().unwrap(), d)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action9<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action9(
     (_, k, _): (lexer::Location, Data, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, v, _): (lexer::Location, Data, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::DataData(k, v)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action10<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action10(
     (_, a, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, d, _): (lexer::Location, Dictionary, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::AtomDictionary(a.try_into().unwrap(), d)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action11<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action11(
     (_, k, _): (lexer::Location, Data, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, v, _): (lexer::Location, Dictionary, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::DataDictionary(k, v)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action12<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action12(
     (_, a, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Statement
-{
+) -> Statement {
     Statement::Atom(a.try_into().unwrap())
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action13<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action13(
     (_, a, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, s, _): (lexer::Location, Option<lexer::Token>, lexer::Location),
     (_, d, _): (lexer::Location, Dictionary, lexer::Location),
-) -> Block
-{
+) -> Block {
     {
         Block {
             r#type: a.try_into().unwrap(),
@@ -6154,55 +6170,57 @@ fn __action13<
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action14<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action14(
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, s, _): (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Dictionary
-{
+) -> Dictionary {
     {
-        Dictionary {
-            items: s,
-        }
+        Dictionary { items: s }
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action15<
->(
-    (_, x, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Data
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action15((_, x, _): (lexer::Location, lexer::Token, lexer::Location)) -> Data {
     x.try_into().unwrap()
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action16<
->(
-    (_, x, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Data
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action16((_, x, _): (lexer::Location, lexer::Token, lexer::Location)) -> Data {
     x.try_into().unwrap()
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action17<
->(
-    (_, x, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Data
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action17((_, x, _): (lexer::Location, lexer::Token, lexer::Location)) -> Data {
     x.try_into().unwrap()
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action18<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action18(
     (_, _, _): (lexer::Location, lexer::Token, lexer::Location),
     (_, x, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Data
-{
+) -> Data {
     {
         match x {
             Token::Atom(x) => Data::Variable(x),
@@ -6211,204 +6229,200 @@ fn __action18<
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action19<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action19(
     (_, __0, _): (lexer::Location, lexer::Token, lexer::Location),
-) -> Option<lexer::Token>
-{
+) -> Option<lexer::Token> {
     Some(__0)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action20<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action20(
     __lookbehind: &lexer::Location,
     __lookahead: &lexer::Location,
-) -> Option<lexer::Token>
-{
+) -> Option<lexer::Token> {
     None
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action21<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action21(
     __lookbehind: &lexer::Location,
     __lookahead: &lexer::Location,
-) -> alloc::vec::Vec<Statement>
-{
+) -> alloc::vec::Vec<Statement> {
     alloc::vec![]
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action22<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action22(
     (_, v, _): (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
-) -> alloc::vec::Vec<Statement>
-{
+) -> alloc::vec::Vec<Statement> {
     v
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action23<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action23(
     (_, __0, _): (lexer::Location, Statement, lexer::Location),
-) -> alloc::vec::Vec<Statement>
-{
+) -> alloc::vec::Vec<Statement> {
     alloc::vec![__0]
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes, clippy::just_underscores_and_digits)]
-fn __action24<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action24(
     (_, v, _): (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
     (_, e, _): (lexer::Location, Statement, lexer::Location),
-) -> alloc::vec::Vec<Statement>
-{
-    { let mut v = v; v.push(e); v }
+) -> alloc::vec::Vec<Statement> {
+    {
+        let mut v = v;
+        v.push(e);
+        v
+    }
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action25<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action25(
     __0: (lexer::Location, lexer::Token, lexer::Location),
     __1: (lexer::Location, lexer::Token, lexer::Location),
-) -> Dictionary
-{
+) -> Dictionary {
     let __start0 = __0.2;
     let __end0 = __1.0;
-    let __temp0 = __action21(
-        &__start0,
-        &__end0,
-    );
+    let __temp0 = __action21(&__start0, &__end0);
     let __temp0 = (__start0, __temp0, __end0);
-    __action14(
-        __0,
-        __temp0,
-        __1,
-    )
+    __action14(__0, __temp0, __1)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action26<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action26(
     __0: (lexer::Location, lexer::Token, lexer::Location),
     __1: (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
     __2: (lexer::Location, lexer::Token, lexer::Location),
-) -> Dictionary
-{
+) -> Dictionary {
     let __start0 = __1.0;
     let __end0 = __1.2;
-    let __temp0 = __action22(
-        __1,
-    );
+    let __temp0 = __action22(__1);
     let __temp0 = (__start0, __temp0, __end0);
-    __action14(
-        __0,
-        __temp0,
-        __2,
-    )
+    __action14(__0, __temp0, __2)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action27<
->(
-    __lookbehind: &lexer::Location,
-    __lookahead: &lexer::Location,
-) -> Vec<Statement>
-{
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action27(__lookbehind: &lexer::Location, __lookahead: &lexer::Location) -> Vec<Statement> {
     let __start0 = *__lookbehind;
     let __end0 = *__lookahead;
-    let __temp0 = __action21(
-        &__start0,
-        &__end0,
-    );
+    let __temp0 = __action21(&__start0, &__end0);
     let __temp0 = (__start0, __temp0, __end0);
-    __action5(
-        __temp0,
-    )
+    __action5(__temp0)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action28<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action28(
     __0: (lexer::Location, alloc::vec::Vec<Statement>, lexer::Location),
-) -> Vec<Statement>
-{
+) -> Vec<Statement> {
     let __start0 = __0.0;
     let __end0 = __0.2;
-    let __temp0 = __action22(
-        __0,
-    );
+    let __temp0 = __action22(__0);
     let __temp0 = (__start0, __temp0, __end0);
-    __action5(
-        __temp0,
-    )
+    __action5(__temp0)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action29<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action29(
     __0: (lexer::Location, lexer::Token, lexer::Location),
     __1: (lexer::Location, lexer::Token, lexer::Location),
     __2: (lexer::Location, Dictionary, lexer::Location),
-) -> Block
-{
+) -> Block {
     let __start0 = __1.0;
     let __end0 = __1.2;
-    let __temp0 = __action19(
-        __1,
-    );
+    let __temp0 = __action19(__1);
     let __temp0 = (__start0, __temp0, __end0);
-    __action13(
-        __0,
-        __temp0,
-        __2,
-    )
+    __action13(__0, __temp0, __2)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_lifetimes,
-    clippy::just_underscores_and_digits)]
-fn __action30<
->(
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    clippy::just_underscores_and_digits
+)]
+fn __action30(
     __0: (lexer::Location, lexer::Token, lexer::Location),
     __1: (lexer::Location, Dictionary, lexer::Location),
-) -> Block
-{
+) -> Block {
     let __start0 = __0.2;
     let __end0 = __1.0;
-    let __temp0 = __action20(
-        &__start0,
-        &__end0,
-    );
+    let __temp0 = __action20(&__start0, &__end0);
     let __temp0 = (__start0, __temp0, __end0);
-    __action13(
-        __0,
-        __temp0,
-        __1,
-    )
+    __action13(__0, __temp0, __1)
 }
 
 #[allow(clippy::type_complexity, dead_code)]
-pub  trait __ToTriple<>
-{
-    fn to_triple(self) -> Result<(lexer::Location,lexer::Token,lexer::Location), __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>>;
+pub trait __ToTriple {
+    fn to_triple(
+        self,
+    ) -> Result<
+        (lexer::Location, lexer::Token, lexer::Location),
+        __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>,
+    >;
 }
 
-impl<> __ToTriple<> for (lexer::Location, lexer::Token, lexer::Location)
-{
-    fn to_triple(self) -> Result<(lexer::Location,lexer::Token,lexer::Location), __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>> {
+impl __ToTriple for (lexer::Location, lexer::Token, lexer::Location) {
+    fn to_triple(
+        self,
+    ) -> Result<
+        (lexer::Location, lexer::Token, lexer::Location),
+        __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>,
+    > {
         Ok(self)
     }
 }
-impl<> __ToTriple<> for Result<(lexer::Location, lexer::Token, lexer::Location), lexer::LexicalError>
-{
-    fn to_triple(self) -> Result<(lexer::Location,lexer::Token,lexer::Location), __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>> {
+impl __ToTriple for Result<(lexer::Location, lexer::Token, lexer::Location), lexer::LexicalError> {
+    fn to_triple(
+        self,
+    ) -> Result<
+        (lexer::Location, lexer::Token, lexer::Location),
+        __lalrpop_util::ParseError<lexer::Location, lexer::Token, lexer::LexicalError>,
+    > {
         self.map_err(|error| __lalrpop_util::ParseError::User { error })
     }
 }
