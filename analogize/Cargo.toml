@@ -27,7 +27,7 @@ indicio = { path = "../indicio", version = "0.9", features = ["prototk"] }
 mani = { path = "../mani", version = "0.7" }
 prototk = { path = "../prototk", version = "0.11" }
 prototk_derive = { path = "../prototk_derive", version = "0.11" }
-scrunch = { path = "../scrunch", version = "0.6" }
+scrunch = { path = "../scrunch", version = "0.7" }
 zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.10" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
