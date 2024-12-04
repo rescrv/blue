@@ -17,7 +17,7 @@ binaries = []
 libc = "0.2"
 
 buffertk = { path = "../buffertk", version = "0.10" }
-listfree = { path = "../listfree", version = "0.4" }
+listfree = { path = "../listfree", version = "0.5" }
 scrunch = { path = "../scrunch", version = "0.6" }
 
 [dev-dependencies]
