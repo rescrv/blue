@@ -1,6 +1,6 @@
 [package]
 name = "shvar"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "shvar provides a POSIX-compliant shell variable substitution routine."
