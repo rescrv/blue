@@ -772,6 +772,9 @@ pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<Stri
             return Ok(once);
         }
         let new_witnesses = generate_witnesses(vars, &once)?;
+        if new_witnesses.is_empty() {
+            return Ok(once);
+        }
         if witnesses.is_subset(&new_witnesses) {
             return Err(Error::DepthLimitExceeded);
         }
