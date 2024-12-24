@@ -417,7 +417,10 @@ struct ChannelManager<'a, 'b, R: Resolver> {
 }
 
 impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
-    type ChannelHandle<'c> = ChannelHandle<'a, 'b, 'c, R> where Self: 'c;
+    type ChannelHandle<'c>
+        = ChannelHandle<'a, 'b, 'c, R>
+    where
+        Self: 'c;
     type MonitoredChannel = MonitoredChannel<'a, 'b>;
 
     fn new(ssl: SslOptions, options: ClientOptions, resolver: R) -> Self {

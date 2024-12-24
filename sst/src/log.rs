@@ -409,7 +409,10 @@ struct WriteCoalescingCore<W: Write> {
 
 impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, Error>> for WriteCoalescingCore<W> {
     type InputAccumulator = WriteBatch;
-    type OutputIterator<'a> = std::iter::Take<std::iter::Repeat<Result<u64, Error>>> where W: 'a;
+    type OutputIterator<'a>
+        = std::iter::Take<std::iter::Repeat<Result<u64, Error>>>
+    where
+        W: 'a;
 
     fn can_batch(&self, acc: &WriteBatch, other: &Arc<WriteBatch>) -> bool {
         check_batch_size(acc.buffer.len().saturating_add(other.buffer.len())).is_ok()
