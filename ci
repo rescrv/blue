@@ -6,7 +6,8 @@ set -x
 cargo fmt -- --check
 
 export PATH="$PATH":"`pwd`"/target/debug
-export RUSTFLAGS="--deny warnings"
+# TODO(rescrv, 1.91):  Remove this allowance.
+export RUSTFLAGS="-A clippy::needless-lifetimes --deny warnings"
 
 pushd meta
 cargo build
