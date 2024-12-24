@@ -332,7 +332,8 @@ mod tests {
                 || found.basename().as_str().starts_with("Cargo.toml")
                 || found.basename().as_str().starts_with("k8s.metrics")
                 || found.basename().as_str().starts_with("src")
-                || found.basename().as_str().starts_with("tmp.foo."),
+                || found.basename().as_str().starts_with("tmp.foo.")
+                || found.basename().as_str().starts_with(".gitignore"),
             "found: {found:?}",
         );
     }
