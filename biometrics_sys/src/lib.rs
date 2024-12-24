@@ -45,7 +45,7 @@ impl BiometricsSys {
                 .ru_utime
                 .tv_sec
                 .saturating_mul(1_000_000)
-                .saturating_add(rusage.ru_utime.tv_usec) as u64,
+                .saturating_add(rusage.ru_utime.tv_usec.into()) as u64,
         );
         output_counter("biometrics.sys.utime", self.utime);
         self.stime = std::cmp::max(
@@ -54,7 +54,7 @@ impl BiometricsSys {
                 .ru_stime
                 .tv_sec
                 .saturating_mul(1_000_000)
-                .saturating_add(rusage.ru_stime.tv_usec) as u64,
+                .saturating_add(rusage.ru_stime.tv_usec.into()) as u64,
         );
         output_counter("biometrics.sys.stime", self.stime);
         self.minflt = std::cmp::max(self.minflt, rusage.ru_minflt as u64);
