@@ -117,7 +117,7 @@ impl TinyLFU {
             }
         };
         let counter_bits = (opts.window_size as f64).log2().ceil() as usize;
-        let num_counters = (opts.target_memory_usage * 8 + counter_bits - 1) / counter_bits;
+        let num_counters = (opts.target_memory_usage * 8).div_ceil(counter_bits);
         let n = bloomcalc::N(opts.window_size as f64);
         let m = bloomcalc::M(num_counters as f64);
         let p = bloomcalc::calc_p_given_n_m(n, m);
