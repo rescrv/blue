@@ -11,7 +11,7 @@ repository = "https://github.com/rescrv/blue"
 nom = "7.1"
 
 buffertk = { path = "../buffertk", version = "0.11" }
-busyrpc = { path = "../busyrpc", version = "0.10" }
+busyrpc = { path = "../busyrpc", version = "0.11" }
 indicio = { path = "../indicio", version = "0.10" }
 one_two_eight = { path = "../one_two_eight", version = "0.8" }
 prototk = { path = "../prototk", version = "0.11" }
