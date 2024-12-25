@@ -816,6 +816,36 @@ impl RcConf {
         self.generate_rcvars(service, &keys)
     }
 
+    /// Generate the set of rcvariables that are expected by the script at `path` when invoked as
+    /// `service`.
+    pub fn bind_for_container(
+        &self,
+        command: &str,
+        container: &str,
+        service: &str,
+    ) -> Result<HashMap<String, String>, Error> {
+        let output = Command::new(command)
+            .arg("run")
+            .arg("-t")
+            .arg("-e")
+            .arg(format!("RCVAR_ARGV0={}", var_name_from_service(service)))
+            .arg("-e")
+            .arg("RCCONF_OVERRIDE_SERVICE_SWITCH=true")
+            .arg("--entrypoint")
+            .arg("rcvar")
+            .arg(container)
+            .arg(service)
+            .output()?;
+        if !output.status.success() {
+            return Err(Error::InvalidInvocation {
+                message: "rcvar command failed".to_string(),
+            });
+        }
+        let keys = String::from_utf8(output.stdout)?;
+        let keys = keys.split_whitespace().collect::<Vec<_>>();
+        self.generate_rcvars(service, &keys)
+    }
+
     /// Generate the set of rcvariables from the provided set of keys.
     pub fn generate_rcvars(
         &self,
@@ -991,9 +1021,19 @@ pub fn load_services(
 ///
 /// This does not return.
 pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
+    exec_rc_with_override(rc_conf_path, rc_d_path, false, service, cmd)
+}
+
+fn exec_rc_with_override(
+    rc_conf_path: &str,
+    rc_d_path: &str,
+    override_service_switch: bool,
+    service: &str,
+    cmd: &[&str],
+) -> ! {
     let rc_conf = RcConf::parse(rc_conf_path).expect("rc_conf should parse");
     let rc_d = load_services(rc_d_path).expect("rc.d should parse");
-    if !rc_conf.service_switch(service).can_be_started() {
+    if !override_service_switch && !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -1040,20 +1080,80 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
     panic!("command unexpectedly failed: {err}");
 }
 
+////////////////////////////////////////// exec_container //////////////////////////////////////////
+
+/// Exec a service using the provided rc_conf_path, rc_d_path, service name, and command arguments.
+///
+/// This does not return.
+pub fn exec_container(
+    rc_conf_path: &str,
+    _: &str,
+    command: &str,
+    container: &str,
+    service: &str,
+    cmd: &[&str],
+) -> ! {
+    let rc_conf = RcConf::parse(rc_conf_path).expect("rc_conf should parse");
+    if !rc_conf.service_switch(service).can_be_started() {
+        eprintln!("service not enabled");
+        std::process::exit(132);
+    }
+    let mut env = HashMap::new();
+    env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
+    let mut bound = rc_conf
+        .bind_for_container(command, container, service)
+        .expect("bind for invoke should bind");
+    bound.extend(env);
+    let mut argv = vec!["podman".to_string(), "run".to_string(), "-t".to_string()];
+    for (key, value) in bound.iter() {
+        argv.push("--env".to_string());
+        argv.push(format!("{}={}", key, value));
+    }
+    argv.push("--env".to_string());
+    argv.push("RCCONF_OVERRIDE_SERVICE_SWITCH=true".to_string());
+    argv.push(container.to_string());
+    argv.extend(
+        rc_conf
+            .argv(service, "WRAPPER", &())
+            .expect("argv should generate"),
+    );
+    Command::new(&argv[0])
+        .args(&argv[1..])
+        .arg(service)
+        .args(cmd)
+        .envs(bound)
+        .exec();
+    panic!("command unexpectedly failed");
+}
+
 ///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
 
 /// exec_rc the service in a way that runs it.
 pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
     let mut cmd = vec!["run"];
     cmd.extend(args);
-    exec_rc(rc_conf_path, rc_d_path, service, &cmd)
+    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
+    exec_rc_with_override(
+        rc_conf_path,
+        rc_d_path,
+        override_service_switch,
+        service,
+        &cmd,
+    )
 }
 
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
 /// exec_rc the service in a way that prints rcvariables.
 pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
-    exec_rc(rc_conf_path, rc_d_path, service, &["rcvar"])
+    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
+    exec_rc_with_override(
+        rc_conf_path,
+        rc_d_path,
+        override_service_switch,
+        service,
+        &["rcvar"],
+    )
 }
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////
