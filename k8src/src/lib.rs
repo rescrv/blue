@@ -263,8 +263,11 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     } else {
         root.join("manifests")
     };
-    if !options.verify && Path::from("manifests").exists() {
+    if !options.verify && !options.overwrite && output.exists() {
         return Err(Error::ManifestsDirectoryExists);
+    }
+    if options.overwrite && output.exists() {
+        std::fs::remove_dir_all(&output)?;
     }
     let rc_confs = restrict_to_terminals(find_rc_confs(&root)?);
     for rc_conf in rc_confs.into_iter() {
