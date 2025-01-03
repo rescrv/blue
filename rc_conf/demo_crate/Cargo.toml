@@ -1,0 +1,14 @@
+[package]
+name = "rc_conf_demo_crate"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = "2021"
+description = "rc_conf_demo_crate provides an example crate for _SPEC testing"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
+
+[[bin]]
+name = "rcdemo"
+path = "src/main.rs"
