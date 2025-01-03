@@ -1104,7 +1104,7 @@ pub fn exec_container(
         .bind_for_container(command, container, service)
         .expect("bind for invoke should bind");
     bound.extend(env);
-    let mut argv = vec!["podman".to_string(), "run".to_string(), "-t".to_string()];
+    let mut argv = vec![command.to_string(), "run".to_string(), "-t".to_string()];
     for (key, value) in bound.iter() {
         argv.push("--env".to_string());
         argv.push(format!("{}={}", key, value));
