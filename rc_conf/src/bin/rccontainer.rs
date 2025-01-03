@@ -10,6 +10,8 @@ struct Options {
     rc_conf_path: String,
     #[arrrg(optional, "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit.")]
     rc_d_path: String,
+    #[arrrg(optional, "The container runtime (docker or podman)")]
+    runtime: String,
 }
 
 impl Default for Options {
@@ -17,6 +19,7 @@ impl Default for Options {
         Self {
             rc_conf_path: "rc.conf".to_string(),
             rc_d_path: "rc.d".to_string(),
+            runtime: "docker".to_string(),
         }
     }
 }
@@ -33,7 +36,7 @@ fn main() {
     rc_conf::exec_container(
         &options.rc_conf_path,
         &options.rc_d_path,
-        "podman",
+        &options.runtime,
         argv[0],
         argv[1],
         &argv[2..],
