@@ -31,6 +31,7 @@ members = [
     "prototk",
     "prototk_derive",
     "rc_conf",
+    "rc_conf/demo_crate",
     "rpc_pb",
     "rustrc",
     "saros",

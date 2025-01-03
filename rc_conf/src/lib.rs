@@ -4,6 +4,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
+use std::time::SystemTime;
 
 use shvar::{PrefixingVariableProvider, VariableProvider};
 use utf8path::Path;
@@ -1154,6 +1155,73 @@ pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
         service,
         &["rcvar"],
     )
+}
+
+///////////////////////////////////////////// bootstrap ////////////////////////////////////////////
+
+fn vendor(path: utf8path::Path, crate_name: &str, spec: &str) -> Result<(), Error> {
+    let tmp = std::env::temp_dir().join(format!(
+        "{}_{}_{}",
+        crate_name,
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Time should not go before UNIX epoch")
+            .as_millis(),
+        std::process::id()
+    ));
+    std::fs::create_dir(&tmp)?;
+    std::fs::create_dir(tmp.join("src"))?;
+    std::fs::write(tmp.join("src/lib.rs"), [])?;
+    let tmp = tmp.join("Cargo.toml");
+    std::fs::write(
+        &tmp,
+        format!(
+            r#"
+[package]
+name = "rc-conf-dummy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+{crate_name} = {spec}
+"#
+        ),
+    )?;
+    std::process::Command::new("cargo")
+        .arg("vendor")
+        .arg("--no-delete")
+        .arg("--manifest-path")
+        .arg(tmp)
+        .arg(path.as_str())
+        .output()?;
+    Ok(())
+}
+
+/// Prepare the output directory for running the provided rc_conf_path.  Return the minimal
+/// rc_d_path that will allow it to run.
+pub fn bootstrap<'a>(
+    rc_conf_path: &str,
+    output: impl Into<utf8path::Path<'a>>,
+) -> Result<String, Error> {
+    let output = output.into();
+    let rc_conf = RcConf::parse(rc_conf_path)?;
+    let mut rc_d_path = String::new();
+    for variable in rc_conf.variables() {
+        if let Some(crate_name) = variable.strip_suffix("_SPEC") {
+            if !rc_d_path.is_empty() {
+                rc_d_path.push(':');
+            }
+            // SAFETY(rescrv):  We got the value from variables above and it's a hash map.  It's
+            // still in there, so lookup should succeed.
+            vendor(
+                output.clone(),
+                crate_name,
+                &rc_conf.lookup(&variable).unwrap(),
+            )?;
+            rc_d_path.push_str(output.join(crate_name).join("rc.d").as_str());
+        }
+    }
+    Ok(rc_d_path)
 }
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////

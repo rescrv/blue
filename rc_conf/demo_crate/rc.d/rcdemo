@@ -1,0 +1,4 @@
+#!/usr/bin/env rcscript
+
+DESCRIBE=execute rcdemo
+COMMAND=rcdemo
