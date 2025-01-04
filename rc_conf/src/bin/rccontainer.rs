@@ -25,7 +25,7 @@ impl Default for Options {
 }
 
 fn main() {
-    let (options, argv) = Options::from_command_line(
+    let (options, argv) = Options::from_command_line_relaxed(
         "USAGE: rccontainer [OPTIONS] <container-name> <service> [ARGS]",
     );
     let argv = argv.iter().map(|a| a.as_str()).collect::<Vec<_>>();

@@ -22,7 +22,7 @@ impl Default for Options {
 }
 
 fn main() {
-    let (options, argv) = Options::from_command_line("USAGE: rcvar [OPTIONS] <service>");
+    let (options, argv) = Options::from_command_line_relaxed("USAGE: rcvar [OPTIONS] <service>");
     let argv = argv.iter().map(|a| a.as_str()).collect::<Vec<_>>();
     if argv.is_empty() {
         eprintln!("expected service name to be provided");

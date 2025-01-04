@@ -22,7 +22,8 @@ impl Default for Options {
 }
 
 fn main() {
-    let (options, argv) = Options::from_command_line("USAGE: rcinvoke [OPTIONS] <service> [ARGS]");
+    let (options, argv) =
+        Options::from_command_line_relaxed("USAGE: rcinvoke [OPTIONS] <service> [ARGS]");
     let argv = argv.iter().map(|a| a.as_str()).collect::<Vec<_>>();
     if argv.is_empty() {
         eprintln!("expected service name to be provided");
