@@ -85,6 +85,11 @@ impl StructVisitor for CommandLineVisitor {
         'iterating_fields: for field in fields.named.iter() {
             if let Some(field_ident) = &field.ident {
                 let field_arg = field_ident.to_string().replace('_', "-");
+                let field_arg = if let Some(field_arg) = field_arg.strip_prefix("r#") {
+                    field_arg.to_string()
+                } else {
+                    field_arg
+                };
                 let field_meta = match parse_meta(&field.attrs) {
                     Some(field_meta) => field_meta,
                     None => {

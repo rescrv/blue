@@ -18,6 +18,11 @@ Warts
 
 - Nested derive parameter names can get unwieldy.
 
+Updating
+--------
+
+- 0.6.0 to 0.7.0:  --r#foo becomes --foo
+
 Documentation
 -------------
 
