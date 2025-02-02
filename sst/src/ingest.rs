@@ -77,7 +77,7 @@ impl Jester {
                 self.rollover_builder()?;
                 return self.get_builder();
             }
-            return Ok(self.builder.as_mut().unwrap());
+            Ok(self.builder.as_mut().unwrap())
         } else {
             loop {
                 let path =

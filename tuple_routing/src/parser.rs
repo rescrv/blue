@@ -226,7 +226,7 @@ mod test {
         }
     }
 
-    fn interpret_error_for_test<'a, T, F: FnMut(&'a str) -> ParseResult<T>>(
+    fn interpret_error_for_test<'a, T, F: FnMut(&'a str) -> ParseResult<'a, T>>(
         mut f: F,
     ) -> impl FnMut(&'a str) -> Result<T, ParseError> {
         move |input| match f(input) {

@@ -90,7 +90,7 @@ pub struct BitVector<'a> {
     s1: BitArray<'a>,
 }
 
-impl<'a> BitVector<'a> {
+impl BitVector<'_> {
     fn calc_width(bits: usize) -> Option<usize> {
         let next_power_of_two = (bits + 1).next_power_of_two();
         if next_power_of_two > 0 {
@@ -163,7 +163,7 @@ impl<'a> BitVector<'a> {
     }
 }
 
-impl<'a> super::BitVector for BitVector<'a> {
+impl super::BitVector for BitVector<'_> {
     type Output<'b> = BitVector<'b>;
 
     fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {

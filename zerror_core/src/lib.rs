@@ -131,7 +131,7 @@ impl<'a> Unpackable<'a> for ErrorCore {
     }
 }
 
-impl<'a> FieldPackHelper<'a, message<ErrorCore>> for ErrorCore {
+impl FieldPackHelper<'_, message<ErrorCore>> for ErrorCore {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         Internals::field_pack_sz(&self.internals, tag)
     }
@@ -141,13 +141,13 @@ impl<'a> FieldPackHelper<'a, message<ErrorCore>> for ErrorCore {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, message<ErrorCore>> for ErrorCore {
+impl FieldUnpackHelper<'_, message<ErrorCore>> for ErrorCore {
     fn merge_field(&mut self, proto: message<ErrorCore>) {
         *self = proto.unwrap_message();
     }
 }
 
-impl<'a> Message<'a> for ErrorCore {}
+impl Message<'_> for ErrorCore {}
 
 impl From<message<ErrorCore>> for ErrorCore {
     fn from(proto: message<Self>) -> Self {

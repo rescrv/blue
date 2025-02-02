@@ -1118,13 +1118,13 @@ pub fn exec_container(
             .argv(service, "WRAPPER", &())
             .expect("argv should generate"),
     );
-    Command::new(&argv[0])
+    let err = Command::new(&argv[0])
         .args(&argv[1..])
         .arg(service)
         .args(cmd)
         .envs(bound)
         .exec();
-    panic!("command unexpectedly failed");
+    panic!("command unexpectedly failed: {err}");
 }
 
 ///////////////////////////////////////////// rcinvoke /////////////////////////////////////////////
@@ -1537,6 +1537,7 @@ bar_ENABLE=YES
                 "example1",
                 "example2",
                 "example3",
+                "rcdemo",
                 "runbook1",
             ],
             rc_conf.list().unwrap().collect::<Vec<_>>()

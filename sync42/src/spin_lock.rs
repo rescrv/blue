@@ -59,13 +59,13 @@ pub struct SpinLockGuard<'a, T> {
     index: u64,
 }
 
-impl<'a, T> Drop for SpinLockGuard<'a, T> {
+impl<T> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         self.lock.releases.store(self.index + 1, Ordering::Release);
     }
 }
 
-impl<'a, T> Deref for SpinLockGuard<'a, T> {
+impl<T> Deref for SpinLockGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -73,7 +73,7 @@ impl<'a, T> Deref for SpinLockGuard<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for SpinLockGuard<'a, T> {
+impl<T> DerefMut for SpinLockGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.lock.data.get() }
     }

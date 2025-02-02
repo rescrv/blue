@@ -109,7 +109,7 @@ pub struct SampledInverseSuffixArray<'a> {
     sampled: SampledArray<'a>,
 }
 
-impl<'a> InverseSuffixArray for SampledInverseSuffixArray<'a> {
+impl InverseSuffixArray for SampledInverseSuffixArray<'_> {
     fn construct<H: Helper>(
         isa: &[usize],
         to_sample: &[usize],

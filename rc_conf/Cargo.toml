@@ -26,6 +26,11 @@ path = "src/bin/rcscript.rs"
 required-features=["binaries"]
 
 [[bin]]
+name = "rcbootstrap"
+path = "src/bin/rcbootstrap.rs"
+required-features=["binaries"]
+
+[[bin]]
 name = "rcexamine"
 path = "src/bin/rcexamine.rs"
 required-features=["binaries"]

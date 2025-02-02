@@ -17,6 +17,11 @@ pub fn register_biometrics(collector: &mut Collector) {
     epoll::register_biometrics(collector);
 }
 
+#[cfg(target_os = "macos")]
+pub fn register_biometrics(_collector: &mut Collector) {
+    todo!();
+}
+
 pub trait Pollster: Send + Sync + 'static {
     fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::Error>;
     fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::Error>;
@@ -27,4 +32,9 @@ pub trait Pollster: Send + Sync + 'static {
 pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::Error> {
     let poll = epoll::Epollster::new()?;
     Ok(Box::new(poll))
+}
+
+#[cfg(target_os = "macos")]
+pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::Error> {
+    todo!();
 }

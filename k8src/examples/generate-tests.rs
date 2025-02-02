@@ -60,7 +60,7 @@ fn generate_combinations<'a, 'b>(
         combinations: I,
         inputs: &'b [(&'c str, &'c str)],
     }
-    impl<'b, 'c, I: Iterator<Item = usize>> Iterator for Combinate<'b, 'c, I> {
+    impl<'c, I: Iterator<Item = usize>> Iterator for Combinate<'_, 'c, I> {
         type Item = Vec<(&'c str, &'c str)>;
 
         fn next(&mut self) -> Option<Self::Item> {

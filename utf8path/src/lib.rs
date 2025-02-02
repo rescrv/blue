@@ -243,38 +243,38 @@ impl<'a> Path<'a> {
     }
 }
 
-impl<'a> AsRef<std::ffi::OsStr> for Path<'a> {
+impl AsRef<std::ffi::OsStr> for Path<'_> {
     fn as_ref(&self) -> &std::ffi::OsStr {
         let path: &std::ffi::OsStr = self.as_str().as_ref();
         path
     }
 }
 
-impl<'a> AsRef<std::path::Path> for Path<'a> {
+impl AsRef<std::path::Path> for Path<'_> {
     fn as_ref(&self) -> &std::path::Path {
         std::path::Path::new(self.as_str())
     }
 }
 
-impl<'a> Borrow<std::path::Path> for Path<'a> {
+impl Borrow<std::path::Path> for Path<'_> {
     fn borrow(&self) -> &std::path::Path {
         std::path::Path::new(self.as_str())
     }
 }
 
-impl<'a> std::fmt::Debug for Path<'a> {
+impl std::fmt::Debug for Path<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(f, "{:?}", self.path)
     }
 }
 
-impl<'a> std::fmt::Display for Path<'a> {
+impl std::fmt::Display for Path<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(f, "{}", self.path)
     }
 }
 
-impl<'a> From<String> for Path<'a> {
+impl From<String> for Path<'_> {
     fn from(s: String) -> Self {
         Self {
             path: Cow::Owned(s),
@@ -320,7 +320,7 @@ impl<'a> TryFrom<&'a std::path::Path> for Path<'a> {
     }
 }
 
-impl<'a> TryFrom<std::path::PathBuf> for Path<'a> {
+impl TryFrom<std::path::PathBuf> for Path<'_> {
     type Error = std::str::Utf8Error;
 
     fn try_from(p: std::path::PathBuf) -> Result<Self, Self::Error> {
@@ -330,7 +330,7 @@ impl<'a> TryFrom<std::path::PathBuf> for Path<'a> {
     }
 }
 
-impl<'a> TryFrom<std::ffi::OsString> for Path<'a> {
+impl TryFrom<std::ffi::OsString> for Path<'_> {
     type Error = std::str::Utf8Error;
 
     fn try_from(p: std::ffi::OsString) -> Result<Self, Self::Error> {

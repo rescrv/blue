@@ -1203,10 +1203,16 @@ impl Execution {
             kill: indicio::Value::from(&self.context),
         });
         if let Some(pid) = self.pid() {
+            #[cfg(not(target_os = "macos"))]
+            unsafe fn errno() -> i32 {
+                *libc::__errno_location()
+            }
+            #[cfg(target_os = "macos")]
+            unsafe fn errno() -> i32 {
+                *libc::__error()
+            }
             unsafe {
-                if libc::kill(pid, signal.into_i32()) < 0
-                    && *libc::__errno_location() != libc::ESRCH
-                {
+                if libc::kill(pid, signal.into_i32()) < 0 && errno() != libc::ESRCH {
                     return Err(std::io::Error::last_os_error().into());
                 }
             }

@@ -632,7 +632,7 @@ impl Version {
         lower_level: usize,
         mut first_key: &'a [u8],
         mut last_key: &'a [u8],
-    ) -> Vec<LevelSlice> {
+    ) -> Vec<LevelSlice<'a>> {
         let mut bounds = Vec::with_capacity(NUM_LEVELS);
         for _ in 0..lower_level {
             bounds.push(LevelSlice {
@@ -1043,7 +1043,7 @@ pub struct VersionRef<'a> {
     version: Arc<Version>,
 }
 
-impl<'a> VersionRef<'a> {
+impl VersionRef<'_> {
     pub(crate) fn load(
         &self,
         key: &[u8],
@@ -1075,7 +1075,7 @@ impl<'a> VersionRef<'a> {
     }
 }
 
-impl<'a> Drop for VersionRef<'a> {
+impl Drop for VersionRef<'_> {
     fn drop(&mut self) {
         self.tree.explicit_unref(&self.version);
     }
@@ -1677,14 +1677,14 @@ mod tests {
         assert_eq!(0, level.lower_bound(&[]));
         assert_eq!(0, level.upper_bound(&[]));
 
-        assert_eq!(0, level.lower_bound(&[b'A']));
-        assert_eq!(1, level.upper_bound(&[b'A']));
+        assert_eq!(0, level.lower_bound(b"A"));
+        assert_eq!(1, level.upper_bound(b"A"));
 
-        assert_eq!(2, level.lower_bound(&[b'F']));
-        assert_eq!(5, level.upper_bound(&[b'F']));
+        assert_eq!(2, level.lower_bound(b"F"));
+        assert_eq!(5, level.upper_bound(b"F"));
 
-        assert_eq!(6, level.upper_bound(&[b'H', b'A']));
+        assert_eq!(6, level.upper_bound(b"HA"));
 
-        assert_eq!(7, level.upper_bound(&[b'Z']));
+        assert_eq!(7, level.upper_bound(b"Z"));
     }
 }

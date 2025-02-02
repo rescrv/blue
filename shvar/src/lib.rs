@@ -382,7 +382,7 @@ struct Tokenize<'a> {
     symbols: Peekable<Enumerate<Chars<'a>>>,
 }
 
-impl<'a> Tokenize<'a> {
+impl Tokenize<'_> {
     fn new(input: &str) -> Tokenize {
         let symbols = input.chars().enumerate().peekable();
         Tokenize { symbols }

@@ -289,7 +289,7 @@ struct LockFreeHistogramIterator<'a, const N: usize> {
     index: usize,
 }
 
-impl<'a, const N: usize> Iterator for LockFreeHistogramIterator<'a, N> {
+impl<const N: usize> Iterator for LockFreeHistogramIterator<'_, N> {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {

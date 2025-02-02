@@ -436,7 +436,7 @@ pub struct LengthFree<'a, P: Packable> {
     slice: &'a [P],
 }
 
-impl<'a, P: Packable> Packable for LengthFree<'a, P> {
+impl<P: Packable> Packable for LengthFree<'_, P> {
     fn pack_sz(&self) -> usize {
         self.slice.iter().map(|x| x.pack_sz()).sum()
     }

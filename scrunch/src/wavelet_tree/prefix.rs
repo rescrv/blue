@@ -278,7 +278,7 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
     }
 }
 
-impl<'a, E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'a, E> {
+impl<E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'_, E> {
     fn construct<H: Helper>(symbols: &[u32], builder: &mut Builder<'_, H>) -> Result<(), Error> {
         let mut builder = builder.sub(FieldNumber::must(CONTAINER_TAG));
         // Construct an encoder.
@@ -331,7 +331,7 @@ impl<'a, E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'a, E> {
     }
 }
 
-impl<'a, E: Encoder + std::fmt::Debug> std::fmt::Debug for WaveletTree<'a, E> {
+impl<E: Encoder + std::fmt::Debug> std::fmt::Debug for WaveletTree<'_, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("WaveletTree")
             .field("encoder", &self.encoder.symbols())

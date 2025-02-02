@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::mem::MaybeUninit;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -60,13 +60,13 @@ impl<'a> Tag<'a> {
     }
 }
 
-impl<'a> Debug for Tag<'a> {
+impl Debug for Tag<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}={}", self.key, self.value)
     }
 }
 
-impl<'a> Display for Tag<'a> {
+impl Display for Tag<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}={}", self.key, self.value)
     }
@@ -79,7 +79,7 @@ pub struct Tags<'a> {
     tags: Cow<'a, str>,
 }
 
-impl<'a> Tags<'a> {
+impl Tags<'_> {
     pub fn new<'b, S: Into<Cow<'b, str>>>(tags: S) -> Option<Tags<'b>> {
         let tags = tags.into();
         Self::parse(&tags)?;
@@ -142,13 +142,13 @@ impl<'a> From<Vec<Tag<'a>>> for Tags<'static> {
     }
 }
 
-impl<'a> Debug for Tags<'a> {
+impl Debug for Tags<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.tags)
     }
 }
 
-impl<'a> Display for Tags<'a> {
+impl Display for Tags<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.tags)
     }
@@ -168,7 +168,7 @@ pub struct CompressedTagIndex<'a> {
     doc: MaybeUninit<CompressedDocument<'a>>,
 }
 
-impl<'a> CompressedTagIndex<'a> {
+impl CompressedTagIndex<'_> {
     pub fn create<P: AsRef<Path>>(tagses: &[Tags], path: P) -> Result<(), std::io::Error> {
         let mut contents = String::with_capacity(tagses.iter().map(|t| t.tags.len() + 1).sum());
         let mut record_boundaries = Vec::with_capacity(tagses.len());
@@ -199,17 +199,30 @@ impl<'a> CompressedTagIndex<'a> {
                 "file overflows usize",
             ));
         }
-        // SAFETY(rescrv):  We know this mapping is safe to dereference and later drop.
-        let mapping = unsafe {
+        #[cfg(not(target_os = "macos"))]
+        unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
             libc::mmap64(
                 std::ptr::null_mut(),
-                md.len() as usize,
+                len,
                 libc::PROT_READ,
-                libc::MAP_SHARED | libc::MAP_POPULATE,
-                file.as_raw_fd(),
+                libc::MAP_SHARED,
+                file,
                 0,
             )
-        };
+        }
+        #[cfg(target_os = "macos")]
+        unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file,
+                0,
+            )
+        }
+        // SAFETY(rescrv):  We know this mapping is safe to dereference and later drop.
+        let mapping = unsafe { mmap(md.len() as usize, file.as_raw_fd()) };
         if mapping == libc::MAP_FAILED {
             return Err(std::io::Error::last_os_error());
         }
@@ -233,7 +246,7 @@ impl<'a> CompressedTagIndex<'a> {
     }
 }
 
-impl<'a> TagIndex for CompressedTagIndex<'a> {
+impl TagIndex for CompressedTagIndex<'_> {
     fn search<'b>(self: &'b Pin<Box<Self>>, tags: &[Tag]) -> Result<Vec<Tags<'b>>, std::io::Error> {
         let doc = unsafe { &self.doc.assume_init_ref() };
         let mut first = true;
@@ -284,7 +297,7 @@ impl<'a> TagIndex for CompressedTagIndex<'a> {
     }
 }
 
-impl<'a> Drop for CompressedTagIndex<'a> {
+impl Drop for CompressedTagIndex<'_> {
     fn drop(&mut self) {
         // SAFETY(rescrv): It will always be a valid mapping.
         unsafe {
@@ -293,8 +306,8 @@ impl<'a> Drop for CompressedTagIndex<'a> {
     }
 }
 
-unsafe impl<'a> Send for CompressedTagIndex<'a> {}
-unsafe impl<'a> Sync for CompressedTagIndex<'a> {}
+unsafe impl Send for CompressedTagIndex<'_> {}
+unsafe impl Sync for CompressedTagIndex<'_> {}
 
 ///////////////////////////////////////// InvertedTagIndex /////////////////////////////////////////
 

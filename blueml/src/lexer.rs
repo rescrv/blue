@@ -413,7 +413,7 @@ fn parse_single_string(input: &str) -> Option<String> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl Iterator for Lexer<'_> {
     type Item = Result<(Location, Token, Location), LexicalError>;
 
     fn next(&mut self) -> Option<Self::Item> {

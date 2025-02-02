@@ -162,7 +162,7 @@ impl<'a, K: Key, V: Value> Handle<'a, K, V> {
     }
 }
 
-impl<'a, K: Key, V: Value> Deref for Handle<'a, K, V> {
+impl<K: Key, V: Value> Deref for Handle<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -170,7 +170,7 @@ impl<'a, K: Key, V: Value> Deref for Handle<'a, K, V> {
     }
 }
 
-impl<'a, K: Key, V: Value> Drop for Handle<'a, K, V> {
+impl<K: Key, V: Value> Drop for Handle<'_, K, V> {
     fn drop(&mut self) {
         let mut entries = self.table.entries.lock().unwrap();
         // us and the table; synchronized by entries intentionally.

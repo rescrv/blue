@@ -10,7 +10,7 @@ use super::KeyValueRef;
 
 /// A wrapper around the Setsum type that provides methods to uniformly insert KeyValueRef, or
 /// put/del key-value pairs.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Setsum {
     setsum: RawSetsum,
 }

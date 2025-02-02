@@ -26,7 +26,7 @@ use super::*;
 #[derive(Clone, Debug, Default)]
 pub struct int32(pub i32);
 
-impl<'a> FieldType<'a> for int32 {
+impl FieldType<'_> for int32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = i32;
@@ -40,7 +40,7 @@ impl<'a> FieldType<'a> for int32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, int32> for i32 {
+impl FieldPackHelper<'_, int32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(int32(*self)).pack_sz()
     }
@@ -50,7 +50,7 @@ impl<'a> FieldPackHelper<'a, int32> for i32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, int32> for i32 {
+impl FieldUnpackHelper<'_, int32> for i32 {
     fn merge_field(&mut self, proto: int32) {
         *self = proto.into();
     }
@@ -91,7 +91,7 @@ impl<'a> Unpackable<'a> for int32 {
 #[derive(Clone, Debug, Default)]
 pub struct int64(pub i64);
 
-impl<'a> FieldType<'a> for int64 {
+impl FieldType<'_> for int64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = i64;
@@ -105,7 +105,7 @@ impl<'a> FieldType<'a> for int64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, int64> for i64 {
+impl FieldPackHelper<'_, int64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(int64(*self)).pack_sz()
     }
@@ -115,7 +115,7 @@ impl<'a> FieldPackHelper<'a, int64> for i64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, int64> for i64 {
+impl FieldUnpackHelper<'_, int64> for i64 {
     fn merge_field(&mut self, proto: int64) {
         *self = proto.into();
     }
@@ -156,7 +156,7 @@ impl<'a> Unpackable<'a> for int64 {
 #[derive(Clone, Debug, Default)]
 pub struct uint32(pub u32);
 
-impl<'a> FieldType<'a> for uint32 {
+impl FieldType<'_> for uint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = u32;
@@ -170,7 +170,7 @@ impl<'a> FieldType<'a> for uint32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, uint32> for u32 {
+impl FieldPackHelper<'_, uint32> for u32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(uint32(*self)).pack_sz()
     }
@@ -180,7 +180,7 @@ impl<'a> FieldPackHelper<'a, uint32> for u32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, uint32> for u32 {
+impl FieldUnpackHelper<'_, uint32> for u32 {
     fn merge_field(&mut self, proto: uint32) {
         *self = proto.into();
     }
@@ -221,7 +221,7 @@ impl<'a> Unpackable<'a> for uint32 {
 #[derive(Clone, Debug, Default)]
 pub struct uint64(pub u64);
 
-impl<'a> FieldType<'a> for uint64 {
+impl FieldType<'_> for uint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = u64;
@@ -235,7 +235,7 @@ impl<'a> FieldType<'a> for uint64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, uint64> for u64 {
+impl FieldPackHelper<'_, uint64> for u64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         let v: v64 = v64::from(*self);
         stack_pack(tag).pack(v).pack_sz()
@@ -247,7 +247,7 @@ impl<'a> FieldPackHelper<'a, uint64> for u64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, uint64> for u64 {
+impl FieldUnpackHelper<'_, uint64> for u64 {
     fn merge_field(&mut self, proto: uint64) {
         *self = proto.into();
     }
@@ -259,7 +259,7 @@ impl From<uint64> for u64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, uint64> for usize {
+impl FieldPackHelper<'_, uint64> for usize {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(uint64(*self as u64)).pack_sz()
     }
@@ -269,7 +269,7 @@ impl<'a> FieldPackHelper<'a, uint64> for usize {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, uint64> for usize {
+impl FieldUnpackHelper<'_, uint64> for usize {
     fn merge_field(&mut self, proto: uint64) {
         *self = proto.into();
     }
@@ -310,7 +310,7 @@ impl<'a> Unpackable<'a> for uint64 {
 #[derive(Clone, Debug, Default)]
 pub struct sint32(pub i32);
 
-impl<'a> FieldType<'a> for sint32 {
+impl FieldType<'_> for sint32 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = i32;
@@ -324,7 +324,7 @@ impl<'a> FieldType<'a> for sint32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, sint32> for i32 {
+impl FieldPackHelper<'_, sint32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(sint32(*self)).pack_sz()
     }
@@ -334,7 +334,7 @@ impl<'a> FieldPackHelper<'a, sint32> for i32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, sint32> for i32 {
+impl FieldUnpackHelper<'_, sint32> for i32 {
     fn merge_field(&mut self, proto: sint32) {
         *self = proto.into();
     }
@@ -381,7 +381,7 @@ impl<'a> Unpackable<'a> for sint32 {
 #[derive(Clone, Debug, Default)]
 pub struct sint64(pub i64);
 
-impl<'a> FieldType<'a> for sint64 {
+impl FieldType<'_> for sint64 {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = i64;
@@ -395,7 +395,7 @@ impl<'a> FieldType<'a> for sint64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, sint64> for i64 {
+impl FieldPackHelper<'_, sint64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(sint64(*self)).pack_sz()
     }
@@ -405,7 +405,7 @@ impl<'a> FieldPackHelper<'a, sint64> for i64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, sint64> for i64 {
+impl FieldUnpackHelper<'_, sint64> for i64 {
     fn merge_field(&mut self, proto: sint64) {
         *self = proto.into();
     }
@@ -446,7 +446,7 @@ impl<'a> Unpackable<'a> for sint64 {
 #[derive(Clone, Debug, Default)]
 pub struct fixed32(pub u32);
 
-impl<'a> FieldType<'a> for fixed32 {
+impl FieldType<'_> for fixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
 
     type Native = u32;
@@ -460,7 +460,7 @@ impl<'a> FieldType<'a> for fixed32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, fixed32> for u32 {
+impl FieldPackHelper<'_, fixed32> for u32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(fixed32(*self)).pack_sz()
     }
@@ -470,7 +470,7 @@ impl<'a> FieldPackHelper<'a, fixed32> for u32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, fixed32> for u32 {
+impl FieldUnpackHelper<'_, fixed32> for u32 {
     fn merge_field(&mut self, proto: fixed32) {
         *self = proto.into();
     }
@@ -508,7 +508,7 @@ impl<'a> Unpackable<'a> for fixed32 {
 #[derive(Clone, Debug, Default)]
 pub struct fixed64(pub u64);
 
-impl<'a> FieldType<'a> for fixed64 {
+impl FieldType<'_> for fixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
     type Native = u64;
@@ -522,7 +522,7 @@ impl<'a> FieldType<'a> for fixed64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, fixed64> for u64 {
+impl FieldPackHelper<'_, fixed64> for u64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(fixed64(*self)).pack_sz()
     }
@@ -532,7 +532,7 @@ impl<'a> FieldPackHelper<'a, fixed64> for u64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, fixed64> for u64 {
+impl FieldUnpackHelper<'_, fixed64> for u64 {
     fn merge_field(&mut self, proto: fixed64) {
         *self = proto.into();
     }
@@ -570,7 +570,7 @@ impl<'a> Unpackable<'a> for fixed64 {
 #[derive(Clone, Debug, Default)]
 pub struct sfixed32(pub i32);
 
-impl<'a> FieldType<'a> for sfixed32 {
+impl FieldType<'_> for sfixed32 {
     const WIRE_TYPE: WireType = WireType::ThirtyTwo;
 
     type Native = i32;
@@ -584,7 +584,7 @@ impl<'a> FieldType<'a> for sfixed32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, sfixed32> for i32 {
+impl FieldPackHelper<'_, sfixed32> for i32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(sfixed32(*self)).pack_sz()
     }
@@ -594,7 +594,7 @@ impl<'a> FieldPackHelper<'a, sfixed32> for i32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, sfixed32> for i32 {
+impl FieldUnpackHelper<'_, sfixed32> for i32 {
     fn merge_field(&mut self, proto: sfixed32) {
         *self = proto.into();
     }
@@ -632,7 +632,7 @@ impl<'a> Unpackable<'a> for sfixed32 {
 #[derive(Clone, Debug, Default)]
 pub struct sfixed64(pub i64);
 
-impl<'a> FieldType<'a> for sfixed64 {
+impl FieldType<'_> for sfixed64 {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
     type Native = i64;
@@ -646,7 +646,7 @@ impl<'a> FieldType<'a> for sfixed64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, sfixed64> for i64 {
+impl FieldPackHelper<'_, sfixed64> for i64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(sfixed64(*self)).pack_sz()
     }
@@ -656,7 +656,7 @@ impl<'a> FieldPackHelper<'a, sfixed64> for i64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, sfixed64> for i64 {
+impl FieldUnpackHelper<'_, sfixed64> for i64 {
     fn merge_field(&mut self, proto: sfixed64) {
         *self = proto.into();
     }
@@ -694,7 +694,7 @@ impl<'a> Unpackable<'a> for sfixed64 {
 #[derive(Clone, Debug, Default)]
 pub struct float(pub f32);
 
-impl<'a> FieldType<'a> for float {
+impl FieldType<'_> for float {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
     type Native = f32;
@@ -708,7 +708,7 @@ impl<'a> FieldType<'a> for float {
     }
 }
 
-impl<'a> FieldPackHelper<'a, float> for f32 {
+impl FieldPackHelper<'_, float> for f32 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(float(*self)).pack_sz()
     }
@@ -718,7 +718,7 @@ impl<'a> FieldPackHelper<'a, float> for f32 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, float> for f32 {
+impl FieldUnpackHelper<'_, float> for f32 {
     fn merge_field(&mut self, proto: float) {
         *self = proto.into();
     }
@@ -756,7 +756,7 @@ impl<'a> Unpackable<'a> for float {
 #[derive(Clone, Debug, Default)]
 pub struct double(pub f64);
 
-impl<'a> FieldType<'a> for double {
+impl FieldType<'_> for double {
     const WIRE_TYPE: WireType = WireType::SixtyFour;
 
     type Native = f64;
@@ -770,7 +770,7 @@ impl<'a> FieldType<'a> for double {
     }
 }
 
-impl<'a> FieldPackHelper<'a, double> for f64 {
+impl FieldPackHelper<'_, double> for f64 {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(double(*self)).pack_sz()
     }
@@ -780,7 +780,7 @@ impl<'a> FieldPackHelper<'a, double> for f64 {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, double> for f64 {
+impl FieldUnpackHelper<'_, double> for f64 {
     fn merge_field(&mut self, proto: double) {
         *self = proto.into();
     }
@@ -817,7 +817,7 @@ impl<'a> Unpackable<'a> for double {
 #[derive(Clone, Debug, Default)]
 pub struct Bool(pub bool);
 
-impl<'a> FieldType<'a> for Bool {
+impl FieldType<'_> for Bool {
     const WIRE_TYPE: WireType = WireType::Varint;
 
     type Native = bool;
@@ -831,7 +831,7 @@ impl<'a> FieldType<'a> for Bool {
     }
 }
 
-impl<'a> FieldPackHelper<'a, Bool> for bool {
+impl FieldPackHelper<'_, Bool> for bool {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(Bool(*self)).pack_sz()
     }
@@ -841,7 +841,7 @@ impl<'a> FieldPackHelper<'a, Bool> for bool {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, Bool> for bool {
+impl FieldUnpackHelper<'_, Bool> for bool {
     fn merge_field(&mut self, proto: Bool) {
         *self = proto.into();
     }
@@ -966,7 +966,7 @@ impl<'a> From<bytes<'a>> for PathBuf {
     }
 }
 
-impl<'a> Packable for bytes<'a> {
+impl Packable for bytes<'_> {
     fn pack_sz(&self) -> usize {
         stack_pack(self.0).pack_sz()
     }
@@ -1000,7 +1000,7 @@ impl<'a> Unpackable<'a> for bytes<'a> {
 #[derive(Clone, Debug, Default)]
 pub struct bytes16(pub [u8; 16]);
 
-impl<'a> FieldType<'a> for bytes16 {
+impl FieldType<'_> for bytes16 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     type Native = [u8; 16];
@@ -1014,7 +1014,7 @@ impl<'a> FieldType<'a> for bytes16 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, bytes16> for [u8; 16] {
+impl FieldPackHelper<'_, bytes16> for [u8; 16] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(bytes16(*self)).pack_sz()
     }
@@ -1024,7 +1024,7 @@ impl<'a> FieldPackHelper<'a, bytes16> for [u8; 16] {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, bytes16> for [u8; 16] {
+impl FieldUnpackHelper<'_, bytes16> for [u8; 16] {
     fn merge_field(&mut self, proto: bytes16) {
         *self = proto.into();
     }
@@ -1085,7 +1085,7 @@ impl<'a> Unpackable<'a> for bytes16 {
 #[derive(Clone, Debug, Default)]
 pub struct bytes32(pub [u8; 32]);
 
-impl<'a> FieldType<'a> for bytes32 {
+impl FieldType<'_> for bytes32 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     type Native = [u8; 32];
@@ -1099,7 +1099,7 @@ impl<'a> FieldType<'a> for bytes32 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, bytes32> for [u8; 32] {
+impl FieldPackHelper<'_, bytes32> for [u8; 32] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(bytes32(*self)).pack_sz()
     }
@@ -1109,7 +1109,7 @@ impl<'a> FieldPackHelper<'a, bytes32> for [u8; 32] {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, bytes32> for [u8; 32] {
+impl FieldUnpackHelper<'_, bytes32> for [u8; 32] {
     fn merge_field(&mut self, proto: bytes32) {
         *self = proto.into();
     }
@@ -1171,7 +1171,7 @@ impl<'a> Unpackable<'a> for bytes32 {
 #[derive(Clone, Debug)]
 pub struct bytes64(pub [u8; 64]);
 
-impl<'a> FieldType<'a> for bytes64 {
+impl FieldType<'_> for bytes64 {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     type Native = [u8; 64];
@@ -1191,7 +1191,7 @@ impl Default for bytes64 {
     }
 }
 
-impl<'a> FieldPackHelper<'a, bytes64> for [u8; 64] {
+impl FieldPackHelper<'_, bytes64> for [u8; 64] {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag).pack(bytes64(*self)).pack_sz()
     }
@@ -1201,7 +1201,7 @@ impl<'a> FieldPackHelper<'a, bytes64> for [u8; 64] {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, bytes64> for [u8; 64] {
+impl FieldUnpackHelper<'_, bytes64> for [u8; 64] {
     fn merge_field(&mut self, proto: bytes64) {
         *self = proto.into();
     }
@@ -1345,7 +1345,7 @@ impl<'a> From<string<'a>> for PathBuf {
     }
 }
 
-impl<'a> Packable for string<'a> {
+impl Packable for string<'_> {
     fn pack_sz(&self) -> usize {
         let b: &[u8] = self.0.as_bytes();
         stack_pack(b).pack_sz()
@@ -1395,7 +1395,7 @@ impl<M> message<M> {
     }
 }
 
-impl<'a, M> FieldType<'a> for message<M> {
+impl<M> FieldType<'_> for message<M> {
     const WIRE_TYPE: WireType = WireType::LengthDelimited;
 
     type Native = M;

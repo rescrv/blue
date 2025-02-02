@@ -28,7 +28,7 @@ pub struct SampledArray<'a> {
     present: BitVector<'a>,
 }
 
-impl<'a> SampledArray<'a> {
+impl SampledArray<'_> {
     pub fn construct<H: Helper>(
         values: &[(usize, usize)],
         builder: &mut Builder<H>,

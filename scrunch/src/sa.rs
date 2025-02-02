@@ -122,7 +122,7 @@ pub struct SampledSuffixArray<'a> {
     sampled: SampledArray<'a>,
 }
 
-impl<'a> SuffixArray for SampledSuffixArray<'a> {
+impl SuffixArray for SampledSuffixArray<'_> {
     fn construct<H: Helper>(
         sampling: usize,
         sa: &[usize],

@@ -42,7 +42,7 @@ impl<'a> BitArray<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for BitArray<'a> {
+impl std::fmt::Debug for BitArray<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("BitArray")
             .field("bytes", &self.bytes.len())
@@ -50,7 +50,7 @@ impl<'a> std::fmt::Debug for BitArray<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for BitArray<'a> {
+impl AsRef<[u8]> for BitArray<'_> {
     fn as_ref(&self) -> &[u8] {
         self.bytes
     }
@@ -81,7 +81,7 @@ impl<'a> FixedWidthIterator<'a> {
     }
 }
 
-impl<'a> Iterator for FixedWidthIterator<'a> {
+impl Iterator for FixedWidthIterator<'_> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {

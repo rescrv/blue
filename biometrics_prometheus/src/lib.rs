@@ -70,7 +70,7 @@ impl Emitter {
         let options = self.options.clone();
         let flush_trigger = self.flush_trigger;
         let last_flush = self.last_flush;
-        self.written += line.as_ref().as_bytes().len();
+        self.written += line.as_ref().len();
         let written = self.written;
         let output = self.get_output(now_millis)?;
         output.write_all(line.as_ref().as_bytes())?;
@@ -299,6 +299,9 @@ mod tests {
 
     #[test]
     fn emitter() {
+        static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // SAFETY(rescrv):  Mutex poisoning.
+        let _guard = MUTEX.lock().unwrap();
         if Path::from("tmp.foo.42.prom").exists() {
             remove_file("tmp.foo.42.prom").unwrap();
         }
@@ -318,6 +321,7 @@ mod tests {
 
     #[test]
     fn watcher() {
+        emitter();
         let watcher = Watcher::new(Path::new("."));
         let mut watched = vec![];
         watcher

@@ -91,7 +91,7 @@ pub struct ReferenceBitVector<'a> {
     selects0: Vec<usize>,
 }
 
-impl<'a> BitVector for ReferenceBitVector<'a> {
+impl BitVector for ReferenceBitVector<'_> {
     type Output<'b> = ReferenceBitVector<'b>;
 
     fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {

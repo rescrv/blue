@@ -25,7 +25,7 @@ struct Leaf<'a> {
     words: BitArray<'a>,
 }
 
-impl<'a> Leaf<'a> {
+impl Leaf<'_> {
     fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
         if self.base >= x as u64 {
             Some((self.base == x as u64, 0))
@@ -75,7 +75,7 @@ struct Internal<'a> {
     pointers: BitArray<'a>,
 }
 
-impl<'a> Internal<'a> {
+impl Internal<'_> {
     fn position(&self, x: usize) -> Option<(usize, u64)> {
         if self.divider_base >= x as u64 {
             Some((0, self.pointer_base))
@@ -352,7 +352,7 @@ impl<'a> BitVector<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for BitVector<'a> {
+impl std::fmt::Debug for BitVector<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("SparseBitVector")
             .field("length", &self.length)
@@ -362,7 +362,7 @@ impl<'a> std::fmt::Debug for BitVector<'a> {
     }
 }
 
-impl<'a> BitVectorTrait for BitVector<'a> {
+impl BitVectorTrait for BitVector<'_> {
     type Output<'b> = BitVector<'b>;
 
     fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {

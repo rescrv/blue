@@ -306,7 +306,7 @@ pub struct TupleKeyIterator<'a> {
     offset: usize,
 }
 
-impl<'a> TupleKeyIterator<'a> {
+impl TupleKeyIterator<'_> {
     pub fn number_of_elements_in_common_prefix(lhs: Self, rhs: Self) -> usize {
         let mut max_idx = 0;
         for (idx, (x, y)) in std::iter::zip(lhs, rhs).enumerate() {

@@ -18,7 +18,7 @@ impl<'a> Combine7BitChunks<'a> {
     }
 }
 
-impl<'a> Iterator for Combine7BitChunks<'a> {
+impl Iterator for Combine7BitChunks<'_> {
     type Item = u8;
 
     fn next(&mut self) -> Option<u8> {

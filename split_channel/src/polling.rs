@@ -15,37 +15,53 @@ pub const POLLERR: u32 = 0x0008;
 pub const POLLHUP: u32 = 0x0010;
 
 pub fn to_poll_constants(x: u32) -> i16 {
-    let mut fx: i16 = 0;
-    if x & POLLIN != 0 {
-        fx |= libc::POLLIN;
+    #[cfg(target_os = "macos")]
+    {
+        let _ = x;
+        0
     }
-    if x & POLLOUT != 0 {
-        fx |= libc::POLLOUT;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut fx: i16 = 0;
+        if x & POLLIN != 0 {
+            fx |= libc::POLLIN;
+        }
+        if x & POLLOUT != 0 {
+            fx |= libc::POLLOUT;
+        }
+        if x & POLLERR != 0 {
+            fx |= libc::POLLERR;
+        }
+        if x & POLLHUP != 0 {
+            fx |= libc::POLLHUP;
+        }
+        fx
     }
-    if x & POLLERR != 0 {
-        fx |= libc::POLLERR;
-    }
-    if x & POLLHUP != 0 {
-        fx |= libc::POLLHUP;
-    }
-    fx
 }
 
 pub fn from_epoll_constants(x: i32) -> u32 {
-    let mut events: u32 = 0;
-    if x & libc::EPOLLIN != 0 {
-        events |= POLLIN;
+    #[cfg(target_os = "macos")]
+    {
+        let _ = x;
+        0
     }
-    if x & libc::EPOLLOUT != 0 {
-        events |= POLLOUT;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut events: u32 = 0;
+        if x & libc::EPOLLIN != 0 {
+            events |= POLLIN;
+        }
+        if x & libc::EPOLLOUT != 0 {
+            events |= POLLOUT;
+        }
+        if x & libc::EPOLLERR != 0 {
+            events |= POLLERR;
+        }
+        if x & libc::EPOLLHUP != 0 {
+            events |= POLLHUP;
+        }
+        events
     }
-    if x & libc::EPOLLERR != 0 {
-        events |= POLLERR;
-    }
-    if x & libc::EPOLLHUP != 0 {
-        events |= POLLHUP;
-    }
-    events
 }
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -71,6 +87,9 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&CONSERVE_POLLOUT);
     collector.register_counter(&RETURN_CONSERVED_POLLIN);
     collector.register_counter(&RETURN_CONSERVED_POLLOUT);
+    collector.register_counter(&POLL_ERROR);
+    collector.register_counter(&POLL_TIMEOUT);
+    collector.register_counter(&POLL_RETURN);
 }
 
 //////////////////////////////////////////// ThreadState ///////////////////////////////////////////
@@ -97,20 +116,28 @@ pub trait Poll: OsPoll {
 /////////////////////////////////////////////// Epoll //////////////////////////////////////////////
 
 pub struct Epoll {
+    #[allow(dead_code)]
     epfd: RawFd,
     threads: AtomicU64,
 }
 
 impl Epoll {
     fn new() -> Result<Self, Error> {
-        let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
-        if epfd < 0 {
-            return Err(std::io::Error::last_os_error().into());
+        #[cfg(target_os = "macos")]
+        {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
         }
-        Ok(Self {
-            epfd,
-            threads: AtomicU64::new(0),
-        })
+        #[cfg(not(target_os = "macos"))]
+        {
+            let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+            if epfd < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            Ok(Self {
+                epfd,
+                threads: AtomicU64::new(0),
+            })
+        }
     }
 }
 
@@ -129,34 +156,50 @@ impl OsPoll for Epoll {
     }
 
     fn insert(&self, fd: RawFd) -> Result<(), Error> {
-        let mut ev = libc::epoll_event {
-            events: (libc::EPOLLET | libc::EPOLLIN | libc::EPOLLOUT) as u32,
-            u64: fd as u64,
-        };
-        let ret = unsafe { libc::epoll_ctl(self.epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error().into());
+        #[cfg(target_os = "macos")]
+        {
+            let _ = fd;
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
         }
-        Ok(())
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut ev = libc::epoll_event {
+                events: (libc::EPOLLET | libc::EPOLLIN | libc::EPOLLOUT) as u32,
+                u64: fd as u64,
+            };
+            let ret = unsafe { libc::epoll_ctl(self.epfd, libc::EPOLL_CTL_ADD, fd, &mut ev) };
+            if ret < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            Ok(())
+        }
     }
 
     fn poll(&self, _: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, Error> {
-        let mut ev = libc::epoll_event { events: 0, u64: 0 };
-        let ret = unsafe { libc::epoll_wait(self.epfd, &mut ev, 1, timeout_ms) };
-        if ret < 0 {
-            POLL_ERROR.click();
-            Err(std::io::Error::last_os_error().into())
-        } else if ret == 0 {
-            POLL_TIMEOUT.click();
-            Ok(None)
-        } else if ev.u64 > i32::MAX as u64 {
-            FD_TRUNCATED.click();
-            Ok(None)
-        } else {
-            POLL_RETURN.click();
-            assert_eq!(1, ret);
-            let fd = ev.u64 as RawFd;
-            Ok(Some((fd, from_epoll_constants(ev.events as i32))))
+        #[cfg(target_os = "macos")]
+        {
+            let _ = timeout_ms;
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut ev = libc::epoll_event { events: 0, u64: 0 };
+            let ret = unsafe { libc::epoll_wait(self.epfd, &mut ev, 1, timeout_ms) };
+            if ret < 0 {
+                POLL_ERROR.click();
+                Err(std::io::Error::last_os_error().into())
+            } else if ret == 0 {
+                POLL_TIMEOUT.click();
+                Ok(None)
+            } else if ev.u64 > i32::MAX as u64 {
+                FD_TRUNCATED.click();
+                Ok(None)
+            } else {
+                POLL_RETURN.click();
+                assert_eq!(1, ret);
+                let fd = ev.u64 as RawFd;
+                Ok(Some((fd, from_epoll_constants(ev.events as i32))))
+            }
         }
     }
 }

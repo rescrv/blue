@@ -5,22 +5,20 @@ set -x
 
 cargo fmt -- --check
 
-export PATH="$PATH":"`pwd`"/target/debug
+ROOTDIR="`pwd`"
+export PATH="$PATH":"`pwd`"/target/release
 # TODO(rescrv, 1.91):  Remove this allowance.
 export RUSTFLAGS="-A clippy::needless-lifetimes --deny warnings"
 
-pushd meta
-cargo build
-popd
+cargo build --release --bins
 
 for package in `target/debug/publish`
 do
     pushd $package
     cargo clippy --no-deps --all-targets
-    cargo build --bins
-    cargo hack $HACK_FLAGS --feature-powerset test
+    cargo hack $HACK_FLAGS --feature-powerset test --release
     cargo doc --no-deps
-    ../target/debug/binaries
+    "${ROOTDIR}/target/release/binaries"
     popd
 done
 

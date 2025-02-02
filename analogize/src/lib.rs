@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::fs::{metadata, read_dir, rename, File, Metadata, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -733,7 +733,7 @@ struct AnalogizeDocument<'a> {
     timeline: BitVector<'a>,
 }
 
-impl<'a> AnalogizeDocument<'a> {
+impl AnalogizeDocument<'_> {
     fn query(&self, syms: &SymbolTable, query: &Query) -> Result<HashSet<RecordOffset>, Error> {
         let records = if let Query::Or(subqueries) = query {
             let mut records = HashSet::new();
@@ -1080,17 +1080,30 @@ impl State {
                 core: ErrorCore::default(),
             });
         }
-        // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
-        let mapping = unsafe {
+        #[cfg(not(target_os = "macos"))]
+        unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
             libc::mmap64(
                 std::ptr::null_mut(),
-                md.len() as usize,
+                len,
                 libc::PROT_READ,
-                libc::MAP_SHARED | libc::MAP_POPULATE,
-                file.as_raw_fd(),
+                libc::MAP_SHARED,
+                file,
                 0,
             )
-        };
+        }
+        #[cfg(target_os = "macos")]
+        unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file,
+                0,
+            )
+        }
+        // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
+        let mapping = unsafe { mmap(md.len() as usize, file.as_raw_fd()) };
         if mapping == libc::MAP_FAILED {
             return Err(std::io::Error::last_os_error().into());
         }

@@ -29,7 +29,7 @@ pub struct Sigma<'a> {
     columns: BitVector<'a>,
 }
 
-impl<'a> Sigma<'a> {
+impl Sigma<'_> {
     pub fn construct<I: IntoIterator<Item = u32>, H: Helper>(
         iter: I,
         builder: &mut Builder<H>,
@@ -148,7 +148,7 @@ impl<'a> Sigma<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for Sigma<'a> {
+impl std::fmt::Debug for Sigma<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("Sigma")
             .field("char_to_sigma", &self.char_to_sigma)

@@ -60,8 +60,32 @@ static VALUE_TOO_LARGE: Counter = Counter::new("sst.error.value_too_large");
 static VALUE_TOO_LARGE_MONITOR: Stationary =
     Stationary::new("sst.error.value_too_large", &VALUE_TOO_LARGE);
 
+static SORT_ORDER: Counter = Counter::new("sst.error.SORT_ORDER");
+static SORT_ORDER_MONITOR: Stationary = Stationary::new("sst.error.SORT_ORDER", &SORT_ORDER);
+
 static TABLE_FULL: Counter = Counter::new("sst.error.table_full");
 static TABLE_FULL_MONITOR: Stationary = Stationary::new("sst.error.table_full", &TABLE_FULL);
+
+static BLOCK_TOO_SMALL: Counter = Counter::new("sst.error.block_too_small");
+static BLOCK_TOO_SMALL_MONITOR: Stationary =
+    Stationary::new("sst.error.block_too_small", &BLOCK_TOO_SMALL);
+
+static UNPACK_ERROR: Counter = Counter::new("sst.error.unpack_error");
+static UNPACK_ERROR_MONITOR: Stationary = Stationary::new("sst.error.unpack_error", &UNPACK_ERROR);
+
+static CRC32C_FAILURE: Counter = Counter::new("sst.error.crc32c_failure");
+static CRC32C_FAILURE_MONITOR: Stationary =
+    Stationary::new("sst.error.crc32c_failure", &CRC32C_FAILURE);
+
+static SYSTEM_ERROR: Counter = Counter::new("sst.error.system_error");
+static SYSTEM_ERROR_MONITOR: Stationary = Stationary::new("sst.error.system_error", &SYSTEM_ERROR);
+
+static TOO_MANY_OPEN_FILES: Counter = Counter::new("sst.error.too_many_open_files");
+static TOO_MANY_OPEN_FILES_MONITOR: Stationary =
+    Stationary::new("sst.error.too_many_open_files", &TOO_MANY_OPEN_FILES);
+
+static EMPTY_BATCH: Counter = Counter::new("sst.error.empty_batch");
+static EMPTY_BATCH_MONITOR: Stationary = Stationary::new("sst.error.empty_batch", &EMPTY_BATCH);
 
 static SST_OPEN: Counter = Counter::new("sst.table.open");
 static SST_SETSUM: Counter = Counter::new("sst.table.setsum");
@@ -95,7 +119,14 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&CORRUPTION);
     collector.register_counter(&KEY_TOO_LARGE);
     collector.register_counter(&VALUE_TOO_LARGE);
+    collector.register_counter(&SORT_ORDER);
     collector.register_counter(&TABLE_FULL);
+    collector.register_counter(&BLOCK_TOO_SMALL);
+    collector.register_counter(&UNPACK_ERROR);
+    collector.register_counter(&CRC32C_FAILURE);
+    collector.register_counter(&SYSTEM_ERROR);
+    collector.register_counter(&TOO_MANY_OPEN_FILES);
+    collector.register_counter(&EMPTY_BATCH);
     collector.register_counter(&SST_OPEN);
     collector.register_counter(&SST_CURSOR_NEW);
     collector.register_counter(&SST_SETSUM);
@@ -122,6 +153,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&SST_CURSOR_PREV);
     collector.register_counter(&SST_CURSOR_NEXT);
     collector.register_counter(&SST_CURSOR_NEW);
+
     file_manager::register_biometrics(collector);
     log::register_biometrics(collector);
 }
@@ -132,7 +164,14 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&CORRUPTION_MONITOR);
     hey_listen.register_stationary(&KEY_TOO_LARGE_MONITOR);
     hey_listen.register_stationary(&VALUE_TOO_LARGE_MONITOR);
+    hey_listen.register_stationary(&SORT_ORDER_MONITOR);
     hey_listen.register_stationary(&TABLE_FULL_MONITOR);
+    hey_listen.register_stationary(&BLOCK_TOO_SMALL_MONITOR);
+    hey_listen.register_stationary(&UNPACK_ERROR_MONITOR);
+    hey_listen.register_stationary(&CRC32C_FAILURE_MONITOR);
+    hey_listen.register_stationary(&SYSTEM_ERROR_MONITOR);
+    hey_listen.register_stationary(&TOO_MANY_OPEN_FILES_MONITOR);
+    hey_listen.register_stationary(&EMPTY_BATCH_MONITOR);
 
     file_manager::register_monitors(hey_listen);
 }
@@ -510,15 +549,15 @@ impl<'a> KeyRef<'a> {
     }
 }
 
-impl<'a> Eq for KeyRef<'a> {}
+impl Eq for KeyRef<'_> {}
 
-impl<'a> PartialEq for KeyRef<'a> {
+impl PartialEq for KeyRef<'_> {
     fn eq(&self, rhs: &KeyRef) -> bool {
         self.cmp(rhs) == std::cmp::Ordering::Equal
     }
 }
 
-impl<'a> Ord for KeyRef<'a> {
+impl Ord for KeyRef<'_> {
     fn cmp(&self, rhs: &KeyRef) -> std::cmp::Ordering {
         self.key
             .cmp(rhs.key)
@@ -526,7 +565,7 @@ impl<'a> Ord for KeyRef<'a> {
     }
 }
 
-impl<'a> PartialOrd for KeyRef<'a> {
+impl PartialOrd for KeyRef<'_> {
     fn partial_cmp(&self, rhs: &KeyRef) -> Option<std::cmp::Ordering> {
         Some(self.cmp(rhs))
     }
@@ -669,7 +708,7 @@ pub struct KeyValueRef<'a> {
     pub value: Option<&'a [u8]>,
 }
 
-impl<'a> Display for KeyValueRef<'a> {
+impl Display for KeyValueRef<'_> {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         let key = String::from_utf8(
             self.key
@@ -693,9 +732,9 @@ impl<'a> Display for KeyValueRef<'a> {
     }
 }
 
-impl<'a> Eq for KeyValueRef<'a> {}
+impl Eq for KeyValueRef<'_> {}
 
-impl<'a> PartialEq for KeyValueRef<'a> {
+impl PartialEq for KeyValueRef<'_> {
     fn eq(&self, rhs: &KeyValueRef) -> bool {
         let lhs: KeyRef = self.into();
         let rhs: KeyRef = rhs.into();
@@ -703,7 +742,7 @@ impl<'a> PartialEq for KeyValueRef<'a> {
     }
 }
 
-impl<'a> Ord for KeyValueRef<'a> {
+impl Ord for KeyValueRef<'_> {
     fn cmp(&self, rhs: &KeyValueRef) -> std::cmp::Ordering {
         let lhs: KeyRef = self.into();
         let rhs: KeyRef = rhs.into();
@@ -711,7 +750,7 @@ impl<'a> Ord for KeyValueRef<'a> {
     }
 }
 
-impl<'a> PartialOrd for KeyValueRef<'a> {
+impl PartialOrd for KeyValueRef<'_> {
     fn partial_cmp(&self, rhs: &KeyValueRef) -> Option<std::cmp::Ordering> {
         Some(self.cmp(rhs))
     }
@@ -876,7 +915,7 @@ impl<'a> KeyValueEntry<'a> {
     }
 }
 
-impl<'a> Default for KeyValueEntry<'a> {
+impl Default for KeyValueEntry<'_> {
     fn default() -> Self {
         Self::Put(KeyValuePut::default())
     }
@@ -942,7 +981,7 @@ enum SstEntry<'a> {
     FinalBlock(&'a [u8]),
 }
 
-impl<'a> SstEntry<'a> {
+impl SstEntry<'_> {
     fn bytes(&self) -> &[u8] {
         match self {
             SstEntry::PlainBlock(x) => x,
@@ -956,7 +995,7 @@ impl<'a> SstEntry<'a> {
     }
 }
 
-impl<'a> Default for SstEntry<'a> {
+impl Default for SstEntry<'_> {
     fn default() -> Self {
         Self::PlainBlock(&[])
     }
@@ -1088,6 +1127,19 @@ impl Debug for SstMetadata {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(fmt, "SstMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
             Setsum::from_digest(self.setsum).hexdigest(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
+    }
+}
+
+impl From<SstMetadata> for indicio::Value {
+    fn from(metadata: SstMetadata) -> indicio::Value {
+        indicio::value!({
+            setsum: Setsum::from_digest(metadata.setsum).hexdigest(),
+            first_key: metadata.first_key_escaped(),
+            last_key: metadata.last_key_escaped(),
+            smallest_timestamp: metadata.smallest_timestamp,
+            biggest_timestamp: metadata.biggest_timestamp,
+            file_size: metadata.file_size,
+        })
     }
 }
 

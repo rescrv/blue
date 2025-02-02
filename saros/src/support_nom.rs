@@ -143,7 +143,7 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
 
 ///////////////////////////////////// interpret_error_for_test /////////////////////////////////////
 
-pub fn interpret_error_for_test<'a, T, F: FnMut(&'a str) -> ParseResult<T>>(
+pub fn interpret_error_for_test<'a, T, F: FnMut(&'a str) -> ParseResult<'a, T>>(
     mut f: F,
 ) -> impl FnMut(&'a str) -> Result<T, ParseError> {
     move |input| match f(input) {

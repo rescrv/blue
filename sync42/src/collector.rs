@@ -65,7 +65,7 @@ pub struct ThreadState<'a> {
     index: usize,
 }
 
-impl<'a> ThreadState<'a> {
+impl ThreadState<'_> {
     /// Call `quiescent` regularly at a time when the thread holds no garbage-collectible pointers.
     pub fn quiescent(&mut self) {
         let (timestamp, min_timestamp) = loop {
@@ -176,7 +176,7 @@ impl<'a> ThreadState<'a> {
     }
 }
 
-impl<'a> Drop for ThreadState<'a> {
+impl Drop for ThreadState<'_> {
     fn drop(&mut self) {
         self.collector.nodes[self.index]
             .in_use

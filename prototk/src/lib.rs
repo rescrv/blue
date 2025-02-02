@@ -736,7 +736,7 @@ impl<'a> Unpackable<'a> for Error {
     }
 }
 
-impl<'a> FieldPackHelper<'a, field_types::message<Error>> for Error {
+impl FieldPackHelper<'_, field_types::message<Error>> for Error {
     fn field_pack_sz(&self, tag: &Tag) -> usize {
         stack_pack(tag)
             .pack(stack_pack(self).length_prefixed())
@@ -750,7 +750,7 @@ impl<'a> FieldPackHelper<'a, field_types::message<Error>> for Error {
     }
 }
 
-impl<'a> FieldUnpackHelper<'a, field_types::message<Error>> for Error {
+impl FieldUnpackHelper<'_, field_types::message<Error>> for Error {
     fn merge_field(&mut self, proto: field_types::message<Error>) {
         *self = proto.unwrap_message();
     }
@@ -762,7 +762,7 @@ impl From<field_types::message<Error>> for Error {
     }
 }
 
-impl<'a> Message<'a> for Error {}
+impl Message<'_> for Error {}
 
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
@@ -1140,7 +1140,7 @@ where
     }
 }
 
-impl<'a, T, E> FieldUnpackHelper<'a, field_types::message<Result<T, E>>> for Result<T, E> {
+impl<T, E> FieldUnpackHelper<'_, field_types::message<Result<T, E>>> for Result<T, E> {
     fn merge_field(&mut self, proto: field_types::message<Result<T, E>>) {
         *self = proto.unwrap_message();
     }
@@ -1175,7 +1175,7 @@ where
     }
 }
 
-impl<'a, 'b, T, F> Packable for FieldPacker<'a, 'b, T, F>
+impl<'a, T, F> Packable for FieldPacker<'a, '_, T, F>
 where
     T: FieldType<'a>,
     F: FieldPackHelper<'a, T>,
@@ -1213,7 +1213,7 @@ impl<'a, 'b> FieldIterator<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Iterator for FieldIterator<'a, 'b> {
+impl<'a> Iterator for FieldIterator<'a, '_> {
     type Item = (Tag, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {

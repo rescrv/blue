@@ -817,7 +817,7 @@ pub struct SeriesDecoder<'a> {
     prev_p: Option<Point>,
 }
 
-impl<'a> SeriesDecoder<'a> {
+impl SeriesDecoder<'_> {
     fn double_undelta<T: Copy>(
         prev_prev: &mut Option<T>,
         prev: &mut Option<T>,
@@ -860,7 +860,7 @@ impl<'a> From<&'a [u8]> for SeriesDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for SeriesDecoder<'a> {
+impl Iterator for SeriesDecoder<'_> {
     type Item = Result<(Time, Point), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

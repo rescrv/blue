@@ -273,7 +273,7 @@ where
     psi: PSI,
 }
 
-impl<'a, SA, ISA, PSI> PsiDocument<'a, SA, ISA, PSI>
+impl<SA, ISA, PSI> PsiDocument<'_, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -297,7 +297,7 @@ where
     }
 }
 
-impl<'a, SA, ISA, PSI> Document for PsiDocument<'a, SA, ISA, PSI>
+impl<SA, ISA, PSI> Document for PsiDocument<'_, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -603,7 +603,7 @@ where
     heap: BinaryHeap<ExemplarState>,
 }
 
-impl<'a, SA, ISA, PSI> Exemplars<'a, SA, ISA, PSI>
+impl<SA, ISA, PSI> Exemplars<'_, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -662,7 +662,7 @@ where
     }
 }
 
-impl<'a, SA, ISA, PSI> Iterator for Exemplars<'a, SA, ISA, PSI>
+impl<SA, ISA, PSI> Iterator for Exemplars<'_, SA, ISA, PSI>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,
@@ -709,7 +709,7 @@ where
     select: F,
 }
 
-impl<'a, SA, ISA, PSI, F> Iterator for Correlate<'a, SA, ISA, PSI, F>
+impl<SA, ISA, PSI, F> Iterator for Correlate<'_, SA, ISA, PSI, F>
 where
     SA: sa::SuffixArray,
     ISA: isa::InverseSuffixArray,

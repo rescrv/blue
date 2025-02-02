@@ -50,7 +50,7 @@ impl<'a> Builder<'a, Vec<u8>> {
     }
 }
 
-impl<'a, H: Helper> Drop for Builder<'a, H> {
+impl<H: Helper> Drop for Builder<'_, H> {
     fn drop(&mut self) {
         if let Some(field_number) = self.field_number.take() {
             let tag = Tag {
@@ -77,7 +77,7 @@ impl<'a, H: Helper> Drop for Builder<'a, H> {
 }
 
 // TODO(rescrv):  Cleanup this interface.
-impl<'a, H: Helper> Builder<'a, H> {
+impl<H: Helper> Builder<'_, H> {
     pub fn sub(&mut self, field_number: FieldNumber) -> Builder<'_, Self> {
         let field_number = Some(field_number);
         let starting_size = self.len();
@@ -161,7 +161,7 @@ impl<'a, H: Helper> Builder<'a, H> {
     }
 }
 
-impl<'a, H: Helper> Helper for Builder<'a, H> {
+impl<H: Helper> Helper for Builder<'_, H> {
     fn len(&self) -> usize {
         self.helper.len()
     }

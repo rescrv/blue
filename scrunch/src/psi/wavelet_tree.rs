@@ -217,7 +217,7 @@ where
     y_value: Vec<usize>,
 }
 
-impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
+impl<WT: WaveletTree> WaveletTreePsi<'_, WT> {
     // Find the lowest index of psi in the range [into.0, into.1] s.t. psi[idx] >= point.
     //
     // Requires that into be a closed range.
@@ -328,7 +328,7 @@ impl<'a, WT: WaveletTree> WaveletTreePsi<'a, WT> {
     }
 }
 
-impl<'a, WT: WaveletTree + std::fmt::Debug> std::fmt::Debug for WaveletTreePsi<'a, WT> {
+impl<WT: WaveletTree + std::fmt::Debug> std::fmt::Debug for WaveletTreePsi<'_, WT> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("WaveletTreePsi")
             .field("table", &self.table)
@@ -338,7 +338,7 @@ impl<'a, WT: WaveletTree + std::fmt::Debug> std::fmt::Debug for WaveletTreePsi<'
     }
 }
 
-impl<'a, WT: WaveletTree> super::Psi for WaveletTreePsi<'a, WT> {
+impl<WT: WaveletTree> super::Psi for WaveletTreePsi<'_, WT> {
     fn construct<H: Helper>(
         sigma: &Sigma,
         psi: &[usize],

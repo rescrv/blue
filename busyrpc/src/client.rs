@@ -237,7 +237,7 @@ impl ChannelCriticalSection {
 #[derive(Debug, Default)]
 struct ChannelMonitorCore;
 
-impl<'c> MonitorCore<ChannelCoordination, ChannelCriticalSection, MonitorState<'c>>
+impl MonitorCore<ChannelCoordination, ChannelCriticalSection, MonitorState<'_>>
     for ChannelMonitorCore
 {
     fn acquire<'a: 'b, 'b>(
@@ -358,13 +358,13 @@ struct EstablishmentState<'a, 'b> {
     value: Mutex<Option<Arc<MonitoredChannel<'a, 'b>>>>,
 }
 
-impl<'a, 'b> From<HostKey> for EstablishmentState<'a, 'b> {
+impl From<HostKey> for EstablishmentState<'_, '_> {
     fn from(_: HostKey) -> Self {
         Self::default()
     }
 }
 
-impl<'a, 'b> sync42::state_hash_table::Value for EstablishmentState<'a, 'b> {
+impl sync42::state_hash_table::Value for EstablishmentState<'_, '_> {
     fn finished(&self) -> bool {
         true
     }
@@ -378,7 +378,7 @@ struct ChannelHandle<'a, 'b, 'c, R: Resolver> {
     index: usize,
 }
 
-impl<'a, 'b, 'c, R: Resolver> ChannelHandle<'a, 'b, 'c, R> {
+impl<R: Resolver> ChannelHandle<'_, '_, '_, R> {
     fn kill(&self) {
         let mut channels = self.manager.channels.lock().unwrap();
         if let Some((_, channel)) = &channels[self.index] {

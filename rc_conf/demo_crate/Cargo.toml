@@ -7,8 +7,14 @@ description = "rc_conf_demo_crate provides an example crate for _SPEC testing"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 
 [[bin]]
 name = "rcdemo"
 path = "src/main.rs"
+required-features=["binaries"]

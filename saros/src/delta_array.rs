@@ -119,7 +119,7 @@ impl<'a> DeltaSliceDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for DeltaSliceDecoder<'a> {
+impl Iterator for DeltaSliceDecoder<'_> {
     type Item = Result<u64, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -178,7 +178,7 @@ impl<'a> DeltaDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for DeltaDecoder<'a> {
+impl Iterator for DeltaDecoder<'_> {
     type Item = Result<u64, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

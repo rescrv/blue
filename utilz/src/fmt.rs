@@ -12,7 +12,7 @@ pub fn escape_str(bytes: &[u8]) -> String {
 /// A helper struct returned by [nqs].
 pub struct NoQuoteString<'a>(&'a str);
 
-impl<'a> std::fmt::Debug for NoQuoteString<'a> {
+impl std::fmt::Debug for NoQuoteString<'_> {
     fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
         write!(fmt, "{}", self.0)
     }

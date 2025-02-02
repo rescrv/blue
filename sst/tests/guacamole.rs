@@ -140,7 +140,7 @@ pub trait TableBuilderTrait<'a>: Builder<Sealed = Self::Table> {
 
 //////////////////////////////////////////// Block impls ///////////////////////////////////////////
 
-impl<'a> TableTrait<'a> for Block {
+impl TableTrait<'_> for Block {
     type Builder = BlockBuilder;
     type Cursor = BlockCursor;
 
@@ -158,13 +158,13 @@ impl<'a> TableTrait<'a> for Block {
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for BlockBuilder {
+impl TableBuilderTrait<'_> for BlockBuilder {
     type Table = Block;
 }
 
 ///////////////////////////////////////////// Sst impls ////////////////////////////////////////////
 
-impl<'a> TableTrait<'a> for Sst {
+impl TableTrait<'_> for Sst {
     type Builder = SstBuilder;
     type Cursor = SstCursor;
 
@@ -182,7 +182,7 @@ impl<'a> TableTrait<'a> for Sst {
     }
 }
 
-impl<'a> TableBuilderTrait<'a> for SstBuilder {
+impl TableBuilderTrait<'_> for SstBuilder {
     type Table = Sst;
 }
 

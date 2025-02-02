@@ -63,6 +63,7 @@ pub fn duration(input: &str) -> ParseResult<Duration> {
 
 ////////////////////////////////////////////// sensors /////////////////////////////////////////////
 
+#[allow(clippy::type_complexity)]
 pub fn counters(
     input: &str,
 ) -> ParseResult<
@@ -132,6 +133,7 @@ fn aggregate_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> 
     )(input)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn aggregate(
     input: &str,
 ) -> ParseResult<
@@ -188,6 +190,7 @@ fn rollup_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
     )(input)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn rollup(
     input: &str,
 ) -> ParseResult<
@@ -332,6 +335,7 @@ fn uniform_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
     )(input)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn uniform(
     input: &str,
 ) -> ParseResult<
@@ -392,6 +396,7 @@ fn time_helper(input: &str) -> ParseResult<Box<dyn Fn(Time) -> Point>> {
     )(input)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn time(
     input: &str,
 ) -> ParseResult<
