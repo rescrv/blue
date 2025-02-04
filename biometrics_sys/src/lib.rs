@@ -29,6 +29,7 @@ impl BiometricsSys {
         }
     }
 
+    #[allow(clippy::useless_conversion)]
     pub fn emit<E: Emitter>(&mut self, emitter: &mut E, now: u64) {
         let rusage = self.getrusage();
         let errors = self.errors;

@@ -12,7 +12,7 @@ export RUSTFLAGS="-A clippy::needless-lifetimes --deny warnings"
 
 cargo build --release --bins
 
-for package in `target/debug/publish`
+for package in `target/release/publish`
 do
     pushd $package
     cargo clippy --no-deps --all-targets
