@@ -15,7 +15,7 @@ binaries = []
 [dependencies]
 libc = "0.2"
 
-utf8path = { path = "../utf8path", version = "0.6" }
+utf8path = { path = "../utf8path", version = "0.7" }
 
 [[example]]
 name = "unix-sock-client"
