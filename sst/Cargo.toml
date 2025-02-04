@@ -25,7 +25,7 @@ arrrg = { path = "../arrrg", version = "0.7", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.7", optional = true }
 biometrics = { path = "../biometrics", version = "0.11" }
 buffertk = { path = "../buffertk", version = "0.11" }
-guacamole = { path = "../guacamole", version = "0.10" }
+guacamole = { path = "../guacamole", version = "0.11" }
 indicio = { path = "../indicio", version = "0.10" }
 prototk_derive = { path = "../prototk_derive", version = "0.11" }
 prototk = { path = "../prototk", version = "0.11" }
