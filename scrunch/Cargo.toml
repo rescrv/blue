@@ -22,7 +22,7 @@ proptest = "1.0"
 
 arrrg = { path = "../arrrg", version = "0.7" }
 guacamole = { path = "../guacamole", version = "0.11" }
-statslicer = { path = "../statslicer", version = "0.7" }
+statslicer = { path = "../statslicer", version = "0.8" }
 
 [[bin]]
 name = "scrunch"

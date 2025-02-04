@@ -23,7 +23,7 @@ scrunch = { path = "../scrunch", version = "0.7" }
 [dev-dependencies]
 arrrg = { path = "../arrrg", version = "0.7" }
 guacamole = { path = "../guacamole", version = "0.11" }
-statslicer = { path = "../statslicer", version = "0.7" }
+statslicer = { path = "../statslicer", version = "0.8" }
 
 [[bin]]
 name = "benchmark-compressed-tag-index"
