@@ -484,9 +484,7 @@ impl Rem<Time> for Time {
 ////////////////////////////////////////////// Window //////////////////////////////////////////////
 
 /// A Window has a start and end time.
-#[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, prototk_derive::Message,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, prototk_derive::Message)]
 pub struct Window {
     #[prototk(1, message)]
     start: Time,
@@ -527,12 +525,27 @@ impl Window {
             .expect("steps should fit a usize")
     }
 
+    pub fn round_to_seconds(&self) -> Self {
+        let start = Time(self.start.0 - (self.start.0 % 1_000_000));
+        let limit = Time(self.limit.0 + 1_000_000 - (self.limit.0 % 1_000_000));
+        Self { start, limit }
+    }
+
     pub fn start(&self) -> Time {
         self.start
     }
 
     pub fn limit(&self) -> Time {
         self.limit
+    }
+}
+
+impl Default for Window {
+    fn default() -> Self {
+        Self {
+            start: Time::from_secs(0).unwrap(),
+            limit: Time::from_secs(3600).unwrap(),
+        }
     }
 }
 

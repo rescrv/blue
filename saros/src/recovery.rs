@@ -35,20 +35,6 @@ impl RecoveryBiometricsStore {
     }
 
     pub fn load(&mut self, path: &Path) -> Result<(), Error> {
-        let base = path.basename().into_owned();
-        let Some(tags_ts) = base.as_str().strip_suffix(".prom") else {
-            return Err(Error::text(format!(
-                "filename ({}) did not end in .prom",
-                path
-            )));
-        };
-        let Some((tags, ts)) = tags_ts.rsplit_once('.') else {
-            todo!();
-        };
-        let tags = Tags::new(tags).ok_or_else(|| Error::text("tags did not parse"))?;
-        let _ts: i64 = ts
-            .parse()
-            .map_err(|_| Error::text("timestamp in filename did not parse"))?;
         let contents = std::fs::read_to_string(path)?;
         let prometheus_lines = super::support_nom::parse_all(super::prometheus::parse)(&contents)
             .map_err(|e| Error::text(e.to_string()))?;
@@ -70,7 +56,7 @@ impl RecoveryBiometricsStore {
         }
         for line in prometheus_lines.iter() {
             if let PrometheusLine::MetricReading(reading) = line {
-                let mut tags = tags.tags().collect::<Vec<_>>();
+                let mut tags = vec![];
                 let tag = Tag::new("__name__", &reading.metric_name)
                     .ok_or_else(|| Error::text("tag did not parse"))?;
                 tags.insert(0, tag);

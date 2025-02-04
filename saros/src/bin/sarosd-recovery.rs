@@ -20,12 +20,13 @@ fn main() {
         store.load(&path).expect("should be able to load file");
     }
     let ctx = rpc_pb::Context::default();
+    let window = store
+        .window()
+        .expect("1 second is valid")
+        .round_to_seconds();
     // SAFETY(rescrv):  These are known-good values.
-    let mut params = QueryParams::new(
-        store.window().expect("store has a window"),
-        Time::from_secs(1).expect("1 second is valid"),
-    )
-    .expect("valid query params");
+    let mut params = QueryParams::new(window, Time::from_secs(1).expect("1 second is valid"))
+        .expect("expect valid query params");
     let query_engine = QueryEngine::new(store);
     for line in std::io::stdin().lines() {
         let Ok(line) = line else {
