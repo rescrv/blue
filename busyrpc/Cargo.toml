@@ -19,7 +19,7 @@ boring = "4.9.1"
 crc32c = "0.6"
 
 biometrics = { path = "../biometrics", version = "0.11" }
-buffertk = { path = "../buffertk", version = "0.11" }
+buffertk = { path = "../buffertk", version = "0.12" }
 indicio = { path = "../indicio", version = "0.10" }
 prototk = { path = "../prototk", version = "0.11" }
 prototk_derive = { path = "../prototk_derive", version = "0.11" }
