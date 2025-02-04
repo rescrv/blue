@@ -23,7 +23,7 @@ biometrics = { path = "../biometrics", version = "0.11" }
 buffertk = { path = "../buffertk", version = "0.12" }
 indicio = { path = "../indicio", version = "0.10" }
 one_two_eight = { path = "../one_two_eight", version = "0.8" }
-prototk = { path = "../prototk", version = "0.11" }
+prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
 rpc_pb = { path = "../rpc_pb", version = "0.12" }
 shvar = { path = "../shvar", version = "0.7" }

@@ -21,7 +21,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.7", optional = true }
 busyrpc = { path = "../busyrpc", version = "0.11" }
 indicio = { path = "../indicio", version = "0.10" }
 minimal_signals = { path = "../minimal_signals", version = "0.4" }
-prototk = { path = "../prototk", version = "0.11" }
+prototk = { path = "../prototk", version = "0.12" }
 rpc_pb = { path = "../rpc_pb", version = "0.12" }
 tuple_key = { path = "../tuple_key", version = "0.11" }
 tuple_routing = { path = "../tuple_routing", version = "0.6" }
