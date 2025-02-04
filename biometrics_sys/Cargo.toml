@@ -1,6 +1,6 @@
 [package]
 name = "biometrics_sys"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "biometrics_sys provides system stats measured from within the process"
