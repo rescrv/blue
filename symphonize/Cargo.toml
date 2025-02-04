@@ -20,7 +20,7 @@ arrrg_derive = { path = "../arrrg_derive", version = "0.6" }
 indicio = { path = "../indicio", version = "0.10" }
 k8src = { path = "../k8src", version = "0.13" }
 rc_conf = { path = "../rc_conf", version = "0.11" }
-shvar = { path = "../shvar", version = "0.6" }
+shvar = { path = "../shvar", version = "0.7" }
 utf8path = { path = "../utf8path", version = "0.6" }
 
 [[bin]]
