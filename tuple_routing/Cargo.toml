@@ -21,7 +21,7 @@ sync42 = { path = "../sync42", version = "0.14" }
 tuple_key = { path = "../tuple_key", version = "0.11" }
 utf8path = { path = "../utf8path", version = "0.7" }
 zerror = { path = "../zerror", version = "0.7" }
-zerror_core = { path = "../zerror_core", version = "0.11" }
+zerror_core = { path = "../zerror_core", version = "0.12" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 
 [dev-dependencies]

@@ -13,7 +13,7 @@ prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.10" }
 zerror = { path = "../zerror", version = "0.7" }
-zerror_core = { path = "../zerror_core", version = "0.11" }
+zerror_core = { path = "../zerror_core", version = "0.12" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 
 [dev-dependencies]
