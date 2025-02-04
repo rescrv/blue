@@ -16,7 +16,7 @@ binaries = []
 getopts = { version = "0.2" }
 
 arrrg = { path = "../arrrg", version = "0.6" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.6" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.7" }
 indicio = { path = "../indicio", version = "0.10" }
 k8src = { path = "../k8src", version = "0.13" }
 rc_conf = { path = "../rc_conf", version = "0.11" }
