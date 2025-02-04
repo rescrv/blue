@@ -15,4 +15,4 @@ binaries = []
 [dependencies]
 libc = "0.2"
 
-biometrics = { path = "../biometrics", version = "0.10" }
+biometrics = { path = "../biometrics", version = "0.11" }

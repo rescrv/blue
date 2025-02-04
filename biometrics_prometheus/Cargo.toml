@@ -10,7 +10,7 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 libc = "0.2"
 
-biometrics = { path = "../biometrics", version = "0.10" }
+biometrics = { path = "../biometrics", version = "0.11" }
 utf8path = { path = "../utf8path", version = "0.7" }
 
 [dev-dependencies]
