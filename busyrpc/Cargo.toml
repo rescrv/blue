@@ -23,7 +23,7 @@ buffertk = { path = "../buffertk", version = "0.12" }
 indicio = { path = "../indicio", version = "0.11" }
 prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
-rpc_pb = { path = "../rpc_pb", version = "0.12" }
+rpc_pb = { path = "../rpc_pb", version = "0.13" }
 sync42 = { path = "../sync42", version = "0.14" }
 tatl = { path = "../tatl", version = "0.12" }
 utilz = { path = "../utilz", version = "0.6" }
