@@ -53,7 +53,7 @@ impl biometrics::Emitter for SlashMetrics {
     type Error = std::io::Error;
 
     fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
-        let label = counter.label();
+        let label = counter.label().replace(".", "_");
         let reading = counter.read();
         self.write_line(format!(
             "# TYPE {label} counter
@@ -63,7 +63,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
-        let label = gauge.label();
+        let label = gauge.label().replace(".", "_");
         let reading = gauge.read();
         self.write_line(format!(
             "# TYPE {label} gauge
@@ -73,7 +73,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
-        let label = moments.label();
+        let label = moments.label().replace(".", "_");
         let reading = moments.read();
         self.write_line(format!(
             "# TYPE {label}_count counter
@@ -96,7 +96,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
-        let label = histogram.label();
+        let label = histogram.label().replace(".", "_");
         self.write_line(format!("# TYPE {label} histogram\n"))?;
         let mut total = 0;
         let mut acc = 0.0;
