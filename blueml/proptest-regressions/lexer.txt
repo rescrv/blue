@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 4fe1d822d2964fd21ee627e1d75f569dc322fbc4d6a60580646089b02dddaeb3 # shrinks to expected = [SingleQuotedString("")]
-cc 4856aab925cd445f66c5c334f87704ff99a4caced6660eb00fac423a57cd27a6 # shrinks to expected = [TripleQuotedString("\"")]
-cc ae078bc5629b85fa015314fe7d3e77e968f3c65b8ab3562e398cd47d212894d2 # shrinks to expected = [TripleQuotedString("\u{3099}\"\"\"0")]

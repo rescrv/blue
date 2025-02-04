@@ -10,7 +10,6 @@ members = [
     "biometrics_prometheus",
     "biometrics_sys",
     "bloomcalc",
-    "blueml",
     "buffertk",
     "busyrpc",
     "busyrpc_service_discovery",
