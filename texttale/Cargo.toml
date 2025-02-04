@@ -15,7 +15,7 @@ binaries = []
 [dependencies]
 rustyline = "11.0"
 
-utilz = { path = "../utilz", version = "0.5" }
+utilz = { path = "../utilz", version = "0.6" }
 
 [[example]]
 name = "texttale"
