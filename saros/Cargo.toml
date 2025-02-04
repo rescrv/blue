@@ -27,7 +27,7 @@ prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
 rpc_pb = { path = "../rpc_pb", version = "0.12" }
 shvar = { path = "../shvar", version = "0.7" }
-tag_index = { path = "../tag_index", version = "0.6" }
+tag_index = { path = "../tag_index", version = "0.7" }
 tatl = { path = "../tatl", version = "0.11" }
 utf8path = { path = "../utf8path", version = "0.7" }
 zerror = { path = "../zerror", version = "0.7" }
