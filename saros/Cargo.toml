@@ -1,6 +1,6 @@
 [package]
 name = "saros"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Saros is a terminal-based time series database."
