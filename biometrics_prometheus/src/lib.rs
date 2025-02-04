@@ -27,6 +27,98 @@ impl Default for Options {
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
+#[derive(Clone, Debug, Default)]
+pub struct SlashMetrics {
+    output: Option<String>,
+}
+
+impl SlashMetrics {
+    pub fn new() -> Self {
+        let output = None;
+        Self { output }
+    }
+
+    pub fn take(mut self) -> String {
+        self.output.take().unwrap_or_default()
+    }
+
+    fn write_line(&mut self, line: impl AsRef<str>) -> Result<(), std::io::Error> {
+        let output = self.output.get_or_insert_with(String::new);
+        *output += line.as_ref();
+        Ok(())
+    }
+}
+
+impl biometrics::Emitter for SlashMetrics {
+    type Error = std::io::Error;
+
+    fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
+        let label = counter.label();
+        let reading = counter.read();
+        self.write_line(format!(
+            "# TYPE {label} counter
+{label} {reading} {now}\n",
+        ))?;
+        Ok(())
+    }
+
+    fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
+        let label = gauge.label();
+        let reading = gauge.read();
+        self.write_line(format!(
+            "# TYPE {label} gauge
+{label} {reading} {now}\n"
+        ))?;
+        Ok(())
+    }
+
+    fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
+        let label = moments.label();
+        let reading = moments.read();
+        self.write_line(format!(
+            "# TYPE {label}_count counter
+{label}_count {} {now}
+# TYPE {label}_mean gauge
+{label}_mean {} {now}
+# TYPE {label}_variance gauge
+{label}_variance {} {now}
+# TYPE {label}_skewness gauge
+{label}_skewness {} {now}
+# TYPE {label}_kurtosis gauge
+{label}_kurtosis {} {now}\n",
+            reading.n(),
+            reading.mean(),
+            reading.variance(),
+            reading.skewness(),
+            reading.kurtosis(),
+        ))?;
+        Ok(())
+    }
+
+    fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
+        let label = histogram.label();
+        self.write_line(format!("# TYPE {label} histogram\n"))?;
+        let mut total = 0;
+        let mut acc = 0.0;
+        for (bucket, count) in histogram.read().iter() {
+            total += count;
+            acc += bucket * count as f64;
+            self.write_line(format!(
+                "{label}_bucket{{le=\"{bucket:0.4}\"}} {total} {now}\n"
+            ))?;
+        }
+        self.write_line(format!("{label}_sum {acc} {now}\n"))?;
+        self.write_line(format!("{label}_count {total} {now}\n"))?;
+        let exceeds_max = histogram.exceeds_max().read();
+        self.write_line(format!("{label}_exceeds_max {exceeds_max} {now}\n"))?;
+        let is_negative = histogram.is_negative().read();
+        self.write_line(format!("{label}_is_negative {is_negative} {now}\n"))?;
+        Ok(())
+    }
+}
+
+////////////////////////////////////////////// Emitter /////////////////////////////////////////////
+
 pub struct Emitter {
     options: Options,
     output: Option<BufWriter<File>>,
@@ -296,6 +388,41 @@ mod tests {
     use biometrics::Emitter as EmitterTrait;
 
     use super::*;
+
+    #[test]
+    fn slash_metrics() {
+        static COUNTER: Counter = Counter::new("foo");
+        let collector = biometrics::Collector::new();
+        collector.register_counter(&COUNTER);
+        let mut slash_metrics = SlashMetrics::new();
+        let _ = collector.emit(&mut slash_metrics, 42);
+        assert_eq!(
+            "# TYPE biometrics.collector.register.counter counter
+biometrics.collector.register.counter 11 42
+# TYPE biometrics.collector.register.gauge counter
+biometrics.collector.register.gauge 0 42
+# TYPE biometrics.collector.register.moments counter
+biometrics.collector.register.moments 0 42
+# TYPE biometrics.collector.register.histogram counter
+biometrics.collector.register.histogram 0 42
+# TYPE biometrics.collector.emit.counter counter
+biometrics.collector.emit.counter 4 42
+# TYPE biometrics.collector.emit.gauge counter
+biometrics.collector.emit.gauge 0 42
+# TYPE biometrics.collector.emit.moments counter
+biometrics.collector.emit.moments 0 42
+# TYPE biometrics.collector.emit.histogram counter
+biometrics.collector.emit.histogram 0 42
+# TYPE biometrics.collector.emit.failure counter
+biometrics.collector.emit.failure 0 42
+# TYPE biometrics.collector.time.failure counter
+biometrics.collector.time.failure 0 42
+# TYPE foo counter
+foo 0 42
+",
+            slash_metrics.take()
+        );
+    }
 
     #[test]
     fn emitter() {
