@@ -1,6 +1,6 @@
 [package]
 name = "one_two_eight"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "one_two_eight provides typed 128-bit identifiers."
