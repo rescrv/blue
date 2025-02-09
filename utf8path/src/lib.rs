@@ -241,6 +241,17 @@ impl<'a> Path<'a> {
     pub fn cwd() -> Option<Path<'a>> {
         Path::try_from(std::env::current_dir().ok()?).ok()
     }
+
+    /// Return the canonicalized path with all intermediate components normalized and symbolic
+    /// links resolved.
+    pub fn canonicalize(&self) -> Result<Path<'static>, std::io::Error> {
+        Path::try_from(std::fs::canonicalize(self)?).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "real path contains non-utf8 characters",
+            )
+        })
+    }
 }
 
 impl AsRef<std::ffi::OsStr> for Path<'_> {
