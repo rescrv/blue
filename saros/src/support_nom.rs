@@ -68,9 +68,9 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
                     write!(
                         &mut result,
                         "{index}: at line {line_number}:\n\
-                 {line}\n\
-                 {caret:>column$}\n\
-                 expected '{expected}', found {actual}\n\n",
+{line}\n\
+{caret:>column$}\n\
+expected '{expected}', found {actual}\n\n",
                         index = index,
                         line_number = line_number,
                         line = line,
@@ -84,9 +84,9 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
                     write!(
                         &mut result,
                         "{index}: at line {line_number}:\n\
-                 {line}\n\
-                 {caret:>column$}\n\
-                 expected '{expected}', got end of input\n\n",
+{line}\n\
+{caret:>column$}\n\
+expected '{expected}', got end of input\n\n",
                         index = index,
                         line_number = line_number,
                         line = line,
@@ -102,8 +102,8 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
                 write!(
                     &mut result,
                     "{index}: at line {line_number}, in {context}:\n\
-               {line}\n\
-               {caret:>column$}\n\n",
+{line}\n\
+{caret:>column$}\n\n",
                     index = index,
                     line_number = line_number,
                     context = s,
@@ -120,8 +120,8 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
                     write!(
                         &mut result,
                         "{index}: at line {line_number}: cannot parse input\n\
-                   {line}\n\
-                   {caret:>column$}\n\n",
+{line}\n\
+{caret:>column$}\n\n",
                         index = index,
                         line_number = line_number,
                         line = line,
