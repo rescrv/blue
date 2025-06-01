@@ -40,6 +40,10 @@ This library provides the guacamole type and a tool for drawing from a Zipf dist
 Warts
 -----
 
+Upgrading
+---------
+- Guacamole versions prior to and including 0.11.z had an incorrect Zipf generator.
+
 Documentation
 -------------
 
