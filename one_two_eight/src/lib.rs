@@ -61,7 +61,7 @@ pub fn decode(s: &str) -> Option<[u8; BYTES]> {
             let upper = HEX.find(upper).unwrap();
             let lower = HEX.find(lower).unwrap();
 
-            result[index] = (upper << 4 | lower) as u8;
+            result[index] = ((upper << 4) | lower) as u8;
             index += 1;
         }
         let dash = chars.next();
