@@ -104,16 +104,27 @@ pub struct SetStringChooserZipf {
 }
 
 impl SetStringChooserZipf {
+    /// Configure the Zipf distribution to be `(0, n)` with `param`.
+    pub fn from_param(n: u64, param: f64) -> Self {
+        Self {
+            zipf: Zipf::from_param(n, param),
+        }
+    }
+
     /// Configure the Zipf distribution to be `[0, n)` with `alpha`.
+    #[deprecated(since = "0.12.0", note = "Use `from_param` instead")]
     pub fn from_alpha(n: u64, alpha: f64) -> Self {
         Self {
+            #[allow(deprecated)]
             zipf: Zipf::from_alpha(n, alpha),
         }
     }
 
     /// Configure the Zipf distribution to be `[0, n)` with `theta`.
+    #[deprecated(since = "0.12.0", note = "Use `from_param` instead")]
     pub fn from_theta(n: u64, theta: f64) -> Self {
         Self {
+            #[allow(deprecated)]
             zipf: Zipf::from_theta(n, theta),
         }
     }
@@ -405,10 +416,12 @@ fn set_chooser_once(begin: u64, end: u64) -> Box<dyn SeedChooser> {
 }
 
 fn set_chooser_zipf_theta(cardinality: u64, theta: f64) -> Box<dyn SeedChooser> {
+    #[allow(deprecated)]
     Box::new(SetStringChooserZipf::from_theta(cardinality, theta))
 }
 
 fn set_chooser_zipf_alpha(cardinality: u64, alpha: f64) -> Box<dyn SeedChooser> {
+    #[allow(deprecated)]
     Box::new(SetStringChooserZipf::from_alpha(cardinality, alpha))
 }
 
