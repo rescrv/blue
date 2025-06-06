@@ -32,7 +32,7 @@ fn main() {
     busyrpc_service_discovery::COLLECTOR.register(emitter);
     busyrpc_service_discovery::COLLECTOR.set_verbosity(INFO);
     clue!(busyrpc_service_discovery::COLLECTOR, ALWAYS, {
-        new_process: std::env::args().map(String::from).collect::<Vec<_>>(),
+        new_process: std::env::args().collect::<Vec<_>>(),
     });
     // service discovery service
     let routing_conf = std::fs::read_to_string(options.routing_conf).unwrap();
@@ -61,6 +61,6 @@ fn main() {
     server.serve().as_z().pretty_unwrap();
     // log goodbye
     clue!(busyrpc_service_discovery::COLLECTOR, ALWAYS, {
-        goodbye: std::env::args().map(String::from).collect::<Vec<_>>(),
+        goodbye: std::env::args().collect::<Vec<_>>(),
     });
 }
