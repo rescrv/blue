@@ -397,26 +397,26 @@ mod tests {
         let mut slash_metrics = SlashMetrics::new();
         let _ = collector.emit(&mut slash_metrics, 42);
         assert_eq!(
-            "# TYPE biometrics.collector.register.counter counter
-biometrics.collector.register.counter 11 42
-# TYPE biometrics.collector.register.gauge counter
-biometrics.collector.register.gauge 0 42
-# TYPE biometrics.collector.register.moments counter
-biometrics.collector.register.moments 0 42
-# TYPE biometrics.collector.register.histogram counter
-biometrics.collector.register.histogram 0 42
-# TYPE biometrics.collector.emit.counter counter
-biometrics.collector.emit.counter 4 42
-# TYPE biometrics.collector.emit.gauge counter
-biometrics.collector.emit.gauge 0 42
-# TYPE biometrics.collector.emit.moments counter
-biometrics.collector.emit.moments 0 42
-# TYPE biometrics.collector.emit.histogram counter
-biometrics.collector.emit.histogram 0 42
-# TYPE biometrics.collector.emit.failure counter
-biometrics.collector.emit.failure 0 42
-# TYPE biometrics.collector.time.failure counter
-biometrics.collector.time.failure 0 42
+            "# TYPE biometrics_collector_register_counter counter
+biometrics_collector_register_counter 11 42
+# TYPE biometrics_collector_register_gauge counter
+biometrics_collector_register_gauge 0 42
+# TYPE biometrics_collector_register_moments counter
+biometrics_collector_register_moments 0 42
+# TYPE biometrics_collector_register_histogram counter
+biometrics_collector_register_histogram 0 42
+# TYPE biometrics_collector_emit_counter counter
+biometrics_collector_emit_counter 4 42
+# TYPE biometrics_collector_emit_gauge counter
+biometrics_collector_emit_gauge 0 42
+# TYPE biometrics_collector_emit_moments counter
+biometrics_collector_emit_moments 0 42
+# TYPE biometrics_collector_emit_histogram counter
+biometrics_collector_emit_histogram 0 42
+# TYPE biometrics_collector_emit_failure counter
+biometrics_collector_emit_failure 0 42
+# TYPE biometrics_collector_time_failure counter
+biometrics_collector_time_failure 0 42
 # TYPE foo counter
 foo 0 42
 ",
