@@ -22,7 +22,7 @@ rustyline = "11.0"
 arrrg = { path = "../arrrg", version = "0.7" }
 arrrg_derive = { path = "../arrrg_derive", version = "0.7" }
 buffertk = { path = "../buffertk", version = "0.12" }
-guacamole = { path = "../guacamole", version = "0.11" }
+guacamole = { path = "../guacamole", version = "0.12" }
 indicio = { path = "../indicio", version = "0.11", features = ["prototk"] }
 mani = { path = "../mani", version = "0.9" }
 prototk = { path = "../prototk", version = "0.12" }

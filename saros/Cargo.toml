@@ -38,7 +38,7 @@ zerror_derive = { path = "../zerror_derive", version = "0.6" }
 proptest = "1.0"
 
 biometrics_prometheus = { path = "../biometrics_prometheus", version = "0.8" }
-guacamole = { path = "../guacamole", version = "0.11" }
+guacamole = { path = "../guacamole", version = "0.12" }
 sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.5" }
 
 [[bin]]

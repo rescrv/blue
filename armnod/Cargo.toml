@@ -18,7 +18,7 @@ getopts = { version = "0.2", optional = true }
 
 arrrg = { path = "../arrrg", version = "0.7", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.7", optional = true }
-guacamole = { path = "../guacamole", version = "0.11" }
+guacamole = { path = "../guacamole", version = "0.12" }
 
 [[bin]]
 name = "armnod"
