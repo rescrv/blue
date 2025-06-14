@@ -29,7 +29,7 @@ rpc_pb = { path = "../rpc_pb", version = "0.13" }
 shvar = { path = "../shvar", version = "0.7" }
 tag_index = { path = "../tag_index", version = "0.7" }
 tatl = { path = "../tatl", version = "0.12" }
-utf8path = { path = "../utf8path", version = "0.7" }
+utf8path = { path = "../utf8path", version = "0.8" }
 zerror = { path = "../zerror", version = "0.7" }
 zerror_core = { path = "../zerror_core", version = "0.12" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
