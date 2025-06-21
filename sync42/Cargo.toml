@@ -16,7 +16,7 @@ binaries = []
 biometrics = { path = "../biometrics", version = "0.11" }
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.12" }
+guacamole = { path = "../guacamole", version = "0.13" }
 
 [[example]]
 name = "clicker"
