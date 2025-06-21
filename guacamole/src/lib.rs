@@ -187,6 +187,28 @@ impl Guacamole {
         mash(self.nonce, self.buffer.as_blocks());
     }
 
+    /// Save the exact state of the random number generator so that it can be resumed from in the
+    /// future.  Versioned.
+    pub fn save(&self) -> u128 {
+        let index = self.index as u128;
+        let nonce = self.nonce as u128;
+        (1 << 120) | (index << 64) | nonce
+    }
+
+    /// Load a previously saved version of the random number generator.  Returns None if the
+    /// version is not supported.
+    pub fn load(state: u128) -> Option<Self> {
+        if state >> 120 == 1 {
+            let index = (state >> 64) as u32 as usize;
+            let nonce = state as u64;
+            let mut guac = Self::new(nonce);
+            guac.index = index;
+            Some(guac)
+        } else {
+            None
+        }
+    }
+
     /// Fill `bytes` with the next `bytes.len()` random bytes from the stream.
     pub fn generate(&mut self, bytes: &mut [u8]) {
         let mut bytes = bytes;
@@ -703,5 +725,22 @@ mod tests {
         for i in 0..(1 << 24) {
             char_from_u24(i);
         }
+    }
+
+    #[test]
+    fn save_load() {
+        let mut g1 = Guacamole::default();
+        g1.seek(0xc0ffee);
+
+        let state = g1.save();
+        let mut g2 = Guacamole::load(state).expect("load should succeed");
+
+        let mut bytes1 = [0u8; 1024];
+        let mut bytes2 = [0u8; 1024];
+
+        g1.generate(&mut bytes1);
+        g2.generate(&mut bytes2);
+
+        assert_eq!(bytes1, bytes2);
     }
 }
