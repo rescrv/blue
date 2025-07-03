@@ -519,7 +519,7 @@ struct CorrelateDocState {
 
 #[derive(Debug, Default, Eq, PartialEq)]
 struct ExemplarState {
-    terminal: u32,
+    stop: Vec<u32>,
     needle: Vec<u32>,
     docs: HashMap<usize, CorrelateDocState>,
 }
@@ -572,7 +572,7 @@ where
     for boundary in boundaries.iter() {
         let mut state = ExemplarState {
             // the starting boundary because we do backwards search.
-            terminal: boundary.0,
+            stop: vec![boundary.0],
             needle: vec![boundary.1],
             docs: HashMap::new(),
         };
@@ -589,6 +589,38 @@ where
         if !state.docs.is_empty() {
             heap.push(state);
         }
+    }
+    Exemplars { docs, heap }
+}
+
+pub fn exemplars_from_needle<'a, SA, ISA, PSI>(
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    stop: &[u32],
+    needle: Vec<u32>,
+) -> Exemplars<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    let mut heap = BinaryHeap::new();
+    let mut state = ExemplarState {
+        stop: stop.to_vec(),
+        needle: needle.clone(),
+        docs: HashMap::new(),
+    };
+    for (idx, doc) in docs.iter().enumerate() {
+        let Ok(range) = doc.backwards_search(&state.needle) else {
+            continue;
+        };
+        if range.0 > range.1 {
+            continue;
+        }
+        let numer = range.1 - range.0 + 1;
+        state.docs.insert(idx, CorrelateDocState { numer, range });
+    }
+    if !state.docs.is_empty() {
+        heap.push(state);
     }
     Exemplars { docs, heap }
 }
@@ -611,7 +643,13 @@ where
 {
     fn next_inner(&mut self) -> Option<ExemplarState> {
         while let Some(exemplar) = self.heap.pop() {
-            if exemplar.terminal == exemplar.needle[exemplar.needle.len() - 1] {
+            if std::iter::zip(
+                exemplar.stop.iter(),
+                exemplar.needle[(exemplar.needle.len().saturating_sub(exemplar.stop.len()))..]
+                    .iter(),
+            )
+            .all(|(x, y)| *x == *y)
+            {
                 return Some(exemplar);
             }
             let mut new_exemplars: HashMap<u32, ExemplarState> = HashMap::new();
@@ -626,7 +664,7 @@ where
                         let mut needle = exemplar.needle.clone();
                         needle.push(t);
                         ExemplarState {
-                            terminal: exemplar.terminal,
+                            stop: exemplar.stop.clone(),
                             needle,
                             docs: HashMap::new(),
                         }
