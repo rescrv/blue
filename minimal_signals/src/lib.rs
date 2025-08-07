@@ -39,13 +39,13 @@ pub const SIGUSR2: Signal = Signal(libc::SIGUSR2);
 impl std::fmt::Debug for Signal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let set = SignalSet::new().add(*self);
-        write!(f, "{}", set)
+        write!(f, "{set}")
     }
 }
 
 impl std::fmt::Display for Signal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -177,13 +177,13 @@ impl std::fmt::Debug for SignalSet {
         if display.is_empty() {
             display += "()";
         }
-        write!(f, "{}", display)
+        write!(f, "{display}")
     }
 }
 
 impl std::fmt::Display for SignalSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 

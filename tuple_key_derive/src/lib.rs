@@ -225,6 +225,6 @@ use prototk::FieldNumber;
 
 fn validate_field_number(field_number: u32) {
     if let Err(err) = FieldNumber::new(field_number) {
-        panic!("field_number={} number too invalid: {}", field_number, err);
+        panic!("field_number={field_number} number too invalid: {err}");
     }
 }

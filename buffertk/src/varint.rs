@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn pack_varint() {
         for (idx, &(num, bytes, enc)) in TESTS.iter().enumerate() {
-            println!("test case={} x={}, |x|={}, s(x)={:?}", idx, num, bytes, enc);
+            println!("test case={idx} x={num}, |x|={bytes}, s(x)={enc:?}");
             let mut buf: [u8; 10] = [0; 10];
             assert_eq!(bytes, enc.len(), "human got test case wrong?");
             assert!(bytes <= buf.len(), "human made buffer too small?");
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn unpack_varint() {
         for (idx, &(num, bytes, enc)) in TESTS.iter().enumerate() {
-            println!("test case={} x={}, |x|={}, s(x)={:?}", idx, num, bytes, enc);
+            println!("test case={idx} x={num}, |x|={bytes}, s(x)={enc:?}");
             assert_eq!(bytes, enc.len(), "human got test case wrong?");
             assert!(enc.len() <= 10, "human got test harness wrong?");
             let mut buf: [u8; 10] = [0xff; 10];

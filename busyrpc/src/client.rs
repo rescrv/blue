@@ -495,26 +495,26 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
         let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|err| {
             rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
-                what: format!("could not build connector builder: {}", err),
+                what: format!("could not build connector builder: {err}"),
             }
         })?;
         builder.set_ca_file(&self.ssl.ca_file).map_err(|err| {
             rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
-                what: format!("invalid CA file: {}", err),
+                what: format!("invalid CA file: {err}"),
             }
         })?;
         builder
             .set_private_key_file(&self.ssl.private_key_file, SslFiletype::PEM)
             .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
-                what: format!("invalid private key file: {}", err),
+                what: format!("invalid private key file: {err}"),
             })?;
         builder
             .set_certificate_file(&self.ssl.certificate_file, SslFiletype::PEM)
             .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
                 core: ErrorCore::default(),
-                what: format!("invalid certificate file: {}", err),
+                what: format!("invalid certificate file: {err}"),
             })?;
         builder.set_verify(
             boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
@@ -525,7 +525,7 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
             .connect(host.hostname_or_ip(), stream)
             .map_err(|err| rpc_pb::Error::TransportFailure {
                 core: ErrorCore::default(),
-                what: format!("{}", err),
+                what: format!("{err}"),
             })?;
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let monitored_channel = MonitoredChannel {

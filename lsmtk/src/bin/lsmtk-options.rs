@@ -8,5 +8,5 @@ fn main() {
         eprintln!("expected no positional arguments");
         std::process::exit(1);
     }
-    println!("{:#?}", options);
+    println!("{options:#?}");
 }

@@ -96,6 +96,6 @@ fn candidate_order() -> Vec<String> {
 fn main() {
     let candidates = candidate_order();
     for candidate in candidates.iter() {
-        println!("{}", candidate);
+        println!("{candidate}");
     }
 }

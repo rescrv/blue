@@ -24,7 +24,7 @@ fn compare(dir: &str, what: &str, witnessed: Vec<String>) {
             let path = entry.path().to_string_lossy().to_string();
             if !witnessed.contains(&path) && path.ends_with(".rs") && !path.ends_with("/common.rs")
             {
-                eprintln!("missing {} block for {}", what, path);
+                eprintln!("missing {what} block for {path}");
                 std::process::exit(1);
             }
         }

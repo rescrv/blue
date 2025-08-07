@@ -164,7 +164,7 @@ pub fn uuid(guac: &mut Guacamole) -> String {
             s.push('-');
         }
         for c in &id[start..limit] {
-            write!(&mut s, "{:02x}", c).expect("should be able to write to string");
+            write!(&mut s, "{c:02x}").expect("should be able to write to string");
         }
     }
     s

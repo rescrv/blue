@@ -258,10 +258,8 @@ impl EnumVisitor for PartialEqMethodVisitor {
                 continue;
             }
             let field_ident = &field.ident;
-            let field_lhs =
-                syn::Ident::new(&format!("zerror_{}_lhs", num_fields), Span::call_site());
-            let field_rhs =
-                syn::Ident::new(&format!("zerror_{}_rhs", num_fields), Span::call_site());
+            let field_lhs = syn::Ident::new(&format!("zerror_{num_fields}_lhs"), Span::call_site());
+            let field_rhs = syn::Ident::new(&format!("zerror_{num_fields}_rhs"), Span::call_site());
             if num_fields == 0 {
                 fields_list_lhs = quote! {
                     #field_ident: #field_lhs

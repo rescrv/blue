@@ -42,7 +42,7 @@ fn main() {
         let line = &line.expect("could not parse line");
         let split: Vec<&str> = line.split_whitespace().collect();
         if split.len() != 2 {
-            panic!("Invalid line: {}", line);
+            panic!("Invalid line: {line}");
         }
         log.put(split[0].as_bytes(), idx as u64, split[1].as_bytes())
             .expect("could not put key-value pair");

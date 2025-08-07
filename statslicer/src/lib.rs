@@ -199,7 +199,7 @@ pub trait Parameters: Default {
             if !s.is_empty() {
                 s.push(',');
             }
-            s += &format!("{}={}", name, param);
+            s += &format!("{name}={param}");
         }
         s
     }
@@ -383,12 +383,12 @@ impl FromStr for UntypedParameters {
 pub fn experiment_and_parameters(s: &str) -> Result<(&str, UntypedParameters), String> {
     let pieces = s.rsplitn(2, ':').collect::<Vec<_>>();
     if pieces.len() != 2 {
-        return Err(format!("don't know how to make cdf: {}", s));
+        return Err(format!("don't know how to make cdf: {s}"));
     }
     let params = UntypedParameters::from_str(pieces[0]).expect("don't know how to make cdf");
     let pieces = pieces[1].rsplitn(2, '/').collect::<Vec<_>>();
     if pieces.is_empty() {
-        return Err(format!("don't know how to make cdf: {}", s));
+        return Err(format!("don't know how to make cdf: {s}"));
     }
     Ok((pieces[0], params))
 }
@@ -544,7 +544,7 @@ pub fn benchmark_main<P: Parameters, F: FnMut(&P, &mut Bencher)>(
         size
     };
     if !options.quiet {
-        eprintln!("sizing benchmark at {}", size);
+        eprintln!("sizing benchmark at {size}");
     }
     let warm_up = Duration::from_secs(options.warm_up);
     if !options.quiet {

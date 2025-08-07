@@ -26,7 +26,7 @@ fn error_with_raw_info() {
         Err(Error::system(s.to_string())).without_backtrace()
     }
     fn fail2(s1: &str, s2: &str) -> Result<(), Error> {
-        Err(Error::system(format!("{} {}", s1, s2))).without_backtrace()
+        Err(Error::system(format!("{s1} {s2}"))).without_backtrace()
     }
     // Test with_info.
     let res = handle!(fail1, "noexist.txt");

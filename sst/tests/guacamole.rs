@@ -288,10 +288,10 @@ where
                 }
                 (None, None) => break,
                 (None, Some(x)) => {
-                    panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
+                    panic!("found bad case (open a debugger or print out a dump of info above); got: {x:?}");
                 }
                 (Some(x), None) => {
-                    panic!("found bad case (open a debugger or print out a dump of info above): exp: {:?}", x);
+                    panic!("found bad case (open a debugger or print out a dump of info above): exp: {x:?}");
                 }
             };
             if let Some(x) = exp.as_ref() {
@@ -303,10 +303,10 @@ where
                     }
                     (None, None) => {}
                     (None, Some(x)) => {
-                        panic!("found bad case (open a debugger or print out a dump of info above); got: {:?}", x);
+                        panic!("found bad case (open a debugger or print out a dump of info above); got: {x:?}");
                     }
                     (Some(x), None) => {
-                        panic!("found bad case (open a debugger or print out a dump of info above): exp: {:?}", x);
+                        panic!("found bad case (open a debugger or print out a dump of info above): exp: {x:?}");
                     }
                 };
             }

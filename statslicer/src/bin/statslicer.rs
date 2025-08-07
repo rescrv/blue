@@ -19,10 +19,10 @@ struct StatSlicerOptions {}
 fn format_sig_figs(sig_figs: i32, value: f64) -> String {
     assert!((1..=4).contains(&sig_figs));
     match sig_figs {
-        1 => format!("{:0.00e}", value),
-        2 => format!("{:0.01e}", value),
-        3 => format!("{:0.02e}", value),
-        4 => format!("{:0.03e}", value),
+        1 => format!("{value:0.00e}"),
+        2 => format!("{value:0.01e}"),
+        3 => format!("{value:0.02e}"),
+        4 => format!("{value:0.03e}"),
         _ => {
             unreachable!();
         }
@@ -88,8 +88,7 @@ fn cdf_write(
             .expect("histogram should load");
         if hist.sig_figs() < cdf.sig_figs {
             return Err(format!(
-                "cannot upsample histogram in {} from {} to {} significant figures",
-                file,
+                "cannot upsample histogram in {file} from {} to {} significant figures",
                 hist.sig_figs(),
                 cdf.sig_figs
             ));
@@ -113,7 +112,7 @@ fn cdf_write(
     let _ = create_dir("exp/cdf");
     let mut outputs = vec![];
     for (fixed, hist) in agg.into_iter() {
-        let output = format!("exp/cdf/{}:{}.dat", exp, fixed);
+        let output = format!("exp/cdf/{exp}:{fixed}.dat");
         outputs.push(output.clone());
         let mut output = OpenOptions::new()
             .create(true)
@@ -162,7 +161,7 @@ fn cdf_gnuplot(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> R
         let Some(dependent) = params.get(&cdf.dependent) else {
             return Err(format!(
                 "cannot find dependent parameter in {file}: missing {}",
-                cdf.dependent,
+                cdf.dependent
             ));
         };
         let dependent = UntypedParameters::one(cdf.dependent.clone(), dependent);
@@ -184,7 +183,7 @@ fn cdf_gnuplot(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> R
         }
     }
     for (fixed_str, mut series) in agg.into_iter() {
-        let output = format!("exp/cdf/{}:{}.gnuplot", exp, fixed_str);
+        let output = format!("exp/cdf/{exp}:{fixed_str}.gnuplot");
         let mut output = OpenOptions::new()
             .create(true)
             .write(true)
@@ -196,11 +195,10 @@ fn cdf_gnuplot(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> R
         let mut includes = vec![];
         include("gnuplot/gnuplot.include".to_string(), &mut includes);
         include("gnuplot/cdf/gnuplot.include".to_string(), &mut includes);
-        include(format!("gnuplot/cdf/{}.include", exp), &mut includes);
+        include(format!("gnuplot/cdf/{exp}.include"), &mut includes);
         include(
             format!(
-                "gnuplot/cdf/{}:{}.include",
-                exp,
+                "gnuplot/cdf/{exp}:{}.include",
                 unbound_fixed
                     .get(&fixed_str)
                     .expect("we should have added this to the map above")
@@ -208,7 +206,7 @@ fn cdf_gnuplot(_: &StatSlicerOptions, cdf: &CdfOptions, files: Vec<String>) -> R
             &mut includes,
         );
         include(
-            format!("gnuplot/cdf/{}:{}.include", exp, fixed_str),
+            format!("gnuplot/cdf/{exp}:{fixed_str}.include"),
             &mut includes,
         );
         let includes = includes.join("\n");
@@ -314,8 +312,7 @@ fn lines_write(
             .expect("histogram should load");
         if hist.sig_figs() < lines.sig_figs {
             return Err(format!(
-                "cannot upsample histogram in {} from {} to {} significant figures",
-                file,
+                "cannot upsample histogram in {file} from {} to {} significant figures",
                 hist.sig_figs(),
                 lines.sig_figs
             ));
@@ -338,7 +335,7 @@ fn lines_write(
     let mut outputs = vec![];
     for (fix, mut series) in agg.into_iter() {
         series.sort_by_key(|x| x.0.cast_float());
-        let output = format!("exp/lines/{}:{}.dat", exp, fix);
+        let output = format!("exp/lines/{exp}:{fix}.dat");
         outputs.push(output.clone());
         let mut output = OpenOptions::new()
             .create(true)
@@ -404,7 +401,7 @@ fn lines_gnuplot(
     let _ = create_dir("exp/lines");
     for (fix, mut series) in agg.into_iter() {
         series.sort();
-        let output = format!("exp/lines/{}:{}.gnuplot", exp, fix);
+        let output = format!("exp/lines/{exp}:{fix}.gnuplot");
         let mut output = OpenOptions::new()
             .create(true)
             .write(true)
@@ -417,11 +414,10 @@ fn lines_gnuplot(
         let mut includes = vec![];
         include("gnuplot/gnuplot.include".to_string(), &mut includes);
         include("gnuplot/lines/gnuplot.include".to_string(), &mut includes);
-        include(format!("gnuplot/lines/{}.include", exp), &mut includes);
+        include(format!("gnuplot/lines/{exp}.include"), &mut includes);
         include(
             format!(
-                "gnuplot/lines/{}:{}.include",
-                exp,
+                "gnuplot/lines/{exp}:{}.include",
                 unbound_fixed
                     .get(&fixed_str)
                     .expect("we should have added this to the map above")
@@ -429,7 +425,7 @@ fn lines_gnuplot(
             &mut includes,
         );
         include(
-            format!("gnuplot/lines/{}:{}.include", exp, fixed_str),
+            format!("gnuplot/lines/{exp}:{fixed_str}.include"),
             &mut includes,
         );
         let includes = includes.join("\n");
@@ -511,7 +507,7 @@ fn t_test_main(_: StatSlicerOptions, options: TtestOptions, files: Vec<String>) 
             eprintln!("could not compute difference of {} and {}", files[0], f);
             std::process::exit(1);
         };
-        println!("{} {}", f, diff);
+        println!("{f} {diff}");
     }
 }
 
@@ -548,7 +544,7 @@ fn main() {
             t_test_main(options, t_test, files);
         }
         _ => {
-            eprintln!("unknown subcommand: {}", subcommand);
+            eprintln!("unknown subcommand: {subcommand}");
             std::process::exit(1);
         }
     }

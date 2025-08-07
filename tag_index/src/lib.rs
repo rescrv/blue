@@ -181,10 +181,7 @@ impl CompressedTagIndex<'_> {
         let mut buf = Vec::new();
         let mut builder = Builder::new(&mut buf);
         CompressedDocument::construct(text, record_boundaries, &mut builder).map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("could not construct document: {err:?}"),
-            )
+            std::io::Error::other(format!("could not construct document: {err:?}"))
         })?;
         drop(builder);
         std::fs::write(path.as_ref(), buf)
@@ -194,10 +191,7 @@ impl CompressedTagIndex<'_> {
         let file = File::open(path.as_ref())?;
         let md = file.metadata()?;
         if md.len() > usize::MAX as u64 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "file overflows usize",
-            ));
+            return Err(std::io::Error::other("file overflows usize"));
         }
         #[cfg(not(target_os = "macos"))]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
@@ -234,12 +228,7 @@ impl CompressedTagIndex<'_> {
         // SAFETY(rescrv):  We only ever refer to this region of memory as a slice of u8.
         let buf = unsafe { std::slice::from_raw_parts(pin.data as *const u8, pin.size) };
         let doc = CompressedDocument::unpack(buf)
-            .map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("could not unpack document: {err:?}"),
-                )
-            })?
+            .map_err(|err| std::io::Error::other(format!("could not unpack document: {err:?}")))?
             .0;
         pin.doc.write(doc);
         Ok(pin)
@@ -260,16 +249,10 @@ impl TagIndex for CompressedTagIndex<'_> {
             needle.push(':' as u32);
             let mut new_records = HashSet::new();
             for text_offset in doc.search(&needle).map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("could not lookup text offset: {err:?}"),
-                )
+                std::io::Error::other(format!("could not lookup text offset: {err:?}"))
             })? {
                 let record_offset = doc.lookup(text_offset).map_err(|err| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("could not lookup text offset: {err:?}"),
-                    )
+                    std::io::Error::other(format!("could not lookup text offset: {err:?}"))
                 })?;
                 if first || records.contains(&record_offset) {
                     new_records.insert(record_offset);
@@ -281,10 +264,7 @@ impl TagIndex for CompressedTagIndex<'_> {
         let mut tags = Vec::with_capacity(records.len());
         for record in records {
             let record = doc.retrieve(record).map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("could not lookup text offset: {err:?}"),
-                )
+                std::io::Error::other(format!("could not lookup text offset: {err:?}"))
             })?;
             let record: String = record.iter().flat_map(|c| char::from_u32(*c)).collect();
             let record = record.trim();

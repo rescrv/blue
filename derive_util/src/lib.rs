@@ -164,7 +164,7 @@ mod structs {
             _ds: &syn::DataStruct,
             fields: &syn::FieldsNamed,
         ) -> String {
-            let mut output = format!("struct {} {{\n", ty_name);
+            let mut output = format!("struct {ty_name} {{\n");
             for field in fields.named.iter() {
                 output += &format!(
                     "    {}: {},\n",
@@ -182,7 +182,7 @@ mod structs {
             _ds: &syn::DataStruct,
             fields: &syn::FieldsUnnamed,
         ) -> Self::Output {
-            let mut output = format!("struct {}(", ty_name);
+            let mut output = format!("struct {ty_name}(");
             let mut first = true;
             for field in fields.unnamed.iter() {
                 if first {
@@ -201,7 +201,7 @@ mod structs {
             ty_name: &syn::Ident,
             _ds: &syn::DataStruct,
         ) -> Self::Output {
-            format!("struct {};", ty_name)
+            format!("struct {ty_name};")
         }
     }
 
@@ -259,7 +259,7 @@ mod enums {
             _de: &syn::DataEnum,
             variants: &[Self::VariantOutput],
         ) -> Self::Output {
-            let mut output = format!("enum {} {{\n", ty_name);
+            let mut output = format!("enum {ty_name} {{\n");
             for variant in variants {
                 output += variant;
             }

@@ -12,11 +12,11 @@ fn parse_query(line: &str) -> Option<Query> {
     match Query::parse(line) {
         Ok(query) => Some(query),
         Err(Error::Parsing { core: _, what }) => {
-            eprintln!("{}", what);
+            eprintln!("{what}");
             None
         }
         Err(err) => {
-            eprintln!("error: {}", err);
+            eprintln!("error: {err}");
             None
         }
     }
@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     let analogize = match Analogize::new(options) {
         Ok(analogize) => analogize,
         Err(err) => {
-            eprintln!("could not instantiate analogize: {}", err);
+            eprintln!("could not instantiate analogize: {err}");
             std::process::exit(1);
         }
     };
@@ -65,22 +65,22 @@ fn main() -> Result<()> {
                         match analogize.correlates(query, 10) {
                             Ok(exemplars) => {
                                 for exemplar in exemplars {
-                                    println!("{}", exemplar);
+                                    println!("{exemplar}");
                                 }
                             }
                             Err(err) => {
-                                eprintln!("error: {}", err);
+                                eprintln!("error: {err}");
                             }
                         };
                     } else {
                         match analogize.exemplars(10) {
                             Ok(exemplars) => {
                                 for exemplar in exemplars {
-                                    println!("{}", exemplar);
+                                    println!("{exemplar}");
                                 }
                             }
                             Err(err) => {
-                                eprintln!("error: {}", err);
+                                eprintln!("error: {err}");
                             }
                         };
                     }
@@ -91,11 +91,11 @@ fn main() -> Result<()> {
                     match analogize.query(query) {
                         Ok(results) => {
                             for result in results {
-                                println!("{}", result);
+                                println!("{result}");
                             }
                         }
                         Err(err) => {
-                            eprintln!("error: {}", err);
+                            eprintln!("error: {err}");
                         }
                     };
                 }
@@ -109,7 +109,7 @@ fn main() -> Result<()> {
             }
             Err(err) => {
                 rl.save_history(&history)?;
-                eprintln!("could not read line: {}", err);
+                eprintln!("could not read line: {err}");
             }
         }
     }

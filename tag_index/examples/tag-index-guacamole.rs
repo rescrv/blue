@@ -64,7 +64,7 @@ fn generate(guac: &mut Guacamole, s: &str) {
             tags += &product[idx][indices[idx]].to_string();
             tags.push(':');
         }
-        println!("{}", tags);
+        println!("{tags}");
         for idx in 0..indices.len() {
             indices[idx] += 1;
             if indices[idx] < product[idx].len() {

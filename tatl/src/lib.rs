@@ -49,7 +49,7 @@ impl Condition {
 
     /// Adds context to the condition.
     pub fn with_context<V: Display>(mut self, field_name: &str, field_value: V) -> Self {
-        let ctx = &format!("{} = {}\n", field_name, field_value);
+        let ctx = &format!("{field_name} = {field_value}\n");
         match &mut self {
             Condition::Stable { context } => context.push_str(ctx),
             Condition::Firing {

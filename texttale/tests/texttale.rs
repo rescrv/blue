@@ -97,15 +97,15 @@ save: .... Commit changes to the configuration and return to previous menu.
                     self.age = age;
                 },
                 Err(err) => {
-                    writeln!(self.tale, "invalid age: {}", err).unwrap();
+                    writeln!(self.tale, "invalid age: {err}").unwrap();
                 },
             };
         }
         StoryElement::Continue
     }
     "print" => {
-        let debug = format!("{:#?}", self);
-        writeln!(self.tale, "{}", debug).unwrap();
+        let debug = format!("{self:#?}");
+        writeln!(self.tale, "{debug}").unwrap();
         StoryElement::Continue
     }
     "save" => {

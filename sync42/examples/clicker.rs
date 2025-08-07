@@ -188,7 +188,7 @@ fn main() {
                 .try_into()
                 .expect("millis since epoch should fit u64");
             if let Err(e) = collector.emit(&mut emit, now) {
-                eprintln!("collector error: {}", e);
+                eprintln!("collector error: {e}");
             }
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
@@ -205,7 +205,7 @@ fn main() {
         let c = Arc::clone(&clicker);
         threads.push(std::thread::spawn(move || loop {
             let ticket = c.click();
-            println!("{}", ticket);
+            println!("{ticket}");
             if ticket > 1_000_000 {
                 break;
             }

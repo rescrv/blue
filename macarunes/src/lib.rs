@@ -99,10 +99,10 @@ impl Debug for Caveat {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Caveat::ExactString { what } => {
-                write!(fmt, "exact-string: what={:#?}", what)?;
+                write!(fmt, "exact-string: what={what:#?}")?;
             }
             Caveat::Expires { when } => {
-                write!(fmt, "expires: when={}", when)?;
+                write!(fmt, "expires: when={when}")?;
             }
             Caveat::ThirdParty {
                 location,
@@ -111,8 +111,7 @@ impl Debug for Caveat {
             } => {
                 write!(
                     fmt,
-                    "third-party: location={} identifier={}",
-                    location, identifier
+                    "third-party: location={location} identifier={identifier}"
                 )?;
             }
         }
@@ -465,7 +464,7 @@ impl Debug for Macaroon {
             writeln!(fmt, "{} caveats", self.caveats.len())?;
         }
         for caveat in &self.caveats {
-            writeln!(fmt, "{:?}", caveat)?;
+            writeln!(fmt, "{caveat:?}")?;
         }
         Ok(())
     }
@@ -811,7 +810,7 @@ mod tests {
     };
 
     fn expect(macaroon: Macaroon, exp: &str) {
-        let got = format!("{:#?}", macaroon);
+        let got = format!("{macaroon:#?}");
         assert_eq!(got.trim(), exp.trim());
     }
 

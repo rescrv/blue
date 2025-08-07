@@ -126,9 +126,7 @@ impl Client {
             }
             response.extend(buf[..amt].iter());
         }
-        String::from_utf8(response).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::Other, "expected utf8 in response")
-        })
+        String::from_utf8(response).map_err(|_| std::io::Error::other("expected utf8 in response"))
     }
 }
 

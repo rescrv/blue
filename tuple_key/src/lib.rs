@@ -315,7 +315,7 @@ impl TupleKeyIterator<'_> {
             }
             max_idx = idx;
         }
-        (max_idx + 1) / 2
+        max_idx.div_ceil(2)
     }
 }
 

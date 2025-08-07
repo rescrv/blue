@@ -21,7 +21,7 @@ fn main() {
                 .try_into()
                 .expect("millis since epoch should fit u64");
             if let Err(e) = collector.emit(&mut emit, now) {
-                eprintln!("collector error: {}", e);
+                eprintln!("collector error: {e}");
             }
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
@@ -35,12 +35,12 @@ fn main() {
     let (mut recv_chan, mut send_chan) = match options.connect() {
         Ok((recv_chan, send_chan)) => (recv_chan, send_chan),
         Err(e) => {
-            panic!("err: {}", e);
+            panic!("err: {e}");
         }
     };
     let mut counter = 0u64;
     loop {
-        let msg = format!("ping {}", counter);
+        let msg = format!("ping {counter}");
         let buf = msg.as_bytes();
         counter += 1;
         send_chan.send(buf).expect("send");

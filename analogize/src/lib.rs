@@ -191,7 +191,7 @@ impl SymbolTable {
         let mut sorted = self.symbols.iter().collect::<Vec<_>>();
         sorted.sort();
         for (mangled, symbol) in sorted.into_iter() {
-            writeln!(output, "{} {}", mangled, symbol)?;
+            writeln!(output, "{mangled} {symbol}")?;
         }
         output.flush()?;
         Ok(())
@@ -334,7 +334,7 @@ impl SymbolTable {
                 text.push(sigma);
                 for (k, v) in o.iter() {
                     let len = k.chars().count();
-                    let symbol = format!("{}k{}{}", symbol, len, k);
+                    let symbol = format!("{symbol}k{len}{k}");
                     self.translate_recursive(v, &symbol, text);
                 }
                 text.push(sigma + 1);
@@ -459,7 +459,7 @@ impl SymbolTable {
                 if o.len() == 1 {
                     let (k, q) = &o[0];
                     let len = k.chars().count();
-                    let symbol = format!("{}ok{}{}", symbol, len, k);
+                    let symbol = format!("{symbol}ok{len}{k}");
                     self.translate_query_recursive(q, &symbol)
                 } else if o.is_empty() {
                     let symbol = symbol.to_string() + "o";
@@ -1134,9 +1134,9 @@ impl State {
             return Ok(());
         }
         let mut edit = Edit::default();
-        edit.info('L', &format!("{}", threshold_ns))?;
+        edit.info('L', &format!("{threshold_ns}"))?;
         for log in logs_to_ingest.iter() {
-            edit.add(&format!("log:{}", log))?;
+            edit.add(&format!("log:{log}"))?;
         }
         mani.apply(edit)?;
         Ok(())
@@ -1197,10 +1197,10 @@ impl State {
             let syms_tmp = self.data.join(syms_tmp);
             syms.to_file(&syms_tmp)?;
             rename(syms_tmp, self.data.join("symbols"))?;
-            edit.add(&format!("data:{}", output_path))?;
+            edit.add(&format!("data:{output_path}"))?;
         }
         for input in log_inputs.iter() {
-            edit.rm(&format!("log:{}", input))?;
+            edit.rm(&format!("log:{input}"))?;
         }
         let mut mani = self.mani.lock().unwrap();
         mani.apply(edit)?;
@@ -1388,7 +1388,7 @@ fn take_consistent_cut<P: AsRef<Path>>(
                 if PathBuf::from(&display) != path {
                     return Err(Error::InvalidPath {
                         core: ErrorCore::default(),
-                        what: format!("path {} contains invalid characters", display),
+                        what: format!("path {display} contains invalid characters"),
                     });
                 }
                 paths.push(display);

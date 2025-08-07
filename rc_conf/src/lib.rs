@@ -249,7 +249,7 @@ impl RcScript {
                         return Err(Error::invalid_rc_script(
                             path,
                             number,
-                            format!("{} was repeated", var),
+                            format!("{var} was repeated"),
                         ));
                     }
                     _ => {
@@ -306,7 +306,7 @@ impl RcScript {
         let name = var_prefix_from_service(&self.name);
         Ok(shvar::rcvar(&self.command)?
             .into_iter()
-            .map(|v| format!("{}{}", name, v))
+            .map(|v| format!("{name}{v}"))
             .collect())
     }
 
@@ -703,12 +703,12 @@ impl RcConf {
             if let Some(source) = line.trim().strip_prefix("source ") {
                 let source = Path::from(source);
                 if !seen.contains(&source) {
-                    *rc_conf += &format!("# begin source {:?}\n", source);
+                    *rc_conf += &format!("# begin source {source:?}\n");
                     seen.insert(path.clone().into_owned());
                     Self::examine_recursive(&source, seen, rc_conf)?;
-                    *rc_conf += &format!("# end source {:?}\n", source);
+                    *rc_conf += &format!("# end source {source:?}\n");
                 } else {
-                    *rc_conf += &format!("# already sourced {:?}\n", source);
+                    *rc_conf += &format!("# already sourced {source:?}\n");
                 }
             } else {
                 for line in raw {
@@ -1108,7 +1108,7 @@ pub fn exec_container(
     let mut argv = vec![command.to_string(), "run".to_string(), "-t".to_string()];
     for (key, value) in bound.iter() {
         argv.push("--env".to_string());
-        argv.push(format!("{}={}", key, value));
+        argv.push(format!("{key}={value}"));
     }
     argv.push("--env".to_string());
     argv.push("RCCONF_OVERRIDE_SERVICE_SWITCH=true".to_string());

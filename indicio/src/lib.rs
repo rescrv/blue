@@ -154,9 +154,9 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
-            Value::U64(x) => write!(f, "{}", x),
-            Value::I64(x) => write!(f, "{}", x),
-            Value::F64(x) => write!(f, "{}", x),
+            Value::U64(x) => write!(f, "{x}"),
+            Value::I64(x) => write!(f, "{x}"),
+            Value::F64(x) => write!(f, "{x}"),
             Value::String(s) => {
                 pub fn escape(input: &str) -> String {
                     let mut out: Vec<char> = Vec::new();

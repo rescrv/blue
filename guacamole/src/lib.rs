@@ -528,7 +528,7 @@ mod tests {
         for (descr, seed, output) in TEST_CASES {
             let buffer = &mut [0u32; 16];
             crate::mash(*seed, buffer);
-            assert_eq!(output, buffer, "test case = {}", descr);
+            assert_eq!(output, buffer, "test case = {descr}");
         }
     }
 
@@ -539,7 +539,7 @@ mod tests {
             g.seek(*seed);
             for (i, item) in output.iter().enumerate().take(16) {
                 let x: u32 = u32::from_guacamole(&mut (), &mut g);
-                assert_eq!(*item, x, "test case = {}[{}]", descr, i);
+                assert_eq!(*item, x, "test case = {descr}[{i}]");
             }
         }
     }

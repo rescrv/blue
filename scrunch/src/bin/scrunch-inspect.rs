@@ -10,7 +10,7 @@ fn main() {
         let doc = CompressedDocument::unpack(&data)
             .expect("should be able to parse document")
             .0;
-        println!("{}", file);
+        println!("{file}");
         print!("{doc:#?}");
     }
 }

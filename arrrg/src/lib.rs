@@ -70,14 +70,14 @@ check argument order amongst other differences",
         let matches = match opts.parse(args) {
             Ok(matches) => matches,
             Err(Fail::OptionMissing(which)) => {
-                Self::error(&mut command_line, format!("missing argument: --{}", which));
+                Self::error(&mut command_line, format!("missing argument: --{which}"));
                 Self::usage(&mut command_line, opts, usage);
                 return (command_line, vec![]);
             }
             Err(err) => {
                 Self::error(
                     &mut command_line,
-                    format!("could not parse command line: {}", err),
+                    format!("could not parse command line: {err}"),
                 );
                 Self::exit(&mut command_line, 64);
                 return (command_line, vec![]);
@@ -160,7 +160,7 @@ impl<T: CommandLine> CommandLine for NoExitCommandLine<T> {
 pub fn getopt_str(prefix: Option<&str>, field_arg: &str) -> String {
     match prefix {
         Some(prefix) => {
-            format!("{}-{}", prefix, field_arg)
+            format!("{prefix}-{field_arg}")
         }
         None => field_arg.to_string(),
     }
@@ -180,7 +180,7 @@ where
     match s.parse::<T>() {
         Ok(t) => t,
         Err(err) => {
-            panic!("field --{} is unparseable: {}", arg_str, err);
+            panic!("field --{arg_str} is unparseable: {err}");
         }
     }
 }

@@ -52,7 +52,7 @@ impl std::fmt::Display for StringResolver {
             connect += "=";
             connect += host.connect();
         }
-        write!(fmt, "{}", connect)
+        write!(fmt, "{connect}")
     }
 }
 

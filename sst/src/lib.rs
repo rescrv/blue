@@ -420,7 +420,7 @@ impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
         Error::SystemError {
             core: ErrorCore::default(),
-            what: format!("{:?}", what),
+            what: format!("{what:?}"),
         }
     }
 }
@@ -1312,7 +1312,7 @@ impl Sst {
             let metadata = SstCursor::metadata_from_kvr(kvr)
                 .expect("metadata should parse")
                 .unwrap();
-            println!("{:?}", metadata);
+            println!("{metadata:?}");
             let block = Self::load_block(&self.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek_to_first()?;

@@ -176,7 +176,7 @@ fn parse_slice_u64(branch: usize, bytes: &[u8]) -> Option<(u64, u8, BitArray<'_>
     }
     let bits = bytes[0];
     let bytes = &bytes[1..];
-    let values_bytes = ((branch - 1) * bits as usize + 7) / 8;
+    let values_bytes = ((branch - 1) * bits as usize).div_ceil(8);
     let values = trim_to_length(bytes, values_bytes)?;
     let values = BitArray::new(values);
     let bytes = trim_prefix(bytes, values_bytes)?;

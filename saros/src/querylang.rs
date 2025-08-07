@@ -93,7 +93,7 @@ pub fn counters(
                         );
                     } else {
                         tags.push(
-                            Tags::new(format!(":__name__={}:", counter))
+                            Tags::new(format!(":__name__={counter}:"))
                                 .to_owned()
                                 .ok_or(Error::text("tag did not construct"))?,
                         );

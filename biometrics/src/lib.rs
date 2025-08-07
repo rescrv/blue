@@ -257,7 +257,7 @@ impl Emitter for PlainTextEmitter {
         let label = histogram.label();
         for (bucket, count) in histogram.read().iter() {
             self.output
-                .write_fmt(format_args!("{} {now} {{approx={bucket}}} {count}", label,))?;
+                .write_fmt(format_args!("{label} {now} {{approx={bucket}}} {count}",))?;
         }
         Ok(())
     }

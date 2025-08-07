@@ -14,20 +14,20 @@ fn main() {
     let (cmdline, free) = ArmnodOptions::from_command_line(USAGE);
     if !free.is_empty() {
         eprintln!("free arguments are not accepted");
-        eprintln!("{}", USAGE);
+        eprintln!("{USAGE}");
         std::process::exit(1);
     }
     let mut armnod = match cmdline.try_parse() {
         Ok(armnod) => armnod,
         Err(err) => {
-            eprintln!("invalid command line: {}", err);
-            eprintln!("{}", USAGE);
+            eprintln!("invalid command line: {err}");
+            eprintln!("{USAGE}");
             std::process::exit(1);
         }
     };
     let mut guac = Guacamole::default();
     let mut fout = BufWriter::new(std::io::stdout());
     while let Some(x) = armnod.choose(&mut guac) {
-        writeln!(fout, "{}", x).unwrap();
+        writeln!(fout, "{x}").unwrap();
     }
 }

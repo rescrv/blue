@@ -345,7 +345,7 @@ data:
             let yaml = _rewrite(&vp, &yaml)?;
             let output = output.join(Path::from(format!("{relative}/herd/{service}.yaml")));
             write_yaml(&options, output, &yaml, &mut tracking)?;
-            root_yaml += &format!("- {}.yaml\n", service);
+            root_yaml += &format!("- {service}.yaml\n");
             extended = true;
         }
         if extended {

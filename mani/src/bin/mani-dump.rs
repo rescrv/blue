@@ -10,7 +10,7 @@ fn main() {
         let iter = ManifestIterator::open(file).expect("could not open");
         for edit in iter {
             let edit = edit.expect("could not read edit");
-            println!("{:#?}", edit);
+            println!("{edit:#?}");
         }
     }
 }

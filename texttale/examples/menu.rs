@@ -72,8 +72,8 @@ menu: .. Answer some questions interactively.
                 Menu::Continue
             }
         }
-        let s = format!("{:#?}", self);
-        write!(self.tale, "{}", s).unwrap();
+        let s = format!("{self:#?}");
+        write!(self.tale, "{s}").unwrap();
         StoryElement::Continue
     }
 }

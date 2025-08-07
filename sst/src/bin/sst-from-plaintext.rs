@@ -46,7 +46,7 @@ fn main() {
         let line = &line.expect("could not parse line");
         let split: Vec<&str> = line.split_whitespace().collect();
         if split.len() != 2 {
-            panic!("Invalid line: {}", line);
+            panic!("Invalid line: {line}");
         }
         let ts = if cmdline.timestamp {
             (SystemTime::now()

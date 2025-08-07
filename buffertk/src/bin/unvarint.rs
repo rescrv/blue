@@ -9,12 +9,12 @@ fn main() {
         let x = match argument.parse::<u8>() {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("don't know how to parse {}: {}", argument, e);
+                eprintln!("don't know how to parse {argument}: {e}");
                 std::process::exit(1);
             }
         };
         bytes.push(x);
     }
     let v: u64 = buffertk::v64::unpack(&bytes).unwrap().0.into();
-    println!("{}", v);
+    println!("{v}");
 }

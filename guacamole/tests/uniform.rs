@@ -13,8 +13,7 @@ fn test_any_f64_uniform_distribution() {
         let value: f64 = any(&mut guac);
         assert!(
             (0.0..1.0).contains(&value),
-            "Value should be in [0, 1): {}",
-            value
+            "Value should be in [0, 1): {value}"
         );
 
         let bin_index = (value * num_bins as f64) as usize;
@@ -28,20 +27,12 @@ fn test_any_f64_uniform_distribution() {
 
     // Check that each bin is within tolerance of expected count
     for (i, &count) in bins.iter().enumerate() {
-        let diff = if count > expected_per_bin {
-            count - expected_per_bin
-        } else {
-            expected_per_bin - count
-        };
+        let count: usize = count;
+        let diff = count.abs_diff(expected_per_bin);
 
         assert!(
             diff <= tolerance,
-            "Bin {} has count {} which differs by {} from expected {} (tolerance: {})",
-            i,
-            count,
-            diff,
-            expected_per_bin,
-            tolerance
+            "Bin {i} has count {count} which differs by {diff} from expected {expected_per_bin} (tolerance: {tolerance})"
         );
     }
 }
@@ -58,8 +49,7 @@ fn test_any_f64_chi_square_uniformity() {
         let value: f64 = any(&mut guac);
         assert!(
             (0.0..1.0).contains(&value),
-            "Value should be in [0, 1): {}",
-            value
+            "Value should be in [0, 1): {value}"
         );
 
         let bin_index = (value * num_bins as f64) as usize;
@@ -82,9 +72,7 @@ fn test_any_f64_chi_square_uniformity() {
 
     assert!(
         chi_square < critical_value,
-        "Chi-square test failed: {} >= {} (critical value at 95% confidence)",
-        chi_square,
-        critical_value
+        "Chi-square test failed: {chi_square} >= {critical_value} (critical value at 95% confidence)"
     );
 }
 
@@ -95,8 +83,8 @@ fn test_any_f64_range_bounds() {
     // Test that all generated values are in [0, 1)
     for _ in 0..10_000 {
         let value: f64 = any(&mut guac);
-        assert!(value >= 0.0, "Value should be >= 0.0: {}", value);
-        assert!(value < 1.0, "Value should be < 1.0: {}", value);
+        assert!(value >= 0.0, "Value should be >= 0.0: {value}");
+        assert!(value < 1.0, "Value should be < 1.0: {value}");
     }
 }
 
@@ -131,8 +119,7 @@ fn test_any_f64_different_seeds() {
     // We expect most values to be different with different seeds
     assert!(
         differences > 90,
-        "Different seeds should produce mostly different values, got {} differences",
-        differences
+        "Different seeds should produce mostly different values, got {differences} differences"
     );
 }
 
@@ -166,8 +153,6 @@ fn test_any_f64_kolmogorov_smirnov() {
 
     assert!(
         max_diff < critical_value,
-        "Kolmogorov-Smirnov test failed: max difference {} >= critical value {}",
-        max_diff,
-        critical_value
+        "Kolmogorov-Smirnov test failed: max difference {max_diff} >= critical value {critical_value}"
     );
 }

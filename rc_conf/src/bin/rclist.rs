@@ -11,16 +11,16 @@ fn main() {
             println!();
         }
         first = false;
-        println!("PATH={}", path);
+        println!("PATH={path}");
         for (service, status) in
             rc_conf::load_services(path).expect("examine should always succeed")
         {
             match status {
                 Ok(path) => {
-                    println!("{}\t{:?}", service, path);
+                    println!("{service}\t{path:?}");
                 }
                 Err(why) => {
-                    println!("{} encountered error: {}", service, why);
+                    println!("{service} encountered error: {why}");
                 }
             }
         }

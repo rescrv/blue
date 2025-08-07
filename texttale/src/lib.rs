@@ -71,7 +71,7 @@ impl TextTale for ShellTextTale {
             }
             Err(ReadlineError::Eof) => None,
             Err(err) => {
-                panic!("could not read line: {}", err);
+                panic!("could not read line: {err}");
             }
         }
     }
@@ -184,9 +184,9 @@ impl TextTale for ExpectTextTale {
                 let got = got.trim();
                 diff(exp, got);
                 if !expected_output.is_empty() {
-                    println!("{}", expected_output);
+                    println!("{expected_output}");
                 }
-                println!("{}", cmd);
+                println!("{cmd}");
                 self.output_buffer.clear();
                 return Some(cmd[self.prompt.len()..].to_owned());
             } else if !self.input_lines.is_empty() {

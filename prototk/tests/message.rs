@@ -57,7 +57,7 @@ fn named_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = s.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", s);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({s:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
@@ -85,7 +85,7 @@ fn unnamed_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = u.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", u);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({u:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
@@ -109,7 +109,7 @@ fn unit_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = u.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", u);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({u:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
@@ -142,7 +142,7 @@ fn nested_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = n.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", n);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({n:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
@@ -486,7 +486,7 @@ fn option_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = s.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", s);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({s:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();
@@ -521,7 +521,7 @@ fn box_struct() {
     let mut up = buffertk::Unpacker::new(exp);
     let exp = s.clone();
     let got = up.unpack();
-    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({:?})", s);
+    assert_eq!(Ok(exp), got, "unpacker should have returned Ok({s:?})");
     // test remainder
     let exp: &[u8] = &[];
     let rem: &[u8] = up.remain();

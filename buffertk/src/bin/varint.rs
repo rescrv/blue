@@ -8,7 +8,7 @@ fn main() {
         let x = match argument.parse::<u64>() {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("don't know how to parse {}: {}", argument, e);
+                eprintln!("don't know how to parse {argument}: {e}");
                 continue;
             }
         };

@@ -33,8 +33,8 @@ fn main() {
     let mut symphonize = Symphonize::new(options, paths_to_root[0].clone(), rc_conf.clone());
     match free[0].as_str() {
         "debug" => {
-            println!("RC_CONF_PATH={}", rc_conf_path);
-            println!("RC_CONF={:#?}", rc_conf);
+            println!("RC_CONF_PATH={rc_conf_path}");
+            println!("RC_CONF={rc_conf:#?}");
         }
         "apply" => symphonize.apply().expect("apply should succeed"),
         "build-images" => symphonize

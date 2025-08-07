@@ -63,7 +63,7 @@ impl ProtobufEmitter {
             .map(|x| x.as_micros())
             .unwrap_or(0);
         let mut path = OsString::from(self.prefix.as_os_str());
-        let ext = OsString::from(format!(".{}", ts));
+        let ext = OsString::from(format!(".{ts}"));
         path.push(ext);
         let path = PathBuf::from(path);
         let Ok(file) = OpenOptions::new()

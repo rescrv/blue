@@ -188,7 +188,7 @@ impl RecvBuffer {
                             if crc32c::crc32c(buf.as_ref()) != crc {
                                 return Err(rpc_pb::Error::TransportFailure {
                                     core: ErrorCore::default(),
-                                    what: format!("crc32c checksum failed: {}", crc),
+                                    what: format!("crc32c checksum failed: {crc}"),
                                 });
                             }
                             receiver(buf);

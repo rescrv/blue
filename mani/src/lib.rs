@@ -40,9 +40,7 @@ pub fn TEMPORARY<P: AsRef<Path>>(root: P) -> PathBuf {
 /// Given a root and index, return the path to MANIFEST.{index}.
 #[allow(non_snake_case)]
 pub fn BACKUP<P: AsRef<Path>>(root: P, idx: u64) -> PathBuf {
-    root.as_ref()
-        .to_path_buf()
-        .join(format!("MANIFEST.{}", idx))
+    root.as_ref().to_path_buf().join(format!("MANIFEST.{idx}"))
 }
 
 const TX_SEPARATOR: &str = "--------";
@@ -62,10 +60,7 @@ pub fn extract_backup<P: AsRef<Path>>(path: P) -> Option<u64> {
         }
     };
     if let Some(path) = path.strip_prefix("MANIFEST.") {
-        match path.parse::<u64>() {
-            Ok(idx) => Some(idx),
-            Err(_) => None,
-        }
+        path.parse::<u64>().ok()
     } else {
         None
     }
@@ -399,7 +394,7 @@ impl Manifest {
                 if prev_id + 1 != id {
                     errs.push(Error::Corruption {
                         core: ErrorCore::default(),
-                        what: format!("MANIFEST has gaps at {}", id),
+                        what: format!("MANIFEST has gaps at {id}"),
                     });
                 } else {
                     let first = match Self::read_first_edit(&path) {
@@ -417,8 +412,7 @@ impl Manifest {
                         errs.push(Error::Corruption {
                             core: ErrorCore::default(),
                             what: format!(
-                                "MANIFEST rollover to {} does not match rollup of {}",
-                                id, prev_id
+                                "MANIFEST rollover to {id} does not match rollup of {prev_id}"
                             ),
                         });
                     } else {
@@ -462,7 +456,7 @@ impl Manifest {
         Self::apply_edit(&edit, &mut self.strs, &mut self.info);
         fn to_crc_line(line: String) -> String {
             let cksum = crc32c::crc32c(line.as_bytes());
-            format!("{:08x}{}\n", cksum, line)
+            format!("{cksum:08x}{line}\n")
         }
         for path in edit.rm_strs.iter() {
             edit_str += &to_crc_line("-".to_owned() + path);
@@ -471,7 +465,7 @@ impl Manifest {
             edit_str += &to_crc_line("+".to_owned() + path);
         }
         for (key, value) in edit.info.iter() {
-            edit_str += &to_crc_line(format!("{}{}", key, value));
+            edit_str += &to_crc_line(format!("{key}{value}"));
         }
         edit_str += TX_SEPARATOR;
         edit_str += "\n";
@@ -658,7 +652,7 @@ impl Iterator for ManifestIterator {
             if !line.is_ascii() {
                 return Some(Err(Error::Corruption {
                     core: ErrorCore::default(),
-                    what: format!("line {} is not ascii", idx),
+                    what: format!("line {idx} is not ascii"),
                 }));
             }
             if line == TX_SEPARATOR {
@@ -669,14 +663,14 @@ impl Iterator for ManifestIterator {
                     Err(err) => {
                         return self.poison(Error::Corruption {
                             core: ErrorCore::default(),
-                            what: format!("crc32c is not hex on line {}: {}", idx, err),
+                            what: format!("crc32c is not hex on line {idx}: {err}"),
                         });
                     }
                 };
                 if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
                     return self.poison(Error::Corruption {
                         core: ErrorCore::default(),
-                        what: format!("crc32c failure on line {}", idx),
+                        what: format!("crc32c failure on line {idx}"),
                     });
                 }
                 let action = line.as_bytes()[8] as char;
@@ -699,7 +693,7 @@ impl Iterator for ManifestIterator {
             } else {
                 return self.poison(Error::Corruption {
                     core: ErrorCore::default(),
-                    what: format!("unhandled case on line {}", idx),
+                    what: format!("unhandled case on line {idx}"),
                 });
             }
         }
@@ -723,7 +717,7 @@ mod tests {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        let path = PathBuf::from(format!("{}_{}", root, line));
+        let path = PathBuf::from(format!("{root}_{line}"));
         if path.exists() {
             remove_dir_all(&path).expect("could not prepare for test");
         }
@@ -740,7 +734,7 @@ mod tests {
     fn test_test_root() {
         let line = line!();
         let root = test_root(module_path!(), line);
-        assert_eq!(PathBuf::from(format!("mani__tests_{}", line)), root);
+        assert_eq!(PathBuf::from(format!("mani__tests_{line}")), root);
     }
 
     #[test]
@@ -963,26 +957,21 @@ bc9dae362thing two metadata
 
     fn build_string(params: &GuacamoleParameters, seed: usize) -> String {
         let mut guac2 = Guacamole::new((seed % params.num_strs) as u64);
-        format!(
-            "string:{}_{}_{}",
-            u64::from_guacamole(&mut (), &mut guac2),
-            u64::from_guacamole(&mut (), &mut guac2),
-            u64::from_guacamole(&mut (), &mut guac2)
-        )
+        let val1 = u64::from_guacamole(&mut (), &mut guac2);
+        let val2 = u64::from_guacamole(&mut (), &mut guac2);
+        let val3 = u64::from_guacamole(&mut (), &mut guac2);
+        format!("string:{val1}_{val2}_{val3}")
     }
 
     fn build_info(params: &GuacamoleParameters, guac: &mut Guacamole) -> (char, String) {
         let info_set_idx = usize::from_guacamole(&mut (), guac) % params.info_set.len();
         assert!(info_set_idx < params.info_set.len());
-        (
-            params.info_set[info_set_idx],
-            format!(
-                "info:{}_{}_{}",
-                u64::from_guacamole(&mut (), guac),
-                u64::from_guacamole(&mut (), guac),
-                u64::from_guacamole(&mut (), guac)
-            ),
-        )
+        (params.info_set[info_set_idx], {
+            let val1 = u64::from_guacamole(&mut (), guac);
+            let val2 = u64::from_guacamole(&mut (), guac);
+            let val3 = u64::from_guacamole(&mut (), guac);
+            format!("info:{val1}_{val2}_{val3}")
+        })
     }
 
     fn build_edit_randomly(
@@ -1039,7 +1028,7 @@ bc9dae362thing two metadata
         }
         let mut found = false;
         for err in Manifest::verify(params.options.clone(), &root) {
-            eprintln!("error: {}", err);
+            eprintln!("error: {err}");
             found = true;
         }
         if found {

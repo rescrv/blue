@@ -112,7 +112,7 @@ fn worker_thread(
         let num = COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut ws = WriteState {
             wait_to_write: &WAIT_TO_WRITE,
-            to_write: Some(format!("seq_no={}", num)),
+            to_write: Some(format!("seq_no={num}")),
             writes: Vec::new(),
         };
         monitor.do_it(&mut ws);
@@ -135,7 +135,7 @@ fn main() {
                 .try_into()
                 .expect("millis since epoch should fit u64");
             if let Err(e) = collector.emit(&mut emit, now) {
-                eprintln!("collector error: {}", e);
+                eprintln!("collector error: {e}");
             }
             std::thread::sleep(std::time::Duration::from_millis(250));
         }

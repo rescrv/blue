@@ -47,17 +47,10 @@ pub struct SymphonizeOptions {
 ///////////////////////////////////// auto_infer_configuration /////////////////////////////////////
 
 pub fn paths_to_root(_options: &SymphonizeOptions) -> Result<Vec<Path<'static>>, std::io::Error> {
-    let mut cwd = Path::try_from(std::env::current_dir()?).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "current working directory not unicode",
-        )
-    })?;
+    let mut cwd = Path::try_from(std::env::current_dir()?)
+        .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
     if !cwd.is_abs() && !cwd.has_root() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "current working directory absolute",
-        ));
+        return Err(std::io::Error::other("current working directory absolute"));
     }
     let mut candidates = vec![];
     while cwd != Path::from("/") {
@@ -68,10 +61,7 @@ pub fn paths_to_root(_options: &SymphonizeOptions) -> Result<Vec<Path<'static>>,
         }
         cwd = cwd.dirname().into_owned();
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "no git directory found",
-    ))
+    Err(std::io::Error::other("no git directory found"))
 }
 
 ////////////////////////////////////// autoinfer_configuration /////////////////////////////////////
@@ -190,18 +180,10 @@ impl Symphonize {
     }
 
     pub fn apply_manifests(&mut self) -> Result<(), Error> {
-        let cwd = Path::try_from(std::env::current_dir()?).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "current working directory not unicode",
-            )
-        })?;
+        let cwd = Path::try_from(std::env::current_dir()?)
+            .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
         if !cwd.is_abs() && !cwd.has_root() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "current working directory absolute",
-            )
-            .into());
+            return Err(std::io::Error::other("current working directory absolute").into());
         }
         let Some(relative) = cwd.as_str().strip_prefix(self.root.as_str()) else {
             todo!();

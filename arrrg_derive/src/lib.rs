@@ -267,15 +267,15 @@ fn parse_meta_one(attr: &syn::Attribute) -> Option<FlagMeta> {
     }
     let meta_list = match meta {
         syn::Meta::Path(_) => {
-            panic!("meta path: {}", USAGE);
+            panic!("meta path: {USAGE}");
         }
         syn::Meta::List(ref ml) => ml,
         syn::Meta::NameValue(_) => {
-            panic!("meta name value: {}", USAGE);
+            panic!("meta name value: {USAGE}");
         }
     };
     if meta_list.nested.is_empty() || meta_list.nested.len() > 3 {
-        panic!("meta list length: {}", USAGE);
+        panic!("meta list length: {USAGE}");
     }
     let field_type = match &meta_list.nested[0] {
         syn::NestedMeta::Meta(field_type) => field_type.into_token_stream().to_string(),
@@ -293,7 +293,7 @@ fn parse_meta_one(attr: &syn::Attribute) -> Option<FlagMeta> {
         "required" => FieldType::Required,
         "nested" => FieldType::Nested,
         _ => {
-            panic!("Unknown field_type {:?}", field_type)
+            panic!("Unknown field_type {field_type:?}")
         }
     };
     let help_string = if meta_list.nested.len() > 1 {

@@ -38,6 +38,6 @@ fn main() {
     let mut guac = Guacamole::new(cmdline.seed.unwrap_or(0));
     loop {
         let x = zipf.next(&mut guac);
-        println!("{}", x);
+        println!("{x}");
     }
 }

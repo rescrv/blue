@@ -151,7 +151,7 @@ impl Block {
         // for incomplete ranges.  The value at i may cover a range [x, y) where restart[i + 1] = y.
         while left < right {
             // Pick a mid such that when left and right are adjacent, mid equal right.
-            let mid = (left + right + 1) / 2;
+            let mid = (left + right).div_ceil(2);
             let value = self.restart_point(mid);
             match offset.cmp(&value) {
                 Ordering::Less => {
@@ -601,7 +601,7 @@ impl Cursor for BlockCursor {
         let mut right: usize = self.block.num_restarts - 1;
         while left < right {
             // When left and right are adjacent, it will seek to the right.
-            let mid = left + (right - left + 1) / 2;
+            let mid = left + (right - left).div_ceil(2);
             let kvp = match self.seek_restart(mid)? {
                 Some(x) => x,
                 None => {

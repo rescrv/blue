@@ -84,7 +84,7 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Error::Success {} => fmt.debug_struct("SerializationError").finish(),
+            Error::Success => fmt.debug_struct("SerializationError").finish(),
             Error::BufferTooShort { required, had } => fmt
                 .debug_struct("BufferTooShort")
                 .field("required", required)

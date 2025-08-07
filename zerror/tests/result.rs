@@ -25,7 +25,7 @@ impl Z for SampleError {
     }
 
     fn with_info<X: Debug>(mut self, name: &str, value: X) -> Self::Error {
-        self.var.push(format!("{}: {:?}", name, value));
+        self.var.push(format!("{name}: {value:?}"));
         self
     }
 

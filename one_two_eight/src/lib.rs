@@ -34,7 +34,7 @@ pub fn encode(id: &[u8; BYTES]) -> String {
             s.push('-');
         }
         for c in &id[start..limit] {
-            write!(&mut s, "{:02x}", c).expect("unable to write to string");
+            write!(&mut s, "{c:02x}").expect("unable to write to string");
         }
     }
     s

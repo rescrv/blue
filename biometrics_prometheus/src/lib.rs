@@ -176,7 +176,7 @@ impl Emitter {
 
     fn get_output(&mut self, now_millis: u64) -> Result<&mut dyn std::io::Write, std::io::Error> {
         if self.output.is_none() {
-            let path = self.options.prefix.as_str().to_owned() + &format!("{}.prom", now_millis);
+            let path = self.options.prefix.as_str().to_owned() + &format!("{now_millis}.prom");
             let file = OpenOptions::new().create_new(true).write(true).open(path)?;
             // NOTE(rescrv): l_type,l_whence is 16 bits on some platforms and 32 bits on others.
             // The annotations here are for cross-platform compatibility.

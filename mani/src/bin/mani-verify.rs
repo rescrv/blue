@@ -12,6 +12,6 @@ fn main() {
         std::process::exit(1);
     }
     for err in Manifest::verify(options, &roots[0]) {
-        println!("{}", err);
+        println!("{err}");
     }
 }

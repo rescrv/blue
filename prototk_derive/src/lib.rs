@@ -290,18 +290,16 @@ const LAST_RESERVED_FIELD_NUMBER: u64 = 19999;
 
 fn validate_field_number(field_number: u64) {
     if field_number < FIRST_FIELD_NUMBER {
-        panic!("field_number={} must be a positive integer", field_number);
+        panic!("field_number={field_number} must be a positive integer");
     }
     if field_number > LAST_FIELD_NUMBER {
         panic!(
-            "field_number={} number too large:  must be less than {}",
-            field_number, LAST_FIELD_NUMBER
+            "field_number={field_number} number too large:  must be less than {LAST_FIELD_NUMBER}"
         );
     }
     if (FIRST_RESERVED_FIELD_NUMBER..=LAST_RESERVED_FIELD_NUMBER).contains(&field_number) {
         panic!(
-            "field_number={} reserved: reserved range [{}, {}]",
-            field_number, FIRST_RESERVED_FIELD_NUMBER, LAST_RESERVED_FIELD_NUMBER
+            "field_number={field_number} reserved: reserved range [{FIRST_RESERVED_FIELD_NUMBER}, {LAST_RESERVED_FIELD_NUMBER}]"
         );
     }
 }
@@ -488,8 +486,7 @@ impl<V: ProtoTKVisitor> StructVisitor for V {
     ) -> TokenStream {
         let mut unrolled = Vec::new();
         for (index, field) in fields.unnamed.iter().enumerate() {
-            let field_ident =
-                syn::LitInt::new(&format!("{}", index), proc_macro2::Span::call_site());
+            let field_ident = syn::LitInt::new(&format!("{index}"), proc_macro2::Span::call_site());
             let field_ident = &ToTokens::into_token_stream(&field_ident);
             for attr in field.attrs.iter() {
                 if let Some(x) = visit_attribute::<V>(ty_name, field, field_ident, attr, self) {

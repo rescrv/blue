@@ -88,7 +88,7 @@ impl ErrorCore {
     pub fn set_info<X: Debug>(&mut self, name: &str, value: X) {
         self.internals.info.push(Info {
             name: name.to_owned(),
-            value: format!("{:?}", value),
+            value: format!("{value:?}"),
         });
     }
 

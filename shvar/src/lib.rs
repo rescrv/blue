@@ -107,7 +107,7 @@ pub fn double_quote_string(s: &str) -> String {
 /// Single quote the provided string, if it contains no single-quote characters.
 pub fn single_quote_string(s: &str) -> Option<String> {
     if !s.chars().any(|c| c == '\'') {
-        Some(format!("'{}'", s))
+        Some(format!("'{s}'"))
     } else {
         None
     }

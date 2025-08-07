@@ -31,7 +31,7 @@ macro_rules! test_per_file {
 #[cfg(test)]
 mod tests {
     fn do_test(_file: &str, _line: u32, s: &str) {
-        println!("FINDME: s={}", s);
+        println!("FINDME: s={s}");
     }
 
     test_per_file! {

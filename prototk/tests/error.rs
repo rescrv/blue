@@ -13,7 +13,7 @@ struct WrappedError {
 }
 
 fn test_helper(err: Error, s: &str, exp: &[u8]) {
-    assert_eq!(s, format!("{:?}", err));
+    assert_eq!(s, format!("{err:?}"));
     let we = WrappedError { err };
 
     // test packing

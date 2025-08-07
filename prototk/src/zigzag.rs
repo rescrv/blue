@@ -21,8 +21,8 @@ mod tests {
     use super::*;
 
     fn test_case(s: i64, u: u64) {
-        assert_eq!(u, zigzag(s), "human broke zigzag({}) -> {}?", s, u);
-        assert_eq!(s, unzigzag(u), "human broke unzigzag({}) -> {}?", u, s);
+        assert_eq!(u, zigzag(s), "human broke zigzag({s}) -> {u}?");
+        assert_eq!(s, unzigzag(u), "human broke unzigzag({u}) -> {s}?");
     }
 
     #[test]

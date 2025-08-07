@@ -18,7 +18,7 @@ impl Core {
     }
 
     pub fn with_info(&mut self, name: &str, value: impl Debug) {
-        self.info.push((name.to_string(), format!("{:#?}", value)));
+        self.info.push((name.to_string(), format!("{value:#?}")));
     }
 
     pub fn without_backtrace(&mut self) {

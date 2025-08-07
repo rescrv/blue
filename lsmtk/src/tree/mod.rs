@@ -1248,7 +1248,7 @@ impl LsmTree {
         hard_link(&sst_path, target).as_z()?;
         edit.add(&setsum.hexdigest())?;
         if let Some(log_num) = log_num {
-            edit.info('L', &format!("{}", log_num))?;
+            edit.info('L', &format!("{log_num}"))?;
         }
         self.apply_manifest_ingest(acc, edit, metadata)?;
         Ok(())

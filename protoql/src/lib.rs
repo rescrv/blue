@@ -1675,7 +1675,7 @@ mod test {
                 TableSet::parse(protoql_table_set).expect("test table_set should always parse");
             diff_path(
                 &test_path(test_data, ".schema.describe"),
-                &format!("{:#?}", table_set),
+                &format!("{table_set:#?}"),
             );
             diff_path(
                 &test_path(test_data, ".schema.protoc"),

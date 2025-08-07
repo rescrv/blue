@@ -208,7 +208,7 @@ impl From<std::io::Error> for Error {
     fn from(what: std::io::Error) -> Error {
         Error::SystemError {
             core: ErrorCore::default(),
-            what: format!("{:?}", what),
+            what: format!("{what:?}"),
         }
     }
 }
@@ -217,7 +217,7 @@ impl From<chrono::RoundingError> for Error {
     fn from(what: chrono::RoundingError) -> Error {
         Error::TimeError {
             core: ErrorCore::default(),
-            what: format!("{:?}", what),
+            what: format!("{what:?}"),
         }
     }
 }
@@ -351,8 +351,7 @@ impl Time {
             Ok(Time(delta))
         } else {
             Err(Error::arithmetic(format!(
-                "subtraction underflowed: {:?} - {:?}",
-                point, prev
+                "subtraction underflowed: {point:?} - {prev:?}"
             )))
         }
     }
@@ -363,8 +362,7 @@ impl Time {
             Ok(Time(delta))
         } else {
             Err(Error::arithmetic(format!(
-                "subtraction underflowed: {:?} - {:?}",
-                point, prev
+                "subtraction underflowed: {point:?} - {prev:?}"
             )))
         }
     }
@@ -379,8 +377,7 @@ impl Time {
             Ok(Time(time))
         } else {
             Err(Error::arithmetic(format!(
-                "addition overflowed: {:?} + {:?}",
-                prev, delta,
+                "addition overflowed: {prev:?} + {delta:?}"
             )))
         }
     }
@@ -388,20 +385,17 @@ impl Time {
     fn undelta_undelta(prev_prev: &Self, prev: &Self, delta: &Self) -> Result<Self, Error> {
         let Some(value) = delta.0.checked_add(prev.0) else {
             return Err(Error::arithmetic(format!(
-                "addition overflowed: {:?} + {:?}",
-                delta, prev,
+                "addition overflowed: {delta:?} + {prev:?}"
             )));
         };
         let Some(value) = value.checked_add(prev.0) else {
             return Err(Error::arithmetic(format!(
-                "addition overflowed: {:?} + {:?}",
-                value, prev,
+                "addition overflowed: {value:?} + {prev:?}"
             )));
         };
         let Some(value) = value.checked_sub(prev_prev.0) else {
             return Err(Error::arithmetic(format!(
-                "subtraction underflowed: {:?} - {:?}",
-                value, prev_prev,
+                "subtraction underflowed: {value:?} - {prev_prev:?}"
             )));
         };
         if Time(value) < *prev {

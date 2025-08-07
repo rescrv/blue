@@ -56,7 +56,7 @@ fn main() {
         let mut rcvar = shvar::rcvar(&stdin)
             .expect("shell variable substitution should be valid")
             .into_iter()
-            .map(|v| format!("{}{}", prefix, v))
+            .map(|v| format!("{prefix}{v}"))
             .collect::<Vec<_>>();
         rcvar.sort();
         println!("{}", rcvar.join("\n"));

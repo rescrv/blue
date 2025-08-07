@@ -101,13 +101,12 @@ impl<'a> DeltaSliceDecoder<'a> {
         let bytes_in_buffer = bytes[1] as usize | ((bytes[2] as usize) << 8);
         if bytes_in_buffer < 3 {
             return Err(Error::internal(format!(
-                "expected at buffer length to be at least 3; had: {}",
-                bytes_in_buffer
+                "expected at buffer length to be at least 3; had: {bytes_in_buffer}"
             )));
         }
         let bits_in_last_byte = if bytes[0] == 0 { 8 } else { bytes[0] as usize };
         let bits = (bytes_in_buffer - 1) * 8 + bits_in_last_byte;
-        assert_eq!((bits + 7) / 8, bytes_in_buffer);
+        assert_eq!(bits.div_ceil(8), bytes_in_buffer);
         if bytes.len() < bytes_in_buffer {
             return Err(Error::internal(format!(
                 "buffer length was {}, but only had {} bytes",

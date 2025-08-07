@@ -115,7 +115,7 @@ impl std::fmt::Debug for Host {
 
 impl std::fmt::Display for Host {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -346,7 +346,7 @@ impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Error {
         Error::OsError {
             core: ErrorCore::default(),
-            what: format!("{}", err),
+            what: format!("{err}"),
         }
     }
 }

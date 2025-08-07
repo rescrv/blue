@@ -12,6 +12,6 @@ fn main() {
     }
     let manifest = Manifest::open(options, &roots[0]).expect("could not open");
     for s in manifest.strs() {
-        println!("{}", s);
+        println!("{s}");
     }
 }

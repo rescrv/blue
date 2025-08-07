@@ -305,8 +305,8 @@ pub mod tests {
         drop(builder);
         let wt = WT::unpack(buf).unwrap().0;
         for (i, t) in TEXT.iter().enumerate() {
-            assert_eq!(Some(*t), expected.access(i), "i = {}", i);
-            assert_eq!(Some(*t), wt.access(i), "i = {}", i);
+            assert_eq!(Some(*t), expected.access(i), "i = {i}");
+            assert_eq!(Some(*t), wt.access(i), "i = {i}");
         }
         for c in CHARS.iter() {
             for i in 0..TEXT.len() {

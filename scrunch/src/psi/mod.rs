@@ -186,7 +186,7 @@ pub mod tests {
         let returned = regularize(&table);
         if expected != returned {
             println!("expected:\n{}", t.table);
-            println!("returned:\n{}", table);
+            println!("returned:\n{table}");
             panic!("fix this test");
         }
     }

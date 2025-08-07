@@ -125,7 +125,7 @@ impl Epoll {
     fn new() -> Result<Self, Error> {
         #[cfg(target_os = "macos")]
         {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
+            Err(std::io::Error::other("MacOS not supported").into())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -159,7 +159,7 @@ impl OsPoll for Epoll {
         #[cfg(target_os = "macos")]
         {
             let _ = fd;
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
+            Err(std::io::Error::other("MacOS not supported").into())
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -179,7 +179,7 @@ impl OsPoll for Epoll {
         #[cfg(target_os = "macos")]
         {
             let _ = timeout_ms;
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "MacOS not supported").into())
+            Err(std::io::Error::other("MacOS not supported").into())
         }
         #[cfg(not(target_os = "macos"))]
         {

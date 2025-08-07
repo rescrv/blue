@@ -466,7 +466,7 @@ mod test_util {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        let path = PathBuf::from(format!("{}_{}", root, line));
+        let path = PathBuf::from(format!("{root}_{line}"));
         if path.exists() {
             remove_dir_all(&path).expect("could not prepare for test");
         }

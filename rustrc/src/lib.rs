@@ -1119,11 +1119,11 @@ impl ExecutionContext {
             rc_conf::var_name_from_service(service)
         ))?);
         for (key, value) in bound.iter() {
-            env.push(CString::new(format!("{}={}", key, value))?);
+            env.push(CString::new(format!("{key}={value}"))?);
         }
         for (key, value) in std::env::vars() {
             if matches!(key.as_str(), "PATH" | "TERM" | "TZ" | "LANG") {
-                env.push(CString::new(format!("{}={}", key, value))?);
+                env.push(CString::new(format!("{key}={value}"))?);
             }
         }
         env.sort();

@@ -134,7 +134,7 @@ impl Histogram {
     pub fn dump<W: Write>(&self, mut w: W) -> Result<(), std::io::Error> {
         writeln!(w, "{}", self.sfb.sig_figs)?;
         for (_, bucket) in self.iter() {
-            writeln!(w, "{}", bucket)?;
+            writeln!(w, "{bucket}")?;
         }
         Ok(())
     }
@@ -143,30 +143,18 @@ impl Histogram {
     pub fn load<R: Read>(r: R) -> Result<Self, std::io::Error> {
         let mut lines = BufReader::new(r).lines();
         let Ok(Some(sig_figs)) = lines.next().transpose() else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "missing sig figs value",
-            ));
+            return Err(std::io::Error::other("missing sig figs value"));
         };
         let Ok(sig_figs) = sig_figs.parse::<i32>() else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "could not parse sig figs",
-            ));
+            return Err(std::io::Error::other("could not parse sig figs"));
         };
         if !(1..=4).contains(&sig_figs) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "sig figs out of bounds",
-            ));
+            return Err(std::io::Error::other("sig figs out of bounds"));
         }
         let mut buckets = vec![];
         while let Some(bucket) = lines.next().transpose()? {
             let Ok(bucket) = bucket.parse::<u64>() else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "could not parse bucket",
-                ));
+                return Err(std::io::Error::other("could not parse bucket"));
             };
             buckets.push(bucket);
         }

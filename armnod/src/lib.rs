@@ -466,8 +466,7 @@ impl ArmnodOptions {
             let set_once_end = self.set_once_end.unwrap_or(end);
             if set_once_begin > set_once_end {
                 return Err(format!(
-                    "--set-once-begin must be <= --set-once-end: {} > {}",
-                    set_once_begin, set_once_end
+                    "--set-once-begin must be <= --set-once-end: {set_once_begin} > {set_once_end}"
                 ));
             }
             set_chooser_once(set_once_begin, set_once_end)
@@ -507,8 +506,7 @@ impl ArmnodOptions {
             let max_length: u32 = self.max_length.unwrap_or(min_length + 8);
             if min_length > max_length {
                 return Err(format!(
-                    "--string-min-length must be <= --string-max-length: {} > {}",
-                    min_length, max_length
+                    "--string-min-length must be <= --string-max-length: {min_length} > {max_length}"
                 ));
             }
             if self.length.is_some() {
@@ -521,7 +519,7 @@ impl ArmnodOptions {
             }
             uniform_length_chooser(min_length, max_length)
         } else {
-            return Err(format!("unknown length mode: {}", length_mode));
+            return Err(format!("unknown length mode: {length_mode}"));
         };
         // alphabet to use
         let charset = self.charset.unwrap_or("default".to_string());
@@ -542,7 +540,7 @@ impl ArmnodOptions {
         } else if charset == "hex" {
             CharSetChooser::new(CHAR_SET_HEX)
         } else {
-            return Err(format!("unknown character set: {}", charset));
+            return Err(format!("unknown character set: {charset}"));
         };
         let characters: Box<dyn CharacterChooser> = Box::new(characters);
         // generate strings

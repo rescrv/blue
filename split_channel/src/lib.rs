@@ -421,7 +421,7 @@ impl SplitChannelOptions {
         let mut builder =
             SslConnector::builder(SslMethod::tls()).map_err(|err| Error::TransportFailure {
                 core: ErrorCore::default(),
-                what: format!("could not build connector builder: {}", err),
+                what: format!("could not build connector builder: {err}"),
             })?;
         if let Some(ca_file) = &self.ca_file {
             builder.set_ca_file(ca_file).expect("set_ca_file");
@@ -449,7 +449,7 @@ impl SplitChannelOptions {
                 .connect(&self.host, stream)
                 .map_err(|err| Error::TransportFailure {
                     core: ErrorCore::default(),
-                    what: format!("{}", err),
+                    what: format!("{err}"),
                 })?;
         from_stream(stream)
     }

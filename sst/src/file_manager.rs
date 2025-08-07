@@ -113,7 +113,7 @@ impl State {
         let (path, file) = match self.files[fd as usize].take() {
             Some((path, file)) => (path, file),
             None => {
-                panic!("self.file[{}] is None", fd);
+                panic!("self.file[{fd}] is None");
             }
         };
         if file.as_raw_fd() != fd {
@@ -266,7 +266,7 @@ fn open(path: PathBuf) -> Result<File, Error> {
         Err(e) => {
             let err = Error::SystemError {
                 core: ErrorCore::default(),
-                what: format!("{:?}", e),
+                what: format!("{e:?}"),
             }
             .with_info("path", path.to_string_lossy());
             return Err(err);
