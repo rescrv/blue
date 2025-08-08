@@ -26,7 +26,7 @@ one_two_eight = { path = "../one_two_eight", version = "0.9" }
 prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
 setsum = { path = "../setsum", version = "0.7" }
-skipfree = { path = "../skipfree", version = "0.8" }
+skipfree = { path = "../skipfree", version = "0.9" }
 sst = { path = "../sst", version = "0.17" }
 sync42 = { path = "../sync42", version = "0.14" }
 utilz = { path = "../utilz", version = "0.7" }
