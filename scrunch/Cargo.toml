@@ -1,6 +1,6 @@
 [package]
 name = "scrunch"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "Scrunch provides full-text-searching compression."

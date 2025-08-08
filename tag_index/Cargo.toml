@@ -18,7 +18,7 @@ libc = "0.2"
 
 buffertk = { path = "../buffertk", version = "0.13" }
 listfree = { path = "../listfree", version = "0.7" }
-scrunch = { path = "../scrunch", version = "0.8" }
+scrunch = { path = "../scrunch", version = "0.9" }
 
 [dev-dependencies]
 arrrg = { path = "../arrrg", version = "0.8" }
