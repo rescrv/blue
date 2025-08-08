@@ -18,7 +18,7 @@ getopts = { version = "0.2", optional = true }
 siphasher = "1"
 yaml-rust = "0.4"
 
-arrrg = { path = "../arrrg", version = "0.7", optional = true }
+arrrg = { path = "../arrrg", version = "0.8", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
 rc_conf = { path = "../rc_conf", version = "0.12" }
 shvar = { path = "../shvar", version = "0.8" }
