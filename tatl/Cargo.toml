@@ -9,5 +9,5 @@ repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.12" }
-one_two_eight = { path = "../one_two_eight", version = "0.9" }
+one_two_eight = { path = "../one_two_eight", version = "0.10" }
 prototk = { path = "../prototk", version = "0.13" }
