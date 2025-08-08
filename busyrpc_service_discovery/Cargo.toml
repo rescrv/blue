@@ -1,6 +1,6 @@
 [package]
 name = "busyrpc_service_discovery"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "busyrpc_service_discovery provides service discovery for rpc_pb." 
