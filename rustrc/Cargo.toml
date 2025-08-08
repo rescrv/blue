@@ -17,7 +17,7 @@ libc = "0.2"
 getopts = { version = "0.2" }
 
 arrrg = { path = "../arrrg", version = "0.7" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.7" }
+arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
 biometrics = { path = "../biometrics", version = "0.11" }
 indicio = { path = "../indicio", version = "0.11" }
 minimal_signals = { path = "../minimal_signals", version = "0.5" }

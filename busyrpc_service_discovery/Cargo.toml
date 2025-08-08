@@ -17,7 +17,7 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 getopts = { version = "0.2", optional = true }
 
 arrrg = { path = "../arrrg", version = "0.7", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.7", optional = true }
+arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
 busyrpc = { path = "../busyrpc", version = "0.12" }
 indicio = { path = "../indicio", version = "0.11" }
 minimal_signals = { path = "../minimal_signals", version = "0.5" }
