@@ -21,3 +21,4 @@ shift
 sed -i -e 's|version = "'$FROM_VER'"|version = "'$TO_VER'"|g' $PACKAGE/Cargo.toml
 sed -i -e 's|'$PACKAGE' = { path = "../'$PACKAGE'", version = "'$FROM_SHORT_VER'"|'$PACKAGE' = { path = "../'$PACKAGE'", version = "'$TO_SHORT_VER'"|g' */Cargo.toml
 cargo check --all-targets
+rm **/Cargo.toml-e
