@@ -39,7 +39,7 @@ proptest = "1.0"
 
 biometrics_prometheus = { path = "../biometrics_prometheus", version = "0.8" }
 guacamole = { path = "../guacamole", version = "0.13" }
-sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.5" }
+sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.6" }
 
 [[bin]]
 name = "sarosd-recovery"
