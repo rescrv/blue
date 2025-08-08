@@ -1,6 +1,6 @@
 [package]
 name = "k8src"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "k8src is the kubernetes rc scripting language"
