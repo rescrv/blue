@@ -1,6 +1,6 @@
 [package]
 name = "bloomcalc"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "bloomcalc provides a calculator for bloom filters."
