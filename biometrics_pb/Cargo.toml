@@ -13,5 +13,5 @@ buffertk = { path = "../buffertk", version = "0.13" }
 one_two_eight = { path = "../one_two_eight", version = "0.10" }
 prototk = { path = "../prototk", version = "0.13" }
 prototk_derive = { path = "../prototk_derive", version = "0.13" }
-tuple_key = { path = "../tuple_key", version = "0.12" }
+tuple_key = { path = "../tuple_key", version = "0.13" }
 tuple_key_derive = { path = "../tuple_key_derive", version = "0.11" }
