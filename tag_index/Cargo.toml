@@ -1,6 +1,6 @@
 [package]
 name = "tag_index"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "tag_index provides a searchable index over key-value tags"
