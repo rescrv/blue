@@ -141,10 +141,24 @@ impl<'a> Path<'a> {
         if self.has_app_defined() && !prefix.has_app_defined() {
             return None;
         }
-        let mut path = self.path[..].trim_start_matches('/');
-        let mut prefix = prefix.path[..].trim_start_matches('/');
+        let mut path = if self.has_root() {
+            &self.path[1..]
+        } else if self.has_app_defined() {
+            &self.path[2..]
+        } else {
+            &self.path[..]
+        };
+        let mut prefix = if prefix.has_root() {
+            &prefix.path[1..]
+        } else if prefix.has_app_defined() {
+            &prefix.path[2..]
+        } else {
+            &prefix.path[..]
+        };
         loop {
-            if let Some(prefix_slash) = prefix.find('/') {
+            if path.is_empty() && !prefix.is_empty() {
+                return None;
+            } else if let Some(prefix_slash) = prefix.find('/') {
                 let path_slash = path.find('/')?;
                 if prefix[..prefix_slash] != path[..path_slash] {
                     return None;
@@ -170,6 +184,8 @@ impl<'a> Path<'a> {
                 } else {
                     return Some(Path::new(path));
                 }
+            } else if !path.starts_with(prefix) {
+                return None;
             }
         }
     }
