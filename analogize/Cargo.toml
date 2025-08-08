@@ -28,7 +28,7 @@ mani = { path = "../mani", version = "0.9" }
 prototk = { path = "../prototk", version = "0.12" }
 prototk_derive = { path = "../prototk_derive", version = "0.12" }
 scrunch = { path = "../scrunch", version = "0.8" }
-zerror = { path = "../zerror", version = "0.7" }
+zerror = { path = "../zerror", version = "0.8" }
 zerror_core = { path = "../zerror_core", version = "0.12" }
 zerror_derive = { path = "../zerror_derive", version = "0.6" }
 
