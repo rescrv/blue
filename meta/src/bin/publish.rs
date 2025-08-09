@@ -5,7 +5,14 @@ use toml::Table;
 
 const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb"];
 
-const EXCLUDE_DIRS: &[&str] = &[".git", "target", "napkins", ".symphonize"];
+const EXCLUDE_DIRS: &[&str] = &[
+    ".git",
+    ".github",
+    ".claude",
+    "target",
+    "napkins",
+    ".symphonize",
+];
 
 fn workspace_members() -> Vec<String> {
     let workspace_text = read_to_string("Cargo.toml").expect("reading workspace toml");
