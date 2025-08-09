@@ -19,5 +19,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
+    - name: cargo hack
+      run: cargo install cargo-hack
     - name: run ci
       run: ./ci
