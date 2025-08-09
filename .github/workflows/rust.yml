@@ -18,3 +18,17 @@ jobs:
     - uses: actions/checkout@v4
     - name: run ci
       run: ./ci
+    - uses: actions/checkout@v4
+    - name: Set up Rust
+      uses: actions/setup-rust@v2
+      with:
+        rust-version: 'stable'
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
