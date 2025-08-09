@@ -11,8 +11,9 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::ops::Bound;
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
@@ -1147,9 +1148,9 @@ impl From<SstMetadata> for indicio::Value {
 
 /// An Sst represents an immutable sorted string table.
 #[derive(Clone, Debug)]
-pub struct Sst {
+pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
     // The file backing the table.
-    handle: FileHandle,
+    handle: W,
     // The final block of the table.
     final_block: FinalBlock,
     // Sst metadata.
@@ -1160,28 +1161,24 @@ pub struct Sst {
     file_size: u64,
 }
 
-impl Sst {
+impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     /// Open the provided path using options.
-    pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Sst<FileHandle>, Error> {
         let handle = open_without_manager(path.as_ref())?;
-        Sst::from_file_handle(handle)
+        Sst::<FileHandle>::from_file_handle(handle)
     }
 
     /// Create an Sst from a file handle.
-    pub fn from_file_handle(handle: FileHandle) -> Result<Self, Error> {
+    pub fn from_file_handle(mut handle: W) -> Result<Self, Error> {
         SST_OPEN.click();
         // Read and parse the final block's offset
-        let file_size = handle.size()?;
+        let file_size = handle.seek(SeekFrom::End(0))?;
         if file_size < 8 {
             CORRUPTION.click();
             let err = Err(Error::Corruption {
                 core: ErrorCore::default(),
                 context: "file has fewer than eight bytes".to_string(),
-            })
-            .with_info(
-                "path",
-                handle.path().unwrap_or(PathBuf::from("<not available>")),
-            );
+            });
             return err;
         }
         let position = file_size - 8;
@@ -1262,9 +1259,9 @@ impl Sst {
     }
 
     /// Get a new cursor for the Sst.
-    pub fn cursor(&self) -> SstCursor {
+    pub fn cursor(&self) -> SstCursor<W> {
         SST_CURSOR_NEW.click();
-        SstCursor::new(self.clone())
+        SstCursor::<W>::new(self.clone())
     }
 
     /// Get the Sst's metadata.  This will involve reading the first and last keys from disk.
@@ -1309,7 +1306,7 @@ impl Sst {
         meta_cursor.seek_to_first()?;
         meta_cursor.next()?;
         while let Some(kvr) = meta_cursor.key_value() {
-            let metadata = SstCursor::metadata_from_kvr(kvr)
+            let metadata = SstCursor::<W>::metadata_from_kvr(kvr)
                 .expect("metadata should parse")
                 .unwrap();
             println!("{metadata:?}");
@@ -1331,7 +1328,7 @@ impl Sst {
         Ok(())
     }
 
-    fn load_block(file: &FileHandle, block_metadata: &BlockMetadata) -> Result<Block, Error> {
+    fn load_block(file: &W, block_metadata: &BlockMetadata) -> Result<Block, Error> {
         SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -1375,10 +1372,7 @@ impl Sst {
         }
     }
 
-    fn load_filter_block(
-        file: &FileHandle,
-        block_metadata: &BlockMetadata,
-    ) -> Result<Filter, Error> {
+    fn load_filter_block(file: &W, block_metadata: &BlockMetadata) -> Result<Filter, Error> {
         SST_LOAD_FILTER.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -1468,7 +1462,7 @@ impl Sst {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<SstCursor>>, Error> {
+    ) -> Result<BoundsCursor<PruningCursor<SstCursor<W>>>, Error> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -1851,7 +1845,7 @@ impl Builder for SstBuilder {
         // fsync
         builder.output.flush().as_z()?;
         builder.output.get_mut().sync_all().as_z()?;
-        Sst::new(builder.options, builder.path)
+        Sst::<FileHandle>::new(builder.options, builder.path)
     }
 }
 
@@ -1946,8 +1940,8 @@ impl Builder for SstMultiBuilder {
 
 /// A cursor over an Sst.
 #[derive(Clone, Debug)]
-pub struct SstCursor {
-    table: Sst,
+pub struct SstCursor<W: Clone + Seek + Write + FileExt = FileHandle> {
+    table: Sst<W>,
     // The position in the table.  When meta_cursor is at its extremes, block_cursor is None.
     // Otherwise, block_cursor is positioned at the block referred to by the most recent
     // KVP-returning call to meta_cursor.
@@ -1955,8 +1949,8 @@ pub struct SstCursor {
     block_cursor: Option<BlockCursor>,
 }
 
-impl SstCursor {
-    fn new(table: Sst) -> Self {
+impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
+    fn new(table: Sst<W>) -> Self {
         let meta_cursor = table.index_block.cursor();
         Self {
             table,
@@ -1975,7 +1969,7 @@ impl SstCursor {
                 return Ok(None);
             }
         };
-        SstCursor::metadata_from_kvr(kvr)
+        SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
     fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
@@ -1988,7 +1982,7 @@ impl SstCursor {
                 return Ok(None);
             }
         };
-        SstCursor::metadata_from_kvr(kvr)
+        SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
     fn meta_value(&mut self) -> Result<Option<BlockMetadata>, Error> {
@@ -1998,7 +1992,7 @@ impl SstCursor {
                 return Ok(None);
             }
         };
-        SstCursor::metadata_from_kvr(kvr)
+        SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
     fn metadata_from_kvr(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
@@ -2025,7 +2019,7 @@ impl SstCursor {
     }
 }
 
-impl Cursor for SstCursor {
+impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
     fn seek_to_first(&mut self) -> Result<(), Error> {
         SST_CURSOR_SEEK_TO_FIRST.click();
         self.meta_cursor.seek_to_first()?;
@@ -2049,7 +2043,7 @@ impl Cursor for SstCursor {
                 return self.seek_to_last();
             }
         };
-        let block = Sst::load_block(&self.table.handle, &metadata)?;
+        let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
         let mut block_cursor = block.cursor();
         block_cursor.seek(key)?;
         if block_cursor.key().is_none() {
@@ -2059,7 +2053,7 @@ impl Cursor for SstCursor {
                     return self.seek_to_last();
                 }
             };
-            let block = Sst::load_block(&self.table.handle, &metadata)?;
+            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek(key)?;
             self.block_cursor = Some(block_cursor);
@@ -2078,7 +2072,7 @@ impl Cursor for SstCursor {
                     return self.seek_to_first();
                 }
             };
-            let block = Sst::load_block(&self.table.handle, &metadata)?;
+            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek_to_last()?;
             self.block_cursor = Some(block_cursor);
@@ -2104,7 +2098,7 @@ impl Cursor for SstCursor {
                     return self.seek_to_last();
                 }
             };
-            let block = Sst::load_block(&self.table.handle, &metadata)?;
+            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
             let mut block_cursor = block.cursor();
             block_cursor.seek_to_first()?;
             self.block_cursor = Some(block_cursor);

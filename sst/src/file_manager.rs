@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::c_int;
 use std::fs::File;
+use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -82,6 +83,32 @@ impl FileHandle {
     /// return the size of the file.
     pub fn size(&self) -> Result<u64, Error> {
         Ok(self.file.metadata()?.len())
+    }
+}
+
+impl Seek for FileHandle {
+    fn seek(&mut self, from: SeekFrom) -> Result<u64, std::io::Error> {
+        self.file.seek(from)
+    }
+}
+
+impl Write for FileHandle {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.file.flush()
+    }
+}
+
+impl FileExt for FileHandle {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize, std::io::Error> {
+        self.file.read_at(buf, offset)
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize, std::io::Error> {
+        self.file.write_at(buf, offset)
     }
 }
 
@@ -235,7 +262,7 @@ impl FileManager {
     /// Stat the provided path, if allocation limits allow.
     pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, Error> {
         let handle = self.open(path)?;
-        let sst = Sst::from_file_handle(handle)?;
+        let sst = Sst::<FileHandle>::from_file_handle(handle)?;
         sst.metadata()
     }
 }

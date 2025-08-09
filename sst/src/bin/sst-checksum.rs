@@ -3,16 +3,17 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
+use sst::file_manager::FileHandle;
 use sst::setsum::Setsum;
 use sst::{Cursor, Sst, SstOptions};
 
 fn fast_setsum(opts: SstOptions, sst: &str) -> String {
-    let sst = Sst::new(opts, sst).expect("open Sst");
+    let sst = Sst::<FileHandle>::new(opts, sst).expect("open Sst");
     sst.fast_setsum().hexdigest()
 }
 
 fn slow_setsum(opts: SstOptions, sst: &str) -> String {
-    let sst = Sst::new(opts, sst).expect("open Sst");
+    let sst = Sst::<FileHandle>::new(opts, sst).expect("open Sst");
     let mut cursor = sst.cursor();
     cursor.seek_to_first().expect("seek Sst");
     let mut setsum = Setsum::default();
