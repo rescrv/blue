@@ -21,4 +21,3 @@ jobs:
           ${{ runner.os }}-cargo-
     - name: run ci
       run: ./ci
-      shell: zsh
