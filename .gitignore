@@ -6,3 +6,5 @@
 /Cargo.lock
 /target/
 /.symphonize/
+/.ci.packages
+/.claude

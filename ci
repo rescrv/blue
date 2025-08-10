@@ -1,7 +1,9 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 
-set -e
 set -x
+set -u
+set -o errexit
+set -o pipefail
 
 cargo fmt -- --check
 
@@ -11,12 +13,13 @@ export PATH="$PATH":"`pwd`"/target/release
 export RUSTFLAGS="-A clippy::needless-lifetimes --deny warnings"
 
 cargo build --release --bins
+target/release/publish > .ci.packages
 
-for package in `target/release/publish`
+for package in `cat .ci.packages`
 do
     pushd $package
     cargo clippy --no-deps --all-targets
-    cargo hack $HACK_FLAGS --feature-powerset test --release
+    cargo hack --feature-powerset test --release
     cargo doc --no-deps
     "${ROOTDIR}/target/release/binaries"
     popd
