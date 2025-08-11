@@ -5,7 +5,7 @@ import os.path
 import re
 import subprocess
 
-EXCLUDE_DIRS = ['.git', 'target', 'meta', 'napkins', '.symphonize'];
+EXCLUDE_DIRS = ['.git', '.github', '.claude', 'target', 'meta', 'napkins', '.symphonize'];
 
 RE_LOCAL_PACKAGE = re.compile(r'^(?P<crate>[a-zA-Z][a-zA-Z0-9_]*) v[0-9]+\.[0-9]+\.[0-9]+ .*\((?P<path>[a-zA-Z0-9_/]*)\)')
 RE_VERSION = re.compile(r'version = "(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"')
@@ -33,6 +33,7 @@ def topological_sort(crates):
             if key in seen:
                 continue
             if crates[key] - seen:
+                print('not yet', key, crates[key] - seen)
                 continue
             seen.add(key)
             yield key
