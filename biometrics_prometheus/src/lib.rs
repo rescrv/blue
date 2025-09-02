@@ -166,8 +166,8 @@ impl Emitter {
         let written = self.written;
         let output = self.get_output(now_millis)?;
         output.write_all(line.as_ref().as_bytes())?;
-        if flush_trigger.is_none() && written > options.segment_size
-            || last_flush.elapsed() > options.flush_interval
+        if flush_trigger.is_none()
+            && (written > options.segment_size || last_flush.elapsed() > options.flush_interval)
         {
             self.flush_trigger = Some(now_millis);
         }
