@@ -191,7 +191,7 @@ pub struct GarbageCollector {
 impl GarbageCollector {
     /// Return the next key to be retained from garbage collection.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<KeyRef>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyRef<'_>>, Error> {
         if let Some(ts) = self.key_return.take() {
             return Ok(Some(KeyRef {
                 key: &self.key_backing,
@@ -238,7 +238,7 @@ impl GarbageCollector {
         &mut self,
         kvp: KeyValuePair,
         tombstones: Vec<u64>,
-    ) -> Result<Option<KeyRef>, Error> {
+    ) -> Result<Option<KeyRef<'_>>, Error> {
         if !tombstones.is_empty() {
             // TODO(rescrv):  Possibly set key_backing?
             self.key_return = Some(kvp.timestamp);
@@ -392,7 +392,7 @@ fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
     }
 }
 
-fn ws0(input: &str) -> ParseResult<()> {
+fn ws0(input: &str) -> ParseResult<'_, ()> {
     map(multispace0, |_| ())(input)
 }
 
@@ -408,14 +408,14 @@ fn parse_number(input: &str) -> Result<NonZeroU64, &'static str> {
     }
 }
 
-fn number_literal(input: &str) -> ParseResult<NonZeroU64> {
+fn number_literal(input: &str) -> ParseResult<'_, NonZeroU64> {
     context(
         "number literal",
         map_res(recognize(tuple((opt(tag("-")), digit1))), parse_number),
     )(input)
 }
 
-fn versions(input: &str) -> ParseResult<GarbageCollectionPolicy> {
+fn versions(input: &str) -> ParseResult<'_, GarbageCollectionPolicy> {
     context(
         "versions",
         map(
@@ -433,7 +433,7 @@ fn versions(input: &str) -> ParseResult<GarbageCollectionPolicy> {
     )(input)
 }
 
-fn expires(input: &str) -> ParseResult<GarbageCollectionPolicy> {
+fn expires(input: &str) -> ParseResult<'_, GarbageCollectionPolicy> {
     context(
         "expires",
         map(
@@ -451,7 +451,7 @@ fn expires(input: &str) -> ParseResult<GarbageCollectionPolicy> {
     )(input)
 }
 
-fn any(input: &str) -> ParseResult<GarbageCollectionPolicy> {
+fn any(input: &str) -> ParseResult<'_, GarbageCollectionPolicy> {
     context(
         "any",
         map(
@@ -471,7 +471,7 @@ fn any(input: &str) -> ParseResult<GarbageCollectionPolicy> {
     )(input)
 }
 
-fn all(input: &str) -> ParseResult<GarbageCollectionPolicy> {
+fn all(input: &str) -> ParseResult<'_, GarbageCollectionPolicy> {
     context(
         "all",
         map(
@@ -491,7 +491,7 @@ fn all(input: &str) -> ParseResult<GarbageCollectionPolicy> {
     )(input)
 }
 
-fn gc_policy(input: &str) -> ParseResult<GarbageCollectionPolicy> {
+fn gc_policy(input: &str) -> ParseResult<'_, GarbageCollectionPolicy> {
     context(
         "garbage collection policy",
         alt((versions, expires, any, all)),

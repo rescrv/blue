@@ -19,7 +19,7 @@ use crate::{BiometricsStore, Error, Point, Series, Time};
 
 ////////////////////////////////////////////// parsers /////////////////////////////////////////////
 
-pub fn atom(input: &str) -> ParseResult<String> {
+pub fn atom(input: &str) -> ParseResult<'_, String> {
     context(
         "atom",
         map(
@@ -32,7 +32,7 @@ pub fn atom(input: &str) -> ParseResult<String> {
     )(input)
 }
 
-pub fn metric_name(input: &str) -> ParseResult<String> {
+pub fn metric_name(input: &str) -> ParseResult<'_, String> {
     context(
         "metric name",
         map(
@@ -45,7 +45,7 @@ pub fn metric_name(input: &str) -> ParseResult<String> {
     )(input)
 }
 
-pub fn duration(input: &str) -> ParseResult<Duration> {
+pub fn duration(input: &str) -> ParseResult<'_, Duration> {
     context(
         "duration",
         map(
@@ -67,6 +67,7 @@ pub fn duration(input: &str) -> ParseResult<Duration> {
 pub fn counters(
     input: &str,
 ) -> ParseResult<
+    '_,
     impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
 > {
     context(
@@ -119,7 +120,7 @@ pub fn counters(
 //////////////////////////////////////////// aggregates ////////////////////////////////////////////
 
 #[allow(clippy::type_complexity)]
-fn aggregate_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
+fn aggregate_helper(input: &str) -> ParseResult<'_, Box<dyn Fn(&[Point]) -> Point>> {
     context(
         "aggregate function",
         alt((
@@ -137,6 +138,7 @@ fn aggregate_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> 
 pub fn aggregate(
     input: &str,
 ) -> ParseResult<
+    '_,
     impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
 > {
     context(
@@ -171,7 +173,7 @@ pub fn aggregate(
 ////////////////////////////////////////////// rollups /////////////////////////////////////////////
 
 #[allow(clippy::type_complexity)]
-fn rollup_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
+fn rollup_helper(input: &str) -> ParseResult<'_, Box<dyn Fn(&[Point]) -> Point>> {
     context(
         "rollup function",
         alt((
@@ -194,6 +196,7 @@ fn rollup_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
 pub fn rollup(
     input: &str,
 ) -> ParseResult<
+    '_,
     impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
 > {
     context(
@@ -264,6 +267,7 @@ macro_rules! pointwise_helper {
 pub fn pointwise(
     input: &str,
 ) -> ParseResult<
+    '_,
     Box<
         dyn Fn(
             &rpc_pb::Context,
@@ -315,7 +319,7 @@ pub fn pointwise(
 }
 
 #[allow(clippy::type_complexity)]
-fn uniform_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
+fn uniform_helper(input: &str) -> ParseResult<'_, Box<dyn Fn(&[Point]) -> Point>> {
     context(
         "uniform function",
         alt((
@@ -339,6 +343,7 @@ fn uniform_helper(input: &str) -> ParseResult<Box<dyn Fn(&[Point]) -> Point>> {
 pub fn uniform(
     input: &str,
 ) -> ParseResult<
+    '_,
     impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
 > {
     context(
@@ -372,7 +377,7 @@ pub fn uniform(
 /////////////////////////////////////////////// time ///////////////////////////////////////////////
 
 #[allow(clippy::type_complexity)]
-fn time_helper(input: &str) -> ParseResult<Box<dyn Fn(Time) -> Point>> {
+fn time_helper(input: &str) -> ParseResult<'_, Box<dyn Fn(Time) -> Point>> {
     context(
         "time function",
         alt((
@@ -400,6 +405,7 @@ fn time_helper(input: &str) -> ParseResult<Box<dyn Fn(Time) -> Point>> {
 pub fn time(
     input: &str,
 ) -> ParseResult<
+    '_,
     impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
 > {
     context(
@@ -430,6 +436,7 @@ pub fn time(
 pub fn expr(
     input: &str,
 ) -> ParseResult<
+    '_,
     Box<
         dyn Fn(
             &rpc_pb::Context,

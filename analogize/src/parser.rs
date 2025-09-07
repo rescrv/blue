@@ -178,7 +178,7 @@ pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
 
 /////////////////////////////////////////// bool literal ///////////////////////////////////////////
 
-fn bool_literal(input: &str) -> ParseResult<Query> {
+fn bool_literal(input: &str) -> ParseResult<'_, Query> {
     context(
         "bool literal",
         alt((
@@ -205,7 +205,7 @@ fn number_to_typed(input: &str) -> Result<Query, Error> {
     }
 }
 
-fn number_literal(input: &str) -> ParseResult<Query> {
+fn number_literal(input: &str) -> ParseResult<'_, Query> {
     context(
         "number literal",
         alt((
@@ -233,7 +233,7 @@ fn unescape(input: &str) -> String {
     out.into_iter().collect()
 }
 
-fn string_literal(input: &str) -> ParseResult<String> {
+fn string_literal(input: &str) -> ParseResult<'_, String> {
     context(
         "string literal",
         map(
@@ -247,7 +247,7 @@ fn string_literal(input: &str) -> ParseResult<String> {
     )(input)
 }
 
-fn string_query(input: &str) -> ParseResult<Query> {
+fn string_query(input: &str) -> ParseResult<'_, Query> {
     context(
         "string literal",
         map(
@@ -263,7 +263,7 @@ fn string_query(input: &str) -> ParseResult<Query> {
 
 /////////////////////////////////////////////// array //////////////////////////////////////////////
 
-fn array_query(input: &str) -> ParseResult<Query> {
+fn array_query(input: &str) -> ParseResult<'_, Query> {
     context(
         "array query",
         map(
@@ -284,7 +284,7 @@ fn array_query(input: &str) -> ParseResult<Query> {
 
 ////////////////////////////////////////////// object //////////////////////////////////////////////
 
-fn object_query(input: &str) -> ParseResult<Query> {
+fn object_query(input: &str) -> ParseResult<'_, Query> {
     context(
         "object query",
         map(
@@ -314,7 +314,7 @@ fn object_query(input: &str) -> ParseResult<Query> {
 
 ///////////////////////////////////////////// or_query /////////////////////////////////////////////
 
-fn or_query(input: &str) -> ParseResult<Query> {
+fn or_query(input: &str) -> ParseResult<'_, Query> {
     context(
         "or query",
         map(
@@ -334,7 +334,7 @@ fn or_query(input: &str) -> ParseResult<Query> {
 
 ///////////////////////////////////////////// query_one ////////////////////////////////////////////
 
-pub fn query_one(input: &str) -> ParseResult<Query> {
+pub fn query_one(input: &str) -> ParseResult<'_, Query> {
     alt((
         bool_literal,
         number_literal,
@@ -346,17 +346,17 @@ pub fn query_one(input: &str) -> ParseResult<Query> {
 
 /////////////////////////////////////////////// query //////////////////////////////////////////////
 
-pub fn query(input: &str) -> ParseResult<Query> {
+pub fn query(input: &str) -> ParseResult<'_, Query> {
     context("query", alt((or_query, query_one)))(input)
 }
 
 ////////////////////////////////////////////// private /////////////////////////////////////////////
 
-fn ws0(input: &str) -> ParseResult<()> {
+fn ws0(input: &str) -> ParseResult<'_, ()> {
     map(multispace0, |_| ())(input)
 }
 
-fn ws1(input: &str) -> ParseResult<()> {
+fn ws1(input: &str) -> ParseResult<'_, ()> {
     map(multispace1, |_| ())(input)
 }
 

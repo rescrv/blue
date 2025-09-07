@@ -15,6 +15,7 @@ struct Foo {
 }
 
 #[derive(Clone, Debug, Eq, Message, PartialEq)]
+#[allow(dead_code)]
 struct Bar {
     #[prototk(1, message)]
     res: Result<Foo, Error>,

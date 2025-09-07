@@ -499,7 +499,7 @@ mod test_util {
     macro_rules! sst_check {
         ($test_root:expr; $relative_path:literal: $($key:literal => $val:literal,)*) => {
             let sst_path = PathBuf::from($test_root).join($relative_path);
-            let sst = sst::Sst::new(SstOptions::default(), sst_path).as_z().pretty_unwrap();
+            let sst = sst::Sst::<sst::file_manager::FileHandle>::new(SstOptions::default(), sst_path).as_z().pretty_unwrap();
             let mut cursor = sst.cursor();
             cursor.seek_to_first().as_z().pretty_unwrap();
             $(

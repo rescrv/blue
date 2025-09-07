@@ -129,7 +129,7 @@ impl Cursor for ReferenceCursor {
         }
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if self.index < 0 || self.index as usize >= self.entries.len() {
             None
         } else {

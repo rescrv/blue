@@ -1580,7 +1580,7 @@ impl LsmTree {
         }
     }
 
-    pub(crate) fn take_snapshot(&self) -> VersionRef {
+    pub(crate) fn take_snapshot(&self) -> VersionRef<'_> {
         let version = Arc::clone(&*self.version.lock().unwrap());
         VersionRef {
             tree: self,

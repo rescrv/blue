@@ -795,7 +795,7 @@ pub trait Cursor {
     fn next(&mut self) -> Result<(), Error>;
 
     /// The key where this cursor is positioned, or None if the cursor is positioned at the bounds.
-    fn key(&self) -> Option<KeyRef>;
+    fn key(&self) -> Option<KeyRef<'_>>;
 
     /// The value where this cursor is positioned, or None if the cursor is positioned at a
     /// tombstone or the limits of the cursor.
@@ -803,7 +803,7 @@ pub trait Cursor {
 
     /// Return a KeyValueRef corresponding to the current position of the cursor.  By default this
     /// will stitch together the values of `key()` and `value()` to make a [KeyValueRef].
-    fn key_value(&self) -> Option<KeyValueRef> {
+    fn key_value(&self) -> Option<KeyValueRef<'_>> {
         if let (Some(kr), value) = (self.key(), self.value()) {
             Some(KeyValueRef {
                 key: kr.key,
@@ -837,7 +837,7 @@ impl Cursor for () {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         None
     }
 
@@ -867,7 +867,7 @@ impl Cursor for Box<dyn Cursor> {
         self.as_mut().next()
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         self.as_ref().key()
     }
 
@@ -2115,7 +2115,7 @@ impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
         }
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         match &self.block_cursor {
             Some(cursor) => cursor.key(),
             None => None,

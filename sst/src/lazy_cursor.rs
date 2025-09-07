@@ -105,7 +105,7 @@ impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if let Position::Instantiated { cursor } = &self.position {
             cursor.key()
         } else {

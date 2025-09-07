@@ -166,7 +166,7 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if self.bounds == Bounds::Positioned {
             self.cursor.key()
         } else {

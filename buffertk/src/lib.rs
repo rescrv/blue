@@ -426,7 +426,7 @@ impl<'a> Unpackable<'a> for char {
 
 /// Pack a byte slice without a length prefix.  The resulting format is equivalent to concatenating
 /// the individual packings.
-pub fn length_free<P: Packable>(slice: &[P]) -> LengthFree<P> {
+pub fn length_free<P: Packable>(slice: &[P]) -> LengthFree<'_, P> {
     LengthFree { slice }
 }
 

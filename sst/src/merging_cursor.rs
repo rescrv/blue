@@ -185,7 +185,7 @@ impl<C: Cursor> Cursor for MergingCursor<C> {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if !self.cursors.is_empty() {
             self.cursors[0].key()
         } else {

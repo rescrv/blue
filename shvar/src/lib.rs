@@ -383,7 +383,7 @@ struct Tokenize<'a> {
 }
 
 impl Tokenize<'_> {
-    fn new(input: &str) -> Tokenize {
+    fn new(input: &str) -> Tokenize<'_> {
         let symbols = input.chars().enumerate().peekable();
         Tokenize { symbols }
     }

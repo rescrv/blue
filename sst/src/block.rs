@@ -474,7 +474,7 @@ impl BlockCursor {
     }
 
     // Make self.position be of type CursorPosition::Positioned and fill in the fields.
-    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef>, Error> {
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef<'_>>, Error> {
         if restart_idx >= self.block.num_restarts {
             LOGIC_ERROR.click();
             let err = Error::LogicError {
@@ -521,7 +521,7 @@ impl BlockCursor {
         self.key_ref()
     }
 
-    fn key_ref(&self) -> Result<Option<KeyRef>, Error> {
+    fn key_ref(&self) -> Result<Option<KeyRef<'_>>, Error> {
         match &self.position {
             CursorPosition::First => Ok(None),
             CursorPosition::Last => Ok(None),
@@ -786,7 +786,7 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         match &self.position {
             CursorPosition::First => None,
             CursorPosition::Last => None,

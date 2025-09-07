@@ -193,7 +193,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
         }
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         self.cursor.key()
     }
 

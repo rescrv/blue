@@ -127,7 +127,7 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
 
 //////////////////////////////////////////// TupleRouter ///////////////////////////////////////////
 
-pub fn identifier(input: &str) -> ParseResult<String> {
+pub fn identifier(input: &str) -> ParseResult<'_, String> {
     context(
         "identifier",
         map(
@@ -140,11 +140,11 @@ pub fn identifier(input: &str) -> ParseResult<String> {
     )(input)
 }
 
-pub fn field_number(input: &str) -> ParseResult<FieldNumber> {
+pub fn field_number(input: &str) -> ParseResult<'_, FieldNumber> {
     context("field number", map_res(character::u32, FieldNumber::new))(input)
 }
 
-pub fn schema(input: &str) -> ParseResult<tuple_key::Schema<()>> {
+pub fn schema(input: &str) -> ParseResult<'_, tuple_key::Schema<()>> {
     context(
         "schema",
         map(
@@ -208,7 +208,7 @@ pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
 
 ////////////////////////////////////////////// private /////////////////////////////////////////////
 
-fn ws0(input: &str) -> ParseResult<()> {
+fn ws0(input: &str) -> ParseResult<'_, ()> {
     map(multispace0, |_| ())(input)
 }
 

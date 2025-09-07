@@ -104,7 +104,7 @@ impl<C: Cursor> Cursor for ConcatenatingCursor<C> {
         Ok(())
     }
 
-    fn key(&self) -> Option<KeyRef> {
+    fn key(&self) -> Option<KeyRef<'_>> {
         if self.position < self.cursors.len() {
             self.cursors[self.position].key()
         } else {

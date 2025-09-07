@@ -978,7 +978,7 @@ struct DocumentMapping {
 }
 
 impl DocumentMapping {
-    fn doc(&self) -> Result<AnalogizeDocument, Error> {
+    fn doc(&self) -> Result<AnalogizeDocument<'_>, Error> {
         // SAFETY(rescrv):  We only ever refer to this region of memory as a slice of u8.
         let buf = unsafe { std::slice::from_raw_parts(self.data as *const u8, self.size) };
         Ok(AnalogizeDocument::unpack(buf)?.0)

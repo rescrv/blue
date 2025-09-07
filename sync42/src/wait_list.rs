@@ -147,7 +147,7 @@ impl<T: Clone> WaitList<T> {
     }
 
     /// Link into the wait list with the wait guard set to `t`.
-    pub fn link(&self, t: T) -> WaitGuard<T> {
+    pub fn link(&self, t: T) -> WaitGuard<'_, T> {
         let mut state = self.state.lock().unwrap();
         while state.head + (self.waiters.len() as u64) <= state.tail {
             state = self.assert_invariants(state);

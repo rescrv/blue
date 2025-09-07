@@ -180,7 +180,7 @@ pub fn unescape(input: &str) -> String {
     out.into_iter().collect()
 }
 
-pub fn string_literal(input: &str) -> ParseResult<String> {
+pub fn string_literal(input: &str) -> ParseResult<'_, String> {
     context(
         "string literal",
         map(
@@ -224,16 +224,16 @@ pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
 
 ///////////////////////////////////////////// utilities ////////////////////////////////////////////
 
-pub fn ws0(input: &str) -> ParseResult<()> {
+pub fn ws0(input: &str) -> ParseResult<'_, ()> {
     map(multispace0, |_| ())(input)
 }
 
-pub fn ws1(input: &str) -> ParseResult<()> {
+pub fn ws1(input: &str) -> ParseResult<'_, ()> {
     map(multispace1, |_| ())(input)
 }
 
 /// eat whitespace until newline
-pub fn ewsunl(input: &str) -> ParseResult<()> {
+pub fn ewsunl(input: &str) -> ParseResult<'_, ()> {
     map(
         pair(
             take_while(|c: char| c.is_whitespace() && c != '\n'),

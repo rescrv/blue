@@ -135,7 +135,7 @@ pub fn interpret_verbose_error(input: &'_ str, err: VerboseError<&'_ str>) -> Pa
 
 ///////////////////////////////////////////// TableSet /////////////////////////////////////////////
 
-pub fn identifier(input: &str) -> ParseResult<Identifier> {
+pub fn identifier(input: &str) -> ParseResult<'_, Identifier> {
     context(
         "identifier",
         map(
@@ -150,7 +150,7 @@ pub fn identifier(input: &str) -> ParseResult<Identifier> {
     )(input)
 }
 
-pub fn identifier_list(input: &str) -> ParseResult<Vec<Identifier>> {
+pub fn identifier_list(input: &str) -> ParseResult<'_, Vec<Identifier>> {
     context(
         "identifier list",
         terminated(
@@ -163,7 +163,7 @@ pub fn identifier_list(input: &str) -> ParseResult<Vec<Identifier>> {
     )(input)
 }
 
-pub fn key_data_type(input: &str) -> ParseResult<KeyDataType> {
+pub fn key_data_type(input: &str) -> ParseResult<'_, KeyDataType> {
     let (input, recognized) = context(
         "key data type",
         alt((
@@ -191,7 +191,7 @@ pub fn key_data_type(input: &str) -> ParseResult<KeyDataType> {
     ))
 }
 
-pub fn data_type(input: &str) -> ParseResult<DataType> {
+pub fn data_type(input: &str) -> ParseResult<'_, DataType> {
     let (input, recognized) = context(
         "data type",
         alt((
@@ -249,11 +249,11 @@ pub fn data_type(input: &str) -> ParseResult<DataType> {
     ))
 }
 
-pub fn field_number(input: &str) -> ParseResult<FieldNumber> {
+pub fn field_number(input: &str) -> ParseResult<'_, FieldNumber> {
     context("field number", map_res(character::u32, FieldNumber::new))(input)
 }
 
-pub fn key(input: &str) -> ParseResult<Key> {
+pub fn key(input: &str) -> ParseResult<'_, Key> {
     context(
         "key type",
         map_res(
@@ -272,7 +272,7 @@ pub fn key(input: &str) -> ParseResult<Key> {
     )(input)
 }
 
-pub fn field(input: &str) -> ParseResult<Field> {
+pub fn field(input: &str) -> ParseResult<'_, Field> {
     context(
         "field type",
         alt((
@@ -308,7 +308,7 @@ pub fn field(input: &str) -> ParseResult<Field> {
     )(input)
 }
 
-pub fn object(input: &str) -> ParseResult<Object> {
+pub fn object(input: &str) -> ParseResult<'_, Object> {
     context(
         "object type",
         map_res(
@@ -335,7 +335,7 @@ pub fn object(input: &str) -> ParseResult<Object> {
     )(input)
 }
 
-pub fn map_field(input: &str) -> ParseResult<Map> {
+pub fn map_field(input: &str) -> ParseResult<'_, Map> {
     context(
         "map type",
         map_res(
@@ -356,7 +356,7 @@ pub fn map_field(input: &str) -> ParseResult<Map> {
     )(input)
 }
 
-pub fn join(input: &str) -> ParseResult<Join> {
+pub fn join(input: &str) -> ParseResult<'_, Join> {
     context(
         "join field",
         map_res(
@@ -387,7 +387,7 @@ pub fn join(input: &str) -> ParseResult<Join> {
     )(input)
 }
 
-pub fn field_definition(input: &str) -> ParseResult<FieldDefinition> {
+pub fn field_definition(input: &str) -> ParseResult<'_, FieldDefinition> {
     context(
         "field definition",
         alt((
@@ -399,7 +399,7 @@ pub fn field_definition(input: &str) -> ParseResult<FieldDefinition> {
     )(input)
 }
 
-pub fn key_field_list(input: &str) -> ParseResult<Vec<Key>> {
+pub fn key_field_list(input: &str) -> ParseResult<'_, Vec<Key>> {
     context(
         "key fields",
         terminated(
@@ -426,7 +426,7 @@ pub fn key_field_list(input: &str) -> ParseResult<Vec<Key>> {
     )(input)
 }
 
-pub fn table_field_list(input: &str) -> ParseResult<Vec<FieldDefinition>> {
+pub fn table_field_list(input: &str) -> ParseResult<'_, Vec<FieldDefinition>> {
     context(
         "fields",
         map(
@@ -438,7 +438,7 @@ pub fn table_field_list(input: &str) -> ParseResult<Vec<FieldDefinition>> {
     )(input)
 }
 
-pub fn table(input: &str) -> ParseResult<Table> {
+pub fn table(input: &str) -> ParseResult<'_, Table> {
     context(
         "table definition",
         map_res(
@@ -472,7 +472,7 @@ pub fn table(input: &str) -> ParseResult<Table> {
     )(input)
 }
 
-pub fn table_set(input: &str) -> ParseResult<TableSet> {
+pub fn table_set(input: &str) -> ParseResult<'_, TableSet> {
     context(
         "table set",
         map_res(
@@ -500,7 +500,7 @@ pub fn unescape(input: &str) -> String {
     out.into_iter().collect()
 }
 
-pub fn string_literal(input: &str) -> ParseResult<KeyLiteral> {
+pub fn string_literal(input: &str) -> ParseResult<'_, KeyLiteral> {
     context(
         "string literal",
         map(
@@ -534,21 +534,21 @@ fn number_to_typed(input: &str) -> Result<KeyLiteral, Error> {
     }
 }
 
-pub fn number_literal(input: &str) -> ParseResult<KeyLiteral> {
+pub fn number_literal(input: &str) -> ParseResult<'_, KeyLiteral> {
     context(
         "number literal",
         map_res(recognize(tuple((opt(tag("-")), digit1))), number_to_typed),
     )(input)
 }
 
-pub fn query_exprs(input: &str) -> ParseResult<Vec<Query>> {
+pub fn query_exprs(input: &str) -> ParseResult<'_, Vec<Query>> {
     context(
         "query expression",
         terminated(separated_list0(tag(","), map(query, |x| x)), opt(tag(","))),
     )(input)
 }
 
-pub fn query_filter(input: &str) -> ParseResult<QueryFilter> {
+pub fn query_filter(input: &str) -> ParseResult<'_, QueryFilter> {
     context(
         "query filter",
         alt((
@@ -562,7 +562,7 @@ pub fn query_filter(input: &str) -> ParseResult<QueryFilter> {
     )(input)
 }
 
-pub fn query(input: &str) -> ParseResult<Query> {
+pub fn query(input: &str) -> ParseResult<'_, Query> {
     context(
         "query",
         alt((
@@ -611,7 +611,7 @@ pub fn query(input: &str) -> ParseResult<Query> {
 
 ///////////////////////////////////////////// parse_all ////////////////////////////////////////////
 
-pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
+pub fn parse_all<T, F: Fn(&str) -> ParseResult<'_, T> + Copy>(
     f: F,
 ) -> impl Fn(&str) -> Result<T, ParseError> {
     move |input| {
@@ -636,11 +636,11 @@ pub fn parse_all<T, F: Fn(&str) -> ParseResult<T> + Copy>(
 
 ////////////////////////////////////////////// private /////////////////////////////////////////////
 
-fn ws0(input: &str) -> ParseResult<()> {
+fn ws0(input: &str) -> ParseResult<'_, ()> {
     map(multispace0, |_| ())(input)
 }
 
-fn ws1(input: &str) -> ParseResult<()> {
+fn ws1(input: &str) -> ParseResult<'_, ()> {
     map(multispace1, |_| ())(input)
 }
 

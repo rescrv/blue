@@ -80,7 +80,7 @@ pub enum PrometheusLine {
 
 ////////////////////////////////////////////// parsers /////////////////////////////////////////////
 
-pub fn atom(input: &str) -> ParseResult<String> {
+pub fn atom(input: &str) -> ParseResult<'_, String> {
     context(
         "metric name",
         map(
@@ -96,7 +96,7 @@ pub fn atom(input: &str) -> ParseResult<String> {
     )(input)
 }
 
-pub fn label(input: &str) -> ParseResult<(String, String)> {
+pub fn label(input: &str) -> ParseResult<'_, (String, String)> {
     context(
         "label",
         map(
@@ -114,7 +114,7 @@ pub fn label(input: &str) -> ParseResult<(String, String)> {
     )(input)
 }
 
-pub fn labels(input: &str) -> ParseResult<HashMap<String, String>> {
+pub fn labels(input: &str) -> ParseResult<'_, HashMap<String, String>> {
     context(
         "label",
         map(
@@ -128,7 +128,7 @@ pub fn labels(input: &str) -> ParseResult<HashMap<String, String>> {
     )(input)
 }
 
-pub fn reading(input: &str) -> ParseResult<f64> {
+pub fn reading(input: &str) -> ParseResult<'_, f64> {
     context(
         "sensor reading",
         alt((
@@ -140,7 +140,7 @@ pub fn reading(input: &str) -> ParseResult<f64> {
     )(input)
 }
 
-pub fn metric_reading(input: &str) -> ParseResult<MetricReading> {
+pub fn metric_reading(input: &str) -> ParseResult<'_, MetricReading> {
     context(
         "metric reading",
         map(
@@ -168,7 +168,7 @@ pub fn metric_reading(input: &str) -> ParseResult<MetricReading> {
     )(input)
 }
 
-pub fn help_text(input: &str) -> ParseResult<HelpText> {
+pub fn help_text(input: &str) -> ParseResult<'_, HelpText> {
     context(
         "help comment",
         map(
@@ -187,7 +187,7 @@ pub fn help_text(input: &str) -> ParseResult<HelpText> {
     )(input)
 }
 
-pub fn type_declaration(input: &str) -> ParseResult<TypeDeclaration> {
+pub fn type_declaration(input: &str) -> ParseResult<'_, TypeDeclaration> {
     context(
         "type declaration",
         alt((
@@ -243,14 +243,14 @@ pub fn type_declaration(input: &str) -> ParseResult<TypeDeclaration> {
     )(input)
 }
 
-pub fn comment(input: &str) -> ParseResult<()> {
+pub fn comment(input: &str) -> ParseResult<'_, ()> {
     context(
         "comment",
         map(tuple((ws0, tag("#"), many0(none_of("\n")), ewsunl)), |_| ()),
     )(input)
 }
 
-pub fn parse(input: &str) -> ParseResult<Vec<PrometheusLine>> {
+pub fn parse(input: &str) -> ParseResult<'_, Vec<PrometheusLine>> {
     context(
         "prometheus metrics exposition",
         map(

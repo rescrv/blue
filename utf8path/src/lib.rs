@@ -129,7 +129,7 @@ impl<'a> Path<'a> {
 
     /// Strip a prefix from the path.  The prefix and path are allowed to be non-normal and will
     /// have "." components dropped from consideration.
-    pub fn strip_prefix<'b>(&self, prefix: impl Into<Path<'b>>) -> Option<Path> {
+    pub fn strip_prefix<'b>(&self, prefix: impl Into<Path<'b>>) -> Option<Path<'_>> {
         let prefix = prefix.into();
         // NOTE(rescrv):  You might be tempted to use components() and zip() to solve and/or
         // simplify this.  That fails for one reason:  "components()" intentionally rewrites `foo/`
@@ -191,7 +191,7 @@ impl<'a> Path<'a> {
     }
 
     /// Split the path into basename and dirname components.
-    pub fn split(&self) -> (Path, Path) {
+    pub fn split(&self) -> (Path<'_>, Path<'_>) {
         if let Some(index) = self.path.rfind('/') {
             let dirname = if index == 0 {
                 Path::new("/")

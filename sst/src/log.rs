@@ -648,7 +648,7 @@ impl<R: Read + Seek> LogIterator<R> {
 
     /// Return the next item in the log, or None when the log has been traversed.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<KeyValueRef>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyValueRef<'_>>, Error> {
         if self.buffer_idx < self.buffer.len() {
             return self.next_from_buffer();
         }
@@ -694,7 +694,7 @@ impl<R: Read + Seek> LogIterator<R> {
         self.next_from_buffer()
     }
 
-    fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef>, Error> {
+    fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef<'_>>, Error> {
         if self.buffer_idx >= self.buffer.len() {
             return Err(Error::EmptyBatch {
                 core: ErrorCore::default(),
