@@ -660,10 +660,28 @@ fn parse_variable(
     output: &mut Builder,
 ) -> Result<(), Error> {
     tokens.expect('$')?;
-    tokens.expect('{')?;
-    let ident = parse_identifier(tokens)?;
+
+    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?)
+    if let Some(c) = tokens.peek() {
+        if matches!(c, '@' | '<' | '^' | '+' | '?') {
+            let ident = c.to_string();
+            tokens.expect(c)?;
+            witness.witness(&ident);
+            if let Some(val) = vars.lookup(&ident) {
+                output.push_str(&val);
+            }
+            return Ok(());
+        }
+    }
+
+    // Fall back to long-form variable parsing ${...} or $(...)
+    let is_paren = tokens.accept('(');
+    if !is_paren {
+        tokens.expect('{')?;
+    }
+    let ident = parse_identifier(tokens, is_paren)?;
     witness.witness(&ident);
-    if tokens.accept(':') {
+    if !is_paren && tokens.accept(':') {
         let Some(action) = tokens.peek() else {
             return Err(Error::InvalidVariable);
         };
@@ -707,20 +725,35 @@ fn parse_variable(
     } else if let Some(val) = vars.lookup(&ident) {
         output.push_str(&val);
     }
-    tokens.expect('}')?;
+    if is_paren {
+        tokens.expect(')')?;
+    } else {
+        tokens.expect('}')?;
+    }
     Ok(())
 }
 
-fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
+fn parse_identifier(tokens: &mut Tokenize, is_paren: bool) -> Result<String, Error> {
     let mut identifier = String::new();
     let mut first = true;
     while let Some(c) = tokens.peek() {
         match c {
+            // Regular variable names
             'a'..='z' | 'A'..='Z' | '_' if first => {
                 identifier.push(c);
             }
             'a'..='z' | 'A'..='Z' | '0'..='9' | '_' if !first => {
                 identifier.push(c);
+            }
+            // Make-style automatic variables (single character)
+            '@' | '<' | '^' | '+' | '?' if first => {
+                let special_ident = if is_paren {
+                    format!("({c})")
+                } else {
+                    format!("{{{c}}}")
+                };
+                tokens.expect(c)?;
+                return Ok(special_ident);
             }
             _ => {
                 if !identifier.is_empty() {
@@ -1008,6 +1041,266 @@ mod tests {
         assert_eq!(
             "sjc.CyberDyne.example.org",
             super::expand_recursive(&vp, "${HOST}").unwrap()
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("{@}", "target.o"),
+            ("{<}", "source.c"),
+            ("{^}", "source.c header.h"),
+            ("{+}", "source.c header.h source.c"),
+            ("{?}", "source.c"),
+        ]);
+
+        assert_eq!("target.o", expand(&env, "${@}").unwrap());
+        assert_eq!("source.c", expand(&env, "${<}").unwrap());
+        assert_eq!("source.c header.h", expand(&env, "${^}").unwrap());
+        assert_eq!("source.c header.h source.c", expand(&env, "${+}").unwrap());
+        assert_eq!("source.c", expand(&env, "${?}").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "source.c header.h"),
+            ("+", "source.c header.h source.c"),
+            ("?", "source.c"),
+        ]);
+
+        assert_eq!("target.o", expand(&env, "$@").unwrap());
+        assert_eq!("source.c", expand(&env, "$<").unwrap());
+        assert_eq!("source.c header.h", expand(&env, "$^").unwrap());
+        assert_eq!("source.c header.h source.c", expand(&env, "$+").unwrap());
+        assert_eq!("source.c", expand(&env, "$?").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("{@}", "my target.o"),
+            ("{<}", "my source.c"),
+            ("{^}", "my dependencies.h header.h"),
+            ("{+}", "my all.c files.c"),
+            ("{?}", "my newer.c"),
+        ]);
+
+        assert_eq!(r#""my target.o""#, expand(&env, r#""${@}""#).unwrap());
+        assert_eq!(r#""my source.c""#, expand(&env, r#""${<}""#).unwrap());
+        assert_eq!(
+            r#""my dependencies.h header.h""#,
+            expand(&env, r#""${^}""#).unwrap()
+        );
+        assert_eq!(r#""my all.c files.c""#, expand(&env, r#""${+}""#).unwrap());
+        assert_eq!(r#""my newer.c""#, expand(&env, r#""${?}""#).unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "my target.o"),
+            ("<", "my source.c"),
+            ("^", "my dependencies.h header.h"),
+            ("+", "my all.c files.c"),
+            ("?", "my newer.c"),
+        ]);
+
+        assert_eq!(r#""my target.o""#, expand(&env, r#""$@""#).unwrap());
+        assert_eq!(r#""my source.c""#, expand(&env, r#""$<""#).unwrap());
+        assert_eq!(
+            r#""my dependencies.h header.h""#,
+            expand(&env, r#""$^""#).unwrap()
+        );
+        assert_eq!(r#""my all.c files.c""#, expand(&env, r#""$+""#).unwrap());
+        assert_eq!(r#""my newer.c""#, expand(&env, r#""$?""#).unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_mixed_forms() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "dependencies.h header.h"),
+            ("+", "all.c files.c"),
+            ("?", "newer.c"),
+            ("{@}", "target.o"),
+            ("{<}", "source.c"),
+            ("{^}", "dependencies.h header.h"),
+            ("{+}", "all.c files.c"),
+            ("{?}", "newer.c"),
+        ]);
+
+        // Test mixing short and long forms
+        assert_eq!("target.o source.c", expand(&env, "$@ ${<}").unwrap());
+        assert_eq!("target.o source.c", expand(&env, "${@} $<").unwrap());
+        assert_eq!(
+            "dependencies.h header.h all.c files.c",
+            expand(&env, "$^ ${+}").unwrap()
+        );
+        assert_eq!(
+            "dependencies.h header.h all.c files.c",
+            expand(&env, "${^} $+").unwrap()
+        );
+        assert_eq!("newer.c target.o", expand(&env, "$? ${@}").unwrap());
+        assert_eq!("newer.c target.o", expand(&env, "${?} $@").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form_rcvar() {
+        assert_eq!(
+            vec![
+                "{+}".to_string(),
+                "{<}".to_string(),
+                "{?}".to_string(),
+                "{@}".to_string(),
+                "{^}".to_string()
+            ],
+            rcvar("${@} ${<} ${^} ${+} ${?}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form_rcvar() {
+        assert_eq!(
+            vec![
+                "+".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string()
+            ],
+            rcvar("$@ $< $^ $+ $?").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_mixed_forms_rcvar() {
+        assert_eq!(
+            vec![
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string(),
+                "{+}".to_string(),
+                "{<}".to_string()
+            ],
+            rcvar("$@ ${<} $^ ${+} $?").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_independent_substitution() {
+        // Test that $@ and ${@} can have different values
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "short-form-target.o"),
+            ("{@}", "long-form-target.o"),
+            ("<", "short-form-source.c"),
+            ("{<}", "long-form-source.c"),
+            ("^", "short-form-deps.h"),
+            ("{^}", "long-form-deps.h"),
+            ("+", "short-form-all.c"),
+            ("{+}", "long-form-all.c"),
+            ("?", "short-form-newer.c"),
+            ("{?}", "long-form-newer.c"),
+        ]);
+
+        // Test that short and long forms resolve to different values
+        assert_eq!("short-form-target.o", expand(&env, "$@").unwrap());
+        assert_eq!("long-form-target.o", expand(&env, "${@}").unwrap());
+
+        assert_eq!("short-form-source.c", expand(&env, "$<").unwrap());
+        assert_eq!("long-form-source.c", expand(&env, "${<}").unwrap());
+
+        assert_eq!("short-form-deps.h", expand(&env, "$^").unwrap());
+        assert_eq!("long-form-deps.h", expand(&env, "${^}").unwrap());
+
+        assert_eq!("short-form-all.c", expand(&env, "$+").unwrap());
+        assert_eq!("long-form-all.c", expand(&env, "${+}").unwrap());
+
+        assert_eq!("short-form-newer.c", expand(&env, "$?").unwrap());
+        assert_eq!("long-form-newer.c", expand(&env, "${?}").unwrap());
+
+        // Test mixing different forms in same expression
+        assert_eq!(
+            "short-form-target.o long-form-source.c",
+            expand(&env, "$@ ${<}").unwrap()
+        );
+        assert_eq!(
+            "long-form-target.o short-form-source.c",
+            expand(&env, "${@} $<").unwrap()
+        );
+    }
+
+    #[test]
+    fn dollar_paren_syntax_regular_variables() {
+        let env: HashMap<&str, &str> =
+            HashMap::from([("FOO", "foo"), ("BAR", "bar"), ("BAZ", "baz")]);
+
+        assert_eq!("foo", expand(&env, "$(FOO)").unwrap());
+        assert_eq!("bar", expand(&env, "$(BAR)").unwrap());
+        assert_eq!("baz", expand(&env, "$(BAZ)").unwrap());
+        assert_eq!("foo-bar-baz", expand(&env, "$(FOO)-$(BAR)-$(BAZ)").unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_automatic_variables() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("(@)", "paren-target.o"),
+            ("(<)", "paren-source.c"),
+            ("(^)", "paren-dependencies.h header.h"),
+            ("(+)", "paren-all.c files.c"),
+            ("(?)", "paren-newer.c"),
+        ]);
+
+        assert_eq!("paren-target.o", expand(&env, "$(@)").unwrap());
+        assert_eq!("paren-source.c", expand(&env, "$(<)").unwrap());
+        assert_eq!(
+            "paren-dependencies.h header.h",
+            expand(&env, "$(^)").unwrap()
+        );
+        assert_eq!("paren-all.c files.c", expand(&env, "$(+)").unwrap());
+        assert_eq!("paren-newer.c", expand(&env, "$(?)").unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo bar"), ("(@)", "my target.o")]);
+
+        assert_eq!(r#""foo bar""#, expand(&env, r#""$(FOO)""#).unwrap());
+        assert_eq!(r#""my target.o""#, expand(&env, r#""$(@)""#).unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_mixed_with_other_forms() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("FOO", "foo"),
+            ("@", "short-at"),
+            ("{@}", "brace-at"),
+            ("(@)", "paren-at"),
+            ("BAR", "bar"),
+        ]);
+
+        // Mix $(VAR) with ${VAR} and $VAR
+        assert_eq!("foo bar", expand(&env, "$(FOO) ${BAR}").unwrap());
+        assert_eq!(
+            "short-at brace-at paren-at",
+            expand(&env, "$@ ${@} $(@)").unwrap()
+        );
+    }
+
+    #[test]
+    fn dollar_paren_syntax_rcvar() {
+        assert_eq!(
+            vec![
+                "(<)".to_string(),
+                "(?)".to_string(),
+                "(@)".to_string(),
+                "(^)".to_string(),
+                "FOO".to_string(),
+            ],
+            rcvar("$(FOO) $(@) $(<) $(^) $(?)").unwrap(),
         );
     }
 }
