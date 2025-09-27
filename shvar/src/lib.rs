@@ -703,7 +703,7 @@ fn parse_variable(
     if !is_paren {
         tokens.expect('{')?;
     }
-    let ident = parse_identifier(tokens, is_paren)?;
+    let ident = parse_identifier(tokens)?;
     witness.witness(&ident);
     if !is_paren && tokens.accept(':') {
         let Some(action) = tokens.peek() else {
@@ -748,7 +748,7 @@ fn parse_variable(
         }
     } else if let Some(val) = vars.lookup(&ident) {
         output.push_str(&val);
-    } else if ident == "{$}" || ident == "($)" {
+    } else if ident == "$" {
         // Special case: ${$} and $($) expand to literal $ when not found in variables
         output.push('$');
     }
@@ -760,7 +760,7 @@ fn parse_variable(
     Ok(())
 }
 
-fn parse_identifier(tokens: &mut Tokenize, is_paren: bool) -> Result<String, Error> {
+fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
     let mut identifier = String::new();
     let mut first = true;
     while let Some(c) = tokens.peek() {
@@ -774,11 +774,7 @@ fn parse_identifier(tokens: &mut Tokenize, is_paren: bool) -> Result<String, Err
             }
             // Make-style automatic variables (single character)
             '@' | '<' | '^' | '+' | '?' | '$' if first => {
-                let special_ident = if is_paren {
-                    format!("({c})")
-                } else {
-                    format!("{{{c}}}")
-                };
+                let special_ident = c.to_string();
                 tokens.expect(c)?;
                 return Ok(special_ident);
             }
@@ -1074,11 +1070,11 @@ mod tests {
     #[test]
     fn make_automatic_variables_long_form() {
         let env: HashMap<&str, &str> = HashMap::from([
-            ("{@}", "target.o"),
-            ("{<}", "source.c"),
-            ("{^}", "source.c header.h"),
-            ("{+}", "source.c header.h source.c"),
-            ("{?}", "source.c"),
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "source.c header.h"),
+            ("+", "source.c header.h source.c"),
+            ("?", "source.c"),
         ]);
 
         assert_eq!("target.o", expand(&env, "${@}").unwrap());
@@ -1108,11 +1104,11 @@ mod tests {
     #[test]
     fn make_automatic_variables_long_form_in_quotes() {
         let env: HashMap<&str, &str> = HashMap::from([
-            ("{@}", "my target.o"),
-            ("{<}", "my source.c"),
-            ("{^}", "my dependencies.h header.h"),
-            ("{+}", "my all.c files.c"),
-            ("{?}", "my newer.c"),
+            ("@", "my target.o"),
+            ("<", "my source.c"),
+            ("^", "my dependencies.h header.h"),
+            ("+", "my all.c files.c"),
+            ("?", "my newer.c"),
         ]);
 
         assert_eq!(r#""my target.o""#, expand(&env, r#""${@}""#).unwrap());
@@ -1179,11 +1175,11 @@ mod tests {
     fn make_automatic_variables_long_form_rcvar() {
         assert_eq!(
             vec![
-                "{+}".to_string(),
-                "{<}".to_string(),
-                "{?}".to_string(),
-                "{@}".to_string(),
-                "{^}".to_string()
+                "+".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string()
             ],
             rcvar("${@} ${<} ${^} ${+} ${?}").unwrap(),
         );
@@ -1207,57 +1203,46 @@ mod tests {
     fn make_automatic_variables_mixed_forms_rcvar() {
         assert_eq!(
             vec![
+                "+".to_string(),
+                "<".to_string(),
                 "?".to_string(),
                 "@".to_string(),
-                "^".to_string(),
-                "{+}".to_string(),
-                "{<}".to_string()
+                "^".to_string()
             ],
             rcvar("$@ ${<} $^ ${+} $?").unwrap(),
         );
     }
 
     #[test]
-    fn make_automatic_variables_independent_substitution() {
-        // Test that $@ and ${@} can have different values
+    fn make_automatic_variables_consistent_substitution() {
+        // Test that $@ and ${@} resolve to the same value
         let env: HashMap<&str, &str> = HashMap::from([
-            ("@", "short-form-target.o"),
-            ("{@}", "long-form-target.o"),
-            ("<", "short-form-source.c"),
-            ("{<}", "long-form-source.c"),
-            ("^", "short-form-deps.h"),
-            ("{^}", "long-form-deps.h"),
-            ("+", "short-form-all.c"),
-            ("{+}", "long-form-all.c"),
-            ("?", "short-form-newer.c"),
-            ("{?}", "long-form-newer.c"),
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "deps.h"),
+            ("+", "all.c"),
+            ("?", "newer.c"),
         ]);
 
-        // Test that short and long forms resolve to different values
-        assert_eq!("short-form-target.o", expand(&env, "$@").unwrap());
-        assert_eq!("long-form-target.o", expand(&env, "${@}").unwrap());
+        // Test that short and long forms resolve to the same values
+        assert_eq!("target.o", expand(&env, "$@").unwrap());
+        assert_eq!("target.o", expand(&env, "${@}").unwrap());
 
-        assert_eq!("short-form-source.c", expand(&env, "$<").unwrap());
-        assert_eq!("long-form-source.c", expand(&env, "${<}").unwrap());
+        assert_eq!("source.c", expand(&env, "$<").unwrap());
+        assert_eq!("source.c", expand(&env, "${<}").unwrap());
 
-        assert_eq!("short-form-deps.h", expand(&env, "$^").unwrap());
-        assert_eq!("long-form-deps.h", expand(&env, "${^}").unwrap());
+        assert_eq!("deps.h", expand(&env, "$^").unwrap());
+        assert_eq!("deps.h", expand(&env, "${^}").unwrap());
 
-        assert_eq!("short-form-all.c", expand(&env, "$+").unwrap());
-        assert_eq!("long-form-all.c", expand(&env, "${+}").unwrap());
+        assert_eq!("all.c", expand(&env, "$+").unwrap());
+        assert_eq!("all.c", expand(&env, "${+}").unwrap());
 
-        assert_eq!("short-form-newer.c", expand(&env, "$?").unwrap());
-        assert_eq!("long-form-newer.c", expand(&env, "${?}").unwrap());
+        assert_eq!("newer.c", expand(&env, "$?").unwrap());
+        assert_eq!("newer.c", expand(&env, "${?}").unwrap());
 
         // Test mixing different forms in same expression
-        assert_eq!(
-            "short-form-target.o long-form-source.c",
-            expand(&env, "$@ ${<}").unwrap()
-        );
-        assert_eq!(
-            "long-form-target.o short-form-source.c",
-            expand(&env, "${@} $<").unwrap()
-        );
+        assert_eq!("target.o source.c", expand(&env, "$@ ${<}").unwrap());
+        assert_eq!("target.o source.c", expand(&env, "${@} $<").unwrap());
     }
 
     #[test]
@@ -1274,11 +1259,11 @@ mod tests {
     #[test]
     fn dollar_paren_syntax_automatic_variables() {
         let env: HashMap<&str, &str> = HashMap::from([
-            ("(@)", "paren-target.o"),
-            ("(<)", "paren-source.c"),
-            ("(^)", "paren-dependencies.h header.h"),
-            ("(+)", "paren-all.c files.c"),
-            ("(?)", "paren-newer.c"),
+            ("@", "paren-target.o"),
+            ("<", "paren-source.c"),
+            ("^", "paren-dependencies.h header.h"),
+            ("+", "paren-all.c files.c"),
+            ("?", "paren-newer.c"),
         ]);
 
         assert_eq!("paren-target.o", expand(&env, "$(@)").unwrap());
@@ -1293,7 +1278,7 @@ mod tests {
 
     #[test]
     fn dollar_paren_syntax_in_quotes() {
-        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo bar"), ("(@)", "my target.o")]);
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo bar"), ("@", "my target.o")]);
 
         assert_eq!(r#""foo bar""#, expand(&env, r#""$(FOO)""#).unwrap());
         assert_eq!(r#""my target.o""#, expand(&env, r#""$(@)""#).unwrap());
@@ -1301,18 +1286,13 @@ mod tests {
 
     #[test]
     fn dollar_paren_syntax_mixed_with_other_forms() {
-        let env: HashMap<&str, &str> = HashMap::from([
-            ("FOO", "foo"),
-            ("@", "short-at"),
-            ("{@}", "brace-at"),
-            ("(@)", "paren-at"),
-            ("BAR", "bar"),
-        ]);
+        let env: HashMap<&str, &str> =
+            HashMap::from([("FOO", "foo"), ("@", "consistent-at"), ("BAR", "bar")]);
 
         // Mix $(VAR) with ${VAR} and $VAR
         assert_eq!("foo bar", expand(&env, "$(FOO) ${BAR}").unwrap());
         assert_eq!(
-            "short-at brace-at paren-at",
+            "consistent-at consistent-at consistent-at",
             expand(&env, "$@ ${@} $(@)").unwrap()
         );
     }
@@ -1321,11 +1301,11 @@ mod tests {
     fn dollar_paren_syntax_rcvar() {
         assert_eq!(
             vec![
-                "(<)".to_string(),
-                "(?)".to_string(),
-                "(@)".to_string(),
-                "(^)".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
                 "FOO".to_string(),
+                "^".to_string(),
             ],
             rcvar("$(FOO) $(@) $(<) $(^) $(?)").unwrap(),
         );
@@ -1374,15 +1354,11 @@ mod tests {
     #[test]
     fn dollar_dollar_with_variable_override() {
         // Test that if $ is defined as a variable, it takes precedence
-        let env: HashMap<&str, &str> = HashMap::from([
-            ("$", "custom-dollar"),
-            ("{$}", "custom-brace-dollar"),
-            ("($)", "custom-paren-dollar"),
-        ]);
+        let env: HashMap<&str, &str> = HashMap::from([("$", "custom-dollar")]);
 
         assert_eq!("custom-dollar", expand(&env, "$$").unwrap());
-        assert_eq!("custom-brace-dollar", expand(&env, "${$}").unwrap());
-        assert_eq!("custom-paren-dollar", expand(&env, "$($)").unwrap());
+        assert_eq!("custom-dollar", expand(&env, "${$}").unwrap());
+        assert_eq!("custom-dollar", expand(&env, "$($)").unwrap());
     }
 
     #[test]
@@ -1390,9 +1366,9 @@ mod tests {
         // Test that $$ is properly tracked in rcvar
         assert_eq!(vec!["$".to_string()], rcvar("$$").unwrap(),);
 
-        assert_eq!(vec!["{$}".to_string()], rcvar("${$}").unwrap(),);
+        assert_eq!(vec!["$".to_string()], rcvar("${$}").unwrap(),);
 
-        assert_eq!(vec!["($)".to_string()], rcvar("$($)").unwrap(),);
+        assert_eq!(vec!["$".to_string()], rcvar("$($)").unwrap(),);
 
         // Test mixed with other variables
         assert_eq!(
