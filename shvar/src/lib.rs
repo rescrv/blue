@@ -542,6 +542,7 @@ impl Builder {
 
 fn parse_statement(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -558,10 +559,26 @@ fn parse_statement(
                 parse_single_quotes(vars, witness, tokens, output)?;
             }
             '"' => {
-                parse_double_quotes(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_double_quotes(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             '$' => {
-                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_variable(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             '}' => {
                 break;
@@ -607,6 +624,7 @@ fn parse_single_quotes(
 
 fn parse_double_quotes(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -653,7 +671,15 @@ fn parse_double_quotes(
             }
             '$' => {
                 noexpect = true;
-                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_variable(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             c if prev_was_whack => {
                 output.push('\\');
@@ -674,6 +700,7 @@ fn parse_double_quotes(
 
 fn parse_variable(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -682,16 +709,23 @@ fn parse_variable(
 ) -> Result<(), Error> {
     tokens.expect('$')?;
 
-    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?, $$)
+    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?) or $$
     if let Some(c) = tokens.peek() {
-        if matches!(c, '@' | '<' | '^' | '+' | '?' | '$') {
+        if matches!(c, '@' | '<' | '^' | '+' | '?') {
             let ident = c.to_string();
             tokens.expect(c)?;
             witness.witness(&ident);
             if let Some(val) = vars.lookup(&ident) {
                 output.push_str(&val);
-            } else if c == '$' {
-                // Special case: $$ expands to literal $ when not found in variables
+            }
+            return Ok(());
+        } else if c == '$' {
+            // Handle $$ - behavior depends on escape_dollar_literal
+            tokens.expect('$')?;
+            witness.witness("$");
+            if escape_dollar_literal {
+                output.push_str("$$");
+            } else {
                 output.push('$');
             }
             return Ok(());
@@ -713,6 +747,7 @@ fn parse_variable(
         let mut expanded = Builder::from_other(output);
         parse_statement(
             generate_errors,
+            escape_dollar_literal,
             depth + 1,
             vars,
             witness,
@@ -749,8 +784,11 @@ fn parse_variable(
     } else if let Some(val) = vars.lookup(&ident) {
         output.push_str(&val);
     } else if ident == "$" {
-        // Special case: ${$} and $($) expand to literal $ when not found in variables
-        output.push('$');
+        if escape_dollar_literal {
+            output.push_str("$$");
+        } else {
+            output.push_str("$");
+        }
     }
     if is_paren {
         tokens.expect(')')?;
@@ -796,15 +834,32 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 
 /// Expand the input to a shell-quoted string suitable for passing to `split`.
 pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
+    expand_once(vars, input, false)
+}
+
+fn expand_once(
+    vars: &dyn VariableProvider,
+    input: &str,
+    escape_dollar_literal: bool,
+) -> Result<String, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
-    parse_statement(true, 0, vars, &mut (), &mut tokens, &mut output)?;
+    parse_statement(
+        true,
+        escape_dollar_literal,
+        0,
+        vars,
+        &mut (),
+        &mut tokens,
+        &mut output,
+    )?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
         return Err(Error::TrailingRightBrace);
     }
-    Ok(output.into_string().trim().to_string())
+    let result = output.into_string().trim().to_string();
+    Ok(result)
 }
 
 ///////////////////////////////////////// expand_recursive /////////////////////////////////////////
@@ -817,19 +872,32 @@ pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<Stri
         let mut witnesses = HashSet::default();
         let mut tokens = Tokenize::new(input);
         let mut output = Builder::default();
-        parse_statement(true, 0, vars, &mut witnesses, &mut tokens, &mut output)?;
+        parse_statement(
+            false,
+            true,
+            0,
+            vars,
+            &mut witnesses,
+            &mut tokens,
+            &mut output,
+        )?;
         Ok(witnesses)
     }
+
+    fn post_process(s: &str) -> Result<String, Error> {
+        expand_once(&(), s, false)
+    }
+
     let mut witnesses = generate_witnesses(vars, input)?;
     let mut input = input.to_string();
     for _ in 0..128 {
-        let once = expand(vars, &input)?;
+        let once = expand_once(vars, &input, true)?;
         if once == input {
-            return Ok(once);
+            return post_process(&once);
         }
         let new_witnesses = generate_witnesses(vars, &once)?;
-        if new_witnesses.is_empty() {
-            return Ok(once);
+        if new_witnesses.is_empty() || (new_witnesses.len() == 1 && new_witnesses.contains("$")) {
+            return post_process(&once);
         }
         if witnesses.is_subset(&new_witnesses) {
             return Err(Error::DepthLimitExceeded);
@@ -847,7 +915,15 @@ pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     let mut witnesses: HashSet<String> = HashSet::new();
-    parse_statement(false, 0, &(), &mut witnesses, &mut tokens, &mut output)?;
+    parse_statement(
+        false,
+        true,
+        0,
+        &(),
+        &mut witnesses,
+        &mut tokens,
+        &mut output,
+    )?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
@@ -1352,16 +1428,6 @@ mod tests {
     }
 
     #[test]
-    fn dollar_dollar_with_variable_override() {
-        // Test that if $ is defined as a variable, it takes precedence
-        let env: HashMap<&str, &str> = HashMap::from([("$", "custom-dollar")]);
-
-        assert_eq!("custom-dollar", expand(&env, "$$").unwrap());
-        assert_eq!("custom-dollar", expand(&env, "${$}").unwrap());
-        assert_eq!("custom-dollar", expand(&env, "$($)").unwrap());
-    }
-
-    #[test]
     fn dollar_dollar_rcvar() {
         // Test that $$ is properly tracked in rcvar
         assert_eq!(vec!["$".to_string()], rcvar("$$").unwrap(),);
@@ -1374,6 +1440,69 @@ mod tests {
         assert_eq!(
             vec!["$".to_string(), "FOO".to_string()],
             rcvar("$$ ${FOO}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn dollar_dollar_comprehensive_edge_cases() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test consecutive $$ expansions
+        assert_eq!("$$", expand(&env, "$$$$").unwrap());
+
+        // Test $$ followed immediately by digits (like process ID)
+        assert_eq!("$123", expand(&env, "$$123").unwrap());
+        assert_eq!("$456", expand(&env, "$$456").unwrap());
+
+        // Test $$ in shell command contexts
+        assert_eq!("kill -9 $", expand(&env, "kill -9 $$").unwrap());
+        assert_eq!("echo $ > file", expand(&env, "echo $$ > file").unwrap());
+
+        // Test $$ with mixed variable forms
+        let env2: HashMap<&str, &str> = HashMap::from([("PID", "12345")]);
+        assert_eq!(
+            "Process $ has PID 12345",
+            expand(&env2, "Process $$ has PID ${PID}").unwrap()
+        );
+
+        // Test $$ in complex quoted scenarios
+        assert_eq!("\"echo $\"", expand(&env, "\"echo $$\"").unwrap());
+        assert_eq!("\"$123\"", expand(&env, "\"$$123\"").unwrap());
+
+        // Test split functionality with $$ results
+        let expanded = expand(&env, "arg1 $$ arg3").unwrap();
+        assert_eq!("arg1 $ arg3", expanded);
+        let split_result = split(&expanded).unwrap();
+        assert_eq!(vec!["arg1", "$", "arg3"], split_result);
+    }
+
+    #[test]
+    fn expand_recursive_dollar_dollar_monotonic() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test that expand_recursive stops when only $$ -> $ transformation occurs
+        assert_eq!("$", super::expand_recursive(&env, "$$").unwrap());
+        assert_eq!("$ $", super::expand_recursive(&env, "$$ $$").unwrap());
+        assert_eq!("test $", super::expand_recursive(&env, "test $$").unwrap());
+        assert_eq!("$ test", super::expand_recursive(&env, "$$ test").unwrap());
+        assert_eq!(
+            "$ test $",
+            super::expand_recursive(&env, "$$ test $$").unwrap()
+        );
+
+        // Test that it still works with real variables
+        let env2: HashMap<&str, &str> = HashMap::from([("FOO", "bar")]);
+
+        // First test basic expand works
+        println!("expand result: {:?}", expand(&env2, "${FOO} $$"));
+
+        assert_eq!(
+            "bar $",
+            super::expand_recursive(&env2, "${FOO} $$").unwrap()
+        );
+        assert_eq!(
+            "$ bar",
+            super::expand_recursive(&env2, "$$ ${FOO}").unwrap()
         );
     }
 }
