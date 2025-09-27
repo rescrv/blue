@@ -15,7 +15,7 @@ fn construct_index(tagfile: &str) -> Pin<Box<InvertedTagIndex>> {
     Box::pin(iti)
 }
 
-fn parse_queries(queries: &str) -> Vec<Tag> {
+fn parse_queries(queries: &str) -> Vec<Tag<'_>> {
     let reader = BufReader::new(File::open(queries).unwrap());
     let mut queries = vec![];
     for line in reader.lines() {
