@@ -682,14 +682,17 @@ fn parse_variable(
 ) -> Result<(), Error> {
     tokens.expect('$')?;
 
-    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?)
+    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?, $$)
     if let Some(c) = tokens.peek() {
-        if matches!(c, '@' | '<' | '^' | '+' | '?') {
+        if matches!(c, '@' | '<' | '^' | '+' | '?' | '$') {
             let ident = c.to_string();
             tokens.expect(c)?;
             witness.witness(&ident);
             if let Some(val) = vars.lookup(&ident) {
                 output.push_str(&val);
+            } else if c == '$' {
+                // Special case: $$ expands to literal $ when not found in variables
+                output.push('$');
             }
             return Ok(());
         }
@@ -745,6 +748,9 @@ fn parse_variable(
         }
     } else if let Some(val) = vars.lookup(&ident) {
         output.push_str(&val);
+    } else if ident == "{$}" || ident == "($)" {
+        // Special case: ${$} and $($) expand to literal $ when not found in variables
+        output.push('$');
     }
     if is_paren {
         tokens.expect(')')?;
@@ -767,7 +773,7 @@ fn parse_identifier(tokens: &mut Tokenize, is_paren: bool) -> Result<String, Err
                 identifier.push(c);
             }
             // Make-style automatic variables (single character)
-            '@' | '<' | '^' | '+' | '?' if first => {
+            '@' | '<' | '^' | '+' | '?' | '$' if first => {
                 let special_ident = if is_paren {
                     format!("({c})")
                 } else {
@@ -1322,6 +1328,76 @@ mod tests {
                 "FOO".to_string(),
             ],
             rcvar("$(FOO) $(@) $(<) $(^) $(?)").unwrap(),
+        );
+    }
+
+    #[test]
+    fn dollar_dollar_literal_expansion() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test short form $$
+        assert_eq!("$", expand(&env, "$$").unwrap());
+
+        // Test long forms ${$} and $($)
+        assert_eq!("$", expand(&env, "${$}").unwrap());
+        assert_eq!("$", expand(&env, "$($)").unwrap());
+
+        // Test in context
+        assert_eq!("Price: $10", expand(&env, "Price: $$10").unwrap());
+        assert_eq!("Price: $10", expand(&env, "Price: ${$}10").unwrap());
+        assert_eq!("Price: $10", expand(&env, "Price: $($)10").unwrap());
+
+        // Test multiple $$ in one string
+        assert_eq!("$1 $2 $3", expand(&env, "$$1 $$2 $$3").unwrap());
+
+        // Test with other variables
+        let env2: HashMap<&str, &str> = HashMap::from([("FOO", "bar")]);
+        assert_eq!("bar$", expand(&env2, "${FOO}$$").unwrap());
+        assert_eq!("$bar", expand(&env2, "$$${FOO}").unwrap());
+    }
+
+    #[test]
+    fn dollar_dollar_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test in double quotes
+        assert_eq!("\"$\"", expand(&env, "\"$$\"").unwrap());
+        assert_eq!("\"$\"", expand(&env, "\"${$}\"").unwrap());
+        assert_eq!("\"$\"", expand(&env, "\"$($)\"").unwrap());
+
+        // Test in single quotes (should be literal)
+        assert_eq!("\"$$\"", expand(&env, "'$$'").unwrap());
+        assert_eq!("\"${$}\"", expand(&env, "'${$}'").unwrap());
+        assert_eq!("\"$($)\"", expand(&env, "'$($)'").unwrap());
+    }
+
+    #[test]
+    fn dollar_dollar_with_variable_override() {
+        // Test that if $ is defined as a variable, it takes precedence
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("$", "custom-dollar"),
+            ("{$}", "custom-brace-dollar"),
+            ("($)", "custom-paren-dollar"),
+        ]);
+
+        assert_eq!("custom-dollar", expand(&env, "$$").unwrap());
+        assert_eq!("custom-brace-dollar", expand(&env, "${$}").unwrap());
+        assert_eq!("custom-paren-dollar", expand(&env, "$($)").unwrap());
+    }
+
+    #[test]
+    fn dollar_dollar_rcvar() {
+        // Test that $$ is properly tracked in rcvar
+        assert_eq!(vec!["$".to_string()], rcvar("$$").unwrap(),);
+
+        assert_eq!(vec!["{$}".to_string()], rcvar("${$}").unwrap(),);
+
+        assert_eq!(vec!["($)".to_string()], rcvar("$($)").unwrap(),);
+
+        // Test mixed with other variables
+        assert_eq!(
+            vec!["$".to_string(), "FOO".to_string()],
+            rcvar("$$ ${FOO}").unwrap(),
         );
     }
 }
