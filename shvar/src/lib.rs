@@ -35,6 +35,27 @@ pub enum Error {
     Requested(String),
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::OpenSingleQuotes => write!(f, "unclosed single quotes"),
+            Error::OpenDoubleQuotes => write!(f, "unclosed double quotes"),
+            Error::TrailingRightBrace => write!(f, "unmatched right brace"),
+            Error::InvalidVariable => write!(f, "invalid variable definition"),
+            Error::InvalidCharacter { expected, returned } => match returned {
+                Some(c) => write!(f, "expected '{}', found '{}'", expected, c),
+                None => write!(f, "expected '{}', found end of input", expected),
+            },
+            Error::DepthLimitExceeded => {
+                write!(f, "expansion depth limit exceeded (possible cycle)")
+            }
+            Error::Requested(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
 ////////////////////////////////////////////// quoting /////////////////////////////////////////////
 
 // I consulted the FreeBSD man pages for guidance.
