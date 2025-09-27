@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 
 use tag_index::{CompressedTagIndex, Tag, TagIndex, Tags};
 
-fn parse_queries(queries: &str) -> Vec<Tag> {
+fn parse_queries(queries: &str) -> Vec<Tag<'_>> {
     let reader = BufReader::new(File::open(queries).unwrap());
     let mut queries = vec![];
     for line in reader.lines() {
