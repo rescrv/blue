@@ -542,6 +542,7 @@ impl Builder {
 
 fn parse_statement(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -558,10 +559,26 @@ fn parse_statement(
                 parse_single_quotes(vars, witness, tokens, output)?;
             }
             '"' => {
-                parse_double_quotes(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_double_quotes(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             '$' => {
-                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_variable(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             '}' => {
                 break;
@@ -607,6 +624,7 @@ fn parse_single_quotes(
 
 fn parse_double_quotes(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -653,7 +671,15 @@ fn parse_double_quotes(
             }
             '$' => {
                 noexpect = true;
-                parse_variable(generate_errors, depth, vars, witness, tokens, output)?;
+                parse_variable(
+                    generate_errors,
+                    escape_dollar_literal,
+                    depth,
+                    vars,
+                    witness,
+                    tokens,
+                    output,
+                )?;
             }
             c if prev_was_whack => {
                 output.push('\\');
@@ -674,6 +700,7 @@ fn parse_double_quotes(
 
 fn parse_variable(
     generate_errors: bool,
+    escape_dollar_literal: bool,
     depth: usize,
     vars: &dyn VariableProvider,
     witness: &mut dyn VariableWitness,
@@ -681,10 +708,38 @@ fn parse_variable(
     output: &mut Builder,
 ) -> Result<(), Error> {
     tokens.expect('$')?;
-    tokens.expect('{')?;
+
+    // Check if this is a short-form automatic variable ($@, $<, $^, $+, $?) or $$
+    if let Some(c) = tokens.peek() {
+        if matches!(c, '@' | '<' | '^' | '+' | '?') {
+            let ident = c.to_string();
+            tokens.expect(c)?;
+            witness.witness(&ident);
+            if let Some(val) = vars.lookup(&ident) {
+                output.push_str(&val);
+            }
+            return Ok(());
+        } else if c == '$' {
+            // Handle $$ - behavior depends on escape_dollar_literal
+            tokens.expect('$')?;
+            witness.witness("$");
+            if escape_dollar_literal {
+                output.push_str("$$");
+            } else {
+                output.push('$');
+            }
+            return Ok(());
+        }
+    }
+
+    // Fall back to long-form variable parsing ${...} or $(...)
+    let is_paren = tokens.accept('(');
+    if !is_paren {
+        tokens.expect('{')?;
+    }
     let ident = parse_identifier(tokens)?;
     witness.witness(&ident);
-    if tokens.accept(':') {
+    if !is_paren && tokens.accept(':') {
         let Some(action) = tokens.peek() else {
             return Err(Error::InvalidVariable);
         };
@@ -692,6 +747,7 @@ fn parse_variable(
         let mut expanded = Builder::from_other(output);
         parse_statement(
             generate_errors,
+            escape_dollar_literal,
             depth + 1,
             vars,
             witness,
@@ -727,8 +783,18 @@ fn parse_variable(
         }
     } else if let Some(val) = vars.lookup(&ident) {
         output.push_str(&val);
+    } else if ident == "$" {
+        if escape_dollar_literal {
+            output.push_str("$$");
+        } else {
+            output.push_str("$");
+        }
     }
-    tokens.expect('}')?;
+    if is_paren {
+        tokens.expect(')')?;
+    } else {
+        tokens.expect('}')?;
+    }
     Ok(())
 }
 
@@ -737,11 +803,18 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
     let mut first = true;
     while let Some(c) = tokens.peek() {
         match c {
+            // Regular variable names
             'a'..='z' | 'A'..='Z' | '_' if first => {
                 identifier.push(c);
             }
             'a'..='z' | 'A'..='Z' | '0'..='9' | '_' if !first => {
                 identifier.push(c);
+            }
+            // Make-style automatic variables (single character)
+            '@' | '<' | '^' | '+' | '?' | '$' if first => {
+                let special_ident = c.to_string();
+                tokens.expect(c)?;
+                return Ok(special_ident);
             }
             _ => {
                 if !identifier.is_empty() {
@@ -761,15 +834,32 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 
 /// Expand the input to a shell-quoted string suitable for passing to `split`.
 pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
+    expand_once(vars, input, false)
+}
+
+fn expand_once(
+    vars: &dyn VariableProvider,
+    input: &str,
+    escape_dollar_literal: bool,
+) -> Result<String, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
-    parse_statement(true, 0, vars, &mut (), &mut tokens, &mut output)?;
+    parse_statement(
+        true,
+        escape_dollar_literal,
+        0,
+        vars,
+        &mut (),
+        &mut tokens,
+        &mut output,
+    )?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
         return Err(Error::TrailingRightBrace);
     }
-    Ok(output.into_string().trim().to_string())
+    let result = output.into_string().trim().to_string();
+    Ok(result)
 }
 
 ///////////////////////////////////////// expand_recursive /////////////////////////////////////////
@@ -782,19 +872,32 @@ pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<Stri
         let mut witnesses = HashSet::default();
         let mut tokens = Tokenize::new(input);
         let mut output = Builder::default();
-        parse_statement(true, 0, vars, &mut witnesses, &mut tokens, &mut output)?;
+        parse_statement(
+            false,
+            true,
+            0,
+            vars,
+            &mut witnesses,
+            &mut tokens,
+            &mut output,
+        )?;
         Ok(witnesses)
     }
+
+    fn post_process(s: &str) -> Result<String, Error> {
+        expand_once(&(), s, false)
+    }
+
     let mut witnesses = generate_witnesses(vars, input)?;
     let mut input = input.to_string();
     for _ in 0..128 {
-        let once = expand(vars, &input)?;
+        let once = expand_once(vars, &input, true)?;
         if once == input {
-            return Ok(once);
+            return post_process(&once);
         }
         let new_witnesses = generate_witnesses(vars, &once)?;
-        if new_witnesses.is_empty() {
-            return Ok(once);
+        if new_witnesses.is_empty() || (new_witnesses.len() == 1 && new_witnesses.contains("$")) {
+            return post_process(&once);
         }
         if witnesses.is_subset(&new_witnesses) {
             return Err(Error::DepthLimitExceeded);
@@ -812,7 +915,15 @@ pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     let mut witnesses: HashSet<String> = HashSet::new();
-    parse_statement(false, 0, &(), &mut witnesses, &mut tokens, &mut output)?;
+    parse_statement(
+        false,
+        true,
+        0,
+        &(),
+        &mut witnesses,
+        &mut tokens,
+        &mut output,
+    )?;
     if tokens.peek().is_some() {
         // SAFETY(rescrv): We can only break out of the loop early on '}'.
         assert_eq!(Some('}'), tokens.peek());
@@ -1029,6 +1140,369 @@ mod tests {
         assert_eq!(
             "sjc.CyberDyne.example.org",
             super::expand_recursive(&vp, "${HOST}").unwrap()
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "source.c header.h"),
+            ("+", "source.c header.h source.c"),
+            ("?", "source.c"),
+        ]);
+
+        assert_eq!("target.o", expand(&env, "${@}").unwrap());
+        assert_eq!("source.c", expand(&env, "${<}").unwrap());
+        assert_eq!("source.c header.h", expand(&env, "${^}").unwrap());
+        assert_eq!("source.c header.h source.c", expand(&env, "${+}").unwrap());
+        assert_eq!("source.c", expand(&env, "${?}").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "source.c header.h"),
+            ("+", "source.c header.h source.c"),
+            ("?", "source.c"),
+        ]);
+
+        assert_eq!("target.o", expand(&env, "$@").unwrap());
+        assert_eq!("source.c", expand(&env, "$<").unwrap());
+        assert_eq!("source.c header.h", expand(&env, "$^").unwrap());
+        assert_eq!("source.c header.h source.c", expand(&env, "$+").unwrap());
+        assert_eq!("source.c", expand(&env, "$?").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "my target.o"),
+            ("<", "my source.c"),
+            ("^", "my dependencies.h header.h"),
+            ("+", "my all.c files.c"),
+            ("?", "my newer.c"),
+        ]);
+
+        assert_eq!(r#""my target.o""#, expand(&env, r#""${@}""#).unwrap());
+        assert_eq!(r#""my source.c""#, expand(&env, r#""${<}""#).unwrap());
+        assert_eq!(
+            r#""my dependencies.h header.h""#,
+            expand(&env, r#""${^}""#).unwrap()
+        );
+        assert_eq!(r#""my all.c files.c""#, expand(&env, r#""${+}""#).unwrap());
+        assert_eq!(r#""my newer.c""#, expand(&env, r#""${?}""#).unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "my target.o"),
+            ("<", "my source.c"),
+            ("^", "my dependencies.h header.h"),
+            ("+", "my all.c files.c"),
+            ("?", "my newer.c"),
+        ]);
+
+        assert_eq!(r#""my target.o""#, expand(&env, r#""$@""#).unwrap());
+        assert_eq!(r#""my source.c""#, expand(&env, r#""$<""#).unwrap());
+        assert_eq!(
+            r#""my dependencies.h header.h""#,
+            expand(&env, r#""$^""#).unwrap()
+        );
+        assert_eq!(r#""my all.c files.c""#, expand(&env, r#""$+""#).unwrap());
+        assert_eq!(r#""my newer.c""#, expand(&env, r#""$?""#).unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_mixed_forms() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "dependencies.h header.h"),
+            ("+", "all.c files.c"),
+            ("?", "newer.c"),
+            ("{@}", "target.o"),
+            ("{<}", "source.c"),
+            ("{^}", "dependencies.h header.h"),
+            ("{+}", "all.c files.c"),
+            ("{?}", "newer.c"),
+        ]);
+
+        // Test mixing short and long forms
+        assert_eq!("target.o source.c", expand(&env, "$@ ${<}").unwrap());
+        assert_eq!("target.o source.c", expand(&env, "${@} $<").unwrap());
+        assert_eq!(
+            "dependencies.h header.h all.c files.c",
+            expand(&env, "$^ ${+}").unwrap()
+        );
+        assert_eq!(
+            "dependencies.h header.h all.c files.c",
+            expand(&env, "${^} $+").unwrap()
+        );
+        assert_eq!("newer.c target.o", expand(&env, "$? ${@}").unwrap());
+        assert_eq!("newer.c target.o", expand(&env, "${?} $@").unwrap());
+    }
+
+    #[test]
+    fn make_automatic_variables_long_form_rcvar() {
+        assert_eq!(
+            vec![
+                "+".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string()
+            ],
+            rcvar("${@} ${<} ${^} ${+} ${?}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_short_form_rcvar() {
+        assert_eq!(
+            vec![
+                "+".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string()
+            ],
+            rcvar("$@ $< $^ $+ $?").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_mixed_forms_rcvar() {
+        assert_eq!(
+            vec![
+                "+".to_string(),
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "^".to_string()
+            ],
+            rcvar("$@ ${<} $^ ${+} $?").unwrap(),
+        );
+    }
+
+    #[test]
+    fn make_automatic_variables_consistent_substitution() {
+        // Test that $@ and ${@} resolve to the same value
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "target.o"),
+            ("<", "source.c"),
+            ("^", "deps.h"),
+            ("+", "all.c"),
+            ("?", "newer.c"),
+        ]);
+
+        // Test that short and long forms resolve to the same values
+        assert_eq!("target.o", expand(&env, "$@").unwrap());
+        assert_eq!("target.o", expand(&env, "${@}").unwrap());
+
+        assert_eq!("source.c", expand(&env, "$<").unwrap());
+        assert_eq!("source.c", expand(&env, "${<}").unwrap());
+
+        assert_eq!("deps.h", expand(&env, "$^").unwrap());
+        assert_eq!("deps.h", expand(&env, "${^}").unwrap());
+
+        assert_eq!("all.c", expand(&env, "$+").unwrap());
+        assert_eq!("all.c", expand(&env, "${+}").unwrap());
+
+        assert_eq!("newer.c", expand(&env, "$?").unwrap());
+        assert_eq!("newer.c", expand(&env, "${?}").unwrap());
+
+        // Test mixing different forms in same expression
+        assert_eq!("target.o source.c", expand(&env, "$@ ${<}").unwrap());
+        assert_eq!("target.o source.c", expand(&env, "${@} $<").unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_regular_variables() {
+        let env: HashMap<&str, &str> =
+            HashMap::from([("FOO", "foo"), ("BAR", "bar"), ("BAZ", "baz")]);
+
+        assert_eq!("foo", expand(&env, "$(FOO)").unwrap());
+        assert_eq!("bar", expand(&env, "$(BAR)").unwrap());
+        assert_eq!("baz", expand(&env, "$(BAZ)").unwrap());
+        assert_eq!("foo-bar-baz", expand(&env, "$(FOO)-$(BAR)-$(BAZ)").unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_automatic_variables() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("@", "paren-target.o"),
+            ("<", "paren-source.c"),
+            ("^", "paren-dependencies.h header.h"),
+            ("+", "paren-all.c files.c"),
+            ("?", "paren-newer.c"),
+        ]);
+
+        assert_eq!("paren-target.o", expand(&env, "$(@)").unwrap());
+        assert_eq!("paren-source.c", expand(&env, "$(<)").unwrap());
+        assert_eq!(
+            "paren-dependencies.h header.h",
+            expand(&env, "$(^)").unwrap()
+        );
+        assert_eq!("paren-all.c files.c", expand(&env, "$(+)").unwrap());
+        assert_eq!("paren-newer.c", expand(&env, "$(?)").unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo bar"), ("@", "my target.o")]);
+
+        assert_eq!(r#""foo bar""#, expand(&env, r#""$(FOO)""#).unwrap());
+        assert_eq!(r#""my target.o""#, expand(&env, r#""$(@)""#).unwrap());
+    }
+
+    #[test]
+    fn dollar_paren_syntax_mixed_with_other_forms() {
+        let env: HashMap<&str, &str> =
+            HashMap::from([("FOO", "foo"), ("@", "consistent-at"), ("BAR", "bar")]);
+
+        // Mix $(VAR) with ${VAR} and $VAR
+        assert_eq!("foo bar", expand(&env, "$(FOO) ${BAR}").unwrap());
+        assert_eq!(
+            "consistent-at consistent-at consistent-at",
+            expand(&env, "$@ ${@} $(@)").unwrap()
+        );
+    }
+
+    #[test]
+    fn dollar_paren_syntax_rcvar() {
+        assert_eq!(
+            vec![
+                "<".to_string(),
+                "?".to_string(),
+                "@".to_string(),
+                "FOO".to_string(),
+                "^".to_string(),
+            ],
+            rcvar("$(FOO) $(@) $(<) $(^) $(?)").unwrap(),
+        );
+    }
+
+    #[test]
+    fn dollar_dollar_literal_expansion() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test short form $$
+        assert_eq!("$", expand(&env, "$$").unwrap());
+
+        // Test long forms ${$} and $($)
+        assert_eq!("$", expand(&env, "${$}").unwrap());
+        assert_eq!("$", expand(&env, "$($)").unwrap());
+
+        // Test in context
+        assert_eq!("Price: $10", expand(&env, "Price: $$10").unwrap());
+        assert_eq!("Price: $10", expand(&env, "Price: ${$}10").unwrap());
+        assert_eq!("Price: $10", expand(&env, "Price: $($)10").unwrap());
+
+        // Test multiple $$ in one string
+        assert_eq!("$1 $2 $3", expand(&env, "$$1 $$2 $$3").unwrap());
+
+        // Test with other variables
+        let env2: HashMap<&str, &str> = HashMap::from([("FOO", "bar")]);
+        assert_eq!("bar$", expand(&env2, "${FOO}$$").unwrap());
+        assert_eq!("$bar", expand(&env2, "$$${FOO}").unwrap());
+    }
+
+    #[test]
+    fn dollar_dollar_in_quotes() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test in double quotes
+        assert_eq!("\"$\"", expand(&env, "\"$$\"").unwrap());
+        assert_eq!("\"$\"", expand(&env, "\"${$}\"").unwrap());
+        assert_eq!("\"$\"", expand(&env, "\"$($)\"").unwrap());
+
+        // Test in single quotes (should be literal)
+        assert_eq!("\"$$\"", expand(&env, "'$$'").unwrap());
+        assert_eq!("\"${$}\"", expand(&env, "'${$}'").unwrap());
+        assert_eq!("\"$($)\"", expand(&env, "'$($)'").unwrap());
+    }
+
+    #[test]
+    fn dollar_dollar_rcvar() {
+        // Test that $$ is properly tracked in rcvar
+        assert_eq!(vec!["$".to_string()], rcvar("$$").unwrap(),);
+
+        assert_eq!(vec!["$".to_string()], rcvar("${$}").unwrap(),);
+
+        assert_eq!(vec!["$".to_string()], rcvar("$($)").unwrap(),);
+
+        // Test mixed with other variables
+        assert_eq!(
+            vec!["$".to_string(), "FOO".to_string()],
+            rcvar("$$ ${FOO}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn dollar_dollar_comprehensive_edge_cases() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test consecutive $$ expansions
+        assert_eq!("$$", expand(&env, "$$$$").unwrap());
+
+        // Test $$ followed immediately by digits (like process ID)
+        assert_eq!("$123", expand(&env, "$$123").unwrap());
+        assert_eq!("$456", expand(&env, "$$456").unwrap());
+
+        // Test $$ in shell command contexts
+        assert_eq!("kill -9 $", expand(&env, "kill -9 $$").unwrap());
+        assert_eq!("echo $ > file", expand(&env, "echo $$ > file").unwrap());
+
+        // Test $$ with mixed variable forms
+        let env2: HashMap<&str, &str> = HashMap::from([("PID", "12345")]);
+        assert_eq!(
+            "Process $ has PID 12345",
+            expand(&env2, "Process $$ has PID ${PID}").unwrap()
+        );
+
+        // Test $$ in complex quoted scenarios
+        assert_eq!("\"echo $\"", expand(&env, "\"echo $$\"").unwrap());
+        assert_eq!("\"$123\"", expand(&env, "\"$$123\"").unwrap());
+
+        // Test split functionality with $$ results
+        let expanded = expand(&env, "arg1 $$ arg3").unwrap();
+        assert_eq!("arg1 $ arg3", expanded);
+        let split_result = split(&expanded).unwrap();
+        assert_eq!(vec!["arg1", "$", "arg3"], split_result);
+    }
+
+    #[test]
+    fn expand_recursive_dollar_dollar_monotonic() {
+        let env: HashMap<&str, &str> = HashMap::new();
+
+        // Test that expand_recursive stops when only $$ -> $ transformation occurs
+        assert_eq!("$", super::expand_recursive(&env, "$$").unwrap());
+        assert_eq!("$ $", super::expand_recursive(&env, "$$ $$").unwrap());
+        assert_eq!("test $", super::expand_recursive(&env, "test $$").unwrap());
+        assert_eq!("$ test", super::expand_recursive(&env, "$$ test").unwrap());
+        assert_eq!(
+            "$ test $",
+            super::expand_recursive(&env, "$$ test $$").unwrap()
+        );
+
+        // Test that it still works with real variables
+        let env2: HashMap<&str, &str> = HashMap::from([("FOO", "bar")]);
+
+        // First test basic expand works
+        println!("expand result: {:?}", expand(&env2, "${FOO} $$"));
+
+        assert_eq!(
+            "bar $",
+            super::expand_recursive(&env2, "${FOO} $$").unwrap()
+        );
+        assert_eq!(
+            "$ bar",
+            super::expand_recursive(&env2, "$$ ${FOO}").unwrap()
         );
     }
 }
