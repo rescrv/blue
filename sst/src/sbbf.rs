@@ -157,7 +157,7 @@ impl TryFrom<&[u8]> for Filter {
         if bytes.is_empty() {
             return Err("bloom filter must have a non-zero length");
         }
-        if bytes.len() % 32 != 0 {
+        if !bytes.len().is_multiple_of(32) {
             return Err("bloom filter must be a multiple of 32 in length");
         }
         let limit = bytes.len() / 32;

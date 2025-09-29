@@ -31,6 +31,7 @@
 //     print(3, |x| format!("{:0.2e}", x));
 //     println!("}}");
 // }
+#![allow(clippy::approx_constant)]
 
 use sig_fig_histogram::SigFigBucketizer;
 #[test]
@@ -577,6 +578,7 @@ fn two_sig_figs() {
     assert_eq!(269, sfb.bucket_for(9.9e2));
     assert!((sfb.boundary_for(269) - 9.9e2).abs() < 1e-10);
 }
+
 #[test]
 fn three_sig_figs() {
     let sfb = SigFigBucketizer::new(3);

@@ -234,7 +234,7 @@ proptest::proptest! {
 
     #[test]
     fn tuple_key_proptest(elements in proptest::collection::vec((arb_field_number(), arb_direction(), arb_element()), 0..32)
-                              .prop_filter("reverse unit", |v| v.iter().all(|e| (e.1 != Direction::Reverse || e.2 != TestElement::Unit)))) {
+                              .prop_filter("reverse unit", |v| v.iter().all(|e| e.1 != Direction::Reverse || e.2 != TestElement::Unit))) {
         let mut key = TupleKey::default();
         for (field_number, direction, element) in elements.iter() {
             element.extend(*field_number, *direction, &mut key);
