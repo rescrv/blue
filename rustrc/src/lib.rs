@@ -280,6 +280,12 @@ impl From<&Error> for indicio::Value {
                             from_utf8: format!("{:?}", err),
                         })
                     }
+                    rc_conf::Error::ExecFailed { command, error } => {
+                        indicio::value!({
+                            command: command,
+                            exec_failed: format!("{:?}", error),
+                        })
+                    }
                 };
                 indicio::value!({
                     rc_conf: inner,
