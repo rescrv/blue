@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_yaml::{from_str, to_string, Deserializer, Value};
+use serde_yaml::{to_string, Deserializer, Value};
 
 use rc_conf::RcConf;
 use utf8path::Path;
@@ -57,11 +57,9 @@ fn main() {
             continue;
         }
         let yaml = std::fs::read_to_string(&spec).expect("should be able to read");
-        let mut idx = 0;
-        for doc in Deserializer::from_str(&yaml) {
+        for (idx, doc) in Deserializer::from_str(&yaml).enumerate() {
             let doc = Value::deserialize(doc).expect("should be able to parse yaml");
             run_test(&spec, idx, doc);
-            idx += 1;
         }
     }
 }
