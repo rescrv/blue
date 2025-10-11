@@ -1,10 +1,8 @@
----
 host: TyrellCorp.Jfk.memcached.example.org
 port: 11211
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config-map-67662248005596223230290573062391191974
   namespace: memcached
-data: ~
+data: null

@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use serde::Deserialize;
+use serde_yaml::{from_str, to_string, Deserializer, Value};
 use siphasher::sip128::{Hasher128, SipHasher24};
-use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
 use rc_conf::RcConf;
 use shvar::VariableProvider;
@@ -69,8 +70,7 @@ pub enum Error {
     ParseIntError(std::num::ParseIntError),
     RcConf(rc_conf::Error),
     Shvar(shvar::Error),
-    YamlScan(yaml_rust::ScanError),
-    YamlEmit(yaml_rust::EmitError),
+    SerdeYaml(serde_yaml::Error),
     InvalidCurrentDirectory,
     ManifestsDirectoryExists,
     ManifestExists(Path<'static>),
@@ -103,15 +103,9 @@ impl From<shvar::Error> for Error {
     }
 }
 
-impl From<yaml_rust::ScanError> for Error {
-    fn from(err: yaml_rust::ScanError) -> Self {
-        Self::YamlScan(err)
-    }
-}
-
-impl From<yaml_rust::EmitError> for Error {
-    fn from(err: yaml_rust::EmitError) -> Self {
-        Self::YamlEmit(err)
+impl From<serde_yaml::Error> for Error {
+    fn from(err: serde_yaml::Error) -> Self {
+        Self::SerdeYaml(err)
     }
 }
 
@@ -123,37 +117,36 @@ pub fn rewrite(rc_conf: &RcConf, service: &str, yaml: &str) -> Result<String, Er
 }
 
 fn _rewrite(vp: &impl VariableProvider, yaml: &str) -> Result<String, Error> {
-    let yaml = YamlLoader::load_from_str(yaml)?;
-    let yaml = yaml
+    let mut docs = vec![];
+    for doc in Deserializer::from_str(yaml) {
+        let value = Value::deserialize(doc)?;
+        docs.push(value);
+    }
+    let docs = docs
         .into_iter()
-        .map(|y| transform(&vp, y))
+        .map(|y| transform(vp, y))
         .collect::<Result<Vec<_>, _>>()?;
-    let yaml = yaml.into_iter().flatten().collect::<Vec<_>>();
     let mut out = String::new();
-    for obj in yaml {
-        let mut emitter = YamlEmitter::new(&mut out);
-        emitter.dump(&obj)?;
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
+    for doc in docs.into_iter().flatten() {
+        out += &to_string(&doc)?;
     }
     Ok(out)
 }
 
-fn transform(vp: &dyn VariableProvider, yaml: Yaml) -> Result<Option<Yaml>, Error> {
-    fn transform_vec(vp: &dyn VariableProvider, yaml: Vec<Yaml>) -> Result<Option<Yaml>, Error> {
+fn transform(vp: &dyn VariableProvider, yaml: Value) -> Result<Option<Value>, Error> {
+    fn transform_vec(vp: &dyn VariableProvider, yaml: Vec<Value>) -> Result<Option<Value>, Error> {
         let yaml = yaml
             .into_iter()
             .map(|y| transform(vp, y))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(Yaml::Array(yaml.into_iter().flatten().collect())))
+        Ok(Some(Value::Sequence(yaml.into_iter().flatten().collect())))
     }
 
     fn transform_kv(
         vp: &dyn VariableProvider,
-        k: Yaml,
-        v: Yaml,
-    ) -> Result<Option<(Yaml, Yaml)>, Error> {
+        k: Value,
+        v: Value,
+    ) -> Result<Option<(Value, Value)>, Error> {
         let k = transform(vp, k)?;
         let v = transform(vp, v)?;
         if let (Some(k), Some(v)) = (k, v) {
@@ -165,21 +158,22 @@ fn transform(vp: &dyn VariableProvider, yaml: Yaml) -> Result<Option<Yaml>, Erro
 
     fn transform_hash(
         vp: &dyn VariableProvider,
-        yaml: impl Iterator<Item = (Yaml, Yaml)>,
-    ) -> Result<Option<Yaml>, Error> {
+        yaml: impl Iterator<Item = (Value, Value)>,
+    ) -> Result<Option<Value>, Error> {
         let yaml = yaml
             .into_iter()
             .map(|(k, v)| transform_kv(vp, k, v))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(Yaml::Hash(yaml.into_iter().flatten().collect())))
+        Ok(Some(Value::Mapping(yaml.into_iter().flatten().collect())))
     }
 
     match yaml {
-        Yaml::String(s) => match shvar::expand_recursive(vp, &s) {
+        Value::String(s) => match shvar::expand_recursive(vp, &s) {
             Ok(expanded) => {
                 let pieces = shvar::split(&expanded)?;
                 let quoted = shvar::quote(pieces);
-                Ok(Some(Yaml::from_str(&quoted)))
+                let value: Value = from_str(&quoted)?;
+                Ok(Some(value))
             }
             Err(shvar::Error::Requested(msg)) => {
                 if msg.is_empty() {
@@ -190,8 +184,8 @@ fn transform(vp: &dyn VariableProvider, yaml: Yaml) -> Result<Option<Yaml>, Erro
             }
             Err(err) => Err(err.into()),
         },
-        Yaml::Array(a) => transform_vec(vp, a),
-        Yaml::Hash(h) => transform_hash(vp, h.into_iter()),
+        Value::Sequence(a) => transform_vec(vp, a),
+        Value::Mapping(h) => transform_hash(vp, h.into_iter()),
         _ => Ok(Some(yaml)),
     }
 }

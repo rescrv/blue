@@ -1,10 +1,8 @@
----
 host: memcached.example.org
 port: 22122
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config-map-80983675536533694274576869787814314195
   namespace: memcached
-data: ~
+data: null

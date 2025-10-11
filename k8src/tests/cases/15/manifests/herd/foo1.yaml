@@ -1,4 +1,3 @@
----
 source: this is foo1 template
 salutation: Hello Alice!---
 apiVersion: v1
@@ -6,4 +5,4 @@ kind: ConfigMap
 metadata:
   name: config-map-43481688782351957739423696898826794767
   namespace: symphhonize
-data: ~
+data: null

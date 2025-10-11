@@ -1,10 +1,8 @@
----
 host: CyberDyne.Sjc.memcached.example.org
 port: 11211
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config-map-302225206729029218955926002704402304022
   namespace: memcached
-data: ~
+data: null

@@ -15,8 +15,9 @@ command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
 getopts = { version = "0.2", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 siphasher = "1"
-yaml-rust = "0.4"
 
 arrrg = { path = "../arrrg", version = "0.8", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
