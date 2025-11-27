@@ -308,7 +308,7 @@ impl Handle<UnpackError> for UnpackError {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// The sst Error type.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum Error {
     // Key/Value constraints
