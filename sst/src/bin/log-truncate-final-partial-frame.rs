@@ -3,7 +3,7 @@
 use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
-use sst::{Error, IoToZ, LogOptions};
+use sst::LogOptions;
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct LogTruncateFinalPartialFrameOptions {
@@ -23,9 +23,8 @@ fn main() {
         eprintln!("specify exactly one sst");
         std::process::exit(1);
     }
-    if let Some(offset) = sst::log::truncate_final_partial_frame(cmdline.log.clone(), &args[0])
-        .as_z()
-        .pretty_unwrap()
+    if let Some(offset) =
+        sst::log::truncate_final_partial_frame(cmdline.log.clone(), &args[0]).unwrap()
     {
         if cmdline.truncate {
             if let Some(truncate_to) = cmdline.truncate_to {
@@ -39,9 +38,9 @@ fn main() {
                     libc::truncate(args[0].as_ptr() as *const i8, offset.try_into().unwrap())
                 } < 0
                 {
-                    Err::<(), Error>(std::io::Error::last_os_error().into())
-                        .as_z()
-                        .pretty_unwrap();
+                    let err = std::io::Error::last_os_error();
+                    eprintln!("truncate failed: {err:?}");
+                    std::process::exit(3);
                 }
             } else {
                 eprintln!("not truncating: specify --truncate-to {offset} to truncate");

@@ -1385,7 +1385,7 @@ fn take_consistent_cut<P: AsRef<Path>>(
                         .to_path_buf();
                 }
                 let display = path.to_string_lossy().to_string();
-                if PathBuf::from(&display) != path {
+                if Path::new(&display) != path {
                     return Err(Error::InvalidPath {
                         core: ErrorCore::default(),
                         what: format!("path {display} contains invalid characters"),

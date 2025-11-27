@@ -230,6 +230,10 @@ pub enum Error {
         core: ErrorCore,
         path: String,
     },
+    Sst {
+        core: ErrorCore,
+        what: sst::Error,
+    },
 }
 
 impl From<std::io::Error> for Error {
@@ -252,74 +256,9 @@ impl From<mani::Error> for Error {
 
 impl From<sst::Error> for Error {
     fn from(what: sst::Error) -> Error {
-        match what {
-            sst::Error::Success { core } => Error::Success { core },
-            sst::Error::KeyTooLarge {
-                core,
-                length,
-                limit,
-            } => Error::KeyTooLarge {
-                core,
-                length,
-                limit,
-            },
-            sst::Error::ValueTooLarge {
-                core,
-                length,
-                limit,
-            } => Error::ValueTooLarge {
-                core,
-                length,
-                limit,
-            },
-            sst::Error::SortOrder {
-                core,
-                last_key,
-                last_timestamp,
-                new_key,
-                new_timestamp,
-            } => Error::SortOrder {
-                core,
-                last_key,
-                last_timestamp,
-                new_key,
-                new_timestamp,
-            },
-            sst::Error::TableFull { core, size, limit } => Error::TableFull { core, size, limit },
-            sst::Error::BlockTooSmall {
-                core,
-                length,
-                required,
-            } => Error::BlockTooSmall {
-                core,
-                length,
-                required,
-            },
-            sst::Error::UnpackError {
-                core,
-                error,
-                context,
-            } => Error::UnpackError {
-                core,
-                error,
-                context,
-            },
-            sst::Error::Crc32cFailure {
-                core,
-                start,
-                limit,
-                crc32c,
-            } => Error::Crc32cFailure {
-                core,
-                start,
-                limit,
-                crc32c,
-            },
-            sst::Error::Corruption { core, context } => Error::Corruption { core, context },
-            sst::Error::LogicError { core, context } => Error::LogicError { core, context },
-            sst::Error::SystemError { core, what } => Error::SystemError { core, what },
-            sst::Error::TooManyOpenFiles { core, limit } => Error::TooManyOpenFiles { core, limit },
-            sst::Error::EmptyBatch { core } => Error::EmptyBatch { core },
+        Error::Sst {
+            core: ErrorCore::default(),
+            what,
         }
     }
 }

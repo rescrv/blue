@@ -4,12 +4,12 @@ use arrrg::CommandLine;
 use arrrg_derive::CommandLine;
 
 use sst::setsum::Setsum;
-use sst::{IoToZ, LogIterator, LogOptions};
+use sst::{LogIterator, LogOptions};
 
 fn setsum(opts: LogOptions, log: &str) -> String {
     let mut log = LogIterator::new(opts, log).expect("open log");
     let mut setsum = Setsum::default();
-    while let Some(kvr) = log.next().pretty_unwrap() {
+    while let Some(kvr) = log.next().unwrap() {
         match kvr.value {
             Some(v) => {
                 setsum.put(kvr.key, kvr.timestamp, v);

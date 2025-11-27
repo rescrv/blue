@@ -18,9 +18,8 @@ use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
 use buffertk::{stack_pack, Packable, Unpacker};
+use handled::Handle;
 use tatl::{HeyListen, Stationary};
-use zerror::{iotoz, Z};
-use zerror_core::ErrorCore;
 
 pub mod block;
 pub mod bounds_cursor;
@@ -207,12 +206,10 @@ pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64
 pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
-        let err = Error::KeyTooLarge {
-            core: ErrorCore::default(),
+        Err(Error::KeyTooLarge {
             length: key.len(),
             limit: MAX_KEY_LEN,
-        };
-        Err(err)
+        })
     } else {
         Ok(())
     }
@@ -222,12 +219,10 @@ pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
 pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
-        let err = Error::ValueTooLarge {
-            core: ErrorCore::default(),
+        Err(Error::ValueTooLarge {
             length: value.len(),
             limit: MAX_VALUE_LEN,
-        };
-        Err(err)
+        })
     } else {
         Ok(())
     }
@@ -237,12 +232,10 @@ pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
 pub fn check_table_size(size: usize) -> Result<(), Error> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
-        let err = Error::TableFull {
-            core: ErrorCore::default(),
+        Err(Error::TableFull {
             size,
             limit: TABLE_FULL_SIZE,
-        };
-        Err(err)
+        })
     } else {
         Ok(())
     }
@@ -250,208 +243,456 @@ pub fn check_table_size(size: usize) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-/// The sst Error type.
-#[derive(Clone, Message, zerror_derive::Z)]
-pub enum Error {
-    /// Success.  Used for Message default.  Should not be constructed otherwise.
-    #[prototk(442368, message)]
-    Success {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// Indicates the key length is too big for sst.
-    #[prototk(442369, message)]
-    KeyTooLarge {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The length of the key.
-        #[prototk(2, uint64)]
-        length: usize,
-        /// The limit on length of the key.
-        #[prototk(3, uint64)]
-        limit: usize,
-    },
-    /// Indicates the value length is too big for sst.
-    #[prototk(442370, message)]
-    ValueTooLarge {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The length of the value.
-        #[prototk(2, uint64)]
-        length: usize,
-        /// The limit on length of the value.
-        #[prototk(3, uint64)]
-        limit: usize,
-    },
-    /// The SST was provided keys out of order.
-    #[prototk(442371, message)]
-    SortOrder {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The most recently inserted key.
-        #[prototk(2, bytes)]
-        last_key: Vec<u8>,
-        /// The most recently inserted timestamp.
-        #[prototk(3, uint64)]
-        last_timestamp: u64,
-        /// The key that happened out of order.
-        #[prototk(4, bytes)]
-        new_key: Vec<u8>,
-        /// The timestamp that happened out of order.
-        #[prototk(5, uint64)]
-        new_timestamp: u64,
-    },
-    /// The table is full.
-    #[prototk(442372, message)]
-    TableFull {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The attempted size of the table.
-        #[prototk(2, uint64)]
-        size: usize,
-        /// The limit on size of the table.
-        #[prototk(3, uint64)]
-        limit: usize,
-    },
-    /// The block was too small to be considered valid.
-    #[prototk(442373, message)]
-    BlockTooSmall {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The length observed.
-        #[prototk(2, uint64)]
-        length: usize,
-        /// The length required.
-        #[prototk(3, uint64)]
-        required: usize,
-    },
-    /// There was an error unpacking data.
-    #[prototk(442374, message)]
-    UnpackError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The prototk unpack error.
-        #[prototk(2, message)]
-        error: prototk::Error,
-        /// Additional context.
-        #[prototk(3, string)]
-        context: String,
-    },
-    /// A block failed its crc check.
-    #[prototk(442375, message)]
-    Crc32cFailure {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The starting offset.
-        #[prototk(2, uint64)]
-        start: u64,
-        /// The limit offset.
-        #[prototk(3, uint64)]
-        limit: u64,
-        /// The computed crc.
-        #[prototk(3, fixed32)]
-        crc32c: u32,
-    },
-    /// General corruption was observed.
-    #[prototk(442376, message)]
-    Corruption {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A description of what was corrupt.
-        #[prototk(2, string)]
-        context: String,
-    },
-    /// A logic error was encountered.
-    #[prototk(442377, message)]
-    LogicError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        context: String,
-    },
-    /// A system error was encountered.
-    #[prototk(442378, message)]
-    SystemError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Too many files were opened at once.
-    #[prototk(442379, message)]
-    TooManyOpenFiles {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The limit on the number of files allowed.
-        #[prototk(2, uint64)]
-        limit: usize,
-    },
-    /// An empty batch was provided to a builder that cannot accept empty batches.
-    #[prototk(442380, message)]
-    EmptyBatch {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
+////////////////////////////////////////// Error Classes ///////////////////////////////////////////
+
+/// An I/O operation failed with this error kind.
+#[derive(Clone, Debug)]
+pub struct IoError {
+    /// The kind of I/O error that occurred.
+    pub kind: std::io::ErrorKind,
+    /// The path associated with the error, if any.
+    pub path: Option<PathBuf>,
 }
 
-impl Default for Error {
-    fn default() -> Self {
-        Error::Success {
-            core: ErrorCore::default(),
-        }
+impl Handle<IoError> for IoError {
+    fn handle(&self) -> Option<IoError> {
+        Some(self.clone())
     }
 }
 
+/// Corruption was detected in the data.
+#[derive(Clone, Debug)]
+pub struct CorruptionError {
+    /// A description of what was corrupt.
+    pub context: String,
+}
+
+impl Handle<CorruptionError> for CorruptionError {
+    fn handle(&self) -> Option<CorruptionError> {
+        Some(self.clone())
+    }
+}
+
+/// A resource limit was exceeded.
+#[derive(Clone, Debug)]
+pub struct ResourceLimit {
+    /// The resource that was exhausted.
+    pub resource: String,
+    /// The limit that was exceeded.
+    pub limit: usize,
+    /// The size that was attempted.
+    pub size: usize,
+}
+
+impl Handle<ResourceLimit> for ResourceLimit {
+    fn handle(&self) -> Option<ResourceLimit> {
+        Some(self.clone())
+    }
+}
+
+/// An unpack/decode operation failed.
+#[derive(Clone, Debug)]
+pub struct UnpackError {
+    /// The underlying prototk error.
+    pub error: prototk::Error,
+    /// Additional context.
+    pub context: String,
+}
+
+impl Handle<UnpackError> for UnpackError {
+    fn handle(&self) -> Option<UnpackError> {
+        Some(self.clone())
+    }
+}
+
+/////////////////////////////////////////////// Error //////////////////////////////////////////////
+
+/// The sst Error type.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[allow(missing_docs)]
+pub enum Error {
+    // Key/Value constraints
+    KeyTooLarge {
+        length: usize,
+        limit: usize,
+    },
+    ValueTooLarge {
+        length: usize,
+        limit: usize,
+    },
+    SortOrder {
+        last_key: Vec<u8>,
+        last_timestamp: u64,
+        new_key: Vec<u8>,
+        new_timestamp: u64,
+    },
+
+    // Table/Block structure errors
+    TableFull {
+        size: usize,
+        limit: usize,
+    },
+    BlockTooSmall {
+        length: usize,
+        required: usize,
+    },
+    #[default]
+    EmptyBatch,
+
+    // Corruption errors
+    Crc32cFailure {
+        start: u64,
+        limit: u64,
+        crc32c: u32,
+    },
+    CorruptionFileTooSmall {
+        file_size: u64,
+        minimum_size: u64,
+    },
+    CorruptionFinalBlockOffsetTooLarge {
+        final_block_offset: u64,
+        file_size: u64,
+    },
+    CorruptionIndexBlockRunsPastFilterBlock {
+        index_block_limit: u64,
+        filter_block_start: u64,
+    },
+    CorruptionFilterBlockRunsPastFinalBlock {
+        filter_block_limit: u64,
+        final_block_offset: u64,
+    },
+    CorruptionBlockMetadataStartGteLimit {
+        start: u64,
+        limit: u64,
+    },
+    CorruptionMetaBlockNullValue,
+    CorruptionTriedLoadingFilterBlockAsPlain,
+    CorruptionTriedLoadingFinalBlockAsPlain,
+    CorruptionTriedLoadingPlainBlockAsFilter,
+    CorruptionTriedLoadingFinalBlockAsFilter,
+    CorruptionBadFilterBlock {
+        what: String,
+    },
+    CorruptionBlockWithZeroRestarts,
+    CorruptionRestartPointNoKeyValuePair {
+        restart_point: usize,
+    },
+    CorruptionBinarySearchLeftNeRight {
+        left: usize,
+        right: usize,
+    },
+    CorruptionOffsetExceedsRestartsBoundary {
+        offset: usize,
+        restarts_boundary: usize,
+    },
+    CorruptionSharedNotZero,
+    CorruptionInvalidDiscriminant {
+        discriminant: u32,
+        offset: u64,
+    },
+    CorruptionCrcChecksumFailed {
+        expected: u32,
+        computed: u32,
+        offset: u64,
+    },
+    CorruptionHeaderSizeExceedsMax {
+        header_size: usize,
+        offset: u64,
+    },
+    CorruptionEntrySizeExceedsMax {
+        size: u64,
+        offset: u64,
+    },
+    CorruptionTrueUpExceedsHeaderMax {
+        offset: u64,
+        trued_up: u64,
+    },
+    CorruptionTruncationNoSecondHeader {
+        offset: u64,
+    },
+    CorruptionLogPoisoned,
+    CorruptionFsyncFailed,
+
+    // Unpack errors
+    UnpackFinalBlockOffset {
+        error: prototk::Error,
+    },
+    UnpackFinalBlock {
+        error: prototk::Error,
+    },
+    UnpackTableEntry {
+        error: prototk::Error,
+    },
+    UnpackBlockMetadata {
+        error: prototk::Error,
+    },
+    UnpackKeyValuePair {
+        error: prototk::Error,
+        offset: usize,
+    },
+    UnpackBlockRestarts {
+        error: prototk::Error,
+    },
+    UnpackKeyValueEntry {
+        error: buffertk::Error,
+    },
+    UnpackLogHeader {
+        error: prototk::Error,
+    },
+
+    // Logic errors
+    LogicErrorStartNewBlockWhenSome,
+    LogicErrorFlushBlockWhenNone,
+    LogicErrorRestartIdxExceedsNumRestarts {
+        restart_idx: usize,
+        num_restarts: usize,
+    },
+    LogicErrorTriedTakingNegativeRestartIdx,
+    LogicErrorNextNotPositioned,
+    LogicErrorPrevNotPositioned,
+    LogicErrorFileDescriptorNegative {
+        fd: i32,
+    },
+    LogicErrorFileManagerBrokenPointer {
+        fd: usize,
+    },
+    LogicErrorBufWriterIntoInnerFailed,
+
+    // System errors
+    IoError {
+        kind: std::io::ErrorKind,
+        path: Option<PathBuf>,
+        context: String,
+    },
+
+    // Resource limits
+    TooManyOpenFiles {
+        limit: usize,
+        current: usize,
+    },
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for Error {}
+
 impl From<std::io::Error> for Error {
-    fn from(what: std::io::Error) -> Error {
-        Error::SystemError {
-            core: ErrorCore::default(),
-            what: format!("{what:?}"),
+    fn from(err: std::io::Error) -> Error {
+        Error::IoError {
+            kind: err.kind(),
+            path: None,
+            context: format!("{err:?}"),
         }
     }
 }
 
 impl From<buffertk::Error> for Error {
     fn from(error: buffertk::Error) -> Error {
-        let err: prototk::Error = error.into();
-        Error::from(err)
+        Error::UnpackKeyValueEntry { error }
     }
 }
 
 impl From<prototk::Error> for Error {
     fn from(error: prototk::Error) -> Error {
-        Error::UnpackError {
-            core: ErrorCore::default(),
-            error,
-            context: "From<prototk::Error>".to_owned(),
-        }
+        Error::UnpackLogHeader { error }
     }
 }
 
 impl From<std::convert::Infallible> for Error {
     fn from(_: std::convert::Infallible) -> Error {
-        Error::Success {
-            core: ErrorCore::default(),
+        Error::EmptyBatch
+    }
+}
+
+// Handle implementations for Error
+
+impl Handle<IoError> for Error {
+    fn handle(&self) -> Option<IoError> {
+        match self {
+            Error::IoError { kind, path, .. } => Some(IoError {
+                kind: *kind,
+                path: path.clone(),
+            }),
+            _ => None,
         }
     }
 }
 
-iotoz! {Error}
+impl Handle<CorruptionError> for Error {
+    fn handle(&self) -> Option<CorruptionError> {
+        match self {
+            Error::Crc32cFailure { start, limit, crc32c } => Some(CorruptionError {
+                context: format!("crc32c failure at [{start}..{limit}] with crc {crc32c:#x}"),
+            }),
+            Error::CorruptionFileTooSmall { file_size, minimum_size } => Some(CorruptionError {
+                context: format!("file too small: {file_size} < {minimum_size}"),
+            }),
+            Error::CorruptionFinalBlockOffsetTooLarge { final_block_offset, file_size } => {
+                Some(CorruptionError {
+                    context: format!(
+                        "final block offset {final_block_offset} > file size {file_size}"
+                    ),
+                })
+            }
+            Error::CorruptionIndexBlockRunsPastFilterBlock {
+                index_block_limit,
+                filter_block_start,
+            } => Some(CorruptionError {
+                context: format!(
+                    "index block limit {index_block_limit} > filter block start {filter_block_start}"
+                ),
+            }),
+            Error::CorruptionFilterBlockRunsPastFinalBlock {
+                filter_block_limit,
+                final_block_offset,
+            } => Some(CorruptionError {
+                context: format!(
+                    "filter block limit {filter_block_limit} > final block offset {final_block_offset}"
+                ),
+            }),
+            Error::CorruptionBlockMetadataStartGteLimit { start, limit } => Some(CorruptionError {
+                context: format!("block metadata start {start} >= limit {limit}"),
+            }),
+            Error::CorruptionMetaBlockNullValue => Some(CorruptionError {
+                context: "meta block has null value".to_string(),
+            }),
+            Error::CorruptionTriedLoadingFilterBlockAsPlain => Some(CorruptionError {
+                context: "tried loading filter block as plain".to_string(),
+            }),
+            Error::CorruptionTriedLoadingFinalBlockAsPlain => Some(CorruptionError {
+                context: "tried loading final block as plain".to_string(),
+            }),
+            Error::CorruptionTriedLoadingPlainBlockAsFilter => Some(CorruptionError {
+                context: "tried loading plain block as filter".to_string(),
+            }),
+            Error::CorruptionTriedLoadingFinalBlockAsFilter => Some(CorruptionError {
+                context: "tried loading final block as filter".to_string(),
+            }),
+            Error::CorruptionBadFilterBlock { what } => Some(CorruptionError {
+                context: format!("bad filter block: {what}"),
+            }),
+            Error::CorruptionBlockWithZeroRestarts => Some(CorruptionError {
+                context: "block with zero restarts".to_string(),
+            }),
+            Error::CorruptionRestartPointNoKeyValuePair { restart_point } => Some(CorruptionError {
+                context: format!("restart point {restart_point} returned no key-value pair"),
+            }),
+            Error::CorruptionBinarySearchLeftNeRight { left, right } => Some(CorruptionError {
+                context: format!("binary search left {left} != right {right}"),
+            }),
+            Error::CorruptionOffsetExceedsRestartsBoundary {
+                offset,
+                restarts_boundary,
+            } => Some(CorruptionError {
+                context: format!("offset {offset} exceeds restarts boundary {restarts_boundary}"),
+            }),
+            Error::CorruptionSharedNotZero => Some(CorruptionError {
+                context: "shared was not zero".to_string(),
+            }),
+            Error::CorruptionInvalidDiscriminant { discriminant, offset } => Some(CorruptionError {
+                context: format!("invalid discriminant {discriminant} at offset {offset}"),
+            }),
+            Error::CorruptionCrcChecksumFailed { expected, computed, offset } => {
+                Some(CorruptionError {
+                    context: format!(
+                        "crc checksum failed at offset {offset}: expected {expected:#x}, got {computed:#x}"
+                    ),
+                })
+            }
+            Error::CorruptionHeaderSizeExceedsMax { header_size, offset } => Some(CorruptionError {
+                context: format!("header size {header_size} exceeds max at offset {offset}"),
+            }),
+            Error::CorruptionEntrySizeExceedsMax { size, offset } => Some(CorruptionError {
+                context: format!("entry size {size} exceeds max at offset {offset}"),
+            }),
+            Error::CorruptionTrueUpExceedsHeaderMax { offset, trued_up } => Some(CorruptionError {
+                context: format!("true-up from {offset} to {trued_up} exceeds header max"),
+            }),
+            Error::CorruptionTruncationNoSecondHeader { offset } => Some(CorruptionError {
+                context: format!("truncation: no second header at offset {offset}"),
+            }),
+            Error::CorruptionLogPoisoned => Some(CorruptionError {
+                context: "log is poisoned".to_string(),
+            }),
+            Error::CorruptionFsyncFailed => Some(CorruptionError {
+                context: "fsync failed".to_string(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl Handle<ResourceLimit> for Error {
+    fn handle(&self) -> Option<ResourceLimit> {
+        match self {
+            Error::KeyTooLarge { length, limit } => Some(ResourceLimit {
+                resource: "key".to_string(),
+                limit: *limit,
+                size: *length,
+            }),
+            Error::ValueTooLarge { length, limit } => Some(ResourceLimit {
+                resource: "value".to_string(),
+                limit: *limit,
+                size: *length,
+            }),
+            Error::TableFull { size, limit } => Some(ResourceLimit {
+                resource: "table".to_string(),
+                limit: *limit,
+                size: *size,
+            }),
+            Error::TooManyOpenFiles { limit, current } => Some(ResourceLimit {
+                resource: "open_files".to_string(),
+                limit: *limit,
+                size: *current,
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl Handle<UnpackError> for Error {
+    fn handle(&self) -> Option<UnpackError> {
+        match self {
+            Error::UnpackFinalBlockOffset { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing final block offset".to_string(),
+            }),
+            Error::UnpackFinalBlock { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing final block".to_string(),
+            }),
+            Error::UnpackTableEntry { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing table entry".to_string(),
+            }),
+            Error::UnpackBlockMetadata { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing block metadata".to_string(),
+            }),
+            Error::UnpackKeyValuePair { error, offset } => Some(UnpackError {
+                error: error.clone(),
+                context: format!("parsing key-value pair at offset {offset}"),
+            }),
+            Error::UnpackBlockRestarts { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing block restarts".to_string(),
+            }),
+            Error::UnpackKeyValueEntry { error } => Some(UnpackError {
+                error: (*error).clone().into(),
+                context: "parsing key-value entry".to_string(),
+            }),
+            Error::UnpackLogHeader { error } => Some(UnpackError {
+                error: error.clone(),
+                context: "parsing log header".to_string(),
+            }),
+            _ => None,
+        }
+    }
+}
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
 
@@ -1020,13 +1261,11 @@ const BLOCK_METADATA_MAX_SZ: usize = 27;
 impl BlockMetadata {
     fn sanity_check(&self) -> Result<(), Error> {
         if self.start >= self.limit {
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "block_metadata.start >= block_metadata.limit".to_string(),
-            }
-            .with_info("self.start", self.start)
-            .with_info("self.limit", self.limit);
-            return Err(err);
+            CORRUPTION.click();
+            return Err(Error::CorruptionBlockMetadataStartGteLimit {
+                start: self.start,
+                limit: self.limit,
+            });
         }
         Ok(())
     }
@@ -1175,11 +1414,10 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let file_size = handle.seek(SeekFrom::End(0))?;
         if file_size < 8 {
             CORRUPTION.click();
-            let err = Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "file has fewer than eight bytes".to_string(),
+            return Err(Error::CorruptionFileTooSmall {
+                file_size,
+                minimum_size: 8,
             });
-            return err;
         }
         let position = file_size - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
@@ -1187,22 +1425,15 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e.into(),
-                context: "parsing final block offset".to_string(),
-            }
+            Error::UnpackFinalBlockOffset { error: e.into() }
         })?;
         // Read and parse the final block
         if file_size < final_block_offset {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "final block offset is larger than file size".to_string(),
-            }
-            .with_info("final_block_offset", final_block_offset)
-            .with_info("file_size", file_size);
-            return Err(err);
+            return Err(Error::CorruptionFinalBlockOffsetTooLarge {
+                final_block_offset,
+                file_size,
+            });
         }
         let size_of_final_block = position + 8 - (final_block_offset);
         buf.resize(size_of_final_block as usize, 0);
@@ -1210,35 +1441,25 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let final_block: FinalBlock = up.unpack().map_err(|e| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e,
-                context: "parsing final block".to_string(),
-            }
+            Error::UnpackFinalBlock { error: e }
         })?;
         final_block.index_block.sanity_check()?;
         final_block.filter_block.sanity_check()?;
         // Check that the final block's metadata is sane.
         if final_block.index_block.limit > final_block.filter_block.start {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "index_block runs past filter_block.start".to_string(),
-            }
-            .with_info("filter_block_start", final_block.filter_block.start)
-            .with_info("index_block_limit", final_block.index_block.limit);
-            return Err(err);
+            return Err(Error::CorruptionIndexBlockRunsPastFilterBlock {
+                index_block_limit: final_block.index_block.limit,
+                filter_block_start: final_block.filter_block.start,
+            });
         }
         // Check that the final block's metadata is sane.
         if final_block.filter_block.limit > final_block_offset {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "filter_block runs past final_block_offset".to_string(),
-            }
-            .with_info("final_block_offset", final_block_offset)
-            .with_info("filter_block_limit", final_block.filter_block.limit);
-            return Err(err);
+            return Err(Error::CorruptionFilterBlockRunsPastFinalBlock {
+                filter_block_limit: final_block.filter_block.limit,
+                final_block_offset,
+            });
         }
         let index_block = Sst::load_block(&handle, &final_block.index_block)?;
         let filter = Sst::load_filter_block(&handle, &final_block.filter_block)?;
@@ -1337,37 +1558,25 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let table_entry: SstEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e,
-                context: "parsing table entry".to_string(),
-            }
+            Error::UnpackTableEntry { error: e }
         })?;
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
-            let err = Error::Crc32cFailure {
-                core: ErrorCore::default(),
+            return Err(Error::Crc32cFailure {
                 start: block_metadata.start,
                 limit: block_metadata.limit,
                 crc32c: block_metadata.crc32c,
-            };
-            return Err(err);
+            });
         }
         match table_entry {
             SstEntry::PlainBlock(bytes) => Block::new(bytes.into()),
             SstEntry::FilterBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "tried loading filter block".to_string(),
-                })
+                Err(Error::CorruptionTriedLoadingFilterBlockAsPlain)
             }
             SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "tried loading final block".to_string(),
-                })
+                Err(Error::CorruptionTriedLoadingFinalBlockAsPlain)
             }
         }
     }
@@ -1381,43 +1590,30 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let table_entry: SstEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e,
-                context: "parsing table entry".to_string(),
-            }
+            Error::UnpackTableEntry { error: e }
         })?;
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
-            let err = Error::Crc32cFailure {
-                core: ErrorCore::default(),
+            return Err(Error::Crc32cFailure {
                 start: block_metadata.start,
                 limit: block_metadata.limit,
                 crc32c: block_metadata.crc32c,
-            };
-            return Err(err);
+            });
         }
         match table_entry {
             SstEntry::FilterBlock(bytes) => Filter::try_from(bytes).map_err(|err| {
                 CORRUPTION.click();
-                Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("bad filter block: {err}"),
+                Error::CorruptionBadFilterBlock {
+                    what: err.to_string(),
                 }
             }),
             SstEntry::PlainBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "tried loading plain block".to_string(),
-                })
+                Err(Error::CorruptionTriedLoadingPlainBlockAsFilter)
             }
             SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "tried loading final block".to_string(),
-                })
+                Err(Error::CorruptionTriedLoadingFinalBlockAsFilter)
             }
         }
     }
@@ -1636,8 +1832,11 @@ impl SstBuilder {
             .create_new(true)
             .write(true)
             .open(path.as_ref())
-            .as_z()
-            .with_info("open", path.as_ref().to_string_lossy())?;
+            .map_err(|e| Error::IoError {
+                kind: e.kind(),
+                path: Some(path.as_ref().to_path_buf()),
+                context: "opening file for sst builder".to_string(),
+            })?;
         Ok(SstBuilder {
             options,
             last_key: Vec::new(),
@@ -1660,8 +1859,8 @@ impl SstBuilder {
         if KeyRef::new(&self.last_key, self.last_timestamp).cmp(&KeyRef::new(key, timestamp))
             != Ordering::Less
         {
+            SORT_ORDER.click();
             Err(Error::SortOrder {
-                core: ErrorCore::default(),
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
@@ -1689,10 +1888,7 @@ impl SstBuilder {
         BUILDER_START_NEW_BLOCK.click();
         if self.block_builder.is_some() {
             LOGIC_ERROR.click();
-            return Err(Error::LogicError {
-                core: ErrorCore::default(),
-                context: "called start_new_block() when block_builder is not None".to_string(),
-            });
+            return Err(Error::LogicErrorStartNewBlockWhenSome);
         }
         self.block_builder = Some(BlockBuilder::new(self.options.block.clone()));
         self.block_start_offset = self.bytes_written;
@@ -1703,10 +1899,7 @@ impl SstBuilder {
         BUILDER_FLUSH_BLOCK.click();
         if self.block_builder.is_none() {
             LOGIC_ERROR.click();
-            return Err(Error::LogicError {
-                core: ErrorCore::default(),
-                context: "self.block_builder.is_none()".to_string(),
-            });
+            return Err(Error::LogicErrorFlushBlockWhenNone);
         }
         // Metadata for the block.
         let start = self.bytes_written as u64;
@@ -1717,7 +1910,7 @@ impl SstBuilder {
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        self.bytes_written += pa.stream(&mut self.output).as_z()?;
+        self.bytes_written += pa.stream(&mut self.output)?;
         // Prepare the block metadata.
         let limit = self.bytes_written as u64;
         let block_metadata = BlockMetadata {
@@ -1805,7 +1998,7 @@ impl Builder for SstBuilder {
             let start = builder.bytes_written as u64;
             let crc32c = entry.crc32c();
             let pa = stack_pack(entry);
-            builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
+            builder.bytes_written += pa.stream(&mut builder.output)?;
             let limit = builder.bytes_written as u64;
             Ok(BlockMetadata {
                 start,
@@ -1841,10 +2034,10 @@ impl Builder for SstBuilder {
             biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output).as_z()?;
+        builder.bytes_written += pa.stream(&mut builder.output)?;
         // fsync
-        builder.output.flush().as_z()?;
-        builder.output.get_mut().sync_all().as_z()?;
+        builder.output.flush()?;
+        builder.output.get_mut().sync_all()?;
         Sst::<FileHandle>::new(builder.options, builder.path)
     }
 }
@@ -2000,20 +2193,13 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
             Some(v) => v,
             None => {
                 CORRUPTION.click();
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "meta block has null value".to_string(),
-                });
+                return Err(Error::CorruptionMetaBlockNullValue);
             }
         };
         let mut up = Unpacker::new(value);
         let metadata: BlockMetadata = up.unpack().map_err(|e| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e,
-                context: "parsing block metadata".to_string(),
-            }
+            Error::UnpackBlockMetadata { error: e }
         })?;
         Ok(Some(metadata))
     }
