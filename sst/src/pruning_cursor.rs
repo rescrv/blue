@@ -2,9 +2,8 @@
 //! looks like a consistent cut of the data.  Consequently, there nees to be more logic than just
 //! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 //! to create a cursor over an immutable data set.
-use zerror_core::ErrorCore;
 
-use super::{Cursor, Error, KeyRef};
+use super::{Cursor, Error, KeyRef, LOGIC_ERROR};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
@@ -150,11 +149,8 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
             let kr = match self.key() {
                 Some(kr) => kr,
                 None => {
-                    let err = Error::LogicError {
-                        core: ErrorCore::default(),
-                        context: "should be positioned at some key with a value".to_string(),
-                    };
-                    return Err(err);
+                    LOGIC_ERROR.click();
+                    return Err(Error::LogicErrorPrevNotPositioned);
                 }
             };
             // SAFETY(rescrv): Ensured by the while loop above.

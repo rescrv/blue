@@ -21,6 +21,7 @@ nom = "7.1"
 siphasher = "1.0.0"
 
 armnod = { path = "../armnod", version = "0.11" }
+handled = { path = "../handled", version = "0.5" }
 arrrg = { path = "../arrrg", version = "0.8", optional = true }
 arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
 biometrics = { path = "../biometrics", version = "0.12" }
@@ -33,9 +34,6 @@ setsum = { path = "../setsum", version = "0.7" }
 sync42 = { path = "../sync42", version = "0.15" }
 tatl = { path = "../tatl", version = "0.13" }
 utilz = { path = "../utilz", version = "0.7" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-zerror_derive = { path = "../zerror_derive", version = "0.7" }
-zerror = { path = "../zerror", version = "0.8" }
 
 [dev-dependencies]
 proptest = "1.0"

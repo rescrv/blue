@@ -12,8 +12,6 @@ use biometrics::{Collector, Counter};
 use buffertk::{stack_pack, v64, Packable, Unpackable};
 use prototk_derive::Message;
 use sync42::work_coalescing_queue::{WorkCoalescingCore, WorkCoalescingQueue};
-use zerror::Z;
-use zerror_core::ErrorCore;
 
 use super::setsum::Setsum;
 use super::{
@@ -61,12 +59,10 @@ fn next_boundary(offset: u64) -> u64 {
 
 fn check_batch_size(size: usize) -> Result<(), Error> {
     if size as u64 > BLOCK_SIZE {
-        let err = Error::TableFull {
-            core: ErrorCore::default(),
+        Err(Error::TableFull {
             size,
             limit: BLOCK_SIZE as usize,
-        };
-        Err(err)
+        })
     } else {
         Ok(())
     }
@@ -275,9 +271,7 @@ impl<W: Write> LogBuilder<W> {
     /// Append a write batch to the log.
     pub fn append(&mut self, write_batch: &WriteBatch) -> Result<(), Error> {
         if write_batch.buffer.is_empty() {
-            return Err(Error::EmptyBatch {
-                core: ErrorCore::default(),
-            });
+            return Err(Error::EmptyBatch);
         }
         assert_ne!(write_batch.setsum, Setsum::default());
         self.setsum += write_batch.setsum;
@@ -298,7 +292,6 @@ impl<W: Write> LogBuilder<W> {
         check_table_size(new_offset as usize)?;
         if new_offset > self.options.rollover_size as u64 {
             return Err(Error::TableFull {
-                core: ErrorCore::default(),
                 size: new_offset as usize,
                 limit: self.options.rollover_size,
             });
@@ -392,10 +385,9 @@ impl<W: Write> Builder for LogBuilder<W> {
         self.flush()?;
         Ok((
             self.setsum,
-            self.output.into_inner().map_err(|_| Error::LogicError {
-                core: ErrorCore::default(),
-                context: "failed to get inner".to_string(),
-            })?,
+            self.output
+                .into_inner()
+                .map_err(|_| Error::LogicErrorBufWriterIntoInnerFailed)?,
         ))
     }
 }
@@ -505,10 +497,7 @@ impl ConcurrentLogBuilder<File> {
     /// fsync the data to disk.  This will return when all previously written data is durable.
     pub fn fsync(&self) -> Result<(), Error> {
         if !self.fsync_cq.do_work(0) {
-            Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "log is poisoned".to_string(),
-            })
+            Err(Error::CorruptionLogPoisoned)
         } else {
             Ok(())
         }
@@ -560,9 +549,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Returns after fsync is done.
     pub fn append(&self, write_batch: WriteBatch) -> Result<(), Error> {
         if write_batch.buffer.is_empty() {
-            return Err(Error::EmptyBatch {
-                core: ErrorCore::default(),
-            });
+            return Err(Error::EmptyBatch);
         }
         let written = match self.write_cq.do_work(Arc::new(write_batch)) {
             Ok(written) => written,
@@ -573,11 +560,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
         };
         if !self.fsync_cq.do_work(written) {
             self.poison.store(true, atomic::Ordering::Relaxed);
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "fsync failed".to_string(),
-            };
-            return Err(err);
+            return Err(Error::CorruptionFsyncFailed);
         }
         Ok(())
     }
@@ -667,47 +650,35 @@ impl<R: Read + Seek> LogIterator<R> {
             let header2 = match self.next_frame()? {
                 Some(header) => header,
                 None => {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: "truncation: no second header".to_owned(),
-                    }
-                    .with_info("header1", header)
-                    .with_info("offset", self.input.stream_position().unwrap_or(0)));
+                    return Err(Error::CorruptionTruncationNoSecondHeader {
+                        offset: self.input.stream_position().unwrap_or(0),
+                    });
                 }
             };
             if header2.discriminant != HEADER_SECOND {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "invalid discriminant in second header".to_owned(),
-                }
-                .with_info("discriminant", header2.discriminant)
-                .with_info("offset", self.input.stream_position().unwrap_or(0)));
+                return Err(Error::CorruptionInvalidDiscriminant {
+                    discriminant: header2.discriminant,
+                    offset: self.input.stream_position().unwrap_or(0),
+                });
             }
         } else {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "invalid discriminant in header".to_owned(),
-            }
-            .with_info("discriminant", header.discriminant)
-            .with_info("offset", self.input.stream_position().unwrap_or(0)));
+            return Err(Error::CorruptionInvalidDiscriminant {
+                discriminant: header.discriminant,
+                offset: self.input.stream_position().unwrap_or(0),
+            });
         }
         self.next_from_buffer()
     }
 
     fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef<'_>>, Error> {
         if self.buffer_idx >= self.buffer.len() {
-            return Err(Error::EmptyBatch {
-                core: ErrorCore::default(),
-            });
+            return Err(Error::EmptyBatch);
         }
         let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])?;
         self.buffer_idx = self.buffer.len() - rem.len();
         fn check_shared(shared: u64) -> Result<(), Error> {
             if shared != 0 {
-                Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "shared was not 0".to_string(),
-                })
+                Err(Error::CorruptionSharedNotZero)
             } else {
                 Ok(())
             }
@@ -755,13 +726,11 @@ impl<R: Read + Seek> LogIterator<R> {
         self.input.read_exact(buffer)?;
         let crc = crc32c::crc32c(buffer);
         if crc != header.crc32c {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "crc checksum failed".to_owned(),
-            }
-            .with_info("expected", header.crc32c)
-            .with_info("returned", crc)
-            .with_info("offset", self.input.stream_position().unwrap_or(0)));
+            return Err(Error::CorruptionCrcChecksumFailed {
+                expected: header.crc32c,
+                computed: crc,
+                offset: self.input.stream_position().unwrap_or(0),
+            });
         }
         Ok(Some(header))
     }
@@ -786,23 +755,19 @@ impl<R: Read + Seek> LogIterator<R> {
                 continue 'looping;
             }
             if header_sz as u64 > HEADER_MAX_SIZE {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "header size exceeds HEADER_MAX_SIZE".to_owned(),
-                }
-                .with_info("header_sz", header_sz)
-                .with_info("offset", self.input.stream_position().unwrap_or(0)));
+                return Err(Error::CorruptionHeaderSizeExceedsMax {
+                    header_size: header_sz,
+                    offset: self.input.stream_position().unwrap_or(0),
+                });
             }
             let header = &mut header[..header_sz];
             self.input.read_exact(header)?;
             let header: Header = <Header as Unpackable>::unpack(header)?.0;
             if header.size > TABLE_FULL_SIZE as u64 {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "entry size exceeds TABLE_FULL_SIZE".to_owned(),
-                }
-                .with_info("size", header.size)
-                .with_info("offset", self.input.stream_position().unwrap_or(0)));
+                return Err(Error::CorruptionEntrySizeExceedsMax {
+                    size: header.size,
+                    offset: self.input.stream_position().unwrap_or(0),
+                });
             }
             return Ok(Some(header));
         }
@@ -812,13 +777,7 @@ impl<R: Read + Seek> LogIterator<R> {
         let offset = self.input.stream_position()?;
         let trued_up = compute_true_up(offset);
         if trued_up - offset > HEADER_MAX_SIZE {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "true-up exceeds HEADER_MAX_SIZE".to_owned(),
-            }
-            .with_info("offset", offset)
-            .with_info("trued_up", trued_up)
-            .with_info("offset", self.input.stream_position().unwrap_or(0)));
+            return Err(Error::CorruptionTrueUpExceedsHeaderMax { offset, trued_up });
         }
         self.input.seek(SeekFrom::Start(trued_up))?;
         Ok(())

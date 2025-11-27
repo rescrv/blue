@@ -7,8 +7,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
-use zerror::Z;
-use zerror_core::ErrorCore;
 
 use super::{
     check_key_len, check_table_size, check_value_len, Builder, Cursor, Error, KeyRef, KeyValueDel,
@@ -86,7 +84,6 @@ impl Block {
             // This is impossible.  A block must end in a u32 that indicates how many restarts
             // there are.
             return Err(Error::BlockTooSmall {
-                core: ErrorCore::default(),
                 length: bytes.len(),
                 required: 4,
             });
@@ -94,11 +91,7 @@ impl Block {
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
         let num_restarts: u32 = up.unpack().map_err(|e: buffertk::Error| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e.into(),
-                context: "could not read last four bytes of block".to_string(),
-            }
+            Error::UnpackBlockRestarts { error: e.into() }
         })?;
         let num_restarts: usize = num_restarts as usize;
         // Footer size.
@@ -295,7 +288,6 @@ impl BlockBuilder {
             != Ordering::Less
         {
             Err(Error::SortOrder {
-                core: ErrorCore::default(),
                 last_key: self.last_key.clone(),
                 last_timestamp: self.last_timestamp,
                 new_key: key.to_vec(),
@@ -477,24 +469,18 @@ impl BlockCursor {
     fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef<'_>>, Error> {
         if restart_idx >= self.block.num_restarts {
             LOGIC_ERROR.click();
-            let err = Error::LogicError {
-                core: ErrorCore::default(),
-                context: "restart_idx exceeds num_restarts".to_string(),
-            }
-            .with_info("restart_idx", restart_idx)
-            .with_info("num_restarts", self.block.num_restarts);
-            return Err(err);
+            return Err(Error::LogicErrorRestartIdxExceedsNumRestarts {
+                restart_idx,
+                num_restarts: self.block.num_restarts,
+            });
         }
         let offset = self.block.restart_point(restart_idx);
         if offset >= self.block.restarts_boundary {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "offset exceeds restarts_boundary".to_string(),
-            }
-            .with_info("offset", offset)
-            .with_info("restarts_boundary", self.block.restarts_boundary);
-            return Err(err);
+            return Err(Error::CorruptionOffsetExceedsRestartsBoundary {
+                offset,
+                restarts_boundary: self.block.restarts_boundary,
+            });
         }
 
         // Extract the key from self.position.
@@ -552,12 +538,7 @@ impl BlockCursor {
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
         let be: KeyValueEntry = up.unpack().map_err(|e| {
             CORRUPTION.click();
-            Error::UnpackError {
-                core: ErrorCore::default(),
-                error: e,
-                context: "could not unpack key-value pair at offset".to_string(),
-            }
-            .with_info("offset", offset)
+            Error::UnpackKeyValuePair { error: e, offset }
         })?;
         let next_offset = block.restarts_boundary - up.remain().len();
         let restart_idx = block.restart_for_offset(offset);
@@ -589,11 +570,7 @@ impl Cursor for BlockCursor {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "a block with 0 restarts".to_string(),
-            };
-            return Err(err);
+            return Err(Error::CorruptionBlockWithZeroRestarts);
         }
 
         // Binary search to the correct restart point.
@@ -606,12 +583,7 @@ impl Cursor for BlockCursor {
                 Some(x) => x,
                 None => {
                     CORRUPTION.click();
-                    let err = Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: "restart point returned no key-value pair".to_string(),
-                    }
-                    .with_info("restart_point", mid);
-                    return Err(err);
+                    return Err(Error::CorruptionRestartPointNoKeyValuePair { restart_point: mid });
                 }
             };
             match key.cmp(kvp.key) {
@@ -639,13 +611,7 @@ impl Cursor for BlockCursor {
         // Sanity check the outcome of the binary search.
         if left != right {
             CORRUPTION.click();
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "binary_search left != right".to_string(),
-            }
-            .with_info("left", left)
-            .with_info("right", right);
-            return Err(err);
+            return Err(Error::CorruptionBinarySearchLeftNeRight { left, right });
         }
 
         // We position at the left restart point
@@ -656,12 +622,9 @@ impl Cursor for BlockCursor {
             Some(x) => x,
             None => {
                 CORRUPTION.click();
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "restart point returned no key-value pair".to_string(),
-                }
-                .with_info("restart_point", left);
-                return Err(err);
+                return Err(Error::CorruptionRestartPointNoKeyValuePair {
+                    restart_point: left,
+                });
             }
         };
 
@@ -709,11 +672,7 @@ impl Cursor for BlockCursor {
         {
             if current_restart_idx == 0 {
                 LOGIC_ERROR.click();
-                let err = Error::LogicError {
-                    core: ErrorCore::default(),
-                    context: "tried taking the -1st restart_idx".to_string(),
-                };
-                return Err(err);
+                return Err(Error::LogicErrorTriedTakingNegativeRestartIdx);
             }
             current_restart_idx - 1
         } else {
@@ -721,11 +680,9 @@ impl Cursor for BlockCursor {
         };
 
         // Seek and scan.
-        self.seek_restart(restart_idx)
-            .with_info("restart_idx", restart_idx)?;
+        self.seek_restart(restart_idx)?;
         while self.next_offset() < target_next_offset {
-            self.next()
-                .with_info("target_next_offset", target_next_offset)?;
+            self.next()?;
         }
         Ok(())
     }
@@ -760,11 +717,7 @@ impl Cursor for BlockCursor {
         // We are positioned.
         if !self.position.is_positioned() {
             LOGIC_ERROR.click();
-            let err = Error::LogicError {
-                core: ErrorCore::default(),
-                context: "next was not positioned, but made it to here.".to_string(),
-            };
-            return Err(err);
+            return Err(Error::LogicErrorNextNotPositioned);
         }
 
         // Extract the key from self.position.
@@ -781,8 +734,7 @@ impl Cursor for BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position =
-            BlockCursor::extract_key(&self.block, offset, prev_key).with_info("offset", offset)?;
+        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
         Ok(())
     }
 
