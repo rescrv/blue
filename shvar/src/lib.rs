@@ -56,6 +56,74 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/////////////////////////////////////////// ExpandOptions //////////////////////////////////////////
+
+/// Configuration for which variable syntax forms are accepted during expansion.
+///
+/// Shell-style variable expansion supports multiple forms:
+/// - `$VARNAME` - bareword form, variable name until non-identifier character
+/// - `${VARNAME}` - curly brace form, supports modifiers like `${VAR:-default}`
+/// - `$(VARNAME)` - parenthesis form, commonly used in Makefiles
+///
+/// By default, only `${curlybraces}` syntax is enabled for backward compatibility.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpandOptions {
+    /// Allow `$VARNAME` syntax (bareword until whitespace/non-identifier).
+    pub bareword: bool,
+    /// Allow `${VARNAME}` syntax (curly braces).
+    pub curly_braces: bool,
+    /// Allow `$(VARNAME)` syntax (parentheses).
+    pub parens: bool,
+}
+
+impl Default for ExpandOptions {
+    fn default() -> Self {
+        Self {
+            bareword: false,
+            curly_braces: true,
+            parens: false,
+        }
+    }
+}
+
+impl ExpandOptions {
+    /// Create options that allow all syntax forms.
+    pub fn all() -> Self {
+        Self {
+            bareword: true,
+            curly_braces: true,
+            parens: true,
+        }
+    }
+
+    /// Create options that only allow `$VARNAME` bareword syntax.
+    pub fn bareword_only() -> Self {
+        Self {
+            bareword: true,
+            curly_braces: false,
+            parens: false,
+        }
+    }
+
+    /// Create options that only allow `${VARNAME}` curly brace syntax.
+    pub fn curly_braces_only() -> Self {
+        Self {
+            bareword: false,
+            curly_braces: true,
+            parens: false,
+        }
+    }
+
+    /// Create options that only allow `$(VARNAME)` parenthesis syntax.
+    pub fn parens_only() -> Self {
+        Self {
+            bareword: false,
+            curly_braces: false,
+            parens: true,
+        }
+    }
+}
+
 ////////////////////////////////////////////// quoting /////////////////////////////////////////////
 
 // I consulted the FreeBSD man pages for guidance.
@@ -540,47 +608,48 @@ impl Builder {
 
 /////////////////////////////////////////////// parse //////////////////////////////////////////////
 
-fn parse_statement(
+struct ParseContext<'a> {
+    options: ExpandOptions,
     generate_errors: bool,
     escape_dollar_literal: bool,
     depth: usize,
-    vars: &dyn VariableProvider,
+    vars: &'a dyn VariableProvider,
+}
+
+impl ParseContext<'_> {
+    fn deeper(&self) -> ParseContext<'_> {
+        ParseContext {
+            options: self.options,
+            generate_errors: self.generate_errors,
+            escape_dollar_literal: self.escape_dollar_literal,
+            depth: self.depth + 1,
+            vars: self.vars,
+        }
+    }
+}
+
+fn parse_statement(
+    ctx: &ParseContext<'_>,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
 ) -> Result<(), Error> {
-    if depth > 256 {
+    if ctx.depth > 256 {
         return Err(Error::DepthLimitExceeded);
     }
     // SAFETY(rescrv):  If you add another break to this loop, update the assert in `expand`.
     while let Some(c) = tokens.peek() {
         match c {
             '\'' => {
-                parse_single_quotes(vars, witness, tokens, output)?;
+                parse_single_quotes(ctx.vars, witness, tokens, output)?;
             }
             '"' => {
-                parse_double_quotes(
-                    generate_errors,
-                    escape_dollar_literal,
-                    depth,
-                    vars,
-                    witness,
-                    tokens,
-                    output,
-                )?;
+                parse_double_quotes(ctx, witness, tokens, output)?;
             }
             '$' => {
-                parse_variable(
-                    generate_errors,
-                    escape_dollar_literal,
-                    depth,
-                    vars,
-                    witness,
-                    tokens,
-                    output,
-                )?;
+                parse_variable(ctx, witness, tokens, output)?;
             }
-            '}' => {
+            '}' if ctx.options.curly_braces => {
                 break;
             }
             c => {
@@ -623,10 +692,7 @@ fn parse_single_quotes(
 }
 
 fn parse_double_quotes(
-    generate_errors: bool,
-    escape_dollar_literal: bool,
-    depth: usize,
-    vars: &dyn VariableProvider,
+    ctx: &ParseContext<'_>,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -671,15 +737,7 @@ fn parse_double_quotes(
             }
             '$' => {
                 noexpect = true;
-                parse_variable(
-                    generate_errors,
-                    escape_dollar_literal,
-                    depth,
-                    vars,
-                    witness,
-                    tokens,
-                    output,
-                )?;
+                parse_variable(ctx, witness, tokens, output)?;
             }
             c if prev_was_whack => {
                 output.push('\\');
@@ -699,10 +757,7 @@ fn parse_double_quotes(
 }
 
 fn parse_variable(
-    generate_errors: bool,
-    escape_dollar_literal: bool,
-    depth: usize,
-    vars: &dyn VariableProvider,
+    ctx: &ParseContext<'_>,
     witness: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -715,7 +770,7 @@ fn parse_variable(
             let ident = c.to_string();
             tokens.expect(c)?;
             witness.witness(&ident);
-            if let Some(val) = vars.lookup(&ident) {
+            if let Some(val) = ctx.vars.lookup(&ident) {
                 output.push_str(&val);
             }
             return Ok(());
@@ -723,7 +778,7 @@ fn parse_variable(
             // Handle $$ - behavior depends on escape_dollar_literal
             tokens.expect('$')?;
             witness.witness("$");
-            if escape_dollar_literal {
+            if ctx.escape_dollar_literal {
                 output.push_str("$$");
             } else {
                 output.push('$');
@@ -732,70 +787,122 @@ fn parse_variable(
         }
     }
 
-    // Fall back to long-form variable parsing ${...} or $(...)
-    let is_paren = tokens.accept('(');
-    if !is_paren {
-        tokens.expect('{')?;
-    }
-    let ident = parse_identifier(tokens)?;
-    witness.witness(&ident);
-    if !is_paren && tokens.accept(':') {
-        let Some(action) = tokens.peek() else {
-            return Err(Error::InvalidVariable);
-        };
-        tokens.accept(action);
-        let mut expanded = Builder::from_other(output);
-        parse_statement(
-            generate_errors,
-            escape_dollar_literal,
-            depth + 1,
-            vars,
-            witness,
-            tokens,
-            &mut expanded,
-        )?;
-        match action {
-            '-' => {
-                if let Some(val) = vars.lookup(&ident) {
-                    output.push_str(&val);
-                } else {
-                    output.append(expanded);
-                }
-            }
-            '+' => {
-                if vars.lookup(&ident).is_some() {
-                    output.append(expanded);
-                }
-            }
-            '?' => {
-                if let Some(val) = vars.lookup(&ident) {
-                    output.push_str(&val);
-                } else if generate_errors {
-                    return Err(Error::Requested(expanded.into_string()));
-                }
-            }
-            c => {
-                return Err(Error::InvalidCharacter {
-                    expected: '-',
-                    returned: Some(c),
-                });
+    // Determine syntax form: ${...}, $(...), or $BAREWORD
+    // Check what follows the $
+    let next_char = tokens.peek();
+
+    // Try paren form $(...)
+    if next_char == Some('(') && ctx.options.parens {
+        tokens.expect('(')?;
+        let ident = parse_identifier(tokens)?;
+        witness.witness(&ident);
+        if let Some(val) = ctx.vars.lookup(&ident) {
+            output.push_str(&val);
+        } else if ident == "$" {
+            if ctx.escape_dollar_literal {
+                output.push_str("$$");
+            } else {
+                output.push_str("$");
             }
         }
-    } else if let Some(val) = vars.lookup(&ident) {
-        output.push_str(&val);
-    } else if ident == "$" {
-        if escape_dollar_literal {
-            output.push_str("$$");
-        } else {
-            output.push_str("$");
-        }
-    }
-    if is_paren {
         tokens.expect(')')?;
-    } else {
-        tokens.expect('}')?;
+        return Ok(());
     }
+
+    // Try curly brace form ${...}
+    if next_char == Some('{') && ctx.options.curly_braces {
+        tokens.expect('{')?;
+        let ident = parse_identifier(tokens)?;
+        witness.witness(&ident);
+        if tokens.accept(':') {
+            let Some(action) = tokens.peek() else {
+                return Err(Error::InvalidVariable);
+            };
+            tokens.accept(action);
+            let mut expanded = Builder::from_other(output);
+            parse_statement(&ctx.deeper(), witness, tokens, &mut expanded)?;
+            match action {
+                '-' => {
+                    if let Some(val) = ctx.vars.lookup(&ident) {
+                        output.push_str(&val);
+                    } else {
+                        output.append(expanded);
+                    }
+                }
+                '+' => {
+                    if ctx.vars.lookup(&ident).is_some() {
+                        output.append(expanded);
+                    }
+                }
+                '?' => {
+                    if let Some(val) = ctx.vars.lookup(&ident) {
+                        output.push_str(&val);
+                    } else if ctx.generate_errors {
+                        return Err(Error::Requested(expanded.into_string()));
+                    }
+                }
+                c => {
+                    return Err(Error::InvalidCharacter {
+                        expected: '-',
+                        returned: Some(c),
+                    });
+                }
+            }
+        } else if let Some(val) = ctx.vars.lookup(&ident) {
+            output.push_str(&val);
+        } else if ident == "$" {
+            if ctx.escape_dollar_literal {
+                output.push_str("$$");
+            } else {
+                output.push_str("$");
+            }
+        }
+        tokens.expect('}')?;
+        return Ok(());
+    }
+
+    // Try bareword form $VARNAME
+    if ctx.options.bareword {
+        if let Some(c) = next_char {
+            if matches!(c, 'a'..='z' | 'A'..='Z' | '_') {
+                let ident = parse_bareword_identifier(tokens)?;
+                witness.witness(&ident);
+                if let Some(val) = ctx.vars.lookup(&ident) {
+                    output.push_str(&val);
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    // No valid syntax found - output literal $
+    output.push('$');
     Ok(())
+}
+
+fn parse_bareword_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
+    let mut identifier = String::new();
+    let mut first = true;
+    while let Some(c) = tokens.peek() {
+        match c {
+            'a'..='z' | 'A'..='Z' | '_' if first => {
+                identifier.push(c);
+                tokens.expect(c)?;
+            }
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' if !first => {
+                identifier.push(c);
+                tokens.expect(c)?;
+            }
+            _ => {
+                break;
+            }
+        }
+        first = false;
+    }
+    if identifier.is_empty() {
+        return Err(Error::InvalidVariable);
+    }
+    Ok(identifier)
 }
 
 fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
@@ -832,29 +939,48 @@ fn parse_identifier(tokens: &mut Tokenize) -> Result<String, Error> {
 
 ////////////////////////////////////////////// expand //////////////////////////////////////////////
 
+/// Default options for backward compatibility: curly braces and parens enabled.
+const LEGACY_OPTIONS: ExpandOptions = ExpandOptions {
+    bareword: false,
+    curly_braces: true,
+    parens: true,
+};
+
 /// Expand the input to a shell-quoted string suitable for passing to `split`.
+///
+/// Uses legacy options (curly braces and parens) for backward compatibility.
 pub fn expand(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
-    expand_once(vars, input, false)
+    expand_once(LEGACY_OPTIONS, vars, input, false)
+}
+
+/// Expand the input with custom options to a shell-quoted string suitable for passing to `split`.
+pub fn expand_with_options(
+    options: ExpandOptions,
+    vars: &dyn VariableProvider,
+    input: &str,
+) -> Result<String, Error> {
+    expand_once(options, vars, input, false)
 }
 
 fn expand_once(
+    options: ExpandOptions,
     vars: &dyn VariableProvider,
     input: &str,
     escape_dollar_literal: bool,
 ) -> Result<String, Error> {
+    let ctx = ParseContext {
+        options,
+        generate_errors: true,
+        escape_dollar_literal,
+        depth: 0,
+        vars,
+    };
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
-    parse_statement(
-        true,
-        escape_dollar_literal,
-        0,
-        vars,
-        &mut (),
-        &mut tokens,
-        &mut output,
-    )?;
+    parse_statement(&ctx, &mut (), &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
-        // SAFETY(rescrv): We can only break out of the loop early on '}'.
+        // SAFETY(rescrv): We can only break out of the loop early on '}' when curly_braces is enabled.
+        assert!(options.curly_braces);
         assert_eq!(Some('}'), tokens.peek());
         return Err(Error::TrailingRightBrace);
     }
@@ -864,40 +990,52 @@ fn expand_once(
 
 ///////////////////////////////////////// expand_recursive /////////////////////////////////////////
 
+/// Recursively expand variables until no more expansions are possible.
+///
+/// Uses legacy options (curly braces and parens) for backward compatibility.
 pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<String, Error> {
+    expand_recursive_with_options(LEGACY_OPTIONS, vars, input)
+}
+
+/// Recursively expand variables with custom options until no more expansions are possible.
+pub fn expand_recursive_with_options(
+    options: ExpandOptions,
+    vars: &dyn VariableProvider,
+    input: &str,
+) -> Result<String, Error> {
     fn generate_witnesses(
+        options: ExpandOptions,
         vars: &dyn VariableProvider,
         input: &str,
     ) -> Result<HashSet<String>, Error> {
+        let ctx = ParseContext {
+            options,
+            generate_errors: false,
+            escape_dollar_literal: true,
+            depth: 0,
+            vars,
+        };
         let mut witnesses = HashSet::default();
         let mut tokens = Tokenize::new(input);
         let mut output = Builder::default();
-        parse_statement(
-            false,
-            true,
-            0,
-            vars,
-            &mut witnesses,
-            &mut tokens,
-            &mut output,
-        )?;
+        parse_statement(&ctx, &mut witnesses, &mut tokens, &mut output)?;
         Ok(witnesses)
     }
 
-    fn post_process(s: &str) -> Result<String, Error> {
-        expand_once(&(), s, false)
+    fn post_process(options: ExpandOptions, s: &str) -> Result<String, Error> {
+        expand_once(options, &(), s, false)
     }
 
-    let mut witnesses = generate_witnesses(vars, input)?;
+    let mut witnesses = generate_witnesses(options, vars, input)?;
     let mut input = input.to_string();
     for _ in 0..128 {
-        let once = expand_once(vars, &input, true)?;
+        let once = expand_once(options, vars, &input, true)?;
         if once == input {
-            return post_process(&once);
+            return post_process(options, &once);
         }
-        let new_witnesses = generate_witnesses(vars, &once)?;
+        let new_witnesses = generate_witnesses(options, vars, &once)?;
         if new_witnesses.is_empty() || (new_witnesses.len() == 1 && new_witnesses.contains("$")) {
-            return post_process(&once);
+            return post_process(options, &once);
         }
         if witnesses.is_subset(&new_witnesses) {
             return Err(Error::DepthLimitExceeded);
@@ -911,21 +1049,28 @@ pub fn expand_recursive(vars: &dyn VariableProvider, input: &str) -> Result<Stri
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
 /// Return a vector of the variables in use by this script.
+///
+/// Uses legacy options (curly braces and parens) for backward compatibility.
 pub fn rcvar(input: &str) -> Result<Vec<String>, Error> {
+    rcvar_with_options(LEGACY_OPTIONS, input)
+}
+
+/// Return a vector of the variables in use by this script with custom options.
+pub fn rcvar_with_options(options: ExpandOptions, input: &str) -> Result<Vec<String>, Error> {
+    let ctx = ParseContext {
+        options,
+        generate_errors: false,
+        escape_dollar_literal: true,
+        depth: 0,
+        vars: &(),
+    };
     let mut tokens = Tokenize::new(input);
     let mut output = Builder::default();
     let mut witnesses: HashSet<String> = HashSet::new();
-    parse_statement(
-        false,
-        true,
-        0,
-        &(),
-        &mut witnesses,
-        &mut tokens,
-        &mut output,
-    )?;
+    parse_statement(&ctx, &mut witnesses, &mut tokens, &mut output)?;
     if tokens.peek().is_some() {
-        // SAFETY(rescrv): We can only break out of the loop early on '}'.
+        // SAFETY(rescrv): We can only break out of the loop early on '}' when curly_braces is enabled.
+        assert!(options.curly_braces);
         assert_eq!(Some('}'), tokens.peek());
         return Err(Error::TrailingRightBrace);
     }
@@ -1503,6 +1648,217 @@ mod tests {
         assert_eq!(
             "$ bar",
             super::expand_recursive(&env2, "$$ ${FOO}").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_options_bareword_syntax() {
+        let env: HashMap<&str, &str> =
+            HashMap::from([("FOO", "foo"), ("BAR", "bar"), ("BAZ", "baz")]);
+
+        let opts = ExpandOptions::all();
+
+        // bareword expansion
+        assert_eq!("foo", expand_with_options(opts, &env, "$FOO").unwrap());
+        assert_eq!("bar", expand_with_options(opts, &env, "$BAR").unwrap());
+        assert_eq!("baz", expand_with_options(opts, &env, "$BAZ").unwrap());
+
+        // bareword with trailing text
+        assert_eq!(
+            "foo-bar",
+            expand_with_options(opts, &env, "$FOO-$BAR").unwrap()
+        );
+
+        // bareword at end of string
+        assert_eq!(
+            "value: foo",
+            expand_with_options(opts, &env, "value: $FOO").unwrap()
+        );
+
+        // bareword followed by non-identifier characters
+        assert_eq!(
+            "foo/bar",
+            expand_with_options(opts, &env, "$FOO/$BAR").unwrap()
+        );
+        assert_eq!(
+            "foo.bar",
+            expand_with_options(opts, &env, "$FOO.$BAR").unwrap()
+        );
+
+        // bareword in quotes
+        assert_eq!(
+            "\"foo bar\"",
+            expand_with_options(opts, &env, "\"$FOO $BAR\"").unwrap()
+        );
+
+        // unset variable as bareword
+        assert_eq!("", expand_with_options(opts, &env, "$NOTSET").unwrap());
+    }
+
+    #[test]
+    fn expand_options_bareword_only() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        let opts = ExpandOptions::bareword_only();
+
+        // bareword works
+        assert_eq!("foo", expand_with_options(opts, &env, "$FOO").unwrap());
+
+        // curly braces treated as literal
+        assert_eq!("${FOO}", expand_with_options(opts, &env, "${FOO}").unwrap());
+
+        // parens treated as literal
+        assert_eq!("$(FOO)", expand_with_options(opts, &env, "$(FOO)").unwrap());
+    }
+
+    #[test]
+    fn expand_options_curly_braces_only() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        let opts = ExpandOptions::curly_braces_only();
+
+        // curly braces work
+        assert_eq!("foo", expand_with_options(opts, &env, "${FOO}").unwrap());
+
+        // bareword $ is literal
+        assert_eq!("$FOO", expand_with_options(opts, &env, "$FOO").unwrap());
+
+        // parens treated as literal
+        assert_eq!("$(FOO)", expand_with_options(opts, &env, "$(FOO)").unwrap());
+    }
+
+    #[test]
+    fn expand_options_parens_only() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        let opts = ExpandOptions::parens_only();
+
+        // parens work
+        assert_eq!("foo", expand_with_options(opts, &env, "$(FOO)").unwrap());
+
+        // curly braces treated as literal
+        assert_eq!("${FOO}", expand_with_options(opts, &env, "${FOO}").unwrap());
+
+        // bareword $ is literal
+        assert_eq!("$FOO", expand_with_options(opts, &env, "$FOO").unwrap());
+    }
+
+    #[test]
+    fn expand_options_all_forms() {
+        let env: HashMap<&str, &str> = HashMap::from([("A", "a"), ("B", "b"), ("C", "c")]);
+        let opts = ExpandOptions::all();
+
+        // all three forms in same string
+        assert_eq!(
+            "a b c",
+            expand_with_options(opts, &env, "$A ${B} $(C)").unwrap()
+        );
+
+        // mixed forms with text
+        assert_eq!(
+            "val=a, curly=b, paren=c",
+            expand_with_options(opts, &env, "val=$A, curly=${B}, paren=$(C)").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_options_bareword_edge_cases() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("FOO", "foo"),
+            ("FOO_BAR", "foobar"),
+            ("_UNDERSCORE", "under"),
+            ("A1", "a1"),
+        ]);
+        let opts = ExpandOptions::all();
+
+        // underscore in variable name
+        assert_eq!(
+            "foobar",
+            expand_with_options(opts, &env, "$FOO_BAR").unwrap()
+        );
+
+        // leading underscore
+        assert_eq!(
+            "under",
+            expand_with_options(opts, &env, "$_UNDERSCORE").unwrap()
+        );
+
+        // digits after first char
+        assert_eq!("a1", expand_with_options(opts, &env, "$A1").unwrap());
+
+        // $ followed by digit is literal
+        assert_eq!("$1", expand_with_options(opts, &env, "$1").unwrap());
+
+        // $ followed by non-identifier is literal
+        assert_eq!("$-test", expand_with_options(opts, &env, "$-test").unwrap());
+
+        // $ at end of string
+        assert_eq!("test$", expand_with_options(opts, &env, "test$").unwrap());
+
+        // consecutive $
+        assert_eq!("$", expand_with_options(opts, &env, "$$").unwrap());
+    }
+
+    #[test]
+    fn expand_options_rcvar_bareword() {
+        let opts = ExpandOptions::all();
+
+        assert_eq!(
+            vec!["BAR".to_string(), "FOO".to_string()],
+            rcvar_with_options(opts, "$FOO $BAR").unwrap()
+        );
+
+        // mixed forms
+        assert_eq!(
+            vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            rcvar_with_options(opts, "$A ${B} $(C)").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_options_recursive_bareword() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("HOST", "$METRO.$CUSTOMER.example.org"),
+            ("METRO", "sjc"),
+            ("CUSTOMER", "CyberDyne"),
+        ]);
+        let opts = ExpandOptions::all();
+
+        assert_eq!(
+            "sjc.CyberDyne.example.org",
+            expand_recursive_with_options(opts, &env, "$HOST").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_options_default() {
+        // default should be curly_braces only
+        let opts = ExpandOptions::default();
+        assert!(!opts.bareword);
+        assert!(opts.curly_braces);
+        assert!(!opts.parens);
+    }
+
+    #[test]
+    fn expand_options_curly_with_modifiers() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        let opts = ExpandOptions::all();
+
+        // default modifier
+        assert_eq!(
+            "default",
+            expand_with_options(opts, &env, "${NOTSET:-default}").unwrap()
+        );
+        assert_eq!(
+            "foo",
+            expand_with_options(opts, &env, "${FOO:-default}").unwrap()
+        );
+
+        // alternate modifier
+        assert_eq!(
+            "",
+            expand_with_options(opts, &env, "${NOTSET:+alternate}").unwrap()
+        );
+        assert_eq!(
+            "alternate",
+            expand_with_options(opts, &env, "${FOO:+alternate}").unwrap()
         );
     }
 }
