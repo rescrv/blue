@@ -285,6 +285,10 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
                 append_char(&mut next_word, c);
                 prev_was_whack = false;
             }
+            (State::Unquoted, c) if c.is_whitespace() && prev_was_whack => {
+                append_char(&mut next_word, c);
+                prev_was_whack = false;
+            }
             (State::Unquoted, c) if c.is_whitespace() => {
                 if let Some(next_word) = next_word.take() {
                     output.push(next_word);
@@ -303,6 +307,14 @@ pub fn split(s: &str) -> Result<Vec<String>, Error> {
                 if next_word.is_none() {
                     next_word = Some(String::new());
                 }
+                prev_was_whack = false;
+            }
+            (State::Unquoted, '\\') if !prev_was_whack => {
+                prev_was_whack = true;
+            }
+            (State::Unquoted, c) if prev_was_whack => {
+                append_char(&mut next_word, '\\');
+                append_char(&mut next_word, c);
                 prev_was_whack = false;
             }
             (State::Unquoted, c) => {
@@ -1834,6 +1846,64 @@ mod tests {
         assert!(!opts.bareword);
         assert!(opts.curly_braces);
         assert!(!opts.parens);
+    }
+
+    #[test]
+    fn backslash_escaped_space_in_unquoted() {
+        // Bug #10: Backslash-space should escape the space and join words
+        // `echo hello\ world` should produce a single argument "hello world"
+        let result = split(r"hello\ world").unwrap();
+        println!("result: {result:?}");
+        assert_eq!(
+            1,
+            result.len(),
+            "backslash-space should join into single word"
+        );
+        assert_eq!("hello world", result[0]);
+    }
+
+    #[test]
+    fn backslash_escaped_tab_in_unquoted() {
+        // Backslash-tab should also escape
+        let result = split("hello\\\tworld").unwrap();
+        println!("result: {result:?}");
+        assert_eq!(
+            1,
+            result.len(),
+            "backslash-tab should join into single word"
+        );
+        assert_eq!("hello\tworld", result[0]);
+    }
+
+    #[test]
+    fn backslash_escaped_newline_in_unquoted() {
+        // Backslash-newline should escape the newline
+        let result = split("hello\\\nworld").unwrap();
+        println!("result: {result:?}");
+        assert_eq!(
+            1,
+            result.len(),
+            "backslash-newline should join into single word"
+        );
+        assert_eq!("hello\nworld", result[0]);
+    }
+
+    #[test]
+    fn backslash_non_whitespace_in_unquoted() {
+        // Backslash followed by non-whitespace should preserve both
+        let result = split(r"hello\nworld").unwrap();
+        println!("result: {result:?}");
+        assert_eq!(1, result.len());
+        assert_eq!("hello\\nworld", result[0]);
+    }
+
+    #[test]
+    fn multiple_backslash_escaped_spaces() {
+        // Multiple backslash-spaces
+        let result = split(r"hello\ world\ foo").unwrap();
+        println!("result: {result:?}");
+        assert_eq!(1, result.len());
+        assert_eq!("hello world foo", result[0]);
     }
 
     #[test]
