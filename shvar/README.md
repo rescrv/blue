@@ -18,6 +18,11 @@ Warts
 
 - A string with `'{'` and `'}'` characters outside the variable declarations won't parse right now.
 
+Breaking Changes
+----------------
+
+- `split("")` now returns `[]` instead of `[""]`. Empty or whitespace-only input yields an empty vector.
+
 Documentation
 -------------
 

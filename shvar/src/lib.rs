@@ -214,118 +214,149 @@ pub fn quote(pieces: Vec<String>) -> String {
 
 ///////////////////////////////////////////// splitting ////////////////////////////////////////////
 
+#[derive(Clone, Copy)]
+enum SplitState {
+    Unquoted,
+    Double,
+    Single,
+}
+
+/// Parse a single shell-quoted argument from the input.
+///
+/// Returns `Ok(None)` if the input is empty or contains only whitespace.
+/// Returns `Ok(Some((word, rest)))` where `word` is the parsed argument and `rest` is the
+/// remaining unparsed input (without leading whitespace stripped).
+///
+/// The parsing follows shell quoting rules:
+/// - Single quotes preserve all characters literally except for closing single quote
+/// - Double quotes allow escape sequences: `\$`, `` \` ``, `\"`, `\\`, `\n`
+/// - Outside quotes, backslash escapes the following character (including whitespace)
+pub fn split_once(s: &str) -> Result<Option<(String, &str)>, Error> {
+    let mut state = SplitState::Unquoted;
+    let mut word = String::new();
+    let mut prev_was_whack = false;
+    let mut chars = s.char_indices().peekable();
+    let mut word_started = false;
+
+    // Skip leading whitespace
+    while let Some(&(_, c)) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    // NOTE: We use `while let` instead of `for` because we need access to `idx` when breaking
+    // early on whitespace to compute the remaining slice.
+    #[allow(clippy::while_let_on_iterator)]
+    while let Some((idx, c)) = chars.next() {
+        match (state, c) {
+            (SplitState::Double, '$') if prev_was_whack => {
+                word.push('$');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '`') if prev_was_whack => {
+                word.push('`');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '"') if prev_was_whack => {
+                word.push('"');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '\\') if prev_was_whack => {
+                word.push('\\');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '\n') if prev_was_whack => {
+                word.push('\n');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, 'n') if prev_was_whack => {
+                word.push('\n');
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '"') => {
+                state = SplitState::Unquoted;
+                prev_was_whack = false;
+            }
+            (SplitState::Double, '\\') => {
+                prev_was_whack = true;
+            }
+            (SplitState::Double, c) if prev_was_whack => {
+                word.push('\\');
+                word.push(c);
+                prev_was_whack = false;
+            }
+            (SplitState::Double, c) => {
+                word.push(c);
+                prev_was_whack = false;
+            }
+            (SplitState::Single, '\'') => {
+                state = SplitState::Unquoted;
+                prev_was_whack = false;
+            }
+            (SplitState::Single, c) => {
+                word.push(c);
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, c) if c.is_whitespace() && prev_was_whack => {
+                word.push(c);
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, c) if c.is_whitespace() => {
+                // Word boundary - return the word and remaining input
+                if word_started {
+                    let rest = &s[idx..];
+                    return Ok(Some((word, rest)));
+                }
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, '\'') => {
+                state = SplitState::Single;
+                word_started = true;
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, '"') => {
+                state = SplitState::Double;
+                word_started = true;
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, '\\') if !prev_was_whack => {
+                word_started = true;
+                prev_was_whack = true;
+            }
+            (SplitState::Unquoted, c) if prev_was_whack => {
+                word.push('\\');
+                word.push(c);
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, c) => {
+                word.push(c);
+                word_started = true;
+                prev_was_whack = false;
+            }
+        }
+    }
+
+    // Handle end of input
+    if word_started {
+        Ok(Some((word, "")))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Split the string in a way that respects quoting rules.
 pub fn split(s: &str) -> Result<Vec<String>, Error> {
-    #[derive(Clone, Copy)]
-    enum State {
-        Unquoted,
-        Double,
-        Single,
-    }
-    let mut state = State::Unquoted;
     let mut output = vec![];
-    let mut next_word: Option<String> = Some("".to_string());
-    let append_char = |next_word: &mut Option<String>, c: char| {
-        if let Some(next_word) = next_word.as_mut() {
-            next_word.push(c);
-        } else {
-            let mut s = String::new();
-            s.push(c);
-            *next_word = Some(s);
-        }
-    };
-    let mut prev_was_whack = false;
-    for c in s.chars() {
-        match (state, c) {
-            (State::Double, '$') if prev_was_whack => {
-                append_char(&mut next_word, '$');
-                prev_was_whack = false;
-            }
-            (State::Double, '`') if prev_was_whack => {
-                append_char(&mut next_word, '`');
-                prev_was_whack = false;
-            }
-            (State::Double, '"') if prev_was_whack => {
-                append_char(&mut next_word, '"');
-                prev_was_whack = false;
-            }
-            (State::Double, '\\') if prev_was_whack => {
-                append_char(&mut next_word, '\\');
-                prev_was_whack = false;
-            }
-            (State::Double, '\n') if prev_was_whack => {
-                append_char(&mut next_word, '\n');
-                prev_was_whack = false;
-            }
-            (State::Double, 'n') if prev_was_whack => {
-                append_char(&mut next_word, '\n');
-                prev_was_whack = false;
-            }
-            (State::Double, '"') => {
-                state = State::Unquoted;
-                prev_was_whack = false;
-            }
-            (State::Double, '\\') => {
-                prev_was_whack = true;
-            }
-            (State::Double, c) if prev_was_whack => {
-                append_char(&mut next_word, '\\');
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-            (State::Double, c) => {
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-            (State::Single, '\'') => {
-                state = State::Unquoted;
-                prev_was_whack = false;
-            }
-            (State::Single, c) => {
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-            (State::Unquoted, c) if c.is_whitespace() && prev_was_whack => {
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-            (State::Unquoted, c) if c.is_whitespace() => {
-                if let Some(next_word) = next_word.take() {
-                    output.push(next_word);
-                }
-                prev_was_whack = false;
-            }
-            (State::Unquoted, '\'') => {
-                state = State::Single;
-                if next_word.is_none() {
-                    next_word = Some(String::new());
-                }
-                prev_was_whack = false;
-            }
-            (State::Unquoted, '"') => {
-                state = State::Double;
-                if next_word.is_none() {
-                    next_word = Some(String::new());
-                }
-                prev_was_whack = false;
-            }
-            (State::Unquoted, '\\') if !prev_was_whack => {
-                prev_was_whack = true;
-            }
-            (State::Unquoted, c) if prev_was_whack => {
-                append_char(&mut next_word, '\\');
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-            (State::Unquoted, c) => {
-                append_char(&mut next_word, c);
-                prev_was_whack = false;
-            }
-        }
+    let mut remaining = s;
+
+    while let Some((word, rest)) = split_once(remaining)? {
+        output.push(word);
+        remaining = rest;
     }
-    if let Some(next_word) = next_word.take() {
-        output.push(next_word);
-    }
+
     Ok(output)
 }
 
@@ -1188,18 +1219,30 @@ mod tests {
 
         #[test]
         fn awkward_quote_roundtrip(s in "[_a-zA-Z0-9 \"']*") {
-            let quoted = awkward_quote_string(&s);
-            let pieces = split(&quoted).unwrap();
-            assert_eq!(1, pieces.len(), "s={s:?}");
-            assert_eq!(s, pieces[0]);
+            if s.is_empty() {
+                let quoted = awkward_quote_string(&s);
+                let pieces = split(&quoted).unwrap();
+                assert_eq!(0, pieces.len(), "s={s:?}");
+            } else {
+                let quoted = awkward_quote_string(&s);
+                let pieces = split(&quoted).unwrap();
+                assert_eq!(1, pieces.len(), "s={s:?}");
+                assert_eq!(s, pieces[0]);
+            }
         }
 
         #[test]
         fn quote_string_roundtrip(s in "[_a-zA-Z0-9 \"']*") {
-            let quoted = quote_string(&s);
-            let pieces = split(&quoted).unwrap();
-            assert_eq!(1, pieces.len(), "s={s:?}");
-            assert_eq!(s, pieces[0]);
+            if s.is_empty() {
+                let quoted = quote_string(&s);
+                let pieces = split(&quoted).unwrap();
+                assert_eq!(0, pieces.len(), "s={s:?}");
+            } else {
+                let quoted = quote_string(&s);
+                let pieces = split(&quoted).unwrap();
+                assert_eq!(1, pieces.len(), "s={s:?}");
+                assert_eq!(s, pieces[0]);
+            }
         }
 
         #[test]
@@ -1930,5 +1973,134 @@ mod tests {
             "alternate",
             expand_with_options(opts, &env, "${FOO:+alternate}").unwrap()
         );
+    }
+
+    #[test]
+    fn split_once_empty_input() {
+        assert_eq!(None, split_once("").unwrap());
+    }
+
+    #[test]
+    fn split_once_whitespace_only() {
+        assert_eq!(None, split_once("   ").unwrap());
+        assert_eq!(None, split_once("\t\n ").unwrap());
+    }
+
+    #[test]
+    fn split_once_single_word() {
+        let result = split_once("hello").unwrap();
+        assert_eq!(Some(("hello".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_two_words() {
+        let result = split_once("hello world").unwrap();
+        assert_eq!(Some(("hello".to_string(), " world")), result);
+    }
+
+    #[test]
+    fn split_once_leading_whitespace() {
+        let result = split_once("  hello world").unwrap();
+        assert_eq!(Some(("hello".to_string(), " world")), result);
+    }
+
+    #[test]
+    fn split_once_single_quoted() {
+        let result = split_once("'hello world'").unwrap();
+        assert_eq!(Some(("hello world".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_single_quoted_with_rest() {
+        let result = split_once("'hello world' foo").unwrap();
+        assert_eq!(Some(("hello world".to_string(), " foo")), result);
+    }
+
+    #[test]
+    fn split_once_double_quoted() {
+        let result = split_once("\"hello world\"").unwrap();
+        assert_eq!(Some(("hello world".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_double_quoted_with_rest() {
+        let result = split_once("\"hello world\" bar").unwrap();
+        assert_eq!(Some(("hello world".to_string(), " bar")), result);
+    }
+
+    #[test]
+    fn split_once_double_quoted_escapes() {
+        // \$ -> $
+        let result = split_once(r#""\$foo""#).unwrap();
+        assert_eq!(Some(("$foo".to_string(), "")), result);
+
+        // \` -> `
+        let result = split_once(r#""\`cmd\`""#).unwrap();
+        assert_eq!(Some(("`cmd`".to_string(), "")), result);
+
+        // \" -> "
+        let result = split_once(r#""say \"hi\"""#).unwrap();
+        assert_eq!(Some(("say \"hi\"".to_string(), "")), result);
+
+        // \\ -> \
+        let result = split_once(r#""path\\to""#).unwrap();
+        assert_eq!(Some(("path\\to".to_string(), "")), result);
+
+        // \n -> newline
+        let result = split_once(r#""\n""#).unwrap();
+        assert_eq!(Some(("\n".to_string(), "")), result);
+
+        // unrecognized escape preserved
+        let result = split_once(r#""\x""#).unwrap();
+        assert_eq!(Some(("\\x".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_backslash_escaped_space() {
+        let result = split_once(r"hello\ world").unwrap();
+        assert_eq!(Some(("hello world".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_backslash_escaped_space_with_rest() {
+        let result = split_once(r"hello\ world foo").unwrap();
+        assert_eq!(Some(("hello world".to_string(), " foo")), result);
+    }
+
+    #[test]
+    fn split_once_backslash_non_whitespace() {
+        let result = split_once(r"hello\nworld").unwrap();
+        assert_eq!(Some(("hello\\nworld".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_mixed_quotes() {
+        let result = split_once("he'llo wo'rld").unwrap();
+        assert_eq!(Some(("hello world".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_empty_quotes() {
+        let result = split_once("''").unwrap();
+        assert_eq!(Some(("".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_empty_double_quotes() {
+        let result = split_once("\"\"").unwrap();
+        assert_eq!(Some(("".to_string(), "")), result);
+    }
+
+    #[test]
+    fn split_once_iterative_parsing() {
+        // Test that we can iteratively parse multiple words
+        let input = "one two three";
+        let (word1, rest1) = split_once(input).unwrap().unwrap();
+        assert_eq!("one", word1);
+        let (word2, rest2) = split_once(rest1).unwrap().unwrap();
+        assert_eq!("two", word2);
+        let (word3, rest3) = split_once(rest2).unwrap().unwrap();
+        assert_eq!("three", word3);
+        assert_eq!(None, split_once(rest3).unwrap());
     }
 }
