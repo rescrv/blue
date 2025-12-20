@@ -838,8 +838,6 @@ pub mod test_util {
     use crate::builder::Builder;
     use crate::sigma::Sigma;
 
-    use super::*;
-
     #[macro_export]
     macro_rules! assert_eq_with_ctx {
         (@inner [$($elems:tt)*] , $($rem:tt)*) => {

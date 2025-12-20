@@ -1136,7 +1136,7 @@ where
     F: FieldUnpackHelper<'a, T>,
 {
     fn merge_field(&mut self, proto: T) {
-        *self = Box::new(proto.into());
+        **self = proto.into();
     }
 }
 
