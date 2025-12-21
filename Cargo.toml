@@ -52,6 +52,7 @@ members = [
     "tuple_key",
     "tuple_key_derive",
     "tuple_routing",
+    "two_five_six",
     "unix_sock",
     "utf8path",
     "utilz",
