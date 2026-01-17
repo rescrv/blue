@@ -14,7 +14,11 @@ use biometrics::Counter;
 
 use tatl::{HeyListen, Stationary};
 
-use super::{Error, Sst, SstMetadata, LOGIC_ERROR};
+use super::{
+    error_with_path, io_result, logic_error_file_descriptor_negative,
+    logic_error_file_manager_broken_pointer, system_error_with_context,
+    system_error_with_path_and_context, too_many_open_files, Error, Sst, SstMetadata, LOGIC_ERROR,
+};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -58,7 +62,7 @@ impl FileHandle {
             Ok(path.clone())
         } else {
             LOGIC_ERROR.click();
-            Err(Error::LogicErrorFileManagerBrokenPointer { fd })
+            Err(logic_error_file_manager_broken_pointer(fd))
         }
     }
 
@@ -66,21 +70,24 @@ impl FileHandle {
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
         self.file
             .read_exact_at(buf, offset)
-            .map_err(|e| Error::IoError {
-                kind: e.kind(),
-                path: self.path().ok(),
-                context: format!(
+            .map_err(|e| {
+                let context = format!(
                     "read_exact_at failed: fd={}, offset={}, amount={}",
                     self.file.as_raw_fd(),
                     offset,
                     buf.len()
-                ),
+                );
+                if let Ok(path) = self.path() {
+                    system_error_with_path_and_context(e, path.to_string_lossy(), context)
+                } else {
+                    system_error_with_context(e, context)
+                }
             })
     }
 
     /// return the size of the file.
     pub fn size(&self) -> Result<u64, Error> {
-        Ok(self.file.metadata()?.len())
+        Ok(io_result(self.file.metadata())?.len())
     }
 }
 
@@ -175,18 +182,24 @@ impl FileManager {
 
     /// Open the given path, if allocation limits allow.
     pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<FileHandle, Error> {
+        // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+        self.open_inner(path.as_ref())
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))
+    }
+
+    fn open_inner(&self, path: &Path) -> Result<FileHandle, Error> {
         // Check if the file is opened or opening.
         {
             let mut state = self.state.lock().unwrap();
-            while state.opening.contains(path.as_ref()) {
+            while state.opening.contains(path) {
                 state = self.wake_opening.wait(state).unwrap();
             }
             // We have it by name
-            if let Some(fd) = state.names.get(path.as_ref()) {
+            if let Some(fd) = state.names.get(path) {
                 // Check that we won't exceed the vector's bounds.
                 if state.files.len() <= *fd {
                     LOGIC_ERROR.click();
-                    return Err(Error::LogicErrorFileManagerBrokenPointer { fd: *fd });
+                    return Err(logic_error_file_manager_broken_pointer(*fd));
                 };
                 // Check that we haven't violated internal invariants.
                 if let Some((_, file)) = &state.files[*fd] {
@@ -196,27 +209,27 @@ impl FileManager {
                     });
                 } else {
                     LOGIC_ERROR.click();
-                    return Err(Error::LogicErrorFileManagerBrokenPointer { fd: *fd });
+                    return Err(logic_error_file_manager_broken_pointer(*fd));
                 };
             };
             // We're going to be opening a file, so make sure we won't exceed the max number of
             // files.
             if state.opening.len() + state.names.len() >= self.max_open_files {
                 TOO_MANY_OPEN_FILES.click();
-                return Err(Error::TooManyOpenFiles {
-                    limit: self.max_open_files,
-                    current: state.opening.len() + state.names.len(),
-                });
+                return Err(too_many_open_files(
+                    self.max_open_files,
+                    state.opening.len() + state.names.len(),
+                ));
             }
-            state.opening.insert(path.as_ref().to_path_buf());
+            state.opening.insert(path.to_path_buf());
         }
         // Open the file
-        let file = match open(path.as_ref().to_path_buf()) {
+        let file = match open(path.to_path_buf()) {
             Ok(file) => file,
             Err(e) => {
                 {
                     let mut state = self.state.lock().unwrap();
-                    state.opening.remove(path.as_ref());
+                    state.opening.remove(path);
                 }
                 self.wake_opening.notify_all();
                 return Err(e);
@@ -226,11 +239,11 @@ impl FileManager {
         // Setup the file as a managed file.
         let file = Arc::new(file);
         let file2 = Arc::clone(&file);
-        let path2 = path.as_ref().to_path_buf();
+        let path2 = path.to_path_buf();
         {
             let mut state = self.state.lock().unwrap();
-            state.opening.remove(&path.as_ref().to_path_buf());
-            state.names.insert(path.as_ref().to_path_buf(), fd);
+            state.opening.remove(&path.to_path_buf());
+            state.names.insert(path.to_path_buf(), fd);
             if state.files.len() <= fd {
                 state.files.resize(fd + 1, None);
             }
@@ -245,9 +258,14 @@ impl FileManager {
 
     /// Stat the provided path, if allocation limits allow.
     pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, Error> {
-        let handle = self.open(path)?;
-        let sst = Sst::<FileHandle>::from_file_handle(handle)?;
+        // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+        let handle = self
+            .open(path.as_ref())
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))?;
+        let sst = Sst::<FileHandle>::from_file_handle(handle)
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))?;
         sst.metadata()
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))
     }
 }
 
@@ -257,7 +275,7 @@ impl FileManager {
 fn check_fd(fd: c_int) -> Result<usize, Error> {
     if fd < 0 {
         LOGIC_ERROR.click();
-        return Err(Error::LogicErrorFileDescriptorNegative { fd });
+        return Err(logic_error_file_descriptor_negative(fd));
     }
     Ok(fd as usize)
 }
@@ -270,11 +288,11 @@ fn open(path: PathBuf) -> Result<File, Error> {
     let file = match File::open(path.clone()) {
         Ok(file) => file,
         Err(e) => {
-            return Err(Error::IoError {
-                kind: e.kind(),
-                path: Some(path),
-                context: "file open failed".to_string(),
-            });
+            return Err(system_error_with_path_and_context(
+                e,
+                path.to_string_lossy(),
+                "file open failed",
+            ));
         }
     };
     check_fd(file.as_raw_fd())?;
@@ -287,7 +305,10 @@ fn open(path: PathBuf) -> Result<File, Error> {
 pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error> {
     let path = path.as_ref().to_path_buf();
     FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();
-    let file = Arc::new(open(path.clone())?);
+    // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+    let file = Arc::new(
+        open(path.clone()).map_err(|err| error_with_path(err, path.to_string_lossy()))?,
+    );
     let fd = file.as_raw_fd() as usize;
     assert!(fd < usize::MAX);
     let mut state = State {

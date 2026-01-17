@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use super::log::log_to_builder;
 use super::setsum::Setsum;
-use super::{Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE};
+use super::{
+    error_with_path, is_table_full, system_error_with_path_and_context, Builder, Error, LogBuilder,
+    LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE,
+};
 
 /////////////////////////////////////////// IngestOptions //////////////////////////////////////////
 
@@ -109,8 +112,18 @@ impl Jester {
         log_to_builder(self.options.log.clone(), &input, builder)?;
         let final_file =
             PathBuf::from(&self.options.sst_dir).join(format!("{}.sst", setsum.hexdigest()));
-        rename(output, final_file)?;
-        remove_file(input)?;
+        // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+        rename(&output, &final_file).map_err(|err| {
+            let context = format!("rename to {}", final_file.to_string_lossy());
+            system_error_with_path_and_context(err, output.to_string_lossy(), context)
+        })?;
+        // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+        remove_file(&input).map_err(|err| {
+            error_with_path(
+                system_error_with_path_and_context(err, input.to_string_lossy(), "remove input"),
+                input.to_string_lossy(),
+            )
+        })?;
         Ok(())
     }
 }
@@ -129,7 +142,7 @@ impl Builder for Jester {
     fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
         match self.get_builder()?.put(key, timestamp, value) {
             Ok(_) => Ok(()),
-            Err(Error::TableFull { .. }) => {
+            Err(err) if is_table_full(&err) => {
                 self.rollover_builder()?;
                 self.put(key, timestamp, value)
             }
@@ -140,7 +153,7 @@ impl Builder for Jester {
     fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
         match self.get_builder()?.del(key, timestamp) {
             Ok(_) => Ok(()),
-            Err(Error::TableFull { .. }) => {
+            Err(err) if is_table_full(&err) => {
                 self.rollover_builder()?;
                 self.del(key, timestamp)
             }
