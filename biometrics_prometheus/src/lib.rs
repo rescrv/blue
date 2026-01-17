@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
+use std::{collections::HashSet, fmt};
 
 use biometrics::{Counter, Gauge, Histogram, Moments, Sensor};
 use utf8path::Path;
@@ -125,6 +126,7 @@ pub struct Emitter {
     written: usize,
     last_flush: Instant,
     flush_trigger: Option<u64>,
+    emitted_types: HashSet<String>,
 }
 
 impl Emitter {
@@ -133,12 +135,14 @@ impl Emitter {
         let written = 0;
         let last_flush = Instant::now();
         let flush_trigger = None;
+        let emitted_types = HashSet::new();
         Self {
             options,
             output,
             written,
             last_flush,
             flush_trigger,
+            emitted_types,
         }
     }
 
@@ -157,9 +161,9 @@ impl Emitter {
                 self.written = 0;
                 self.last_flush = Instant::now();
                 self.flush_trigger = None;
+                self.emitted_types.clear();
             }
         }
-        let options = self.options.clone();
         let flush_trigger = self.flush_trigger;
         let last_flush = self.last_flush;
         self.written += line.as_ref().len();
@@ -167,7 +171,8 @@ impl Emitter {
         let output = self.get_output(now_millis)?;
         output.write_all(line.as_ref().as_bytes())?;
         if flush_trigger.is_none()
-            && (written > options.segment_size || last_flush.elapsed() > options.flush_interval)
+            && (written > self.options.segment_size
+                || last_flush.elapsed() > self.options.flush_interval)
         {
             self.flush_trigger = Some(now_millis);
         }
@@ -201,6 +206,19 @@ impl Emitter {
         }
         Ok(self.output.as_mut().unwrap())
     }
+
+    fn emit_type_once(
+        &mut self,
+        label: impl fmt::Display,
+        kind: &str,
+        now: u64,
+    ) -> Result<(), std::io::Error> {
+        let label = label.to_string();
+        if self.emitted_types.insert(label.clone()) {
+            self.write_line(format!("# TYPE {label} {kind}\n"), now)?;
+        }
+        Ok(())
+    }
 }
 
 impl biometrics::Emitter for Emitter {
@@ -209,44 +227,35 @@ impl biometrics::Emitter for Emitter {
     fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
         let label = counter.label();
         let reading = counter.read();
-        self.write_line(
-            format!(
-                "# TYPE {label} counter
-{label} {reading} {now}\n",
-            ),
-            now,
-        )?;
+        self.emit_type_once(label, "counter", now)?;
+        self.write_line(format!("{label} {reading} {now}\n"), now)?;
         Ok(())
     }
 
     fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
         let label = gauge.label();
         let reading = gauge.read();
-        self.write_line(
-            format!(
-                "# TYPE {label} gauge
-{label} {reading} {now}\n"
-            ),
-            now,
-        )?;
+        self.emit_type_once(label, "gauge", now)?;
+        self.write_line(format!("{label} {reading} {now}\n"), now)?;
         Ok(())
     }
 
     fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
         let label = moments.label();
         let reading = moments.read();
+        self.emit_type_once(format!("{label}_count"), "counter", now)?;
+        self.emit_type_once(format!("{label}_mean"), "gauge", now)?;
+        self.emit_type_once(format!("{label}_variance"), "gauge", now)?;
+        self.emit_type_once(format!("{label}_skewness"), "gauge", now)?;
+        self.emit_type_once(format!("{label}_kurtosis"), "gauge", now)?;
         self.write_line(
             format!(
-                "# TYPE {label}_count counter
-{label}_count {} {now}
-# TYPE {label}_mean gauge
+                "{label}_count {} {now}
 {label}_mean {} {now}
-# TYPE {label}_variance gauge
 {label}_variance {} {now}
-# TYPE {label}_skewness gauge
 {label}_skewness {} {now}
-# TYPE {label}_kurtosis gauge
-{label}_kurtosis {} {now}\n",
+{label}_kurtosis {} {now}
+",
                 reading.n(),
                 reading.mean(),
                 reading.variance(),
@@ -260,7 +269,11 @@ impl biometrics::Emitter for Emitter {
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
         let label = histogram.label();
-        self.write_line(format!("# TYPE {label} histogram\n"), now)?;
+        self.emit_type_once(label, "histogram", now)?;
+        self.emit_type_once(format!("{label}_sum"), "gauge", now)?;
+        self.emit_type_once(format!("{label}_count"), "counter", now)?;
+        self.emit_type_once(format!("{label}_exceeds_max"), "gauge", now)?;
+        self.emit_type_once(format!("{label}_is_negative"), "gauge", now)?;
         let mut total = 0;
         let mut acc = 0.0;
         for (bucket, count) in histogram.read().iter() {
@@ -383,7 +396,7 @@ impl Watcher {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_file;
+    use std::fs::{read_to_string, remove_file};
 
     use biometrics::Emitter as EmitterTrait;
 
@@ -439,6 +452,27 @@ foo 0 42
         });
         emitter.emit_counter(&Counter::new("foo"), 42).unwrap();
         drop(emitter);
+    }
+
+    #[test]
+    fn emitter_type_once() {
+        static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // SAFETY(rescrv):  Mutex poisoning.
+        let _guard = MUTEX.lock().unwrap();
+        if Path::from("tmp.type.7.prom").exists() {
+            remove_file("tmp.type.7.prom").unwrap();
+        }
+        let mut emitter = Emitter::new(Options {
+            segment_size: 1024,
+            flush_interval: Duration::from_secs(1),
+            prefix: Path::new("tmp.type."),
+        });
+        emitter.emit_counter(&Counter::new("foo"), 7).unwrap();
+        emitter.emit_counter(&Counter::new("foo"), 7).unwrap();
+        drop(emitter);
+        let output = read_to_string("tmp.type.7.prom").unwrap();
+        assert_eq!(1, output.matches("# TYPE foo counter\n").count());
+        remove_file("tmp.type.7.prom").unwrap();
     }
 
     #[test]
