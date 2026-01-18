@@ -1,6 +1,10 @@
 [package]
 name = "two_five_six"
 version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2024"
+description = "Two-five-six provides high-entropy, human-friendly identifiers."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
