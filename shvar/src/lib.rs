@@ -312,9 +312,17 @@ pub fn split_once(s: &str) -> Result<Option<(String, &str)>, Error> {
                 }
                 prev_was_whack = false;
             }
+            (SplitState::Unquoted, '\'') if prev_was_whack => {
+                word.push('\'');
+                prev_was_whack = false;
+            }
             (SplitState::Unquoted, '\'') => {
                 state = SplitState::Single;
                 word_started = true;
+                prev_was_whack = false;
+            }
+            (SplitState::Unquoted, '"') if prev_was_whack => {
+                word.push('"');
                 prev_was_whack = false;
             }
             (SplitState::Unquoted, '"') => {
@@ -1487,6 +1495,15 @@ mod tests {
             ],
             rcvar("$@ ${<} $^ ${+} $?").unwrap(),
         );
+    }
+
+    #[test]
+    fn escaped_single_quote_in_unquoted_context() {
+        // Standard shell syntax: 'single'\''quote' should produce single'quote
+        // This ends single quote, adds escaped quote, and resumes single quote
+        let result = split(r#"'single'\''quote'"#).unwrap();
+        assert_eq!(vec!["single'quote".to_string()], result);
+        // echo 'single'\''quote' output: single'quote
     }
 
     #[test]
