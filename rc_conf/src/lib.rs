@@ -834,10 +834,13 @@ impl RcConf {
                 }
             } else if let Some((var, val)) = line.split_once('=') {
                 let split = shvar::split(val)?;
-                if split.len() != 1 {
+                if split.is_empty() {
+                    items.insert(var.to_string(), String::new());
+                } else if split.len() == 1 {
+                    items.insert(var.to_string(), split[0].clone());
+                } else {
                     return Err(Error::invalid_rc_conf(path, number, line));
                 }
-                items.insert(var.to_string(), split[0].clone());
             } else {
                 return Err(Error::invalid_rc_conf(path, number, line));
             }
@@ -856,10 +859,13 @@ impl RcConf {
             }
             if let Some((var, val)) = line.split_once('=') {
                 let split = shvar::split(val)?;
-                if split.len() != 1 {
+                if split.is_empty() {
+                    items.insert(var.to_string(), String::new());
+                } else if split.len() == 1 {
+                    items.insert(var.to_string(), split[0].clone());
+                } else {
                     return Err(Error::invalid_rc_conf(path, number, line));
                 }
-                items.insert(var.to_string(), split[0].clone());
             } else {
                 return Err(Error::invalid_rc_conf(path, number, line));
             }
