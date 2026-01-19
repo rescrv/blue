@@ -11,10 +11,14 @@ repository = "https://github.com/rescrv/blue"
 default = ["binaries"]
 
 binaries = []
+
 [dependencies]
 biometrics = { path = "../biometrics", version = "0.12" }
 
+[dev-dependencies]
+guacamole = { path = "../guacamole" }
+
 [[example]]
-name = "rate_limiting"
-path = "examples/rate_limiting.rs"
-required-features = ["binaries"]
+name = "generror"
+path = "examples/generror.rs"
+required-features=["binaries"]

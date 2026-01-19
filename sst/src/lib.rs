@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
 use buffertk::{stack_pack, Packable, Unpacker};
-use handled::Handle;
+use handled::{SError, SExpr};
 use tatl::{HeyListen, Stationary};
 
 pub mod block;
@@ -206,10 +206,7 @@ pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64
 pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
-        Err(Error::KeyTooLarge {
-            length: key.len(),
-            limit: MAX_KEY_LEN,
-        })
+        Err(key_too_large(key.len(), MAX_KEY_LEN))
     } else {
         Ok(())
     }
@@ -219,10 +216,7 @@ pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
 pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
-        Err(Error::ValueTooLarge {
-            length: value.len(),
-            limit: MAX_VALUE_LEN,
-        })
+        Err(value_too_large(value.len(), MAX_VALUE_LEN))
     } else {
         Ok(())
     }
@@ -232,10 +226,7 @@ pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
 pub fn check_table_size(size: usize) -> Result<(), Error> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
-        Err(Error::TableFull {
-            size,
-            limit: TABLE_FULL_SIZE,
-        })
+        Err(table_full(size, TABLE_FULL_SIZE))
     } else {
         Ok(())
     }
@@ -244,454 +235,451 @@ pub fn check_table_size(size: usize) -> Result<(), Error> {
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 ////////////////////////////////////////// Error Classes ///////////////////////////////////////////
+pub type Error = SError;
 
-/// An I/O operation failed with this error kind.
-#[derive(Clone, Debug)]
-pub struct IoError {
-    /// The kind of I/O error that occurred.
-    pub kind: std::io::ErrorKind,
-    /// The path associated with the error, if any.
-    pub path: Option<PathBuf>,
+const PHASE: &str = "sst";
+
+pub const CODE_KEY_TOO_LARGE: &str = "key-too-large";
+pub const CODE_VALUE_TOO_LARGE: &str = "value-too-large";
+pub const CODE_SORT_ORDER: &str = "sort-order";
+pub const CODE_TABLE_FULL: &str = "table-full";
+pub const CODE_BLOCK_TOO_SMALL: &str = "block-too-small";
+pub const CODE_EMPTY_BATCH: &str = "empty-batch";
+pub const CODE_CRC32C_FAILURE: &str = "crc32c-failure";
+pub const CODE_CORRUPTION_FILE_TOO_SMALL: &str = "corruption-file-too-small";
+pub const CODE_CORRUPTION_FINAL_BLOCK_OFFSET_TOO_LARGE: &str =
+    "corruption-final-block-offset-too-large";
+pub const CODE_CORRUPTION_INDEX_BLOCK_RUNS_PAST_FILTER_BLOCK: &str =
+    "corruption-index-block-runs-past-filter-block";
+pub const CODE_CORRUPTION_FILTER_BLOCK_RUNS_PAST_FINAL_BLOCK: &str =
+    "corruption-filter-block-runs-past-final-block";
+pub const CODE_CORRUPTION_BLOCK_METADATA_START_GTE_LIMIT: &str =
+    "corruption-block-metadata-start-gte-limit";
+pub const CODE_CORRUPTION_META_BLOCK_NULL_VALUE: &str = "corruption-meta-block-null-value";
+pub const CODE_CORRUPTION_TRIED_LOADING_FILTER_BLOCK_AS_PLAIN: &str =
+    "corruption-tried-loading-filter-block-as-plain";
+pub const CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_PLAIN: &str =
+    "corruption-tried-loading-final-block-as-plain";
+pub const CODE_CORRUPTION_TRIED_LOADING_PLAIN_BLOCK_AS_FILTER: &str =
+    "corruption-tried-loading-plain-block-as-filter";
+pub const CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_FILTER: &str =
+    "corruption-tried-loading-final-block-as-filter";
+pub const CODE_CORRUPTION_BAD_FILTER_BLOCK: &str = "corruption-bad-filter-block";
+pub const CODE_CORRUPTION_BLOCK_WITH_ZERO_RESTARTS: &str = "corruption-block-with-zero-restarts";
+pub const CODE_CORRUPTION_RESTART_POINT_NO_KEY_VALUE_PAIR: &str =
+    "corruption-restart-point-no-key-value-pair";
+pub const CODE_CORRUPTION_BINARY_SEARCH_LEFT_NE_RIGHT: &str =
+    "corruption-binary-search-left-ne-right";
+pub const CODE_CORRUPTION_OFFSET_EXCEEDS_RESTARTS_BOUNDARY: &str =
+    "corruption-offset-exceeds-restarts-boundary";
+pub const CODE_CORRUPTION_SHARED_NOT_ZERO: &str = "corruption-shared-not-zero";
+pub const CODE_CORRUPTION_INVALID_DISCRIMINANT: &str = "corruption-invalid-discriminant";
+pub const CODE_CORRUPTION_CRC_CHECKSUM_FAILED: &str = "corruption-crc-checksum-failed";
+pub const CODE_CORRUPTION_HEADER_SIZE_EXCEEDS_MAX: &str = "corruption-header-size-exceeds-max";
+pub const CODE_CORRUPTION_ENTRY_SIZE_EXCEEDS_MAX: &str = "corruption-entry-size-exceeds-max";
+pub const CODE_CORRUPTION_TRUE_UP_EXCEEDS_HEADER_MAX: &str =
+    "corruption-true-up-exceeds-header-max";
+pub const CODE_CORRUPTION_TRUNCATION_NO_SECOND_HEADER: &str =
+    "corruption-truncation-no-second-header";
+pub const CODE_CORRUPTION_LOG_POISONED: &str = "corruption-log-poisoned";
+pub const CODE_CORRUPTION_FSYNC_FAILED: &str = "corruption-fsync-failed";
+pub const CODE_UNPACK_FINAL_BLOCK_OFFSET: &str = "unpack-final-block-offset";
+pub const CODE_UNPACK_FINAL_BLOCK: &str = "unpack-final-block";
+pub const CODE_UNPACK_TABLE_ENTRY: &str = "unpack-table-entry";
+pub const CODE_UNPACK_BLOCK_METADATA: &str = "unpack-block-metadata";
+pub const CODE_UNPACK_KEY_VALUE_PAIR: &str = "unpack-key-value-pair";
+pub const CODE_UNPACK_BLOCK_RESTARTS: &str = "unpack-block-restarts";
+pub const CODE_UNPACK_KEY_VALUE_ENTRY: &str = "unpack-key-value-entry";
+pub const CODE_UNPACK_LOG_HEADER: &str = "unpack-log-header";
+pub const CODE_LOGIC_ERROR_START_NEW_BLOCK_WHEN_SOME: &str =
+    "logic-error-start-new-block-when-some";
+pub const CODE_LOGIC_ERROR_FLUSH_BLOCK_WHEN_NONE: &str = "logic-error-flush-block-when-none";
+pub const CODE_LOGIC_ERROR_RESTART_IDX_EXCEEDS_NUM_RESTARTS: &str =
+    "logic-error-restart-idx-exceeds-num-restarts";
+pub const CODE_LOGIC_ERROR_TRIED_TAKING_NEGATIVE_RESTART_IDX: &str =
+    "logic-error-tried-taking-negative-restart-idx";
+pub const CODE_LOGIC_ERROR_NEXT_NOT_POSITIONED: &str = "logic-error-next-not-positioned";
+pub const CODE_LOGIC_ERROR_PREV_NOT_POSITIONED: &str = "logic-error-prev-not-positioned";
+pub const CODE_LOGIC_ERROR_FILE_DESCRIPTOR_NEGATIVE: &str = "logic-error-file-descriptor-negative";
+pub const CODE_LOGIC_ERROR_FILE_MANAGER_BROKEN_POINTER: &str =
+    "logic-error-file-manager-broken-pointer";
+pub const CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED: &str =
+    "logic-error-buf-writer-into-inner-failed";
+pub const CODE_SYSTEM_ERROR: &str = "system-error";
+pub const CODE_TOO_MANY_OPEN_FILES: &str = "too-many-open-files";
+
+const FIELD_LENGTH: &str = "length";
+const FIELD_LIMIT: &str = "limit";
+const FIELD_LAST_KEY: &str = "last_key";
+const FIELD_LAST_TIMESTAMP: &str = "last_timestamp";
+const FIELD_NEW_KEY: &str = "new_key";
+const FIELD_NEW_TIMESTAMP: &str = "new_timestamp";
+const FIELD_SIZE: &str = "size";
+const FIELD_REQUIRED: &str = "required";
+const FIELD_START: &str = "start";
+const FIELD_END: &str = "end";
+const FIELD_CRC32C: &str = "crc32c";
+const FIELD_FILE_SIZE: &str = "file_size";
+const FIELD_FINAL_BLOCK_OFFSET: &str = "final_block_offset";
+const FIELD_INDEX_BLOCK_LIMIT: &str = "index_block_limit";
+const FIELD_FILTER_BLOCK_START: &str = "filter_block_start";
+const FIELD_FILTER_BLOCK_LIMIT: &str = "filter_block_limit";
+const FIELD_BLOCK_METADATA_START: &str = "block_metadata_start";
+const FIELD_WHAT: &str = "what";
+const FIELD_RESTART_POINT: &str = "restart_point";
+const FIELD_LEFT: &str = "left";
+const FIELD_RIGHT: &str = "right";
+const FIELD_OFFSET: &str = "offset";
+const FIELD_RESTARTS_BOUNDARY: &str = "restarts_boundary";
+const FIELD_DISCRIMINANT: &str = "discriminant";
+const FIELD_EXPECTED: &str = "expected";
+const FIELD_COMPUTED: &str = "computed";
+const FIELD_HEADER_SIZE: &str = "header_size";
+const FIELD_TRUE_UP: &str = "trued_up";
+const FIELD_RESTART_IDX: &str = "restart_idx";
+const FIELD_NUM_RESTARTS: &str = "num_restarts";
+const FIELD_FD: &str = "fd";
+const FIELD_KIND: &str = "kind";
+const FIELD_PATH: &str = "path";
+const FIELD_CONTEXT: &str = "context";
+const FIELD_RESOURCE: &str = "resource";
+const FIELD_CURRENT: &str = "current";
+
+fn error(code: &str) -> Error {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Handle<IoError> for IoError {
-    fn handle(&self) -> Option<IoError> {
-        Some(self.clone())
-    }
+fn error_with_message(code: &str, message: impl AsRef<str>) -> Error {
+    error(code).with_message(message.as_ref())
 }
 
-/// Corruption was detected in the data.
-#[derive(Clone, Debug)]
-pub struct CorruptionError {
-    /// A description of what was corrupt.
-    pub context: String,
-}
-
-impl Handle<CorruptionError> for CorruptionError {
-    fn handle(&self) -> Option<CorruptionError> {
-        Some(self.clone())
-    }
-}
-
-/// A resource limit was exceeded.
-#[derive(Clone, Debug)]
-pub struct ResourceLimit {
-    /// The resource that was exhausted.
-    pub resource: String,
-    /// The limit that was exceeded.
-    pub limit: usize,
-    /// The size that was attempted.
-    pub size: usize,
-}
-
-impl Handle<ResourceLimit> for ResourceLimit {
-    fn handle(&self) -> Option<ResourceLimit> {
-        Some(self.clone())
-    }
-}
-
-/// An unpack/decode operation failed.
-#[derive(Clone, Debug)]
-pub struct UnpackError {
-    /// The underlying prototk error.
-    pub error: prototk::Error,
-    /// Additional context.
-    pub context: String,
-}
-
-impl Handle<UnpackError> for UnpackError {
-    fn handle(&self) -> Option<UnpackError> {
-        Some(self.clone())
-    }
-}
-
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
-
-/// The sst Error type.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[allow(missing_docs)]
-pub enum Error {
-    // Key/Value constraints
-    KeyTooLarge {
-        length: usize,
-        limit: usize,
-    },
-    ValueTooLarge {
-        length: usize,
-        limit: usize,
-    },
-    SortOrder {
-        last_key: Vec<u8>,
-        last_timestamp: u64,
-        new_key: Vec<u8>,
-        new_timestamp: u64,
-    },
-
-    // Table/Block structure errors
-    TableFull {
-        size: usize,
-        limit: usize,
-    },
-    BlockTooSmall {
-        length: usize,
-        required: usize,
-    },
-    #[default]
-    EmptyBatch,
-
-    // Corruption errors
-    Crc32cFailure {
-        start: u64,
-        limit: u64,
-        crc32c: u32,
-    },
-    CorruptionFileTooSmall {
-        file_size: u64,
-        minimum_size: u64,
-    },
-    CorruptionFinalBlockOffsetTooLarge {
-        final_block_offset: u64,
-        file_size: u64,
-    },
-    CorruptionIndexBlockRunsPastFilterBlock {
-        index_block_limit: u64,
-        filter_block_start: u64,
-    },
-    CorruptionFilterBlockRunsPastFinalBlock {
-        filter_block_limit: u64,
-        final_block_offset: u64,
-    },
-    CorruptionBlockMetadataStartGteLimit {
-        start: u64,
-        limit: u64,
-    },
-    CorruptionMetaBlockNullValue,
-    CorruptionTriedLoadingFilterBlockAsPlain,
-    CorruptionTriedLoadingFinalBlockAsPlain,
-    CorruptionTriedLoadingPlainBlockAsFilter,
-    CorruptionTriedLoadingFinalBlockAsFilter,
-    CorruptionBadFilterBlock {
-        what: String,
-    },
-    CorruptionBlockWithZeroRestarts,
-    CorruptionRestartPointNoKeyValuePair {
-        restart_point: usize,
-    },
-    CorruptionBinarySearchLeftNeRight {
-        left: usize,
-        right: usize,
-    },
-    CorruptionOffsetExceedsRestartsBoundary {
-        offset: usize,
-        restarts_boundary: usize,
-    },
-    CorruptionSharedNotZero,
-    CorruptionInvalidDiscriminant {
-        discriminant: u32,
-        offset: u64,
-    },
-    CorruptionCrcChecksumFailed {
-        expected: u32,
-        computed: u32,
-        offset: u64,
-    },
-    CorruptionHeaderSizeExceedsMax {
-        header_size: usize,
-        offset: u64,
-    },
-    CorruptionEntrySizeExceedsMax {
-        size: u64,
-        offset: u64,
-    },
-    CorruptionTrueUpExceedsHeaderMax {
-        offset: u64,
-        trued_up: u64,
-    },
-    CorruptionTruncationNoSecondHeader {
-        offset: u64,
-    },
-    CorruptionLogPoisoned,
-    CorruptionFsyncFailed,
-
-    // Unpack errors
-    UnpackFinalBlockOffset {
-        error: prototk::Error,
-    },
-    UnpackFinalBlock {
-        error: prototk::Error,
-    },
-    UnpackTableEntry {
-        error: prototk::Error,
-    },
-    UnpackBlockMetadata {
-        error: prototk::Error,
-    },
-    UnpackKeyValuePair {
-        error: prototk::Error,
-        offset: usize,
-    },
-    UnpackBlockRestarts {
-        error: prototk::Error,
-    },
-    UnpackKeyValueEntry {
-        error: buffertk::Error,
-    },
-    UnpackLogHeader {
-        error: prototk::Error,
-    },
-
-    // Logic errors
-    LogicErrorStartNewBlockWhenSome,
-    LogicErrorFlushBlockWhenNone,
-    LogicErrorRestartIdxExceedsNumRestarts {
-        restart_idx: usize,
-        num_restarts: usize,
-    },
-    LogicErrorTriedTakingNegativeRestartIdx,
-    LogicErrorNextNotPositioned,
-    LogicErrorPrevNotPositioned,
-    LogicErrorFileDescriptorNegative {
-        fd: i32,
-    },
-    LogicErrorFileManagerBrokenPointer {
-        fd: usize,
-    },
-    LogicErrorBufWriterIntoInnerFailed,
-
-    // System errors
-    IoError {
-        kind: std::io::ErrorKind,
-        path: Option<PathBuf>,
-        context: String,
-    },
-
-    // Resource limits
-    TooManyOpenFiles {
-        limit: usize,
-        current: usize,
-    },
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Error {
-        Error::IoError {
-            kind: err.kind(),
-            path: None,
-            context: format!("{err:?}"),
-        }
-    }
-}
-
-impl From<buffertk::Error> for Error {
-    fn from(error: buffertk::Error) -> Error {
-        Error::UnpackKeyValueEntry { error }
-    }
-}
-
-impl From<prototk::Error> for Error {
-    fn from(error: prototk::Error) -> Error {
-        Error::UnpackLogHeader { error }
-    }
-}
-
-impl From<std::convert::Infallible> for Error {
-    fn from(_: std::convert::Infallible) -> Error {
-        Error::EmptyBatch
-    }
-}
-
-// Handle implementations for Error
-
-impl Handle<IoError> for Error {
-    fn handle(&self) -> Option<IoError> {
-        match self {
-            Error::IoError { kind, path, .. } => Some(IoError {
-                kind: *kind,
-                path: path.clone(),
-            }),
+pub fn error_field<'a>(err: &'a Error, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
             _ => None,
-        }
+        }),
+        _ => None,
     }
 }
 
-impl Handle<CorruptionError> for Error {
-    fn handle(&self) -> Option<CorruptionError> {
-        match self {
-            Error::Crc32cFailure { start, limit, crc32c } => Some(CorruptionError {
-                context: format!("crc32c failure at [{start}..{limit}] with crc {crc32c:#x}"),
-            }),
-            Error::CorruptionFileTooSmall { file_size, minimum_size } => Some(CorruptionError {
-                context: format!("file too small: {file_size} < {minimum_size}"),
-            }),
-            Error::CorruptionFinalBlockOffsetTooLarge { final_block_offset, file_size } => {
-                Some(CorruptionError {
-                    context: format!(
-                        "final block offset {final_block_offset} > file size {file_size}"
-                    ),
-                })
-            }
-            Error::CorruptionIndexBlockRunsPastFilterBlock {
-                index_block_limit,
-                filter_block_start,
-            } => Some(CorruptionError {
-                context: format!(
-                    "index block limit {index_block_limit} > filter block start {filter_block_start}"
-                ),
-            }),
-            Error::CorruptionFilterBlockRunsPastFinalBlock {
-                filter_block_limit,
-                final_block_offset,
-            } => Some(CorruptionError {
-                context: format!(
-                    "filter block limit {filter_block_limit} > final block offset {final_block_offset}"
-                ),
-            }),
-            Error::CorruptionBlockMetadataStartGteLimit { start, limit } => Some(CorruptionError {
-                context: format!("block metadata start {start} >= limit {limit}"),
-            }),
-            Error::CorruptionMetaBlockNullValue => Some(CorruptionError {
-                context: "meta block has null value".to_string(),
-            }),
-            Error::CorruptionTriedLoadingFilterBlockAsPlain => Some(CorruptionError {
-                context: "tried loading filter block as plain".to_string(),
-            }),
-            Error::CorruptionTriedLoadingFinalBlockAsPlain => Some(CorruptionError {
-                context: "tried loading final block as plain".to_string(),
-            }),
-            Error::CorruptionTriedLoadingPlainBlockAsFilter => Some(CorruptionError {
-                context: "tried loading plain block as filter".to_string(),
-            }),
-            Error::CorruptionTriedLoadingFinalBlockAsFilter => Some(CorruptionError {
-                context: "tried loading final block as filter".to_string(),
-            }),
-            Error::CorruptionBadFilterBlock { what } => Some(CorruptionError {
-                context: format!("bad filter block: {what}"),
-            }),
-            Error::CorruptionBlockWithZeroRestarts => Some(CorruptionError {
-                context: "block with zero restarts".to_string(),
-            }),
-            Error::CorruptionRestartPointNoKeyValuePair { restart_point } => Some(CorruptionError {
-                context: format!("restart point {restart_point} returned no key-value pair"),
-            }),
-            Error::CorruptionBinarySearchLeftNeRight { left, right } => Some(CorruptionError {
-                context: format!("binary search left {left} != right {right}"),
-            }),
-            Error::CorruptionOffsetExceedsRestartsBoundary {
-                offset,
-                restarts_boundary,
-            } => Some(CorruptionError {
-                context: format!("offset {offset} exceeds restarts boundary {restarts_boundary}"),
-            }),
-            Error::CorruptionSharedNotZero => Some(CorruptionError {
-                context: "shared was not zero".to_string(),
-            }),
-            Error::CorruptionInvalidDiscriminant { discriminant, offset } => Some(CorruptionError {
-                context: format!("invalid discriminant {discriminant} at offset {offset}"),
-            }),
-            Error::CorruptionCrcChecksumFailed { expected, computed, offset } => {
-                Some(CorruptionError {
-                    context: format!(
-                        "crc checksum failed at offset {offset}: expected {expected:#x}, got {computed:#x}"
-                    ),
-                })
-            }
-            Error::CorruptionHeaderSizeExceedsMax { header_size, offset } => Some(CorruptionError {
-                context: format!("header size {header_size} exceeds max at offset {offset}"),
-            }),
-            Error::CorruptionEntrySizeExceedsMax { size, offset } => Some(CorruptionError {
-                context: format!("entry size {size} exceeds max at offset {offset}"),
-            }),
-            Error::CorruptionTrueUpExceedsHeaderMax { offset, trued_up } => Some(CorruptionError {
-                context: format!("true-up from {offset} to {trued_up} exceeds header max"),
-            }),
-            Error::CorruptionTruncationNoSecondHeader { offset } => Some(CorruptionError {
-                context: format!("truncation: no second header at offset {offset}"),
-            }),
-            Error::CorruptionLogPoisoned => Some(CorruptionError {
-                context: "log is poisoned".to_string(),
-            }),
-            Error::CorruptionFsyncFailed => Some(CorruptionError {
-                context: "fsync failed".to_string(),
-            }),
-            _ => None,
-        }
+pub fn error_code(err: &Error) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
-impl Handle<ResourceLimit> for Error {
-    fn handle(&self) -> Option<ResourceLimit> {
-        match self {
-            Error::KeyTooLarge { length, limit } => Some(ResourceLimit {
-                resource: "key".to_string(),
-                limit: *limit,
-                size: *length,
-            }),
-            Error::ValueTooLarge { length, limit } => Some(ResourceLimit {
-                resource: "value".to_string(),
-                limit: *limit,
-                size: *length,
-            }),
-            Error::TableFull { size, limit } => Some(ResourceLimit {
-                resource: "table".to_string(),
-                limit: *limit,
-                size: *size,
-            }),
-            Error::TooManyOpenFiles { limit, current } => Some(ResourceLimit {
-                resource: "open_files".to_string(),
-                limit: *limit,
-                size: *current,
-            }),
-            _ => None,
-        }
-    }
+pub fn error_with_path(err: Error, path: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_PATH, path.as_ref())
 }
 
-impl Handle<UnpackError> for Error {
-    fn handle(&self) -> Option<UnpackError> {
-        match self {
-            Error::UnpackFinalBlockOffset { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing final block offset".to_string(),
-            }),
-            Error::UnpackFinalBlock { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing final block".to_string(),
-            }),
-            Error::UnpackTableEntry { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing table entry".to_string(),
-            }),
-            Error::UnpackBlockMetadata { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing block metadata".to_string(),
-            }),
-            Error::UnpackKeyValuePair { error, offset } => Some(UnpackError {
-                error: error.clone(),
-                context: format!("parsing key-value pair at offset {offset}"),
-            }),
-            Error::UnpackBlockRestarts { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing block restarts".to_string(),
-            }),
-            Error::UnpackKeyValueEntry { error } => Some(UnpackError {
-                error: (*error).clone().into(),
-                context: "parsing key-value entry".to_string(),
-            }),
-            Error::UnpackLogHeader { error } => Some(UnpackError {
-                error: error.clone(),
-                context: "parsing log header".to_string(),
-            }),
-            _ => None,
-        }
-    }
+pub fn is_table_full(err: &Error) -> bool {
+    error_code(err) == Some(CODE_TABLE_FULL)
+}
+
+pub fn is_empty_batch(err: &Error) -> bool {
+    error_code(err) == Some(CODE_EMPTY_BATCH)
+}
+
+fn system_error(err: std::io::Error) -> Error {
+    let message = err.to_string();
+    error(CODE_SYSTEM_ERROR)
+        .with_atom_field(FIELD_KIND, format!("{:?}", err.kind()))
+        .with_message(&message)
+}
+
+fn system_error_with_path(err: std::io::Error, path: impl AsRef<str>) -> Error {
+    system_error(err).with_string_field(FIELD_PATH, path.as_ref())
+}
+
+fn system_error_with_context(err: std::io::Error, context: impl AsRef<str>) -> Error {
+    system_error(err).with_string_field(FIELD_CONTEXT, context.as_ref())
+}
+
+fn system_error_with_path_and_context(
+    err: std::io::Error,
+    path: impl AsRef<str>,
+    context: impl AsRef<str>,
+) -> Error {
+    system_error_with_path(err, path).with_string_field(FIELD_CONTEXT, context.as_ref())
+}
+
+fn io_result<T>(result: std::io::Result<T>) -> Result<T, Error> {
+    result.map_err(system_error)
+}
+
+fn io_result_with_context<T>(
+    result: std::io::Result<T>,
+    context: impl AsRef<str>,
+) -> Result<T, Error> {
+    result.map_err(|err| system_error_with_context(err, context.as_ref()))
+}
+
+fn key_too_large(length: usize, limit: usize) -> Error {
+    error(CODE_KEY_TOO_LARGE)
+        .with_atom_field(FIELD_LENGTH, length)
+        .with_atom_field(FIELD_LIMIT, limit)
+}
+
+fn value_too_large(length: usize, limit: usize) -> Error {
+    error(CODE_VALUE_TOO_LARGE)
+        .with_atom_field(FIELD_LENGTH, length)
+        .with_atom_field(FIELD_LIMIT, limit)
+}
+
+fn sort_order(
+    last_key: Vec<u8>,
+    last_timestamp: u64,
+    new_key: Vec<u8>,
+    new_timestamp: u64,
+) -> Error {
+    error(CODE_SORT_ORDER)
+        .with_atom_field(FIELD_LAST_KEY, format!("{last_key:?}"))
+        .with_atom_field(FIELD_LAST_TIMESTAMP, last_timestamp)
+        .with_atom_field(FIELD_NEW_KEY, format!("{new_key:?}"))
+        .with_atom_field(FIELD_NEW_TIMESTAMP, new_timestamp)
+}
+
+fn table_full(size: usize, limit: usize) -> Error {
+    error(CODE_TABLE_FULL)
+        .with_atom_field(FIELD_SIZE, size)
+        .with_atom_field(FIELD_LIMIT, limit)
+}
+
+fn block_too_small(length: usize, required: usize) -> Error {
+    error(CODE_BLOCK_TOO_SMALL)
+        .with_atom_field(FIELD_LENGTH, length)
+        .with_atom_field(FIELD_REQUIRED, required)
+}
+
+fn empty_batch() -> Error {
+    EMPTY_BATCH.click();
+    error(CODE_EMPTY_BATCH)
+}
+
+fn crc32c_failure(start: u64, limit: u64, crc32c: u32) -> Error {
+    error(CODE_CRC32C_FAILURE)
+        .with_atom_field(FIELD_START, start)
+        .with_atom_field(FIELD_END, limit)
+        .with_atom_field(FIELD_CRC32C, crc32c)
+}
+
+fn corruption_file_too_small(file_size: u64, minimum_size: u64) -> Error {
+    error(CODE_CORRUPTION_FILE_TOO_SMALL)
+        .with_atom_field(FIELD_FILE_SIZE, file_size)
+        .with_atom_field(FIELD_LIMIT, minimum_size)
+}
+
+fn corruption_final_block_offset_too_large(final_block_offset: u64, file_size: u64) -> Error {
+    error(CODE_CORRUPTION_FINAL_BLOCK_OFFSET_TOO_LARGE)
+        .with_atom_field(FIELD_FINAL_BLOCK_OFFSET, final_block_offset)
+        .with_atom_field(FIELD_FILE_SIZE, file_size)
+}
+
+fn corruption_index_block_runs_past_filter_block(
+    index_block_limit: u64,
+    filter_block_start: u64,
+) -> Error {
+    error(CODE_CORRUPTION_INDEX_BLOCK_RUNS_PAST_FILTER_BLOCK)
+        .with_atom_field(FIELD_INDEX_BLOCK_LIMIT, index_block_limit)
+        .with_atom_field(FIELD_FILTER_BLOCK_START, filter_block_start)
+}
+
+fn corruption_filter_block_runs_past_final_block(
+    filter_block_limit: u64,
+    final_block_offset: u64,
+) -> Error {
+    error(CODE_CORRUPTION_FILTER_BLOCK_RUNS_PAST_FINAL_BLOCK)
+        .with_atom_field(FIELD_FILTER_BLOCK_LIMIT, filter_block_limit)
+        .with_atom_field(FIELD_FINAL_BLOCK_OFFSET, final_block_offset)
+}
+
+fn corruption_block_metadata_start_gte_limit(start: u64, limit: u64) -> Error {
+    error(CODE_CORRUPTION_BLOCK_METADATA_START_GTE_LIMIT)
+        .with_atom_field(FIELD_BLOCK_METADATA_START, start)
+        .with_atom_field(FIELD_LIMIT, limit)
+}
+
+fn corruption_meta_block_null_value() -> Error {
+    error(CODE_CORRUPTION_META_BLOCK_NULL_VALUE)
+}
+
+fn corruption_tried_loading_filter_block_as_plain() -> Error {
+    error(CODE_CORRUPTION_TRIED_LOADING_FILTER_BLOCK_AS_PLAIN)
+}
+
+fn corruption_tried_loading_final_block_as_plain() -> Error {
+    error(CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_PLAIN)
+}
+
+fn corruption_tried_loading_plain_block_as_filter() -> Error {
+    error(CODE_CORRUPTION_TRIED_LOADING_PLAIN_BLOCK_AS_FILTER)
+}
+
+fn corruption_tried_loading_final_block_as_filter() -> Error {
+    error(CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_FILTER)
+}
+
+fn corruption_bad_filter_block(what: impl AsRef<str>) -> Error {
+    error(CODE_CORRUPTION_BAD_FILTER_BLOCK).with_string_field(FIELD_WHAT, what.as_ref())
+}
+
+fn corruption_block_with_zero_restarts() -> Error {
+    error(CODE_CORRUPTION_BLOCK_WITH_ZERO_RESTARTS)
+}
+
+fn corruption_restart_point_no_key_value_pair(restart_point: usize) -> Error {
+    error(CODE_CORRUPTION_RESTART_POINT_NO_KEY_VALUE_PAIR)
+        .with_atom_field(FIELD_RESTART_POINT, restart_point)
+}
+
+fn corruption_binary_search_left_ne_right(left: usize, right: usize) -> Error {
+    error(CODE_CORRUPTION_BINARY_SEARCH_LEFT_NE_RIGHT)
+        .with_atom_field(FIELD_LEFT, left)
+        .with_atom_field(FIELD_RIGHT, right)
+}
+
+fn corruption_offset_exceeds_restarts_boundary(offset: usize, restarts_boundary: usize) -> Error {
+    error(CODE_CORRUPTION_OFFSET_EXCEEDS_RESTARTS_BOUNDARY)
+        .with_atom_field(FIELD_OFFSET, offset)
+        .with_atom_field(FIELD_RESTARTS_BOUNDARY, restarts_boundary)
+}
+
+fn corruption_shared_not_zero() -> Error {
+    error(CODE_CORRUPTION_SHARED_NOT_ZERO)
+}
+
+fn corruption_invalid_discriminant(discriminant: u32, offset: u64) -> Error {
+    error(CODE_CORRUPTION_INVALID_DISCRIMINANT)
+        .with_atom_field(FIELD_DISCRIMINANT, discriminant)
+        .with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn corruption_crc_checksum_failed(expected: u32, computed: u32, offset: u64) -> Error {
+    error(CODE_CORRUPTION_CRC_CHECKSUM_FAILED)
+        .with_atom_field(FIELD_EXPECTED, expected)
+        .with_atom_field(FIELD_COMPUTED, computed)
+        .with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn corruption_header_size_exceeds_max(header_size: usize, offset: u64) -> Error {
+    error(CODE_CORRUPTION_HEADER_SIZE_EXCEEDS_MAX)
+        .with_atom_field(FIELD_HEADER_SIZE, header_size)
+        .with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn corruption_entry_size_exceeds_max(size: u64, offset: u64) -> Error {
+    error(CODE_CORRUPTION_ENTRY_SIZE_EXCEEDS_MAX)
+        .with_atom_field(FIELD_SIZE, size)
+        .with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn corruption_true_up_exceeds_header_max(offset: u64, trued_up: u64) -> Error {
+    error(CODE_CORRUPTION_TRUE_UP_EXCEEDS_HEADER_MAX)
+        .with_atom_field(FIELD_OFFSET, offset)
+        .with_atom_field(FIELD_TRUE_UP, trued_up)
+}
+
+fn corruption_truncation_no_second_header(offset: u64) -> Error {
+    error(CODE_CORRUPTION_TRUNCATION_NO_SECOND_HEADER).with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn corruption_log_poisoned() -> Error {
+    error(CODE_CORRUPTION_LOG_POISONED)
+}
+
+fn corruption_fsync_failed() -> Error {
+    error(CODE_CORRUPTION_FSYNC_FAILED)
+}
+
+fn unpack_final_block_offset(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_FINAL_BLOCK_OFFSET, error.to_string())
+}
+
+fn unpack_final_block(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_FINAL_BLOCK, error.to_string())
+}
+
+fn unpack_table_entry(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_TABLE_ENTRY, error.to_string())
+}
+
+fn unpack_block_metadata(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_BLOCK_METADATA, error.to_string())
+}
+
+fn unpack_key_value_pair(error: prototk::Error, offset: usize) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_KEY_VALUE_PAIR, error.to_string())
+        .with_atom_field(FIELD_OFFSET, offset)
+}
+
+fn unpack_block_restarts(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_BLOCK_RESTARTS, error.to_string())
+}
+
+fn unpack_key_value_entry_prototk(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_KEY_VALUE_ENTRY, error.to_string())
+}
+
+fn unpack_log_header(error: prototk::Error) -> Error {
+    UNPACK_ERROR.click();
+    error_with_message(CODE_UNPACK_LOG_HEADER, error.to_string())
+}
+
+fn logic_error_start_new_block_when_some() -> Error {
+    error(CODE_LOGIC_ERROR_START_NEW_BLOCK_WHEN_SOME)
+}
+
+fn logic_error_flush_block_when_none() -> Error {
+    error(CODE_LOGIC_ERROR_FLUSH_BLOCK_WHEN_NONE)
+}
+
+fn logic_error_restart_idx_exceeds_num_restarts(restart_idx: usize, num_restarts: usize) -> Error {
+    error(CODE_LOGIC_ERROR_RESTART_IDX_EXCEEDS_NUM_RESTARTS)
+        .with_atom_field(FIELD_RESTART_IDX, restart_idx)
+        .with_atom_field(FIELD_NUM_RESTARTS, num_restarts)
+}
+
+fn logic_error_tried_taking_negative_restart_idx() -> Error {
+    error(CODE_LOGIC_ERROR_TRIED_TAKING_NEGATIVE_RESTART_IDX)
+}
+
+fn logic_error_next_not_positioned() -> Error {
+    error(CODE_LOGIC_ERROR_NEXT_NOT_POSITIONED)
+}
+
+fn logic_error_prev_not_positioned() -> Error {
+    error(CODE_LOGIC_ERROR_PREV_NOT_POSITIONED)
+}
+
+fn logic_error_file_descriptor_negative(fd: i32) -> Error {
+    error(CODE_LOGIC_ERROR_FILE_DESCRIPTOR_NEGATIVE).with_atom_field(FIELD_FD, fd)
+}
+
+fn logic_error_file_manager_broken_pointer(fd: usize) -> Error {
+    error(CODE_LOGIC_ERROR_FILE_MANAGER_BROKEN_POINTER).with_atom_field(FIELD_FD, fd)
+}
+
+fn logic_error_buf_writer_into_inner_failed() -> Error {
+    error(CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED)
+}
+
+fn too_many_open_files(limit: usize, current: usize) -> Error {
+    error(CODE_TOO_MANY_OPEN_FILES)
+        .with_string_field(FIELD_RESOURCE, "open_files")
+        .with_atom_field(FIELD_LIMIT, limit)
+        .with_atom_field(FIELD_CURRENT, current)
 }
 
 //////////////////////////////////////////////// Key ///////////////////////////////////////////////
@@ -1262,10 +1250,9 @@ impl BlockMetadata {
     fn sanity_check(&self) -> Result<(), Error> {
         if self.start >= self.limit {
             CORRUPTION.click();
-            return Err(Error::CorruptionBlockMetadataStartGteLimit {
-                start: self.start,
-                limit: self.limit,
-            });
+            return Err(corruption_block_metadata_start_gte_limit(
+                self.start, self.limit,
+            ));
         }
         Ok(())
     }
@@ -1403,63 +1390,59 @@ pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
 impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     /// Open the provided path using options.
     pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Sst<FileHandle>, Error> {
-        let handle = open_without_manager(path.as_ref())?;
+        // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+        let handle = open_without_manager(path.as_ref())
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))?;
         Sst::<FileHandle>::from_file_handle(handle)
+            .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))
     }
 
     /// Create an Sst from a file handle.
     pub fn from_file_handle(mut handle: W) -> Result<Self, Error> {
         SST_OPEN.click();
         // Read and parse the final block's offset
-        let file_size = handle.seek(SeekFrom::End(0))?;
+        let file_size = io_result(handle.seek(SeekFrom::End(0)))?;
         if file_size < 8 {
             CORRUPTION.click();
-            return Err(Error::CorruptionFileTooSmall {
-                file_size,
-                minimum_size: 8,
-            });
+            return Err(corruption_file_too_small(file_size, 8));
         }
         let position = file_size - 8;
         let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
-        handle.read_exact_at(&mut buf, position)?;
+        io_result(handle.read_exact_at(&mut buf, position))?;
         let mut up = Unpacker::new(&buf);
-        let final_block_offset: u64 = up.unpack().map_err(|e: buffertk::Error| {
-            CORRUPTION.click();
-            Error::UnpackFinalBlockOffset { error: e.into() }
-        })?;
+        let final_block_offset: u64 = up
+            .unpack()
+            .map_err(|e: buffertk::Error| unpack_final_block_offset(e.into()))?;
         // Read and parse the final block
         if file_size < final_block_offset {
             CORRUPTION.click();
-            return Err(Error::CorruptionFinalBlockOffsetTooLarge {
+            return Err(corruption_final_block_offset_too_large(
                 final_block_offset,
                 file_size,
-            });
+            ));
         }
         let size_of_final_block = position + 8 - (final_block_offset);
         buf.resize(size_of_final_block as usize, 0);
-        handle.read_exact_at(&mut buf, final_block_offset)?;
+        io_result(handle.read_exact_at(&mut buf, final_block_offset))?;
         let mut up = Unpacker::new(&buf);
-        let final_block: FinalBlock = up.unpack().map_err(|e| {
-            CORRUPTION.click();
-            Error::UnpackFinalBlock { error: e }
-        })?;
+        let final_block: FinalBlock = up.unpack().map_err(unpack_final_block)?;
         final_block.index_block.sanity_check()?;
         final_block.filter_block.sanity_check()?;
         // Check that the final block's metadata is sane.
         if final_block.index_block.limit > final_block.filter_block.start {
             CORRUPTION.click();
-            return Err(Error::CorruptionIndexBlockRunsPastFilterBlock {
-                index_block_limit: final_block.index_block.limit,
-                filter_block_start: final_block.filter_block.start,
-            });
+            return Err(corruption_index_block_runs_past_filter_block(
+                final_block.index_block.limit,
+                final_block.filter_block.start,
+            ));
         }
         // Check that the final block's metadata is sane.
         if final_block.filter_block.limit > final_block_offset {
             CORRUPTION.click();
-            return Err(Error::CorruptionFilterBlockRunsPastFinalBlock {
-                filter_block_limit: final_block.filter_block.limit,
+            return Err(corruption_filter_block_runs_past_final_block(
+                final_block.filter_block.limit,
                 final_block_offset,
-            });
+            ));
         }
         let index_block = Sst::load_block(&handle, &final_block.index_block)?;
         let filter = Sst::load_filter_block(&handle, &final_block.filter_block)?;
@@ -1554,29 +1537,26 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
         let mut buf: Vec<u8> = vec![0u8; amt];
-        file.read_exact_at(&mut buf, block_metadata.start)?;
+        io_result(file.read_exact_at(&mut buf, block_metadata.start))?;
         let mut up = Unpacker::new(&buf);
-        let table_entry: SstEntry = up.unpack().map_err(|e| {
-            CORRUPTION.click();
-            Error::UnpackTableEntry { error: e }
-        })?;
+        let table_entry: SstEntry = up.unpack().map_err(unpack_table_entry)?;
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
-            return Err(Error::Crc32cFailure {
-                start: block_metadata.start,
-                limit: block_metadata.limit,
-                crc32c: block_metadata.crc32c,
-            });
+            return Err(crc32c_failure(
+                block_metadata.start,
+                block_metadata.limit,
+                block_metadata.crc32c,
+            ));
         }
         match table_entry {
             SstEntry::PlainBlock(bytes) => Block::new(bytes.into()),
             SstEntry::FilterBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::CorruptionTriedLoadingFilterBlockAsPlain)
+                Err(corruption_tried_loading_filter_block_as_plain())
             }
             SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::CorruptionTriedLoadingFinalBlockAsPlain)
+                Err(corruption_tried_loading_final_block_as_plain())
             }
         }
     }
@@ -1586,34 +1566,28 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
         let mut buf: Vec<u8> = vec![0u8; amt];
-        file.read_exact_at(&mut buf, block_metadata.start)?;
+        io_result(file.read_exact_at(&mut buf, block_metadata.start))?;
         let mut up = Unpacker::new(&buf);
-        let table_entry: SstEntry = up.unpack().map_err(|e| {
-            CORRUPTION.click();
-            Error::UnpackTableEntry { error: e }
-        })?;
+        let table_entry: SstEntry = up.unpack().map_err(unpack_table_entry)?;
         if table_entry.crc32c() != block_metadata.crc32c {
             CORRUPTION.click();
-            return Err(Error::Crc32cFailure {
-                start: block_metadata.start,
-                limit: block_metadata.limit,
-                crc32c: block_metadata.crc32c,
-            });
+            return Err(crc32c_failure(
+                block_metadata.start,
+                block_metadata.limit,
+                block_metadata.crc32c,
+            ));
         }
         match table_entry {
-            SstEntry::FilterBlock(bytes) => Filter::try_from(bytes).map_err(|err| {
-                CORRUPTION.click();
-                Error::CorruptionBadFilterBlock {
-                    what: err.to_string(),
-                }
-            }),
+            SstEntry::FilterBlock(bytes) => {
+                Filter::try_from(bytes).map_err(corruption_bad_filter_block)
+            }
             SstEntry::PlainBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::CorruptionTriedLoadingPlainBlockAsFilter)
+                Err(corruption_tried_loading_plain_block_as_filter())
             }
             SstEntry::FinalBlock(_) => {
                 CORRUPTION.click();
-                Err(Error::CorruptionTriedLoadingFinalBlockAsFilter)
+                Err(corruption_tried_loading_final_block_as_filter())
             }
         }
     }
@@ -1832,10 +1806,13 @@ impl SstBuilder {
             .create_new(true)
             .write(true)
             .open(path.as_ref())
-            .map_err(|e| Error::IoError {
-                kind: e.kind(),
-                path: Some(path.as_ref().to_path_buf()),
-                context: "opening file for sst builder".to_string(),
+            .map_err(|e| {
+                // TODO(rescrv): Use utf8path to avoid lossy path conversions.
+                system_error_with_path_and_context(
+                    e,
+                    path.as_ref().to_string_lossy(),
+                    "opening file for sst builder",
+                )
             })?;
         Ok(SstBuilder {
             options,
@@ -1860,12 +1837,12 @@ impl SstBuilder {
             != Ordering::Less
         {
             SORT_ORDER.click();
-            Err(Error::SortOrder {
-                last_key: self.last_key.clone(),
-                last_timestamp: self.last_timestamp,
-                new_key: key.to_vec(),
-                new_timestamp: timestamp,
-            })
+            Err(sort_order(
+                self.last_key.clone(),
+                self.last_timestamp,
+                key.to_vec(),
+                timestamp,
+            ))
         } else {
             Ok(())
         }
@@ -1888,7 +1865,7 @@ impl SstBuilder {
         BUILDER_START_NEW_BLOCK.click();
         if self.block_builder.is_some() {
             LOGIC_ERROR.click();
-            return Err(Error::LogicErrorStartNewBlockWhenSome);
+            return Err(logic_error_start_new_block_when_some());
         }
         self.block_builder = Some(BlockBuilder::new(self.options.block.clone()));
         self.block_start_offset = self.bytes_written;
@@ -1899,7 +1876,7 @@ impl SstBuilder {
         BUILDER_FLUSH_BLOCK.click();
         if self.block_builder.is_none() {
             LOGIC_ERROR.click();
-            return Err(Error::LogicErrorFlushBlockWhenNone);
+            return Err(logic_error_flush_block_when_none());
         }
         // Metadata for the block.
         let start = self.bytes_written as u64;
@@ -1910,7 +1887,7 @@ impl SstBuilder {
         let entry = self.options.block_compression.compress(bytes, &mut scratch);
         let crc32c = entry.crc32c();
         let pa = stack_pack(entry);
-        self.bytes_written += pa.stream(&mut self.output)?;
+        self.bytes_written += io_result_with_context(pa.stream(&mut self.output), "sst write")?;
         // Prepare the block metadata.
         let limit = self.bytes_written as u64;
         let block_metadata = BlockMetadata {
@@ -1998,7 +1975,8 @@ impl Builder for SstBuilder {
             let start = builder.bytes_written as u64;
             let crc32c = entry.crc32c();
             let pa = stack_pack(entry);
-            builder.bytes_written += pa.stream(&mut builder.output)?;
+            builder.bytes_written +=
+                io_result_with_context(pa.stream(&mut builder.output), "sst builder write")?;
             let limit = builder.bytes_written as u64;
             Ok(BlockMetadata {
                 start,
@@ -2034,10 +2012,11 @@ impl Builder for SstBuilder {
             biggest_timestamp: builder.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written += pa.stream(&mut builder.output)?;
+        builder.bytes_written +=
+            io_result_with_context(pa.stream(&mut builder.output), "sst builder write")?;
         // fsync
-        builder.output.flush()?;
-        builder.output.get_mut().sync_all()?;
+        io_result_with_context(builder.output.flush(), "sst builder flush")?;
+        io_result_with_context(builder.output.get_mut().sync_all(), "sst builder sync_all")?;
         Sst::<FileHandle>::new(builder.options, builder.path)
     }
 }
@@ -2193,14 +2172,11 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
             Some(v) => v,
             None => {
                 CORRUPTION.click();
-                return Err(Error::CorruptionMetaBlockNullValue);
+                return Err(corruption_meta_block_null_value());
             }
         };
         let mut up = Unpacker::new(value);
-        let metadata: BlockMetadata = up.unpack().map_err(|e| {
-            CORRUPTION.click();
-            Error::UnpackBlockMetadata { error: e }
-        })?;
+        let metadata: BlockMetadata = up.unpack().map_err(unpack_block_metadata)?;
         Ok(Some(metadata))
     }
 }
