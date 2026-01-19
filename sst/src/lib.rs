@@ -247,7 +247,8 @@ pub const CODE_BLOCK_TOO_SMALL: &str = "block-too-small";
 pub const CODE_EMPTY_BATCH: &str = "empty-batch";
 pub const CODE_CRC32C_FAILURE: &str = "crc32c-failure";
 pub const CODE_CORRUPTION_FILE_TOO_SMALL: &str = "corruption-file-too-small";
-pub const CODE_CORRUPTION_FINAL_BLOCK_OFFSET_TOO_LARGE: &str = "corruption-final-block-offset-too-large";
+pub const CODE_CORRUPTION_FINAL_BLOCK_OFFSET_TOO_LARGE: &str =
+    "corruption-final-block-offset-too-large";
 pub const CODE_CORRUPTION_INDEX_BLOCK_RUNS_PAST_FILTER_BLOCK: &str =
     "corruption-index-block-runs-past-filter-block";
 pub const CODE_CORRUPTION_FILTER_BLOCK_RUNS_PAST_FINAL_BLOCK: &str =
@@ -276,7 +277,8 @@ pub const CODE_CORRUPTION_INVALID_DISCRIMINANT: &str = "corruption-invalid-discr
 pub const CODE_CORRUPTION_CRC_CHECKSUM_FAILED: &str = "corruption-crc-checksum-failed";
 pub const CODE_CORRUPTION_HEADER_SIZE_EXCEEDS_MAX: &str = "corruption-header-size-exceeds-max";
 pub const CODE_CORRUPTION_ENTRY_SIZE_EXCEEDS_MAX: &str = "corruption-entry-size-exceeds-max";
-pub const CODE_CORRUPTION_TRUE_UP_EXCEEDS_HEADER_MAX: &str = "corruption-true-up-exceeds-header-max";
+pub const CODE_CORRUPTION_TRUE_UP_EXCEEDS_HEADER_MAX: &str =
+    "corruption-true-up-exceeds-header-max";
 pub const CODE_CORRUPTION_TRUNCATION_NO_SECOND_HEADER: &str =
     "corruption-truncation-no-second-header";
 pub const CODE_CORRUPTION_LOG_POISONED: &str = "corruption-log-poisoned";
@@ -298,8 +300,7 @@ pub const CODE_LOGIC_ERROR_TRIED_TAKING_NEGATIVE_RESTART_IDX: &str =
     "logic-error-tried-taking-negative-restart-idx";
 pub const CODE_LOGIC_ERROR_NEXT_NOT_POSITIONED: &str = "logic-error-next-not-positioned";
 pub const CODE_LOGIC_ERROR_PREV_NOT_POSITIONED: &str = "logic-error-prev-not-positioned";
-pub const CODE_LOGIC_ERROR_FILE_DESCRIPTOR_NEGATIVE: &str =
-    "logic-error-file-descriptor-negative";
+pub const CODE_LOGIC_ERROR_FILE_DESCRIPTOR_NEGATIVE: &str = "logic-error-file-descriptor-negative";
 pub const CODE_LOGIC_ERROR_FILE_MANAGER_BROKEN_POINTER: &str =
     "logic-error-file-manager-broken-pointer";
 pub const CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED: &str =
@@ -644,10 +645,7 @@ fn logic_error_flush_block_when_none() -> Error {
     error(CODE_LOGIC_ERROR_FLUSH_BLOCK_WHEN_NONE)
 }
 
-fn logic_error_restart_idx_exceeds_num_restarts(
-    restart_idx: usize,
-    num_restarts: usize,
-) -> Error {
+fn logic_error_restart_idx_exceeds_num_restarts(restart_idx: usize, num_restarts: usize) -> Error {
     error(CODE_LOGIC_ERROR_RESTART_IDX_EXCEEDS_NUM_RESTARTS)
         .with_atom_field(FIELD_RESTART_IDX, restart_idx)
         .with_atom_field(FIELD_NUM_RESTARTS, num_restarts)
@@ -1253,8 +1251,7 @@ impl BlockMetadata {
         if self.start >= self.limit {
             CORRUPTION.click();
             return Err(corruption_block_metadata_start_gte_limit(
-                self.start,
-                self.limit,
+                self.start, self.limit,
             ));
         }
         Ok(())
@@ -1581,7 +1578,9 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
             ));
         }
         match table_entry {
-            SstEntry::FilterBlock(bytes) => Filter::try_from(bytes).map_err(corruption_bad_filter_block),
+            SstEntry::FilterBlock(bytes) => {
+                Filter::try_from(bytes).map_err(corruption_bad_filter_block)
+            }
             SstEntry::PlainBlock(_) => {
                 CORRUPTION.click();
                 Err(corruption_tried_loading_plain_block_as_filter())

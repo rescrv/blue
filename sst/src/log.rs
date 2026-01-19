@@ -296,10 +296,7 @@ impl<W: Write> LogBuilder<W> {
         let new_offset = self.bytes_written + (header_pa.pack_sz() + buffer.len()) as u64;
         check_table_size(new_offset as usize)?;
         if new_offset > self.options.rollover_size as u64 {
-            return Err(table_full(
-                new_offset as usize,
-                self.options.rollover_size,
-            ));
+            return Err(table_full(new_offset as usize, self.options.rollover_size));
         }
         if new_offset > nb {
             self.append_split(buffer)
@@ -772,8 +769,9 @@ impl<R: Read + Seek> LogIterator<R> {
             }
             let header = &mut header[..header_sz];
             io_result(self.input.read_exact(header))?;
-            let header: Header =
-                <Header as Unpackable>::unpack(header).map_err(unpack_log_header)?.0;
+            let header: Header = <Header as Unpackable>::unpack(header)
+                .map_err(unpack_log_header)?
+                .0;
             if header.size > TABLE_FULL_SIZE as u64 {
                 return Err(corruption_entry_size_exceeds_max(
                     header.size,

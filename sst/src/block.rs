@@ -14,8 +14,8 @@ use super::{
     corruption_offset_exceeds_restarts_boundary, corruption_restart_point_no_key_value_pair,
     logic_error_next_not_positioned, logic_error_restart_idx_exceeds_num_restarts,
     logic_error_tried_taking_negative_restart_idx, sort_order, unpack_block_restarts,
-    unpack_key_value_pair, Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry,
-    KeyValuePut, CORRUPTION, LOGIC_ERROR,
+    unpack_key_value_pair, Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut,
+    CORRUPTION, LOGIC_ERROR,
 };
 use crate::bounds_cursor::BoundsCursor;
 use crate::pruning_cursor::PruningCursor;
@@ -537,9 +537,7 @@ impl BlockCursor {
         // Parse the key-value pair.
         let bytes = &block.bytes;
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
-        let be: KeyValueEntry =
-            up.unpack()
-                .map_err(|e| unpack_key_value_pair(e, offset))?;
+        let be: KeyValueEntry = up.unpack().map_err(|e| unpack_key_value_pair(e, offset))?;
         let next_offset = block.restarts_boundary - up.remain().len();
         let restart_idx = block.restart_for_offset(offset);
         // Assemble the returnable cursor.

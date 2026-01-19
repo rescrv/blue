@@ -68,21 +68,19 @@ impl FileHandle {
 
     /// Perform a read_exact_at on the file.
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
-        self.file
-            .read_exact_at(buf, offset)
-            .map_err(|e| {
-                let context = format!(
-                    "read_exact_at failed: fd={}, offset={}, amount={}",
-                    self.file.as_raw_fd(),
-                    offset,
-                    buf.len()
-                );
-                if let Ok(path) = self.path() {
-                    system_error_with_path_and_context(e, path.to_string_lossy(), context)
-                } else {
-                    system_error_with_context(e, context)
-                }
-            })
+        self.file.read_exact_at(buf, offset).map_err(|e| {
+            let context = format!(
+                "read_exact_at failed: fd={}, offset={}, amount={}",
+                self.file.as_raw_fd(),
+                offset,
+                buf.len()
+            );
+            if let Ok(path) = self.path() {
+                system_error_with_path_and_context(e, path.to_string_lossy(), context)
+            } else {
+                system_error_with_context(e, context)
+            }
+        })
     }
 
     /// return the size of the file.
@@ -306,9 +304,8 @@ pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error
     let path = path.as_ref().to_path_buf();
     FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();
     // TODO(rescrv): Use utf8path to avoid lossy path conversions.
-    let file = Arc::new(
-        open(path.clone()).map_err(|err| error_with_path(err, path.to_string_lossy()))?,
-    );
+    let file =
+        Arc::new(open(path.clone()).map_err(|err| error_with_path(err, path.to_string_lossy()))?);
     let fd = file.as_raw_fd() as usize;
     assert!(fd < usize::MAX);
     let mut state = State {
