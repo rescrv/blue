@@ -17,3 +17,7 @@ biometrics = { path = "../biometrics", version = "0.12" }
 
 [dev-dependencies]
 guacamole = { path = "../guacamole" }
+
+[[example]]
+name = "generror"
+path = "examples/generror.rs"
