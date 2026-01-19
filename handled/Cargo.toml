@@ -21,3 +21,4 @@ guacamole = { path = "../guacamole" }
 [[example]]
 name = "generror"
 path = "examples/generror.rs"
+required-features=["binaries"]
