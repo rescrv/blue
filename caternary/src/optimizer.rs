@@ -8,9 +8,9 @@
 
 use std::collections::HashMap;
 
+use crate::parse;
 use crate::ParseError;
 use crate::Token;
-use crate::parse;
 
 /// A rewrite rule: pattern => replacement.
 #[derive(Debug, Clone)]
@@ -49,8 +49,10 @@ type Bindings = HashMap<String, Vec<Token>>;
 /// An error from rule parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleError {
-    /// Failed to parse pattern or replacement.
-    Parse(ParseError),
+    /// Failed to parse the pattern string.
+    PatternParse(ParseError),
+    /// Failed to parse the replacement string.
+    ReplacementParse(ParseError),
     /// Variable in replacement not bound in pattern.
     UnboundVariable(String),
 }
@@ -58,7 +60,8 @@ pub enum RuleError {
 impl std::fmt::Display for RuleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuleError::Parse(e) => write!(f, "parse error: {}", e),
+            RuleError::PatternParse(e) => write!(f, "pattern parse error: {}", e),
+            RuleError::ReplacementParse(e) => write!(f, "replacement parse error: {}", e),
             RuleError::UnboundVariable(name) => write!(f, "unbound variable: {}", name),
         }
     }
@@ -66,17 +69,11 @@ impl std::fmt::Display for RuleError {
 
 impl std::error::Error for RuleError {}
 
-impl From<ParseError> for RuleError {
-    fn from(e: ParseError) -> Self {
-        RuleError::Parse(e)
-    }
-}
-
 impl Rule {
     /// Creates a new rule from pattern and replacement strings.
     pub fn new(pattern: &str, replacement: &str) -> Result<Self, RuleError> {
-        let pattern_tokens = parse(pattern)?;
-        let replacement_tokens = parse(replacement)?;
+        let pattern_tokens = parse(pattern).map_err(RuleError::PatternParse)?;
+        let replacement_tokens = parse(replacement).map_err(RuleError::ReplacementParse)?;
 
         let pattern = Self::parse_pattern(&pattern_tokens);
         let replacement = Self::parse_replacement(&replacement_tokens);
@@ -222,7 +219,13 @@ impl Rule {
                     if tok_idx >= tokens.len() {
                         return None;
                     }
-                    bindings.insert(name.clone(), vec![tokens[tok_idx].clone()]);
+                    if !Self::bind_tokens(
+                        name,
+                        vec![tokens[tok_idx].clone()],
+                        bindings,
+                    ) {
+                        return None;
+                    }
                     tok_idx += 1;
                     pat_idx += 1;
                 }
@@ -233,7 +236,9 @@ impl Rule {
                     for take in (0..=available).rev() {
                         let captured: Vec<Token> = tokens[tok_idx..tok_idx + take].to_vec();
                         let mut test_bindings = bindings.clone();
-                        test_bindings.insert(name.clone(), captured);
+                        if !Self::bind_tokens(name, captured, &mut test_bindings) {
+                            continue;
+                        }
                         if let Some(end) = self.match_pattern(
                             remaining_pattern,
                             tokens,
@@ -250,6 +255,15 @@ impl Rule {
         }
 
         Some(tok_idx)
+    }
+
+    fn bind_tokens(name: &str, captured: Vec<Token>, bindings: &mut Bindings) -> bool {
+        if let Some(existing) = bindings.get(name) {
+            existing == &captured
+        } else {
+            bindings.insert(name.to_string(), captured);
+            true
+        }
     }
 
     fn substitute(&self, bindings: &Bindings) -> Vec<Token> {
@@ -556,6 +570,48 @@ mod tests {
         let expected = parse("B A").unwrap();
         assert_eq!(result, expected);
         println!("Result: {:?}", result);
+    }
+
+    #[test]
+    fn repeated_var_must_match_same_token() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("$X $X PAIR", "MATCHED").unwrap();
+
+        let tokens = parse("A A PAIR").unwrap();
+        let result = opt.optimize(tokens);
+        let expected = parse("MATCHED").unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn repeated_var_rejects_mismatch() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("$X $X PAIR", "MATCHED").unwrap();
+
+        let tokens = parse("A B PAIR").unwrap();
+        let result = opt.optimize(tokens.clone());
+        assert_eq!(result, tokens);
+    }
+
+    #[test]
+    fn repeated_var_many_rejects_mismatch() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("BEGIN $*X MID $*X END", "MATCHED").unwrap();
+
+        let tokens = parse("BEGIN A MID B END").unwrap();
+        let result = opt.optimize(tokens.clone());
+        assert_eq!(result, tokens);
+    }
+
+    #[test]
+    fn repeated_var_many_accepts_match() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("BEGIN $*X MID $*X END", "MATCHED").unwrap();
+
+        let tokens = parse("BEGIN A B MID A B END").unwrap();
+        let result = opt.optimize(tokens);
+        let expected = parse("MATCHED").unwrap();
+        assert_eq!(result, expected);
     }
 
     #[test]
