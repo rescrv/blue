@@ -26,7 +26,11 @@ impl std::fmt::Display for EvalError {
 impl std::error::Error for EvalError {}
 
 /// An operator function that manipulates the stack.
-pub type Operator<T> = fn(&mut Vec<T>) -> Result<(), EvalError>;
+///
+/// Operators receive a mutable reference to the stack and an immutable reference to
+/// the evaluator. The evaluator reference allows operators to execute quotations
+/// (bracketed code) that are on the stack, enabling combinators like `CALL`, `DIP`, etc.
+pub type Operator<T> = fn(&mut Vec<T>, &Evaluator<T>) -> Result<(), EvalError>;
 
 /// A stack-based evaluator for caternary programs.
 ///
@@ -75,7 +79,7 @@ where
             match token {
                 Token::Word(name) if self.operators.contains_key(name) => {
                     let op = self.operators.get(name).unwrap();
-                    op(stack)?;
+                    op(stack, self)?;
                 }
                 _ => {
                     stack.push(T::from(token.clone()));
@@ -138,7 +142,7 @@ mod tests {
 
     #[test]
     fn operator_pops_and_pushes() {
-        fn dup(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn dup(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let val = stack.pop().ok_or(underflow())?;
             stack.push(val.clone());
             stack.push(val);
@@ -173,13 +177,13 @@ mod tests {
 
     #[test]
     fn different_evaluators_same_program() {
-        fn scan_tables(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn scan_tables(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _name = stack.pop().ok_or(underflow())?;
             stack.push(Value::Word("scanned_table".to_string()));
             Ok(())
         }
 
-        fn scan_files(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn scan_files(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _name = stack.pop().ok_or(underflow())?;
             stack.push(Value::Word("scanned_file".to_string()));
             Ok(())
@@ -204,7 +208,7 @@ mod tests {
 
     #[test]
     fn filter_uses_bracket_arg() {
-        fn filter(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn filter(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let predicate = stack
                 .pop()
                 .ok_or(EvalError::OperatorError("need predicate".to_string()))?;
@@ -227,7 +231,7 @@ mod tests {
 
     #[test]
     fn eval_with_existing_stack() {
-        fn add(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn add(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _b = stack.pop().ok_or(underflow())?;
             let _a = stack.pop().ok_or(underflow())?;
             stack.push(Value::Word("sum".to_string()));
@@ -263,8 +267,7 @@ mod tests {
 
     #[test]
     fn operator_error_propagates() {
-        fn fail(stack: &mut Vec<Value>) -> Result<(), EvalError> {
-            let _ = stack.capacity();
+        fn fail(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             Err(EvalError::OperatorError("intentional failure".to_string()))
         }
 
@@ -280,7 +283,7 @@ mod tests {
 
     #[test]
     fn stack_underflow_in_operator() {
-        fn pop_two(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn pop_two(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _a = stack.pop().ok_or(underflow())?;
             let _b = stack.pop().ok_or(underflow())?;
             Ok(())
@@ -298,7 +301,7 @@ mod tests {
 
     #[test]
     fn swap_operator() {
-        fn swap(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn swap(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
             stack.push(b);
@@ -321,7 +324,7 @@ mod tests {
 
     #[test]
     fn drop_operator() {
-        fn drop(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn drop(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _ = stack.pop().ok_or(underflow())?;
             Ok(())
         }
@@ -341,7 +344,7 @@ mod tests {
 
     #[test]
     fn over_operator() {
-        fn over(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn over(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
             stack.push(a.clone());
@@ -369,7 +372,7 @@ mod tests {
 
     #[test]
     fn rot_operator() {
-        fn rot(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn rot(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let c = stack.pop().ok_or(underflow())?;
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
@@ -398,14 +401,14 @@ mod tests {
 
     #[test]
     fn multiple_operators_in_sequence() {
-        fn dup(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn dup(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let val = stack.pop().ok_or(underflow())?;
             stack.push(val.clone());
             stack.push(val);
             Ok(())
         }
 
-        fn swap(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn swap(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
             stack.push(b);
@@ -413,7 +416,7 @@ mod tests {
             Ok(())
         }
 
-        fn drop(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn drop(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let _ = stack.pop().ok_or(underflow())?;
             Ok(())
         }
@@ -440,14 +443,14 @@ mod tests {
 
     #[test]
     fn operator_with_numeric_stack() {
-        fn add(stack: &mut Vec<i32>) -> Result<(), EvalError> {
+        fn add(stack: &mut Vec<i32>, _eval: &Evaluator<i32>) -> Result<(), EvalError> {
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
             stack.push(a + b);
             Ok(())
         }
 
-        fn mul(stack: &mut Vec<i32>) -> Result<(), EvalError> {
+        fn mul(stack: &mut Vec<i32>, _eval: &Evaluator<i32>) -> Result<(), EvalError> {
             let b = stack.pop().ok_or(underflow())?;
             let a = stack.pop().ok_or(underflow())?;
             stack.push(a * b);
@@ -469,12 +472,11 @@ mod tests {
 
     #[test]
     fn redefine_operator() {
-        fn first(stack: &mut Vec<Value>) -> Result<(), EvalError> {
-            let _ = stack.capacity();
+        fn first(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             Err(EvalError::OperatorError("first".to_string()))
         }
 
-        fn second(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn second(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             stack.push(Value::Word("second".to_string()));
             Ok(())
         }
@@ -492,12 +494,12 @@ mod tests {
 
     #[test]
     fn operator_name_is_case_sensitive() {
-        fn lower(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn lower(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             stack.push(Value::Word("lower".to_string()));
             Ok(())
         }
 
-        fn upper(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn upper(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             stack.push(Value::Word("upper".to_string()));
             Ok(())
         }
@@ -556,7 +558,7 @@ mod tests {
 
     #[test]
     fn clear_stack_operator() {
-        fn clear(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn clear(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             stack.clear();
             Ok(())
         }
@@ -573,7 +575,7 @@ mod tests {
 
     #[test]
     fn depth_operator() {
-        fn depth(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn depth(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let d = stack.len();
             stack.push(Value::Word(d.to_string()));
             Ok(())

@@ -3,11 +3,16 @@
 #![deny(missing_docs)]
 
 mod builtins;
+mod combinators;
 mod evaluator;
 mod optimizer;
 mod parser;
 
 pub use builtins::register_stack_builtins;
+pub use combinators::Quotable;
+pub use combinators::register_combinators;
+pub use combinators::register_conditionals;
+pub use combinators::register_sequence_combinators;
 pub use evaluator::EvalError;
 pub use evaluator::Evaluator;
 pub use evaluator::Operator;
