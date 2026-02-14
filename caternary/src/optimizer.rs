@@ -7,6 +7,10 @@
 //! Variables are interpolated into the replacement string.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 
 use crate::ParseError;
 use crate::Token;
@@ -55,6 +59,10 @@ pub enum RuleError {
     ReplacementParse(ParseError),
     /// Variable in replacement not bound in pattern.
     UnboundVariable(String),
+    /// Variable name is invalid.
+    InvalidVariableName(String),
+    /// Same variable name used with both `$name` and `$*name`.
+    VariableArityMismatch(String),
 }
 
 impl std::fmt::Display for RuleError {
@@ -63,6 +71,10 @@ impl std::fmt::Display for RuleError {
             RuleError::PatternParse(e) => write!(f, "pattern parse error: {e}"),
             RuleError::ReplacementParse(e) => write!(f, "replacement parse error: {e}"),
             RuleError::UnboundVariable(name) => write!(f, "unbound variable: {name}"),
+            RuleError::InvalidVariableName(name) => write!(f, "invalid variable name: {name}"),
+            RuleError::VariableArityMismatch(name) => {
+                write!(f, "variable used with mixed arity: {name}")
+            }
         }
     }
 }
@@ -75,14 +87,20 @@ impl Rule {
         let pattern_tokens = parse(pattern).map_err(RuleError::PatternParse)?;
         let replacement_tokens = parse(replacement).map_err(RuleError::ReplacementParse)?;
 
-        let pattern = Self::parse_pattern(&pattern_tokens);
-        let replacement = Self::parse_replacement(&replacement_tokens);
+        let pattern = Self::parse_pattern(&pattern_tokens)?;
+        let replacement = Self::parse_replacement(&replacement_tokens)?;
 
-        // Validate that all replacement variables are bound in pattern
-        let bound = Self::collect_pattern_vars(&pattern);
-        for var in Self::collect_replacement_vars(&replacement) {
-            if !bound.contains(&var) {
-                return Err(RuleError::UnboundVariable(var));
+        // Validate that all replacement variables are bound in pattern and have matching arity.
+        let mut bound: HashMap<String, bool> = HashMap::new();
+        Self::collect_pattern_vars(&pattern, &mut bound)?;
+        let mut replacement_vars: HashMap<String, bool> = HashMap::new();
+        Self::collect_replacement_vars(&replacement, &mut replacement_vars)?;
+        for (name, replacement_is_many) in replacement_vars {
+            let Some(pattern_is_many) = bound.get(&name).copied() else {
+                return Err(RuleError::UnboundVariable(name));
+            };
+            if pattern_is_many != replacement_is_many {
+                return Err(RuleError::VariableArityMismatch(name));
             }
         }
 
@@ -92,71 +110,120 @@ impl Rule {
         })
     }
 
-    fn parse_pattern(tokens: &[Token]) -> Vec<PatternElement> {
+    fn parse_pattern(tokens: &[Token]) -> Result<Vec<PatternElement>, RuleError> {
         tokens
             .iter()
             .map(|t| match t {
-                Token::Word(w) if w.starts_with("$*") => {
-                    PatternElement::VarMany(w[2..].to_string())
-                }
-                Token::Word(w) if w.starts_with('$') => PatternElement::Var(w[1..].to_string()),
-                Token::Word(w) => PatternElement::Word(w.clone()),
-                Token::Bracket(inner) => PatternElement::Bracket(Self::parse_pattern(inner)),
+                Token::Word(w) if w.starts_with("$*") => Ok(PatternElement::VarMany(
+                    Self::parse_variable_name(&w[2..])?.to_string(),
+                )),
+                Token::Word(w) if w.starts_with('$') => Ok(PatternElement::Var(
+                    Self::parse_variable_name(&w[1..])?.to_string(),
+                )),
+                Token::Word(w) => Ok(PatternElement::Word(w.clone())),
+                Token::Bracket(inner) => Ok(PatternElement::Bracket(Self::parse_pattern(inner)?)),
             })
-            .collect()
+            .collect::<Result<Vec<_>, RuleError>>()
     }
 
-    fn parse_replacement(tokens: &[Token]) -> Vec<ReplacementElement> {
+    fn parse_replacement(tokens: &[Token]) -> Result<Vec<ReplacementElement>, RuleError> {
         tokens
             .iter()
             .map(|t| match t {
-                Token::Word(w) if w.starts_with("$*") => {
-                    ReplacementElement::VarMany(w[2..].to_string())
-                }
-                Token::Word(w) if w.starts_with('$') => ReplacementElement::Var(w[1..].to_string()),
-                Token::Word(w) => ReplacementElement::Word(w.clone()),
+                Token::Word(w) if w.starts_with("$*") => Ok(ReplacementElement::VarMany(
+                    Self::parse_variable_name(&w[2..])?.to_string(),
+                )),
+                Token::Word(w) if w.starts_with('$') => Ok(ReplacementElement::Var(
+                    Self::parse_variable_name(&w[1..])?.to_string(),
+                )),
+                Token::Word(w) => Ok(ReplacementElement::Word(w.clone())),
                 Token::Bracket(inner) => {
-                    ReplacementElement::Bracket(Self::parse_replacement(inner))
+                    Ok(ReplacementElement::Bracket(Self::parse_replacement(inner)?))
                 }
             })
-            .collect()
+            .collect::<Result<Vec<_>, RuleError>>()
     }
 
-    fn collect_pattern_vars(pattern: &[PatternElement]) -> Vec<String> {
-        let mut vars = Vec::new();
+    fn collect_pattern_vars(
+        pattern: &[PatternElement],
+        vars: &mut HashMap<String, bool>,
+    ) -> Result<(), RuleError> {
         for elem in pattern {
             match elem {
-                PatternElement::Var(name) | PatternElement::VarMany(name) => {
-                    vars.push(name.clone())
+                PatternElement::Var(name) => {
+                    Self::insert_var_arity(vars, name, false)?;
                 }
-                PatternElement::Bracket(inner) => vars.extend(Self::collect_pattern_vars(inner)),
+                PatternElement::VarMany(name) => {
+                    Self::insert_var_arity(vars, name, true)?;
+                }
+                PatternElement::Bracket(inner) => Self::collect_pattern_vars(inner, vars)?,
                 PatternElement::Word(_) => {}
             }
         }
-        vars
+        Ok(())
     }
 
-    fn collect_replacement_vars(replacement: &[ReplacementElement]) -> Vec<String> {
-        let mut vars = Vec::new();
+    fn collect_replacement_vars(
+        replacement: &[ReplacementElement],
+        vars: &mut HashMap<String, bool>,
+    ) -> Result<(), RuleError> {
         for elem in replacement {
             match elem {
-                ReplacementElement::Var(name) | ReplacementElement::VarMany(name) => {
-                    vars.push(name.clone())
+                ReplacementElement::Var(name) => {
+                    Self::insert_var_arity(vars, name, false)?;
                 }
-                ReplacementElement::Bracket(inner) => {
-                    vars.extend(Self::collect_replacement_vars(inner))
-                }
+                ReplacementElement::VarMany(name) => Self::insert_var_arity(vars, name, true)?,
+                ReplacementElement::Bracket(inner) => Self::collect_replacement_vars(inner, vars)?,
                 ReplacementElement::Word(_) => {}
             }
         }
-        vars
+        Ok(())
+    }
+
+    fn parse_variable_name(raw: &str) -> Result<&str, RuleError> {
+        if !Self::is_valid_variable_name(raw) {
+            return Err(RuleError::InvalidVariableName(raw.to_string()));
+        }
+        Ok(raw)
+    }
+
+    fn is_valid_variable_name(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return false;
+        }
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+
+    fn insert_var_arity(
+        vars: &mut HashMap<String, bool>,
+        name: &str,
+        is_many: bool,
+    ) -> Result<(), RuleError> {
+        if let Some(existing) = vars.get(name).copied() {
+            if existing != is_many {
+                return Err(RuleError::VariableArityMismatch(name.to_string()));
+            }
+            return Ok(());
+        }
+        vars.insert(name.to_string(), is_many);
+        Ok(())
     }
 
     /// Attempts to apply this rule to a token sequence, returning the rewritten sequence if matched.
     /// Returns `None` if no match produces a different result.
     pub fn apply(&self, tokens: &[Token]) -> Option<Vec<Token>> {
+        self.apply_with_limit(tokens, usize::MAX)
+    }
+
+    /// Like [`Rule::apply`] but bounds backtracking through `$*name` pattern variables.
+    pub fn apply_with_limit(&self, tokens: &[Token], max_backtracks: usize) -> Option<Vec<Token>> {
+        let mut budget = BacktrackBudget::new(max_backtracks);
         for start in 0..=tokens.len() {
-            if let Some((end, bindings)) = self.match_at(tokens, start) {
+            if let Some((end, bindings)) = self.match_at(tokens, start, &mut budget) {
                 let mut result = tokens[..start].to_vec();
                 result.extend(self.substitute(&bindings));
                 result.extend(tokens[end..].to_vec());
@@ -168,9 +235,14 @@ impl Rule {
         None
     }
 
-    fn match_at(&self, tokens: &[Token], start: usize) -> Option<(usize, Bindings)> {
+    fn match_at(
+        &self,
+        tokens: &[Token],
+        start: usize,
+        budget: &mut BacktrackBudget,
+    ) -> Option<(usize, Bindings)> {
         let mut bindings = Bindings::new();
-        let end = Self::match_pattern(&self.pattern, tokens, start, &mut bindings)?;
+        let end = Self::match_pattern(&self.pattern, tokens, start, &mut bindings, budget)?;
         Some((end, bindings))
     }
 
@@ -179,6 +251,7 @@ impl Rule {
         tokens: &[Token],
         pos: usize,
         bindings: &mut Bindings,
+        budget: &mut BacktrackBudget,
     ) -> Option<usize> {
         let mut pat_idx = 0;
         let mut tok_idx = pos;
@@ -204,7 +277,8 @@ impl Rule {
                         return None;
                     }
                     if let Token::Bracket(inner_tokens) = &tokens[tok_idx] {
-                        let end = Self::match_pattern(inner_pattern, inner_tokens, 0, bindings)?;
+                        let end =
+                            Self::match_pattern(inner_pattern, inner_tokens, 0, bindings, budget)?;
                         if end != inner_tokens.len() {
                             return None;
                         }
@@ -229,6 +303,9 @@ impl Rule {
                     let remaining_pattern = &pattern[pat_idx + 1..];
                     let available = tokens.len().saturating_sub(tok_idx);
                     for take in (0..=available).rev() {
+                        if !budget.consume() {
+                            return None;
+                        }
                         let captured: Vec<Token> = tokens[tok_idx..tok_idx + take].to_vec();
                         let mut test_bindings = bindings.clone();
                         if !Self::bind_tokens(name, captured, &mut test_bindings) {
@@ -239,6 +316,7 @@ impl Rule {
                             tokens,
                             tok_idx + take,
                             &mut test_bindings,
+                            budget,
                         ) {
                             *bindings = test_bindings;
                             return Some(end);
@@ -289,16 +367,44 @@ impl Rule {
     }
 }
 
+#[derive(Debug, Clone)]
+struct BacktrackBudget {
+    remaining: usize,
+}
+
+impl BacktrackBudget {
+    fn new(max_backtracks: usize) -> Self {
+        Self {
+            remaining: max_backtracks,
+        }
+    }
+
+    fn consume(&mut self) -> bool {
+        if self.remaining == usize::MAX {
+            return true;
+        }
+        if self.remaining == 0 {
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
+}
+
 /// An optimizer that applies a set of rules repeatedly.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Optimizer {
     rules: Vec<Rule>,
+    max_backtracks: usize,
 }
 
 impl Optimizer {
     /// Creates a new optimizer with no rules.
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            max_backtracks: 100_000,
+        }
     }
 
     /// Adds a rewrite rule.
@@ -307,13 +413,25 @@ impl Optimizer {
         Ok(())
     }
 
+    /// Set the per-optimize backtracking budget used by `$*name` pattern matching.
+    pub fn set_max_backtracks(&mut self, max_backtracks: usize) {
+        self.max_backtracks = max_backtracks;
+    }
+
+    /// Returns the current per-optimize backtracking budget.
+    pub fn max_backtracks(&self) -> usize {
+        self.max_backtracks
+    }
+
     /// Applies rules until no more changes occur.
     pub fn optimize(&self, tokens: Vec<Token>) -> Vec<Token> {
         let mut current = tokens;
+        let mut seen = HashSet::new();
+        seen.insert(program_hash(&current));
         loop {
             let mut changed = false;
             for rule in &self.rules {
-                if let Some(rewritten) = rule.apply(&current) {
+                if let Some(rewritten) = rule.apply_with_limit(&current, self.max_backtracks) {
                     current = rewritten;
                     changed = true;
                     break;
@@ -322,9 +440,24 @@ impl Optimizer {
             if !changed {
                 break;
             }
+            if !seen.insert(program_hash(&current)) {
+                break;
+            }
         }
         current
     }
+}
+
+impl Default for Optimizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn program_hash(tokens: &[Token]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    tokens.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
@@ -551,6 +684,17 @@ mod tests {
     }
 
     #[test]
+    fn cycle_detection_stops_oscillation() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("A", "B").unwrap();
+        opt.add_rule("B", "A").unwrap();
+
+        let tokens = parse("A").unwrap();
+        let result = opt.optimize(tokens.clone());
+        assert_eq!(result, tokens);
+    }
+
+    #[test]
     fn multiple_vars() {
         let mut opt = Optimizer::new();
         opt.add_rule("$X $Y SWAP", "$Y $X").unwrap();
@@ -743,6 +887,29 @@ mod tests {
         let result = Rule::new("A", "$*X");
         assert!(matches!(result, Err(RuleError::UnboundVariable(_))));
         println!("Error: {result:?}");
+    }
+
+    #[test]
+    fn invalid_variable_name_error() {
+        let result = Rule::new("$", "A");
+        assert!(matches!(result, Err(RuleError::InvalidVariableName(_))));
+    }
+
+    #[test]
+    fn mixed_arity_variable_error() {
+        let result = Rule::new("$X", "$*X");
+        assert!(matches!(result, Err(RuleError::VariableArityMismatch(_))));
+    }
+
+    #[test]
+    fn backtrack_limit_can_block_expensive_match() {
+        let mut opt = Optimizer::new();
+        opt.set_max_backtracks(1);
+        opt.add_rule("$*X END", "[$*X]").unwrap();
+
+        let tokens = parse("A B C END").unwrap();
+        let result = opt.optimize(tokens.clone());
+        assert_eq!(result, tokens);
     }
 
     #[test]

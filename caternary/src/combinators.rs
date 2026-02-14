@@ -9,6 +9,7 @@
 use crate::EvalError;
 use crate::Evaluator;
 use crate::Token;
+use crate::evaluator::operator_error;
 
 /// A trait for stack element types that can contain quotations.
 ///
@@ -47,7 +48,7 @@ pub trait Quotable: From<Token> + Clone {
 }
 
 fn stack_underflow(expected: usize, found: usize) -> EvalError {
-    EvalError::OperatorError(format!(
+    operator_error(format!(
         "stack underflow: need at least {expected} values, found {found}"
     ))
 }
@@ -60,11 +61,11 @@ fn require_len<T>(stack: &[T], expected: usize) -> Result<(), EvalError> {
 }
 
 fn not_a_quotation() -> EvalError {
-    EvalError::OperatorError("expected a quotation (bracketed code)".to_string())
+    operator_error("expected a quotation (bracketed code)")
 }
 
 fn not_a_sequence() -> EvalError {
-    EvalError::OperatorError("expected a sequence".to_string())
+    operator_error("expected a sequence")
 }
 
 /// Pops a quotation from the stack, returning its tokens.
@@ -198,9 +199,7 @@ fn cleave<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
             stack.push(x.clone());
             eval.eval_with_stack(&q, stack)?;
         } else {
-            return Err(EvalError::OperatorError(
-                "CLEAVE expects a list of quotations".to_string(),
-            ));
+            return Err(operator_error("CLEAVE expects a list of quotations"));
         }
     }
 
@@ -235,9 +234,7 @@ fn spread<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
             stack.push(val);
             eval.eval_with_stack(&q, stack)?;
         } else {
-            return Err(EvalError::OperatorError(
-                "SPREAD expects a list of quotations".to_string(),
-            ));
+            return Err(operator_error("SPREAD expects a list of quotations"));
         }
     }
 
@@ -351,11 +348,17 @@ fn map<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalE
 
     let mut results = Vec::with_capacity(seq.len());
     for elem in seq {
+        let before = stack.len();
         stack.push(elem);
         eval.eval_with_stack(&quotation, stack)?;
-        let result = stack.pop().ok_or_else(|| {
-            EvalError::OperatorError("MAP quotation must leave one value on stack".to_string())
-        })?;
+        if stack.len() != before + 1 {
+            return Err(operator_error(
+                "MAP quotation must consume one element and leave one result",
+            ));
+        }
+        let result = stack
+            .pop()
+            .ok_or_else(|| operator_error("MAP quotation must leave one value on stack"))?;
         results.push(result);
     }
 
@@ -376,11 +379,17 @@ fn filter<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
 
     let mut results = Vec::new();
     for elem in seq {
+        let before = stack.len();
         stack.push(elem.clone());
         eval.eval_with_stack(&quotation, stack)?;
-        let predicate_result = stack.pop().ok_or_else(|| {
-            EvalError::OperatorError("FILTER quotation must leave one value on stack".to_string())
-        })?;
+        if stack.len() != before + 1 {
+            return Err(operator_error(
+                "FILTER quotation must consume one element and leave one predicate value",
+            ));
+        }
+        let predicate_result = stack
+            .pop()
+            .ok_or_else(|| operator_error("FILTER quotation must leave one value on stack"))?;
         if predicate_result.is_truthy() {
             results.push(elem);
         }
@@ -405,8 +414,14 @@ fn fold<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
 
     stack.push(init);
     for elem in seq {
+        let before = stack.len();
         stack.push(elem);
         eval.eval_with_stack(&quotation, stack)?;
+        if stack.len() != before {
+            return Err(operator_error(
+                "FOLD quotation must consume accumulator+element and leave one accumulator",
+            ));
+        }
     }
 
     Ok(())
@@ -424,8 +439,14 @@ fn each<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     let seq = seq_val.as_sequence().ok_or_else(not_a_sequence)?;
 
     for elem in seq {
+        let before = stack.len();
         stack.push(elem);
         eval.eval_with_stack(&quotation, stack)?;
+        if stack.len() != before {
+            return Err(operator_error(
+                "EACH quotation must consume one element and leave no extra values",
+            ));
+        }
     }
 
     Ok(())
@@ -571,9 +592,7 @@ mod tests {
             match (a, b) {
                 (Value::Int(a), Value::Int(b)) => stack.push(Value::Int(a + b)),
                 _ => {
-                    return Err(EvalError::OperatorError(
-                        "ADD requires two integers".to_string(),
-                    ));
+                    return Err(operator_error("ADD requires two integers"));
                 }
             }
             Ok(())
@@ -585,9 +604,7 @@ mod tests {
             match (a, b) {
                 (Value::Int(a), Value::Int(b)) => stack.push(Value::Int(a * b)),
                 _ => {
-                    return Err(EvalError::OperatorError(
-                        "MUL requires two integers".to_string(),
-                    ));
+                    return Err(operator_error("MUL requires two integers"));
                 }
             }
             Ok(())
@@ -599,9 +616,7 @@ mod tests {
             match (a, b) {
                 (Value::Int(a), Value::Int(b)) => stack.push(Value::Bool(a > b)),
                 _ => {
-                    return Err(EvalError::OperatorError(
-                        "GT requires two integers".to_string(),
-                    ));
+                    return Err(operator_error("GT requires two integers"));
                 }
             }
             Ok(())
@@ -612,9 +627,7 @@ mod tests {
             match a {
                 Value::Int(n) => stack.push(Value::Bool(n % 2 == 0)),
                 _ => {
-                    return Err(EvalError::OperatorError(
-                        "EVEN requires an integer".to_string(),
-                    ));
+                    return Err(operator_error("EVEN requires an integer"));
                 }
             }
             Ok(())
