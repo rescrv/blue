@@ -136,7 +136,7 @@ impl SignalSet {
 
     pub fn install(&self) -> Result<(), std::io::Error> {
         let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
-        sa.sa_sigaction = nop as usize;
+        sa.sa_sigaction = nop as *const () as usize;
         sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
         for signal in self.iter() {
             // SAFETY(rescrv):  We know this is safe because we manipulate the set using libc functions.
