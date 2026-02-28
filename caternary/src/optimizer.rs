@@ -8,9 +8,9 @@
 
 use std::collections::HashMap;
 
-use crate::parse;
 use crate::ParseError;
 use crate::Token;
+use crate::parse;
 
 /// A rewrite rule: pattern => replacement.
 #[derive(Debug, Clone)]
@@ -219,11 +219,7 @@ impl Rule {
                     if tok_idx >= tokens.len() {
                         return None;
                     }
-                    if !Self::bind_tokens(
-                        name,
-                        vec![tokens[tok_idx].clone()],
-                        bindings,
-                    ) {
+                    if !Self::bind_tokens(name, vec![tokens[tok_idx].clone()], bindings) {
                         return None;
                     }
                     tok_idx += 1;

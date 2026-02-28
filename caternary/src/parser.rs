@@ -124,7 +124,10 @@ impl<'a> Parser<'a> {
         Self { input, cursor: 0 }
     }
 
-    fn parse_tokens(&mut self, open_bracket: Option<usize>) -> Result<Vec<SpannedToken>, ParseError> {
+    fn parse_tokens(
+        &mut self,
+        open_bracket: Option<usize>,
+    ) -> Result<Vec<SpannedToken>, ParseError> {
         let mut tokens = Vec::new();
         loop {
             self.skip_whitespace();
