@@ -9,8 +9,6 @@ cargo fmt -- --check
 
 ROOTDIR="`pwd`"
 export PATH="$PATH":"`pwd`"/target/release
-# TODO(rescrv, 1.91):  Remove this allowance.
-export RUSTFLAGS="-A clippy::needless-lifetimes --deny warnings"
 
 cargo build --release --bins
 target/release/publish > .ci.packages
@@ -18,7 +16,7 @@ target/release/publish > .ci.packages
 for package in `cat .ci.packages`
 do
     pushd $package
-    cargo clippy --no-deps --all-targets
+    cargo clippy --no-deps --all-targets -- -D warnings -D clippy::all
     cargo hack --feature-powerset test --release
     cargo doc --no-deps
     "${ROOTDIR}/target/release/binaries"
