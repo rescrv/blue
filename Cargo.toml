@@ -13,6 +13,7 @@ members = [
     "buffertk",
     "busyrpc",
     "busyrpc_service_discovery",
+    "caternary",
     "derive_util",
     "guacamole",
     "handled",
