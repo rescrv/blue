@@ -95,6 +95,13 @@ Warts
 
 - A string with `'{'` and `'}'` characters outside the variable declarations won't parse right now.
 
+Updating
+--------
+
+- 0.13.1: fixes two bugs you may rely upon, but I doubt it so I don't mind making a patch release:
+    - cycles in services were permitted
+    - aliases with underscores wouldn't work
+
 Documentation
 -------------
 
