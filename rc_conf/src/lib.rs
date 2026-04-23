@@ -439,6 +439,7 @@ impl RcScript {
         let name = var_prefix_from_service(&self.name);
         Ok(shvar::rcvar(&self.command)?
             .into_iter()
+            .filter(|v| !RESTRICTED_VARIABLES.iter().any(|r| *r == v))
             .map(|v| format!("{name}{v}"))
             .collect())
     }
@@ -465,9 +466,6 @@ impl RcScript {
                         eprintln!("arguments ignored");
                     }
                     for rcvar in self.rcvar()?.into_iter() {
-                        if RESTRICTED_VARIABLES.iter().any(|v| *v == rcvar) {
-                            continue;
-                        }
                         println!("{rcvar}");
                     }
                     Ok(())
@@ -628,6 +626,7 @@ impl RcConf {
             }
             Self::parse_recursive(&piece, &mut seen, &mut items)?;
         }
+        Self::validate_alias_control_variables(&Path::from(path), &items)?;
         let mut aliases = HashMap::default();
         let mut autogens = HashSet::default();
         for (varname, alias) in items.iter() {
@@ -771,19 +770,19 @@ impl RcConf {
                     .collect::<HashMap<_, _>>();
                 let candidate = shvar::expand_recursive(&vp, &template)?;
                 let filter_key = shvar::expand_recursive(&vp, &filter)?;
-                if aliases.contains_key(&candidate) {
-                    return Err(Error::invalid_rc_conf(
-                        &Path::from(path),
-                        0,
-                        format!("{candidate} comes from both autogen and alias"),
-                    ));
-                }
                 let insert = if let Some(filter_rc_conf) = filter_rc_conf.as_ref() {
                     filter_rc_conf.lookup(&filter_key).is_some()
                 } else {
                     true
                 };
                 if insert {
+                    if aliases.contains_key(&candidate) {
+                        return Err(Error::invalid_rc_conf(
+                            &Path::from(path),
+                            0,
+                            format!("{candidate} comes from both autogen and alias"),
+                        ));
+                    }
                     aliases.insert(
                         candidate,
                         Alias {
@@ -803,6 +802,7 @@ impl RcConf {
                 }
             }
         }
+        Self::validate_aliases(&Path::from(path), &aliases)?;
         Ok(Self {
             items,
             aliases,
@@ -843,6 +843,96 @@ impl RcConf {
                 }
             } else {
                 return Err(Error::invalid_rc_conf(path, number, line));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_alias_control_variables(
+        path: &Path,
+        items: &HashMap<String, String>,
+    ) -> Result<(), Error> {
+        let mut variables = items.keys().collect::<Vec<_>>();
+        variables.sort();
+        for varname in variables {
+            let Some(name) = varname.strip_suffix("_INHERIT") else {
+                continue;
+            };
+            let inherit = items
+                .get(varname)
+                .expect("varname came from items keys and must exist");
+            if inherit != "NO" && inherit != "YES" {
+                return Err(Error::invalid_rc_conf(
+                    path,
+                    0,
+                    format!("invalid _INHERIT binding for {name}"),
+                ));
+            }
+            let aliases = name.to_string() + "_ALIASES";
+            if !items.contains_key(&aliases) {
+                return Err(Error::invalid_rc_conf(
+                    path,
+                    0,
+                    format!("{varname} declared without {aliases}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_aliases(path: &Path, aliases: &HashMap<String, Alias>) -> Result<(), Error> {
+        let mut alias_names = aliases.keys().collect::<Vec<_>>();
+        alias_names.sort();
+
+        let mut prefixes: HashMap<String, &str> = HashMap::default();
+        for name in alias_names.iter() {
+            if name.is_empty() {
+                return Err(Error::invalid_rc_conf(path, 0, "empty alias name"));
+            }
+            let prefix = var_name_from_service(name);
+            match prefixes.entry(prefix.clone()) {
+                Entry::Occupied(entry) => {
+                    return Err(Error::invalid_rc_conf(
+                        path,
+                        0,
+                        format!(
+                            "aliases {} and {} use the same variable prefix {}",
+                            entry.get(),
+                            name,
+                            prefix
+                        ),
+                    ));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(name.as_str());
+                }
+            }
+        }
+
+        for name in alias_names {
+            let mut chain = Vec::new();
+            let mut positions: HashMap<&str, usize> = HashMap::default();
+            let mut current = name.as_str();
+            while let Some(alias) = aliases.get(current) {
+                if alias.aliases.is_empty() {
+                    return Err(Error::invalid_rc_conf(
+                        path,
+                        0,
+                        format!("{current} aliases an empty service name"),
+                    ));
+                }
+                if let Some(position) = positions.get(current) {
+                    let mut cycle = chain[*position..].to_vec();
+                    cycle.push(current);
+                    return Err(Error::invalid_rc_conf(
+                        path,
+                        0,
+                        format!("alias cycle: {}", cycle.join(" -> ")),
+                    ));
+                }
+                positions.insert(current, chain.len());
+                chain.push(current);
+                current = alias.aliases.as_str();
             }
         }
         Ok(())
@@ -904,8 +994,11 @@ impl RcConf {
     ) -> Result<(), Error> {
         seen.insert(path.clone().into_owned());
         let contents = std::fs::read_to_string(path.as_str())?;
-        for (_, line, raw) in linearize(path, &contents)? {
+        for (number, line, raw) in linearize(path, &contents)? {
             if let Some(source) = line.trim().strip_prefix("source ") {
+                if !is_safe_source_path(source) {
+                    return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
+                }
                 let source = Path::from(source);
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
@@ -1168,11 +1261,15 @@ impl RcConf {
 
     /// Recursively resolve the alias `service`.
     pub fn resolve_alias<'a>(&'a self, service: &'a str) -> &'a str {
-        if let Some(alias) = self.aliases.get(service) {
-            self.resolve_alias(&alias.aliases)
-        } else {
-            service
+        let mut direct_alias = service;
+        let mut seen = HashSet::new();
+        while let Some(alias) = self.aliases.get(direct_alias) {
+            if !seen.insert(direct_alias) {
+                break;
+            }
+            direct_alias = &alias.aliases;
         }
+        direct_alias
     }
 
     /// Generate the alias lookup order for `service` and a cascade of variables.
@@ -1183,14 +1280,22 @@ impl RcConf {
         let mut alias_lookup_order = vec![service];
         let mut direct_alias = service;
         let mut pre_lookup = HashMap::new();
+        let mut seen = HashSet::new();
         while let Some(alias) = self.aliases.get(direct_alias) {
-            alias_lookup_order.push(&alias.aliases);
-            direct_alias = &alias.aliases;
+            if !seen.insert(direct_alias) {
+                break;
+            }
             for (k, v) in alias.vp.iter() {
                 if !pre_lookup.contains_key(k) {
                     pre_lookup.insert(k.clone(), v.clone());
                 }
             }
+            let next = alias.aliases.as_str();
+            if seen.contains(next) {
+                break;
+            }
+            alias_lookup_order.push(next);
+            direct_alias = next;
         }
         (alias_lookup_order, pre_lookup)
     }
@@ -1604,6 +1709,41 @@ fn strip_prefix_values(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn write_rc_conf(contents: &str) -> String {
+        let id = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("rc_conf_test_{}_{}.conf", std::process::id(), id));
+        std::fs::write(&path, contents).expect("temp rc.conf should be writable");
+        path.into_os_string()
+            .into_string()
+            .expect("temp path should be UTF-8")
+    }
+
+    fn parse_rc_conf(contents: &str) -> Result<super::RcConf, super::Error> {
+        let path = write_rc_conf(contents);
+        let result = super::RcConf::parse(&path);
+        let _ = std::fs::remove_file(path);
+        result
+    }
+
+    fn examine_rc_conf(contents: &str) -> Result<String, super::Error> {
+        let path = write_rc_conf(contents);
+        let result = super::RcConf::examine(&path);
+        let _ = std::fs::remove_file(path);
+        result
+    }
+
+    fn invalid_rc_conf_message(contents: &str) -> String {
+        match parse_rc_conf(contents) {
+            Err(super::Error::InvalidRcConf { message, .. }) => message,
+            Err(err) => panic!("expected InvalidRcConf; got {err:?}"),
+            Ok(_) => panic!("expected InvalidRcConf; got Ok"),
+        }
+    }
 
     mod rc_script {
         use super::super::*;
@@ -1677,6 +1817,19 @@ COMMAND=my-command \
                 vec!["name_MY_VARIABLE".to_string()],
                 rc_script.rcvar().unwrap()
             );
+        }
+
+        #[test]
+        fn rcvar_omits_restricted_name() {
+            let rc_script = RcScript::parse(
+                &Path::from("name"),
+                r#"
+DESCRIBE=my description
+COMMAND=my-command ${NAME} ${FIELD}
+"#,
+            )
+            .unwrap();
+            assert_eq!(vec!["name_FIELD".to_string()], rc_script.rcvar().unwrap());
         }
     }
 
@@ -1805,6 +1958,81 @@ bar_ENABLE=YES
         assert!(super::SwitchPosition::Yes.can_be_started());
         assert!(super::SwitchPosition::Manual.can_be_started());
         assert!(!super::SwitchPosition::No.can_be_started());
+    }
+
+    #[test]
+    fn alias_cycle_is_invalid() {
+        let message = invalid_rc_conf_message(
+            r#"
+alpha_ALIASES="beta"
+alpha_INHERIT="YES"
+beta_ALIASES="alpha"
+beta_INHERIT="YES"
+"#,
+        );
+        assert_eq!("alias cycle: alpha -> beta -> alpha", message);
+    }
+
+    #[test]
+    fn alias_self_cycle_is_invalid() {
+        let message = invalid_rc_conf_message(
+            r#"
+alpha_ALIASES="alpha"
+alpha_INHERIT="YES"
+"#,
+        );
+        assert_eq!("alias cycle: alpha -> alpha", message);
+    }
+
+    #[test]
+    fn alias_variable_prefix_collision_is_invalid() {
+        let message = invalid_rc_conf_message(
+            r#"
+edit-auto_ALIASES="edit"
+edit-auto_INHERIT="YES"
+edit_auto_ALIASES="edit"
+edit_auto_INHERIT="YES"
+"#,
+        );
+        assert_eq!(
+            "aliases edit-auto and edit_auto use the same variable prefix edit_auto",
+            message
+        );
+    }
+
+    #[test]
+    fn orphan_inherit_target_is_invalid() {
+        let message = invalid_rc_conf_message(
+            r#"
+edit_auto_INHERIT="edit"
+"#,
+        );
+        assert_eq!("invalid _INHERIT binding for edit_auto", message);
+    }
+
+    #[test]
+    fn orphan_inherit_flag_is_invalid() {
+        let message = invalid_rc_conf_message(
+            r#"
+edit_auto_INHERIT="YES"
+"#,
+        );
+        assert_eq!(
+            "edit_auto_INHERIT declared without edit_auto_ALIASES",
+            message
+        );
+    }
+
+    #[test]
+    fn examine_rejects_unsafe_source_path() {
+        let result = examine_rc_conf("source ../unsafe.conf\n");
+        match result {
+            Err(super::Error::InvalidRcConf { message, .. }) => {
+                assert_eq!("unsafe source path", message);
+            }
+            Err(err) => panic!("expected InvalidRcConf; got {err:?}"),
+            Ok(examined) => panic!("expected InvalidRcConf; got {examined:?}"),
+        }
     }
 
     #[test]
