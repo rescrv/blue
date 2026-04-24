@@ -13,10 +13,10 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.12" }
+biometrics = { workspace = true }
 
 [dev-dependencies]
-guacamole = { path = "../guacamole", version = "0.14" }
+guacamole = { workspace = true }
 
 [[example]]
 name = "clicker"

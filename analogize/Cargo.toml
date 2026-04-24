@@ -13,28 +13,27 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-chrono = "0.4"
-getopts = "0.2"
-libc = "0.2"
-nom = "7.1"
-rustyline = "11.0"
+chrono = { workspace = true }
+getopts = { workspace = true }
+libc = { workspace = true }
+nom = { workspace = true }
+rustyline = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
-buffertk = { path = "../buffertk", version = "0.13" }
-guacamole = { path = "../guacamole", version = "0.14" }
-indicio = { path = "../indicio", version = "0.12", features = ["prototk"] }
-mani = { path = "../mani", version = "0.10" }
-prototk = { path = "../prototk", version = "0.13" }
-prototk_derive = { path = "../prototk_derive", version = "0.13" }
-scrunch = { path = "../scrunch", version = "0.9" }
-zerror = { path = "../zerror", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-zerror_derive = { path = "../zerror_derive", version = "0.7" }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+buffertk = { workspace = true }
+guacamole = { workspace = true }
+indicio = { workspace = true, features = ["prototk"] }
+mani = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+scrunch = { workspace = true }
+zerror = { workspace = true }
+zerror_core = { workspace = true }
+zerror_derive = { workspace = true }
 
 [dev-dependencies]
-proptest = "1.0"
-
+proptest = { workspace = true }
 [[bin]]
 name = "analogize"
 path = "src/bin/analogize.rs"

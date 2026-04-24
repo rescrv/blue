@@ -13,15 +13,15 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-getopts = { version = "0.2" }
+getopts = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
-indicio = { path = "../indicio", version = "0.12" }
-k8src = { path = "../k8src", version = "0.15" }
-rc_conf = { path = "../rc_conf", version = "0.13" }
-shvar = { path = "../shvar", version = "0.8" }
-utf8path = { path = "../utf8path", version = "0.9" }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+indicio = { workspace = true }
+k8src = { workspace = true }
+rc_conf = { workspace = true }
+shvar = { workspace = true }
+utf8path = { workspace = true }
 
 [[bin]]
 name = "symphonize"

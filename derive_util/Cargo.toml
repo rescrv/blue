@@ -8,6 +8,6 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
-syn = "1.0"
-quote = "1.0"
-proc-macro2 = "1.0"
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }

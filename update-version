@@ -19,6 +19,6 @@ TO_SHORT_VER=$1
 shift
 
 sed -i -e 's|version = "'$FROM_VER'"|version = "'$TO_VER'"|g' $PACKAGE/Cargo.toml
-sed -i -e 's|'$PACKAGE' = { path = "../'$PACKAGE'", version = "'$FROM_SHORT_VER'"|'$PACKAGE' = { path = "../'$PACKAGE'", version = "'$TO_SHORT_VER'"|g' */Cargo.toml
+sed -i -e 's|'$PACKAGE' = { path = "'$PACKAGE'", version = "'$FROM_VER'" }|'$PACKAGE' = { path = "'$PACKAGE'", version = "'$TO_VER'" }|g' Cargo.toml
 cargo check --all-targets
-rm **/Cargo.toml-e
+rm -f Cargo.toml-e $PACKAGE/Cargo.toml-e

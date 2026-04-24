@@ -11,9 +11,9 @@ repository = "https://github.com/rescrv/blue"
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
-quote = "1.0"
-proc-macro2 = "1.0"
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
 
-buffertk = { path = "../buffertk", version = "0.13" }
-prototk = { path = "../prototk", version = "0.13" }
+buffertk = { workspace = true }
+prototk = { workspace = true }

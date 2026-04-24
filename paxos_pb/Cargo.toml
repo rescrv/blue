@@ -8,12 +8,12 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
-buffertk = { path = "../buffertk", version = "0.13" }
-guacamole = { path = "../guacamole", version = "0.14" }
-one_two_eight = { path = "../one_two_eight", version = "0.10" }
-prototk = { path = "../prototk", version = "0.13" }
-prototk_derive = { path = "../prototk_derive", version = "0.13" }
-rpc_pb = { path = "../rpc_pb", version = "0.14" }
-zerror = { path = "../zerror", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-zerror_derive = { path = "../zerror_derive", version = "0.7" }
+buffertk = { workspace = true }
+guacamole = { workspace = true }
+one_two_eight = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+rpc_pb = { workspace = true }
+zerror = { workspace = true }
+zerror_core = { workspace = true }
+zerror_derive = { workspace = true }

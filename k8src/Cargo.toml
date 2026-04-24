@@ -14,16 +14,16 @@ binaries = ["command_line"]
 command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
-getopts = { version = "0.2", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-siphasher = "1"
+getopts = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
+siphasher = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
-rc_conf = { path = "../rc_conf", version = "0.13" }
-shvar = { path = "../shvar", version = "0.8" }
-utf8path = { path = "../utf8path", version = "0.9" }
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+rc_conf = { workspace = true }
+shvar = { workspace = true }
+utf8path = { workspace = true }
 
 [[bin]]
 name = "k8src"

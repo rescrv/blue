@@ -13,9 +13,9 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
-utf8path = { path = "../utf8path", version = "0.9" }
+utf8path = { workspace = true }
 
 [[example]]
 name = "unix-sock-client"

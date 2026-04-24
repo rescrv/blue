@@ -13,11 +13,11 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-getopts = { version = "0.2" }
-libc = "0.2"
+getopts = { workspace = true }
+libc = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
 
 [[bin]]
 name = "stdioredirect"

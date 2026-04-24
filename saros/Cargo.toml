@@ -13,33 +13,33 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-chrono = "0.4"
-getopts = "0.2"
-nom = "7.1"
+chrono = { workspace = true }
+getopts = { workspace = true }
+nom = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
-biometrics = { path = "../biometrics", version = "0.12" }
-buffertk = { path = "../buffertk", version = "0.13" }
-indicio = { path = "../indicio", version = "0.12" }
-one_two_eight = { path = "../one_two_eight", version = "0.10" }
-prototk = { path = "../prototk", version = "0.13" }
-prototk_derive = { path = "../prototk_derive", version = "0.13" }
-rpc_pb = { path = "../rpc_pb", version = "0.14" }
-shvar = { path = "../shvar", version = "0.8" }
-tag_index = { path = "../tag_index", version = "0.8" }
-tatl = { path = "../tatl", version = "0.13" }
-utf8path = { path = "../utf8path", version = "0.9" }
-zerror = { path = "../zerror", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-zerror_derive = { path = "../zerror_derive", version = "0.7" }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+biometrics = { workspace = true }
+buffertk = { workspace = true }
+indicio = { workspace = true }
+one_two_eight = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+rpc_pb = { workspace = true }
+shvar = { workspace = true }
+tag_index = { workspace = true }
+tatl = { workspace = true }
+utf8path = { workspace = true }
+zerror = { workspace = true }
+zerror_core = { workspace = true }
+zerror_derive = { workspace = true }
 
 [dev-dependencies]
-proptest = "1.0"
+proptest = { workspace = true }
 
-biometrics_prometheus = { path = "../biometrics_prometheus", version = "0.9" }
-guacamole = { path = "../guacamole", version = "0.14" }
-sig_fig_histogram = { path = "../sig_fig_histogram", version = "0.6" }
+biometrics_prometheus = { workspace = true }
+guacamole = { workspace = true }
+sig_fig_histogram = { workspace = true }
 
 [[bin]]
 name = "sarosd-recovery"

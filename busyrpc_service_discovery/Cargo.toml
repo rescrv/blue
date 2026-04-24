@@ -14,18 +14,18 @@ binaries = ["command_line"]
 command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
-getopts = { version = "0.2", optional = true }
+getopts = { workspace = true, optional = true }
 
-arrrg = { path = "../arrrg", version = "0.8", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
-busyrpc = { path = "../busyrpc", version = "0.13" }
-indicio = { path = "../indicio", version = "0.12" }
-minimal_signals = { path = "../minimal_signals", version = "0.5" }
-prototk = { path = "../prototk", version = "0.13" }
-rpc_pb = { path = "../rpc_pb", version = "0.14" }
-tuple_key = { path = "../tuple_key", version = "0.13" }
-tuple_routing = { path = "../tuple_routing", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+busyrpc = { workspace = true }
+indicio = { workspace = true }
+minimal_signals = { workspace = true }
+prototk = { workspace = true }
+rpc_pb = { workspace = true }
+tuple_key = { workspace = true }
+tuple_routing = { workspace = true }
+zerror_core = { workspace = true }
 
 [[bin]]
 name = "busyrpc-service-discovery-server"

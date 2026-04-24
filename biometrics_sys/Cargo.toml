@@ -13,6 +13,6 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
-biometrics = { path = "../biometrics", version = "0.12" }
+biometrics = { workspace = true }
