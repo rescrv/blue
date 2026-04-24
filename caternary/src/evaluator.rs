@@ -18,7 +18,7 @@ pub enum EvalError {
 impl std::fmt::Display for EvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EvalError::OperatorError(msg) => write!(f, "operator error: {}", msg),
+            EvalError::OperatorError(msg) => write!(f, "operator error: {msg}"),
         }
     }
 }
@@ -133,7 +133,7 @@ mod tests {
                 Value::Word("C".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
             result,
             vec![Value::Word("A".to_string()), Value::Word("A".to_string()),]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -168,7 +168,7 @@ mod tests {
         assert!(matches!(result[0], Value::Word(_)));
         assert!(matches!(result[1], Value::Bracket(_)));
         assert!(matches!(result[2], Value::Word(_)));
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -198,8 +198,8 @@ mod tests {
 
         assert_eq!(table_result, vec![Value::Word("scanned_table".to_string())]);
         assert_eq!(file_result, vec![Value::Word("scanned_file".to_string())]);
-        println!("Table result: {:?}", table_result);
-        println!("File result: {:?}", file_result);
+        println!("Table result: {table_result:?}");
+        println!("File result: {file_result:?}");
     }
 
     #[test]
@@ -211,10 +211,7 @@ mod tests {
             let data = stack
                 .pop()
                 .ok_or(EvalError::OperatorError("need data".to_string()))?;
-            stack.push(Value::Word(format!(
-                "filtered({:?}, {:?})",
-                data, predicate
-            )));
+            stack.push(Value::Word(format!("filtered({data:?}, {predicate:?})")));
             Ok(())
         }
 
@@ -225,7 +222,7 @@ mod tests {
         let result = eval.eval(&tokens).unwrap();
 
         assert_eq!(result.len(), 1);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -251,7 +248,7 @@ mod tests {
                 Value::Word("sum".to_string()),
             ]
         );
-        println!("Stack: {:?}", stack);
+        println!("Stack: {stack:?}");
     }
 
     #[test]
@@ -261,12 +258,13 @@ mod tests {
         let result = eval.eval(&tokens).unwrap();
 
         assert!(result.is_empty());
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
     fn operator_error_propagates() {
-        fn fail(_stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn fail(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+            let _ = stack.capacity();
             Err(EvalError::OperatorError("intentional failure".to_string()))
         }
 
@@ -277,7 +275,7 @@ mod tests {
         let result = eval.eval(&tokens);
 
         assert!(matches!(result, Err(EvalError::OperatorError(_))));
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 
     #[test]
@@ -295,7 +293,7 @@ mod tests {
         let result = eval.eval(&tokens);
 
         assert!(matches!(result, Err(EvalError::OperatorError(_))));
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 
     #[test]
@@ -318,7 +316,7 @@ mod tests {
             result,
             vec![Value::Word("B".to_string()), Value::Word("A".to_string()),]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -338,7 +336,7 @@ mod tests {
             result,
             vec![Value::Word("A".to_string()), Value::Word("B".to_string()),]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -366,7 +364,7 @@ mod tests {
                 Value::Word("A".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -395,7 +393,7 @@ mod tests {
                 Value::Word("A".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -437,7 +435,7 @@ mod tests {
             result,
             vec![Value::Word("A".to_string()), Value::Word("B".to_string()),]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -466,12 +464,13 @@ mod tests {
         // 2 3 ADD -> 5
         // 5 4 MUL -> 20
         assert_eq!(result, vec![20]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
     fn redefine_operator() {
-        fn first(_stack: &mut Vec<Value>) -> Result<(), EvalError> {
+        fn first(stack: &mut Vec<Value>) -> Result<(), EvalError> {
+            let _ = stack.capacity();
             Err(EvalError::OperatorError("first".to_string()))
         }
 
@@ -488,7 +487,7 @@ mod tests {
         let result = eval.eval(&tokens).unwrap();
 
         assert_eq!(result, vec![Value::Word("second".to_string())]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -517,7 +516,7 @@ mod tests {
                 Value::Word("upper".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -534,7 +533,7 @@ mod tests {
         } else {
             panic!("Expected bracket");
         }
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -552,7 +551,7 @@ mod tests {
                 Value::Word("DROP".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -569,7 +568,7 @@ mod tests {
         let result = eval.eval(&tokens).unwrap();
 
         assert_eq!(result, vec![Value::Word("D".to_string())]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -595,6 +594,6 @@ mod tests {
                 Value::Word("3".to_string()),
             ]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 }

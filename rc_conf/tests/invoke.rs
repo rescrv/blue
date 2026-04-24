@@ -8,7 +8,7 @@ fn example1() {
     let new_path = if current_path.is_empty() {
         debug_path.to_string()
     } else {
-        format!("{}:{}", debug_path, current_path)
+        format!("{debug_path}:{current_path}")
     };
 
     let output = Command::new("cargo")
@@ -38,7 +38,7 @@ fn example1() {
             );
         }
         Err(e) => {
-            panic!("Failed to execute rcinvoke integration test: {}", e);
+            panic!("Failed to execute rcinvoke integration test: {e}");
         }
     }
 }
@@ -53,7 +53,7 @@ fn jfk_planetexpress_example4() {
     let new_path = if current_path.is_empty() {
         debug_path.to_string()
     } else {
-        format!("{}:{}", debug_path, current_path)
+        format!("{debug_path}:{current_path}")
     };
 
     let output = Command::new("cargo")
@@ -91,7 +91,7 @@ fn jfk_planetexpress_example4() {
             );
         }
         Err(e) => {
-            panic!("Failed to execute rcinvoke integration test: {}", e);
+            panic!("Failed to execute rcinvoke integration test: {e}");
         }
     }
 }

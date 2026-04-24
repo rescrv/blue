@@ -60,9 +60,9 @@ pub enum RuleError {
 impl std::fmt::Display for RuleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuleError::PatternParse(e) => write!(f, "pattern parse error: {}", e),
-            RuleError::ReplacementParse(e) => write!(f, "replacement parse error: {}", e),
-            RuleError::UnboundVariable(name) => write!(f, "unbound variable: {}", name),
+            RuleError::PatternParse(e) => write!(f, "pattern parse error: {e}"),
+            RuleError::ReplacementParse(e) => write!(f, "replacement parse error: {e}"),
+            RuleError::UnboundVariable(name) => write!(f, "unbound variable: {name}"),
         }
     }
 }
@@ -170,12 +170,11 @@ impl Rule {
 
     fn match_at(&self, tokens: &[Token], start: usize) -> Option<(usize, Bindings)> {
         let mut bindings = Bindings::new();
-        let end = self.match_pattern(&self.pattern, tokens, start, &mut bindings)?;
+        let end = Self::match_pattern(&self.pattern, tokens, start, &mut bindings)?;
         Some((end, bindings))
     }
 
     fn match_pattern(
-        &self,
         pattern: &[PatternElement],
         tokens: &[Token],
         pos: usize,
@@ -205,7 +204,7 @@ impl Rule {
                         return None;
                     }
                     if let Token::Bracket(inner_tokens) = &tokens[tok_idx] {
-                        let end = self.match_pattern(inner_pattern, inner_tokens, 0, bindings)?;
+                        let end = Self::match_pattern(inner_pattern, inner_tokens, 0, bindings)?;
                         if end != inner_tokens.len() {
                             return None;
                         }
@@ -235,7 +234,7 @@ impl Rule {
                         if !Self::bind_tokens(name, captured, &mut test_bindings) {
                             continue;
                         }
-                        if let Some(end) = self.match_pattern(
+                        if let Some(end) = Self::match_pattern(
                             remaining_pattern,
                             tokens,
                             tok_idx + take,
@@ -263,20 +262,16 @@ impl Rule {
     }
 
     fn substitute(&self, bindings: &Bindings) -> Vec<Token> {
-        self.substitute_elements(&self.replacement, bindings)
+        Self::substitute_elements(&self.replacement, bindings)
     }
 
-    fn substitute_elements(
-        &self,
-        elements: &[ReplacementElement],
-        bindings: &Bindings,
-    ) -> Vec<Token> {
+    fn substitute_elements(elements: &[ReplacementElement], bindings: &Bindings) -> Vec<Token> {
         let mut result = Vec::new();
         for elem in elements {
             match elem {
                 ReplacementElement::Word(w) => result.push(Token::Word(w.clone())),
                 ReplacementElement::Bracket(inner) => {
-                    result.push(Token::Bracket(self.substitute_elements(inner, bindings)));
+                    result.push(Token::Bracket(Self::substitute_elements(inner, bindings)));
                 }
                 ReplacementElement::Var(name) => {
                     if let Some(tokens) = bindings.get(name) {
@@ -347,7 +342,7 @@ mod tests {
 
         let expected = parse("A SCAN DUP STATS SWAP BUILD [PUSHDOWN] DIP PROBE").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -360,7 +355,7 @@ mod tests {
 
         let expected = parse("A SCAN [foo < 5] FILTER DUP").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -373,7 +368,7 @@ mod tests {
 
         let expected = parse("A B C").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -389,14 +384,14 @@ mod tests {
         let expected =
             parse("A SCAN [foo] FILTER DUP DUP STATS SWAP BUILD [PUSHDOWN] DIP PROBE").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
     fn unbound_variable_error() {
         let result = Rule::new("A B", "$X C");
         assert!(matches!(result, Err(RuleError::UnboundVariable(_))));
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 
     #[test]
@@ -408,7 +403,7 @@ mod tests {
         let result = opt.optimize(tokens.clone());
 
         assert_eq!(result, tokens);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -421,7 +416,7 @@ mod tests {
 
         let expected = parse("RESULT foo").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -434,7 +429,7 @@ mod tests {
 
         let expected = parse("A A").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -447,7 +442,7 @@ mod tests {
 
         let expected = parse("DONE").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -460,7 +455,7 @@ mod tests {
 
         let expected = parse("WRAPPED").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -473,7 +468,7 @@ mod tests {
 
         let expected = parse("[A]").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -486,7 +481,7 @@ mod tests {
 
         let expected = parse("[A B C]").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -499,7 +494,7 @@ mod tests {
 
         let expected = parse("BEGIN A B").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -512,7 +507,7 @@ mod tests {
 
         let expected = parse("A B FINISH").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -525,7 +520,7 @@ mod tests {
 
         let expected = parse("A Z B").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -538,7 +533,7 @@ mod tests {
 
         let expected = parse("1 + 1 + 1 +").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -552,7 +547,7 @@ mod tests {
         // Should swap once then stop (B A doesn't match A B)
         let expected = parse("B A").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -565,7 +560,7 @@ mod tests {
 
         let expected = parse("B A").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -620,7 +615,7 @@ mod tests {
 
         let expected = parse("FOO FOO FOO").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -633,7 +628,7 @@ mod tests {
 
         let expected = parse("FOUND").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -645,7 +640,7 @@ mod tests {
         let result = opt.optimize(tokens.clone());
 
         assert_eq!(result, tokens);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -658,7 +653,7 @@ mod tests {
 
         let expected = parse("[FOO]").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -671,7 +666,7 @@ mod tests {
 
         let expected = parse("[BLOCK A B C]").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -684,7 +679,7 @@ mod tests {
 
         let expected = parse("A B C").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -700,7 +695,7 @@ mod tests {
         // Empty pattern matches at position 0 with 0 tokens, replaces with nothing
         // This is degenerate but shouldn't crash
         assert_eq!(result, tokens);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -712,7 +707,7 @@ mod tests {
         let result = opt.optimize(tokens.clone());
 
         assert_eq!(result, tokens);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -726,7 +721,7 @@ mod tests {
         // Greedy: first $*X captures as much as possible (A B)
         let expected = parse("[A B] [C D]").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -740,14 +735,14 @@ mod tests {
 
         let expected = parse("FIRST").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
     fn unbound_var_many_error() {
         let result = Rule::new("A", "$*X");
         assert!(matches!(result, Err(RuleError::UnboundVariable(_))));
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 
     #[test]
@@ -760,7 +755,7 @@ mod tests {
 
         let expected = parse("A B C Y D E").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -773,7 +768,7 @@ mod tests {
 
         let expected = parse("Z A B C").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 
     #[test]
@@ -789,6 +784,6 @@ mod tests {
         // A A A: no match
         let expected = parse("A A A").unwrap();
         assert_eq!(result, expected);
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
     }
 }

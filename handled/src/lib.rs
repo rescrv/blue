@@ -34,14 +34,14 @@ pub enum SExpr {
 impl std::fmt::Display for SExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SExpr::Atom(s) => write!(f, "{}", s),
+            SExpr::Atom(s) => write!(f, "{s}"),
             SExpr::List(l) => {
                 write!(f, "(")?;
                 for (i, expr) in l.iter().enumerate() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", expr)?;
+                    write!(f, "{expr}")?;
                 }
                 write!(f, ")")
             }

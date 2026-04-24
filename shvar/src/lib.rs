@@ -43,13 +43,13 @@ impl std::fmt::Display for Error {
             Error::TrailingRightBrace => write!(f, "unmatched right brace"),
             Error::InvalidVariable => write!(f, "invalid variable definition"),
             Error::InvalidCharacter { expected, returned } => match returned {
-                Some(c) => write!(f, "expected '{}', found '{}'", expected, c),
-                None => write!(f, "expected '{}', found end of input", expected),
+                Some(c) => write!(f, "expected '{expected}', found '{c}'"),
+                None => write!(f, "expected '{expected}', found end of input"),
             },
             Error::DepthLimitExceeded => {
                 write!(f, "expansion depth limit exceeded (possible cycle)")
             }
-            Error::Requested(msg) => write!(f, "{}", msg),
+            Error::Requested(msg) => write!(f, "{msg}"),
         }
     }
 }

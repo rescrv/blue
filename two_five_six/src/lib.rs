@@ -434,14 +434,14 @@ mod tests {
     fn decode_zeros() {
         let decoded = decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
         assert_eq!(decoded, [0u8; BYTES]);
-        println!("decode_zeros: {:?}", decoded);
+        println!("decode_zeros: {decoded:?}");
     }
 
     #[test]
     fn decode_ones() {
         let decoded = decode("__________________________________________8").unwrap();
         assert_eq!(decoded, [0xFFu8; BYTES]);
-        println!("decode_ones: {:?}", decoded);
+        println!("decode_ones: {decoded:?}");
     }
 
     #[test]
@@ -462,14 +462,14 @@ mod tests {
     fn invalid_length() {
         let err = decode("AAAA").unwrap_err();
         assert_eq!(err, Error::InvalidLength(4));
-        println!("invalid_length: {:?}", err);
+        println!("invalid_length: {err:?}");
     }
 
     #[test]
     fn invalid_character() {
         let err = decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!").unwrap_err();
         assert_eq!(err, Error::InvalidBase64Character('!'));
-        println!("invalid_character: {:?}", err);
+        println!("invalid_character: {err:?}");
     }
 
     #[test]
@@ -520,7 +520,7 @@ mod tests {
         let (label, suffix) = TwoFiveSix::parse_label("user_3b6HqZ0gYtFdRsA9c4x2uE0M1n2O3P4Q5R6S");
         assert_eq!(label, Some("user"));
         assert_eq!(suffix, "3b6HqZ0gYtFdRsA9c4x2uE0M1n2O3P4Q5R6S");
-        println!("parse_label_simple: label={:?}, suffix={}", label, suffix);
+        println!("parse_label_simple: label={label:?}, suffix={suffix}");
     }
 
     #[test]
@@ -528,10 +528,7 @@ mod tests {
         let (label, suffix) = TwoFiveSix::parse_label("my-app_3b6HqZ0gYtFdRsA9c4x2uE0M1n2O3P4Q5");
         assert_eq!(label, Some("my-app"));
         assert_eq!(suffix, "3b6HqZ0gYtFdRsA9c4x2uE0M1n2O3P4Q5");
-        println!(
-            "parse_label_with_hyphen: label={:?}, suffix={}",
-            label, suffix
-        );
+        println!("parse_label_with_hyphen: label={label:?}, suffix={suffix}");
     }
 
     #[test]
@@ -540,17 +537,14 @@ mod tests {
             TwoFiveSix::parse_label("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
         assert_eq!(label, None);
         assert_eq!(suffix, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        println!(
-            "parse_label_no_separator: label={:?}, suffix={}",
-            label, suffix
-        );
+        println!("parse_label_no_separator: label={label:?}, suffix={suffix}");
     }
 
     #[test]
     fn invalid_label_character() {
         let err = TwoFiveSix::generate_with_label(Some("user!"), '_').unwrap_err();
         assert_eq!(err, Error::InvalidLabelCharacter('!'));
-        println!("invalid_label_character: {:?}", err);
+        println!("invalid_label_character: {err:?}");
     }
 
     #[test]
@@ -570,7 +564,7 @@ mod tests {
         let next = id.next();
         assert_eq!(next.as_bytes()[31], 1);
         assert_eq!(&next.as_bytes()[..31], &[0u8; 31]);
-        println!("next_increments: {:?} -> {:?}", id, next);
+        println!("next_increments: {id:?} -> {next:?}");
     }
 
     #[test]
@@ -578,7 +572,7 @@ mod tests {
         let id = TwoFiveSix::TOP;
         let next = id.next();
         assert_eq!(next, TwoFiveSix::BOTTOM);
-        println!("next_wraps: {:?} -> {:?}", id, next);
+        println!("next_wraps: {id:?} -> {next:?}");
     }
 
     generate_id!(UserId, "user", '_');
