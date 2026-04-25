@@ -28,6 +28,7 @@ fn drop<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
+#[allow(clippy::ptr_arg)]
 fn swap<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
@@ -43,6 +44,7 @@ fn over<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
+#[allow(clippy::ptr_arg)]
 fn rot<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     require_len(stack, 3)?;
     let len = stack.len();
@@ -82,6 +84,7 @@ fn two_drop<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
+#[allow(clippy::ptr_arg)]
 fn two_swap<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     require_len(stack, 4)?;
     let len = stack.len();
