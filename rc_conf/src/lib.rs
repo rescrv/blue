@@ -232,14 +232,14 @@ impl std::fmt::Display for Error {
                     message
                 )
             }
-            Error::InvalidInvocation { message } => write!(f, "Invalid invocation: {}", message),
+            Error::InvalidInvocation { message } => write!(f, "Invalid invocation: {message}"),
             Error::ExecFailed { command, error } => {
-                write!(f, "Command execution failed for '{}': {}", command, error)
+                write!(f, "Command execution failed for '{command}': {error}")
             }
-            Error::IoError(err) => write!(f, "IO error: {}", err),
-            Error::ShvarError(err) => write!(f, "Shell variable error: {}", err),
-            Error::Utf8Error(err) => write!(f, "UTF-8 error: {}", err),
-            Error::FromUtf8Error(err) => write!(f, "UTF-8 conversion error: {}", err),
+            Error::IoError(err) => write!(f, "IO error: {err}"),
+            Error::ShvarError(err) => write!(f, "Shell variable error: {err}"),
+            Error::Utf8Error(err) => write!(f, "UTF-8 error: {err}"),
+            Error::FromUtf8Error(err) => write!(f, "UTF-8 conversion error: {err}"),
         }
     }
 }
@@ -2080,13 +2080,12 @@ edit_auto_INHERIT="YES"
             .filter(|s| s.to_lowercase().contains("jfk") && s.to_lowercase().contains("planet"))
             .collect();
 
-        println!("JFK Planet services found: {:?}", jfk_planet_services);
+        println!("JFK Planet services found: {jfk_planet_services:?}");
 
         // Should only appear once, either as autogen or manual, not both
         assert!(
             jfk_planet_services.len() <= 1,
-            "jfk-planetexpress-example4 should appear at most once, found: {:?}",
-            jfk_planet_services
+            "jfk-planetexpress-example4 should appear at most once, found: {jfk_planet_services:?}"
         );
     }
 

@@ -1,108 +1,407 @@
-use std::fs::{read_dir, read_to_string};
-use std::path::PathBuf;
+use std::env;
+use std::error::Error;
+use std::fs;
+use std::io::{self, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
-use toml::Table;
+use chrono::Local;
+use reqwest::blocking::Client;
+use reqwest::StatusCode;
+use semver::Version;
+use serde::Deserialize;
 
-const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb"];
+use ci::{candidate_order, package, short_version};
 
-const EXCLUDE_DIRS: &[&str] = &[
-    ".git",
-    ".github",
-    ".claude",
-    "target",
-    "napkins",
-    ".symphonize",
-];
+const PUBLISH_SCRIPT: &str = "publish.sh";
+const USAGE: &str = "usage: publish [--prepare]";
 
-fn workspace_members() -> Vec<String> {
-    let workspace_text = read_to_string("Cargo.toml").expect("reading workspace toml");
-    let workspace_toml = workspace_text
-        .parse::<Table>()
-        .expect("parsing workspace toml");
-    assert!(workspace_toml.contains_key("workspace"));
-    let workspace_table = workspace_toml["workspace"]
-        .as_table()
-        .expect("parsing workspace table");
-    assert!(workspace_table.contains_key("members"));
-    let mut members = Vec::new();
-    for member in workspace_table["members"]
-        .as_array()
-        .expect("parsing members array")
-    {
-        let member = member.as_str().expect("parsing member");
-        if !EXCLUDE_MEMBERS.iter().any(|x| x == &member) {
-            members.push(member.to_string());
-        }
-    }
-    for path in read_dir(".").unwrap() {
-        let path = path.unwrap();
-        let name = path.file_name();
-        if !members.iter().any(|x| x == &name.to_string_lossy())
-            && path.path().is_dir()
-            && !EXCLUDE_MEMBERS.iter().any(|x| x == &name.to_string_lossy())
-            && !EXCLUDE_DIRS.iter().any(|x| x == &name.to_string_lossy())
-        {
-            panic!(
-                "\"{}\" not in manifest and not excluded",
-                path.file_name().to_string_lossy()
-            );
-        }
-    }
-    members.sort();
-    members
+#[derive(Debug, Deserialize)]
+struct CratesIoVersionResponse {
+    version: CratesIoVersion,
 }
 
-fn dependencies(member: &str) -> Vec<String> {
-    let cargo_text = read_to_string(PathBuf::from(".").join(member).join("Cargo.toml"))
-        .expect("reading cargo toml");
-    let cargo_toml = cargo_text.parse::<Table>().expect("parsing cargo toml");
-    assert!(cargo_toml.contains_key("dependencies"));
-    let mut deps = Vec::new();
-    let dependencies_table = cargo_toml["dependencies"]
-        .as_table()
-        .expect("parsing dependencies");
-    for dep in dependencies_table {
-        deps.push(dep.0.to_string());
-    }
-    deps
+#[derive(Debug, Deserialize)]
+struct CratesIoVersion {
+    num: String,
 }
 
-fn graph() -> (Vec<String>, Vec<(String, String)>) {
-    let vertices = workspace_members();
-    let mut edges = Vec::new();
-    for member in vertices.iter() {
-        for dependency in dependencies(member).into_iter() {
-            if PathBuf::from(".").join(&dependency).is_dir() {
-                edges.push((dependency, member.clone()));
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Action {
+    Publish,
+    Print,
+    Stay,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PublishCommand {
+    crate_name: String,
+    version: Version,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Mode {
+    PrintPackages,
+    PrepareRelease,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    match parse_mode(env::args().skip(1))? {
+        Mode::PrintPackages => print_packages(),
+        Mode::PrepareRelease => prepare_release(),
+    }
+}
+
+fn parse_mode<I, S>(args: I) -> Result<Mode, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let args = args.into_iter().collect::<Vec<_>>();
+    match args.as_slice() {
+        [] => Ok(Mode::PrintPackages),
+        [arg] if arg.as_ref() == "--prepare" => Ok(Mode::PrepareRelease),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into()),
+    }
+}
+
+fn print_packages() -> Result<(), Box<dyn Error>> {
+    for member in candidate_order() {
+        println!("{member}");
+    }
+    Ok(())
+}
+
+fn prepare_release() -> Result<(), Box<dyn Error>> {
+    ensure_clean_worktree()?;
+
+    let branch_name = format!("publish-{}", Local::now().format("%Y-%m-%d"));
+    let client = Client::builder()
+        .user_agent("https://github.com/rescrv/blue;crate:meta;bin:publish")
+        .build()?;
+    let mut branch_created = false;
+    let mut planned_publishes = Vec::new();
+
+    for member in candidate_order() {
+        let package = package(&member);
+        let crates_exists = published_on_crates_io(&client, &package.name, &package.version)?;
+        let tag_exists = tag_exists(&package.name, &package.version)?;
+        let has_changed = if tag_exists && crates_exists {
+            has_changed_since_tag(&package.name, &package.version, &package.member)?
+        } else {
+            false
+        };
+
+        match classify(tag_exists, crates_exists, has_changed) {
+            Action::Stay => {
+                println!(
+                    "{} {}: tag exists, crates.io version exists, no changes; staying",
+                    package.name, package.version
+                );
+            }
+            Action::Print => {
+                if tag_exists {
+                    println!(
+                        "{} {}: git tag exists but crates.io version is missing; inspect manually",
+                        package.name, package.version
+                    );
+                } else {
+                    println!(
+                        "{} {}: crates.io version exists without a matching tag; inspect manually",
+                        package.name, package.version
+                    );
+                }
+            }
+            Action::Publish => {
+                let Some(publish) = prepare_publish(
+                    &package.name,
+                    &package.version,
+                    &package.member,
+                    tag_exists,
+                    &branch_name,
+                    &mut branch_created,
+                )?
+                else {
+                    continue;
+                };
+                planned_publishes.push(publish);
             }
         }
     }
-    (vertices, edges)
-}
 
-fn candidate_order() -> Vec<String> {
-    let mut in_sequence = Vec::new();
-    let (mut vertices, mut edges) = graph();
-    while !vertices.is_empty() {
-        let mut candidates = Vec::new();
-        for vertex in vertices.iter() {
-            let num_inbound_edges = edges.iter().filter(|p| &p.1 == vertex).count();
-            if num_inbound_edges == 0 {
-                candidates.push(vertex);
-            }
-        }
-        candidates.sort();
-        let candidate = candidates[0].to_owned();
-        vertices.retain(|v| v != &candidate);
-        edges.retain(|(src, _)| src != &candidate);
-        in_sequence.push(candidate);
+    if !branch_created {
+        println!("no version bumps selected; no branch created and no publish script written");
+        return Ok(());
     }
-    in_sequence
+
+    commit_version_bumps(&branch_name)?;
+    write_publish_script(&planned_publishes)?;
+    println!(
+        "wrote {} with {} tag commands followed by {} cargo publish commands",
+        PUBLISH_SCRIPT,
+        planned_publishes.len(),
+        planned_publishes.len()
+    );
+    Ok(())
 }
 
-fn main() {
-    let candidates = candidate_order();
-    for candidate in candidates.iter() {
-        println!("{candidate}");
+fn classify(tag_exists: bool, crates_exists: bool, has_changed: bool) -> Action {
+    match (tag_exists, crates_exists, has_changed) {
+        (true, true, true) => Action::Publish,
+        (true, true, false) => Action::Stay,
+        (false, true, _) => Action::Print,
+        (false, false, _) => Action::Publish,
+        (true, false, _) => Action::Print,
+    }
+}
+
+fn published_on_crates_io(
+    client: &Client,
+    crate_name: &str,
+    version: &Version,
+) -> Result<bool, Box<dyn Error>> {
+    let url = format!("https://crates.io/api/v1/crates/{crate_name}/{version}");
+    let response = client.get(url).send()?;
+    match response.status() {
+        StatusCode::OK => {
+            let response: CratesIoVersionResponse = response.json()?;
+            Ok(response.version.num == version.to_string())
+        }
+        StatusCode::NOT_FOUND => Ok(false),
+        status => {
+            Err(format!("crates.io lookup failed for {crate_name} {version}: {status}").into())
+        }
+    }
+}
+
+fn tag_exists(crate_name: &str, version: &Version) -> Result<bool, Box<dyn Error>> {
+    let tag = format!("refs/tags/{crate_name}@{version}");
+    let status = Command::new("git")
+        .args(["rev-parse", "--verify", "--quiet", &tag])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    Ok(status.success())
+}
+
+fn has_changed_since_tag(
+    crate_name: &str,
+    version: &Version,
+    member: &str,
+) -> Result<bool, Box<dyn Error>> {
+    let tag = format!("refs/tags/{crate_name}@{version}");
+    let status = Command::new("git")
+        .args(["diff", "--quiet", &tag, "--", member])
+        .status()?;
+    match status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(format!("git diff failed for {crate_name}@{version}").into()),
+    }
+}
+
+fn prepare_publish(
+    crate_name: &str,
+    current_version: &Version,
+    member: &str,
+    current_tag_exists: bool,
+    branch_name: &str,
+    branch_created: &mut bool,
+) -> Result<Option<PublishCommand>, Box<dyn Error>> {
+    println!();
+    println!("publishing candidate: {crate_name} {current_version}");
+    if current_tag_exists {
+        println!(
+            "review delta with: git diff refs/tags/{crate_name}@{current_version} -- {member}"
+        );
+    } else {
+        println!("review history with: git log --stat -- {member}");
+    }
+
+    let new_version = loop {
+        let Some(new_version) = prompt_for_version(crate_name, current_version)? else {
+            println!("skipping {crate_name} {current_version}");
+            return Ok(None);
+        };
+        if tag_exists(crate_name, &new_version)? {
+            println!("{crate_name} {new_version} already has a git tag");
+            continue;
+        }
+        break new_version;
+    };
+
+    if !*branch_created {
+        create_branch(branch_name)?;
+        *branch_created = true;
+    }
+
+    run(Command::new("./update-version").args([
+        crate_name,
+        &current_version.to_string(),
+        &short_version(current_version),
+        &new_version.to_string(),
+        &short_version(&new_version),
+    ]))?;
+
+    println!("buffered: git tag {crate_name}@{new_version} HEAD && cargo publish -p {crate_name}");
+    Ok(Some(PublishCommand {
+        crate_name: crate_name.to_string(),
+        version: new_version,
+    }))
+}
+
+fn create_branch(branch_name: &str) -> Result<(), Box<dyn Error>> {
+    run(Command::new("git").args(["switch", "-c", branch_name]))?;
+    println!("created branch {branch_name}");
+    Ok(())
+}
+
+fn commit_version_bumps(branch_name: &str) -> Result<(), Box<dyn Error>> {
+    run(Command::new("git").args(["add", "-u"]))?;
+    let message = format!("publish {}", Local::now().format("%Y-%m-%d"));
+    run(Command::new("git").args(["commit", "-m", &message]))?;
+    println!("committed version bumps on {branch_name}");
+    Ok(())
+}
+
+fn write_publish_script(planned_publishes: &[PublishCommand]) -> Result<(), Box<dyn Error>> {
+    let contents = render_publish_script(planned_publishes);
+    fs::write(PUBLISH_SCRIPT, contents)?;
+    let permissions = fs::Permissions::from_mode(0o755);
+    fs::set_permissions(PUBLISH_SCRIPT, permissions)?;
+    Ok(())
+}
+
+fn render_publish_script(planned_publishes: &[PublishCommand]) -> String {
+    let mut script = String::from("#!/usr/bin/env bash\nset -euo pipefail\n\n");
+    script.push_str("# Tag the release commit for every crate before publishing.\n");
+    for publish in planned_publishes {
+        script.push_str(&format!(
+            "git tag {}@{} HEAD\n",
+            publish.crate_name, publish.version
+        ));
+    }
+    script.push('\n');
+    script.push_str("# Publish in topological order after all tags are in place.\n");
+    for publish in planned_publishes {
+        script.push_str(&format!("cargo publish -p {}\n", publish.crate_name));
+    }
+    script
+}
+
+fn prompt_for_version(
+    crate_name: &str,
+    current_version: &Version,
+) -> Result<Option<Version>, Box<dyn Error>> {
+    print!("what version would you like to publish for {crate_name} (current {current_version})? ");
+    io::stdout().flush()?;
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(line.parse()?))
+}
+
+fn ensure_clean_worktree() -> Result<(), Box<dyn Error>> {
+    let output = Command::new("git").args(["status", "--short"]).output()?;
+    if !output.status.success() {
+        return Err("git status --short failed".into());
+    }
+    if !output.stdout.is_empty() {
+        return Err(
+            "publish preparation requires a clean worktree before creating the release branch"
+                .into(),
+        );
+    }
+    if Path::new(PUBLISH_SCRIPT).exists() {
+        return Err(
+            format!("{PUBLISH_SCRIPT} already exists; remove it or rename it first").into(),
+        );
+    }
+    Ok(())
+}
+
+fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
+    let status = command
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("command failed: {command:?}").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use semver::Version;
+
+    use super::{classify, parse_mode, render_publish_script, Action, Mode, PublishCommand};
+
+    #[test]
+    fn defaults_to_print_packages_mode() {
+        assert_eq!(parse_mode(Vec::<&str>::new()).unwrap(), Mode::PrintPackages);
+    }
+
+    #[test]
+    fn prepare_release_requires_explicit_flag() {
+        assert_eq!(parse_mode(["--prepare"]).unwrap(), Mode::PrepareRelease);
+    }
+
+    #[test]
+    fn rejects_unknown_args() {
+        assert_eq!(
+            parse_mode(["--wat"]).unwrap_err().to_string(),
+            "usage: publish [--prepare]"
+        );
+    }
+
+    #[test]
+    fn truth_table_exists_exists_changed() {
+        assert_eq!(classify(true, true, true), Action::Publish);
+    }
+
+    #[test]
+    fn truth_table_exists_exists_unchanged() {
+        assert_eq!(classify(true, true, false), Action::Stay);
+    }
+
+    #[test]
+    fn truth_table_missing_tag_existing_crate() {
+        assert_eq!(classify(false, true, false), Action::Print);
+    }
+
+    #[test]
+    fn truth_table_missing_tag_missing_crate() {
+        assert_eq!(classify(false, false, false), Action::Publish);
+    }
+
+    #[test]
+    fn unexpected_tag_without_crate_prints() {
+        assert_eq!(classify(true, false, false), Action::Print);
+    }
+
+    #[test]
+    fn render_script_tags_before_publish() {
+        let planned = vec![
+            PublishCommand {
+                crate_name: "handled".to_string(),
+                version: Version::parse("0.6.0").unwrap(),
+            },
+            PublishCommand {
+                crate_name: "lsmtk".to_string(),
+                version: Version::parse("0.15.0").unwrap(),
+            },
+        ];
+        let script = render_publish_script(&planned);
+        assert!(
+            script.contains("git tag handled@0.6.0 HEAD\ngit tag lsmtk@0.15.0 HEAD\n\n# Publish")
+        );
+        assert!(script.contains("cargo publish -p handled\ncargo publish -p lsmtk\n"));
     }
 }

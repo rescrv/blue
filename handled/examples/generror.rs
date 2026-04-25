@@ -107,7 +107,7 @@ fn generate_error(guac: &mut Guacamole, output: &mut Vec<u8>) {
             }
         }
     }
-    writeln!(output, "{}", err).expect("write failed");
+    writeln!(output, "{err}").expect("write failed");
 }
 
 fn main() {
