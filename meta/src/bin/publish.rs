@@ -42,7 +42,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     ensure_clean_worktree()?;
 
     let branch_name = format!("publish-{}", Local::now().format("%Y-%m-%d"));
-    let client = Client::builder().user_agent("https://github.com/rescrv/blue;crate:meta;bin:publish").build()?;
+    let client = Client::builder()
+        .user_agent("https://github.com/rescrv/blue;crate:meta;bin:publish")
+        .build()?;
     let mut branch_created = false;
     let mut planned_publishes = Vec::new();
 
