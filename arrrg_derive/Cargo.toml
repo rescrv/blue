@@ -11,8 +11,8 @@ repository = "https://github.com/rescrv/blue"
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
-quote = "1.0"
-proc-macro2 = "1.0"
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
 
-derive_util = { path = "../derive_util", version = "0.5" }
+derive_util = { workspace = true }

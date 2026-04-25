@@ -1,6 +1,6 @@
 [package]
 name = "handled"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = "2021"
 description = "handled is an error handling library"
@@ -13,10 +13,10 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.12" }
+biometrics = { workspace = true }
 
 [dev-dependencies]
-guacamole = { path = "../guacamole" }
+guacamole = { workspace = true }
 
 [[example]]
 name = "generror"

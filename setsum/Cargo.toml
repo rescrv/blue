@@ -13,8 +13,7 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-sha3 = "0.10"
-
+sha3 = { workspace = true }
 [[bin]]
 name = "setsum-calculator"
 path = "src/bin/setsum-calculator.rs"

@@ -14,11 +14,11 @@ binaries = []
 prototk = ["dep:buffertk", "dep:prototk", "dep:prototk_derive"]
 
 [dependencies]
-biometrics = { path = "../biometrics", version = "0.12" }
-buffertk = { path = "../buffertk", version = "0.13", optional = true }
-prototk = { path = "../prototk", version = "0.13", optional = true }
-prototk_derive = { path = "../prototk_derive", version = "0.13", optional = true }
-tatl = { path = "../tatl", version = "0.13" }
+biometrics = { workspace = true }
+buffertk = { workspace = true, optional = true }
+prototk = { workspace = true, optional = true }
+prototk_derive = { workspace = true, optional = true }
+tatl = { workspace = true }
 
 [[example]]
 name = "macros"

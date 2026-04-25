@@ -13,13 +13,13 @@ default = ["binaries"]
 binaries = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
-getopts = { version = "0.2", optional = true }
+getopts = { workspace = true, optional = true }
 
-arrrg = { path = "../arrrg", version = "0.8", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
-biometrics = { path = "../biometrics", version = "0.12" }
-shvar = { path = "../shvar", version = "0.8" }
-utf8path = { path = "../utf8path", version = "0.9" }
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+biometrics = { workspace = true }
+shvar = { workspace = true }
+utf8path = { workspace = true }
 
 [[bin]]
 name = "rcscript"

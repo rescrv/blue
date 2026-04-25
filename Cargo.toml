@@ -63,6 +63,71 @@ members = [
     "zerror_full",
 ]
 
+[workspace.dependencies]
+armnod = { path = "armnod", version = "0.11.0" }
+arrrg = { path = "arrrg", version = "0.8.0" }
+arrrg_derive = { path = "arrrg_derive", version = "0.8.0" }
+biometrics = { path = "biometrics", version = "0.12.0" }
+biometrics_prometheus = { path = "biometrics_prometheus", version = "0.9.0" }
+biometrics_sys = { path = "biometrics_sys", version = "0.7.0" }
+bloomcalc = { path = "bloomcalc", version = "0.8.0" }
+buffertk = { path = "buffertk", version = "0.13.0" }
+busyrpc = { path = "busyrpc", version = "0.13.0" }
+derive_util = { path = "derive_util", version = "0.5.0" }
+guacamole = { path = "guacamole", version = "0.14.0" }
+handled = { path = "handled", version = "0.6.0" }
+indicio = { path = "indicio", version = "0.12.0" }
+k8src = { path = "k8src", version = "0.15.0" }
+listfree = { path = "listfree", version = "0.7.0" }
+mani = { path = "mani", version = "0.10.0" }
+minimal_signals = { path = "minimal_signals", version = "0.5.0" }
+one_two_eight = { path = "one_two_eight", version = "0.10.0" }
+prototk = { path = "prototk", version = "0.13.0" }
+prototk_derive = { path = "prototk_derive", version = "0.13.0" }
+rc_conf = { path = "rc_conf", version = "0.13.0" }
+rpc_pb = { path = "rpc_pb", version = "0.14.0" }
+scrunch = { path = "scrunch", version = "0.9.0" }
+setsum = { path = "setsum", version = "0.7.0" }
+shvar = { path = "shvar", version = "0.8.0" }
+sig_fig_histogram = { path = "sig_fig_histogram", version = "0.6.0" }
+skipfree = { path = "skipfree", version = "0.9.0" }
+sst = { path = "sst", version = "0.18.0" }
+statslicer = { path = "statslicer", version = "0.9.0" }
+sync42 = { path = "sync42", version = "0.15.0" }
+tag_index = { path = "tag_index", version = "0.8.0" }
+tatl = { path = "tatl", version = "0.13.0" }
+tuple_key = { path = "tuple_key", version = "0.13.0" }
+tuple_key_derive = { path = "tuple_key_derive", version = "0.11.0" }
+tuple_routing = { path = "tuple_routing", version = "0.8.0" }
+unix_sock = { path = "unix_sock", version = "0.9.0" }
+utf8path = { path = "utf8path", version = "0.9.1" }
+utilz = { path = "utilz", version = "0.7.0" }
+zerror = { path = "zerror", version = "0.8.0" }
+zerror_core = { path = "zerror_core", version = "0.13.0" }
+zerror_derive = { path = "zerror_derive", version = "0.7.0" }
+
+crc32c = { version = "0.6" }
+syn = { version = "1.0" }
+sha3 = { version = "0.10" }
+libc = { version = "0.2" }
+rand = { version = "0.7" }
+toml = { version = "0.7" }
+nom = { version = "7.1" }
+serde = { version = "1.0", features = ["derive"] }
+boring = { version = "4.9.1" }
+chrono = { version = "0.4" }
+semver = { version = "1.0" }
+getopts = { version = "0.2" }
+proptest = { version = "1.0" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+proc-macro2 = { version = "1.0" }
+rustyline = { version = "11.0" }
+quote = { version = "1.0" }
+serde_yaml = { version = "0.9" }
+serde_json = { version = "1.0" }
+siphasher = { version = "1.0.0" }
+libsodium-sys-stable = { version = "1.19" }
+
 [profile.dev]
 panic = "abort"
 

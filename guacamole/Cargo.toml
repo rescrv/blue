@@ -13,10 +13,10 @@ default = ["binaries"]
 binaries = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
-getopts = { version = "0.2", optional = true }
+getopts = { workspace = true, optional = true }
 
-arrrg = { path = "../arrrg", version = "0.8", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
 
 [[bin]]
 name = "guacamole"

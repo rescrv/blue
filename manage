@@ -80,7 +80,7 @@ if __name__ == '__main__':
             print('skipping')
             continue
         subprocess.check_call((os.path.join(root, 'update-version'), crate, old_version, short_version(old_version), new_version, short_version(new_version)), cwd=root)
-        subprocess.check_call(('git', 'add', *glob.glob('*/Cargo.toml')), cwd=root)
+        subprocess.check_call(('git', 'add', 'Cargo.toml', *glob.glob('*/Cargo.toml')), cwd=root)
         subprocess.check_call(('git', 'commit', '-m', '[{}] v{}'.format(crate, new_version)))
         subprocess.check_call(('git', 'tag', '-a', '-m', '[{}] v{}'.format(crate, new_version), '{}@{}'.format(crate, new_version)))
         subprocess.check_call(('cargo', 'publish', '-p', crate, '-n'))

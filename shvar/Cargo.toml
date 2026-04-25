@@ -15,8 +15,7 @@ binaries = []
 [dependencies]
 
 [dev-dependencies]
-proptest = "1.0"
-
+proptest = { workspace = true }
 [[example]]
 name = "tests"
 path = "examples/tests.rs"

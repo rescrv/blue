@@ -13,19 +13,19 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-libc = "0.2"
-getopts = { version = "0.2" }
+libc = { workspace = true }
+getopts = { workspace = true }
 
-arrrg = { path = "../arrrg", version = "0.8" }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8" }
-biometrics = { path = "../biometrics", version = "0.12" }
-indicio = { path = "../indicio", version = "0.12" }
-minimal_signals = { path = "../minimal_signals", version = "0.5" }
-one_two_eight = { path = "../one_two_eight", version = "0.10" }
-rc_conf = { path = "../rc_conf", version = "0.13" }
-shvar = { path = "../shvar", version = "0.8" }
-unix_sock = { path = "../unix_sock", version = "0.9" }
-utf8path = { path = "../utf8path", version = "0.9" }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+biometrics = { workspace = true }
+indicio = { workspace = true }
+minimal_signals = { workspace = true }
+one_two_eight = { workspace = true }
+rc_conf = { workspace = true }
+shvar = { workspace = true }
+unix_sock = { workspace = true }
+utf8path = { workspace = true }
 
 [[bin]]
 name = "rustrc"

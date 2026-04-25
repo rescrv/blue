@@ -14,25 +14,24 @@ binaries = ["command_line"]
 command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
 
 [dependencies]
-libc = "0.2"
-boring = "4.9.1"
-crc32c = "0.6"
+libc = { workspace = true }
+boring = { workspace = true }
+crc32c = { workspace = true }
+getopts = { workspace = true, optional = true }
 
-biometrics = { path = "../biometrics", version = "0.12" }
-buffertk = { path = "../buffertk", version = "0.13" }
-indicio = { path = "../indicio", version = "0.12" }
-prototk = { path = "../prototk", version = "0.13" }
-prototk_derive = { path = "../prototk_derive", version = "0.13" }
-rpc_pb = { path = "../rpc_pb", version = "0.14" }
-sync42 = { path = "../sync42", version = "0.15" }
-tatl = { path = "../tatl", version = "0.13" }
-utilz = { path = "../utilz", version = "0.7" }
-zerror = { path = "../zerror", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-
-getopts = { version = "0.2", optional = true }
-arrrg = { path = "../arrrg", version = "0.8", optional = true }
-arrrg_derive = { path = "../arrrg_derive", version = "0.8", optional = true }
+biometrics = { workspace = true }
+buffertk = { workspace = true }
+indicio = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+rpc_pb = { workspace = true }
+sync42 = { workspace = true }
+tatl = { workspace = true }
+utilz = { workspace = true }
+zerror = { workspace = true }
+zerror_core = { workspace = true }
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
 
 [[example]]
 name = "busyrpc-benchmark-client"

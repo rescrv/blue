@@ -13,9 +13,9 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-rustyline = "11.0"
+rustyline = { workspace = true }
 
-utilz = { path = "../utilz", version = "0.7" }
+utilz = { workspace = true }
 
 [[example]]
 name = "texttale"

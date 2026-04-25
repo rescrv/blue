@@ -13,21 +13,20 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-nom = "7.1"
+nom = { workspace = true }
 
-buffertk = { path = "../buffertk", version = "0.13" }
-prototk = { path = "../prototk", version = "0.13" }
-prototk_derive = { path = "../prototk_derive", version = "0.13" }
-sst = { path = "../sst", version = "0.18" }
-tuple_key = { path = "../tuple_key", version = "0.13" }
-tuple_key_derive = { path = "../tuple_key_derive", version = "0.11" }
-zerror = { path = "../zerror", version = "0.8" }
-zerror_core = { path = "../zerror_core", version = "0.13" }
-zerror_derive = { path = "../zerror_derive", version = "0.7" }
+buffertk = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+sst = { workspace = true }
+tuple_key = { workspace = true }
+tuple_key_derive = { workspace = true }
+zerror = { workspace = true }
+zerror_core = { workspace = true }
+zerror_derive = { workspace = true }
 
 [dev-dependencies]
-proptest = "1.0"
-
+proptest = { workspace = true }
 [[bin]]
 name = "protoql-schema-to-protobuf"
 path = "src/bin/protoql-schema-to-protobuf.rs"
