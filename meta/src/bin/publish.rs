@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::{self, Write};
@@ -14,6 +15,7 @@ use serde::Deserialize;
 use ci::{candidate_order, package, short_version};
 
 const PUBLISH_SCRIPT: &str = "publish.sh";
+const USAGE: &str = "usage: publish [--prepare]";
 
 #[derive(Debug, Deserialize)]
 struct CratesIoVersionResponse {
@@ -38,7 +40,40 @@ struct PublishCommand {
     version: Version,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Mode {
+    PrintPackages,
+    PrepareRelease,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+    match parse_mode(env::args().skip(1))? {
+        Mode::PrintPackages => print_packages(),
+        Mode::PrepareRelease => prepare_release(),
+    }
+}
+
+fn parse_mode<I, S>(args: I) -> Result<Mode, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let args = args.into_iter().collect::<Vec<_>>();
+    match args.as_slice() {
+        [] => Ok(Mode::PrintPackages),
+        [arg] if arg.as_ref() == "--prepare" => Ok(Mode::PrepareRelease),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into()),
+    }
+}
+
+fn print_packages() -> Result<(), Box<dyn Error>> {
+    for member in candidate_order() {
+        println!("{member}");
+    }
+    Ok(())
+}
+
+fn prepare_release() -> Result<(), Box<dyn Error>> {
     ensure_clean_worktree()?;
 
     let branch_name = format!("publish-{}", Local::now().format("%Y-%m-%d"));
@@ -306,7 +341,25 @@ fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
 mod tests {
     use semver::Version;
 
-    use super::{classify, render_publish_script, Action, PublishCommand};
+    use super::{classify, parse_mode, render_publish_script, Action, Mode, PublishCommand};
+
+    #[test]
+    fn defaults_to_print_packages_mode() {
+        assert_eq!(parse_mode(Vec::<&str>::new()).unwrap(), Mode::PrintPackages);
+    }
+
+    #[test]
+    fn prepare_release_requires_explicit_flag() {
+        assert_eq!(parse_mode(["--prepare"]).unwrap(), Mode::PrepareRelease);
+    }
+
+    #[test]
+    fn rejects_unknown_args() {
+        assert_eq!(
+            parse_mode(["--wat"]).unwrap_err().to_string(),
+            "usage: publish [--prepare]"
+        );
+    }
 
     #[test]
     fn truth_table_exists_exists_changed() {
