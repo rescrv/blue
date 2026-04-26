@@ -40,6 +40,13 @@ struct PublishCommand {
     version: Version,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum VersionSelection {
+    Current,
+    New(Version),
+    Skip,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
     PrintPackages,
@@ -118,6 +125,7 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
                     &package.name,
                     &package.version,
                     &package.member,
+                    crates_exists,
                     tag_exists,
                     &branch_name,
                     &mut branch_created,
@@ -130,8 +138,8 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if !branch_created {
-        println!("no version bumps selected; no branch created and no publish script written");
+    if planned_publishes.is_empty() {
+        println!("no publishes selected; no branch created and no publish script written");
         return Ok(());
     }
 
@@ -205,6 +213,7 @@ fn prepare_publish(
     crate_name: &str,
     current_version: &Version,
     member: &str,
+    current_version_exists_on_crates_io: bool,
     current_tag_exists: bool,
     branch_name: &str,
     branch_created: &mut bool,
@@ -219,11 +228,17 @@ fn prepare_publish(
         println!("review history with: git log --stat -- {member}");
     }
 
+    let allow_current_version = !current_version_exists_on_crates_io && !current_tag_exists;
     let new_version = loop {
-        let Some(new_version) = prompt_for_version(crate_name, current_version)? else {
-            println!("skipping {crate_name} {current_version}");
-            return Ok(None);
-        };
+        let new_version =
+            match prompt_for_version(crate_name, current_version, allow_current_version)? {
+                VersionSelection::Current => current_version.clone(),
+                VersionSelection::New(new_version) => new_version,
+                VersionSelection::Skip => {
+                    println!("skipping {crate_name} {current_version}");
+                    return Ok(None);
+                }
+            };
         if tag_exists(crate_name, &new_version)? {
             println!("{crate_name} {new_version} already has a git tag");
             continue;
@@ -236,13 +251,19 @@ fn prepare_publish(
         *branch_created = true;
     }
 
-    run(Command::new("./update-version").args([
-        crate_name,
-        &current_version.to_string(),
-        &short_version(current_version),
-        &new_version.to_string(),
-        &short_version(&new_version),
-    ]))?;
+    if &new_version != current_version {
+        run(Command::new("./update-version").args([
+            crate_name,
+            &current_version.to_string(),
+            &short_version(current_version),
+            &new_version.to_string(),
+            &short_version(&new_version),
+        ]))?;
+    } else {
+        println!(
+            "using current unpublished version {crate_name} {new_version} without rewriting manifests"
+        );
+    }
 
     println!("buffered: git tag {crate_name}@{new_version} HEAD && cargo publish -p {crate_name}");
     Ok(Some(PublishCommand {
@@ -259,6 +280,10 @@ fn create_branch(branch_name: &str) -> Result<(), Box<dyn Error>> {
 
 fn commit_version_bumps(branch_name: &str) -> Result<(), Box<dyn Error>> {
     run(Command::new("git").args(["add", "-u"]))?;
+    if index_is_clean()? {
+        println!("no version bump edits to commit on {branch_name}");
+        return Ok(());
+    }
     let message = format!("publish {}", Local::now().format("%Y-%m-%d"));
     run(Command::new("git").args(["commit", "-m", &message]))?;
     println!("committed version bumps on {branch_name}");
@@ -293,16 +318,39 @@ fn render_publish_script(planned_publishes: &[PublishCommand]) -> String {
 fn prompt_for_version(
     crate_name: &str,
     current_version: &Version,
-) -> Result<Option<Version>, Box<dyn Error>> {
-    print!("what version would you like to publish for {crate_name} (current {current_version})? ");
+    allow_current_version: bool,
+) -> Result<VersionSelection, Box<dyn Error>> {
+    if allow_current_version {
+        print!(
+            "what version would you like to publish for {crate_name} (current {current_version}; press enter to keep current, or type skip)? "
+        );
+    } else {
+        print!(
+            "what version would you like to publish for {crate_name} (current {current_version})? "
+        );
+    }
     io::stdout().flush()?;
     let mut line = String::new();
     io::stdin().read_line(&mut line)?;
+    parse_version_selection(&line, allow_current_version)
+}
+
+fn parse_version_selection(
+    line: &str,
+    allow_current_version: bool,
+) -> Result<VersionSelection, Box<dyn Error>> {
     let line = line.trim();
-    if line.is_empty() {
-        return Ok(None);
+    if line.eq_ignore_ascii_case("skip") {
+        return Ok(VersionSelection::Skip);
     }
-    Ok(Some(line.parse()?))
+    if line.is_empty() {
+        return if allow_current_version {
+            Ok(VersionSelection::Current)
+        } else {
+            Ok(VersionSelection::Skip)
+        };
+    }
+    Ok(VersionSelection::New(line.parse()?))
 }
 
 fn ensure_clean_worktree() -> Result<(), Box<dyn Error>> {
@@ -324,6 +372,17 @@ fn ensure_clean_worktree() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn index_is_clean() -> Result<bool, Box<dyn Error>> {
+    let status = Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .status()?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err("git diff --cached --quiet failed".into()),
+    }
+}
+
 fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
     let status = command
         .stdin(Stdio::inherit())
@@ -341,7 +400,10 @@ fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
 mod tests {
     use semver::Version;
 
-    use super::{Action, Mode, PublishCommand, classify, parse_mode, render_publish_script};
+    use super::{
+        Action, Mode, PublishCommand, VersionSelection, classify, parse_mode,
+        parse_version_selection, render_publish_script,
+    };
 
     #[test]
     fn defaults_to_print_packages_mode() {
@@ -403,5 +465,41 @@ mod tests {
             script.contains("git tag handled@0.6.0 HEAD\ngit tag lsmtk@0.15.0 HEAD\n\n# Publish")
         );
         assert!(script.contains("cargo publish -p handled\ncargo publish -p lsmtk\n"));
+    }
+
+    #[test]
+    fn empty_input_keeps_current_when_current_version_is_unpublished() {
+        assert_eq!(
+            parse_version_selection("", true).unwrap(),
+            VersionSelection::Current
+        );
+    }
+
+    #[test]
+    fn empty_input_skips_when_new_version_is_required() {
+        assert_eq!(
+            parse_version_selection("", false).unwrap(),
+            VersionSelection::Skip
+        );
+    }
+
+    #[test]
+    fn skip_input_always_skips() {
+        assert_eq!(
+            parse_version_selection("skip", true).unwrap(),
+            VersionSelection::Skip
+        );
+        assert_eq!(
+            parse_version_selection("skip", false).unwrap(),
+            VersionSelection::Skip
+        );
+    }
+
+    #[test]
+    fn explicit_input_parses_a_new_version() {
+        assert_eq!(
+            parse_version_selection("0.15.0", true).unwrap(),
+            VersionSelection::New(Version::parse("0.15.0").unwrap())
+        );
     }
 }
