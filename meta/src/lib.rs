@@ -1,8 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{read_dir, read_to_string};
 use std::path::PathBuf;
 
 use semver::Version;
-use toml::Table;
+use toml::{Table, Value};
 
 pub const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb"];
 
@@ -87,23 +88,54 @@ pub fn dependencies(member: &str) -> Vec<String> {
     let cargo_text = read_to_string(PathBuf::from(".").join(member).join("Cargo.toml"))
         .expect("reading cargo toml");
     let cargo_toml = cargo_text.parse::<Table>().expect("parsing cargo toml");
-    let Some(dependencies_table) = cargo_toml.get("dependencies").and_then(|v| v.as_table()) else {
-        return Vec::new();
-    };
-    let mut deps = Vec::new();
-    for dep in dependencies_table {
-        deps.push(dep.0.to_string());
+    dependency_names(&cargo_toml)
+}
+
+fn dependency_names(cargo_toml: &Table) -> Vec<String> {
+    let mut deps = BTreeSet::new();
+    collect_dependencies(cargo_toml, &mut deps);
+    if let Some(targets) = cargo_toml.get("target").and_then(|v| v.as_table()) {
+        for target in targets.values() {
+            let target = target.as_table().expect("parsing target table");
+            collect_dependencies(target, &mut deps);
+        }
     }
-    deps
+    deps.into_iter().collect()
+}
+
+fn collect_dependencies(cargo_toml: &Table, deps: &mut BTreeSet<String>) {
+    for heading in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        let Some(dependencies_table) = cargo_toml.get(heading).and_then(|v| v.as_table()) else {
+            continue;
+        };
+        for (dependency, spec) in dependencies_table {
+            deps.insert(dependency_name(dependency, spec));
+        }
+    }
+}
+
+fn dependency_name(dependency: &str, spec: &Value) -> String {
+    spec.as_table()
+        .and_then(|table| table.get("package"))
+        .and_then(Value::as_str)
+        .unwrap_or(dependency)
+        .to_string()
 }
 
 pub fn graph() -> (Vec<String>, Vec<(String, String)>) {
     let vertices = workspace_members();
+    let local_members = vertices
+        .iter()
+        .map(|member| {
+            let package = package(member);
+            (package.name, member.clone())
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut edges = Vec::new();
     for member in &vertices {
         for dependency in dependencies(member) {
-            if PathBuf::from(".").join(&dependency).is_dir() {
-                edges.push((dependency, member.clone()));
+            if let Some(local_member) = local_members.get(&dependency) {
+                edges.push((local_member.clone(), member.clone()));
             }
         }
     }
@@ -111,8 +143,12 @@ pub fn graph() -> (Vec<String>, Vec<(String, String)>) {
 }
 
 pub fn candidate_order() -> Vec<String> {
+    let (vertices, edges) = graph();
+    topological_order(vertices, edges)
+}
+
+fn topological_order(mut vertices: Vec<String>, mut edges: Vec<(String, String)>) -> Vec<String> {
     let mut in_sequence = Vec::new();
-    let (mut vertices, mut edges) = graph();
     while !vertices.is_empty() {
         let mut candidates = Vec::new();
         for vertex in &vertices {
@@ -146,8 +182,9 @@ pub fn short_version(version: &Version) -> String {
 #[cfg(test)]
 mod tests {
     use semver::Version;
+    use toml::Table;
 
-    use super::short_version;
+    use super::{dependency_names, short_version, topological_order};
 
     #[test]
     fn short_version_for_stable_series() {
@@ -162,5 +199,50 @@ mod tests {
     #[test]
     fn short_version_for_zero_zero_series() {
         assert_eq!(short_version(&Version::parse("0.0.7").unwrap()), "0.0.7");
+    }
+
+    #[test]
+    fn dependency_names_include_all_dependency_kinds() {
+        let manifest = r#"
+[dependencies]
+handled = "0.7"
+renamed = { package = "zerror", version = "0.9" }
+
+[dev-dependencies]
+arrrg = "0.9"
+
+[build-dependencies]
+prototk = "0.14"
+
+[target.'cfg(unix)'.dependencies]
+buffertk = "0.14"
+
+[target.'cfg(test)'.dev-dependencies]
+sync42 = "0.16"
+"#
+        .parse::<Table>()
+        .unwrap();
+        assert_eq!(
+            dependency_names(&manifest),
+            vec![
+                "arrrg".to_string(),
+                "buffertk".to_string(),
+                "handled".to_string(),
+                "prototk".to_string(),
+                "sync42".to_string(),
+                "zerror".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn topological_order_places_dependencies_first() {
+        assert_eq!(
+            topological_order(
+                vec!["arrrg".to_string(), "buffertk".to_string()],
+                vec![("arrrg".to_string(), "buffertk".to_string())],
+            ),
+            vec!["arrrg".to_string(), "buffertk".to_string()]
+        );
     }
 }
