@@ -2,8 +2,8 @@
 
 use std::hash::Hash;
 
-use buffertk::{v64, Unpackable};
-use zerror::{iotoz, Z};
+use buffertk::{Unpackable, v64};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 pub use prototk::{FieldNumber, WireType};
@@ -1865,7 +1865,10 @@ mod test {
                 })
                 .unwrap();
             if let Err(err) = schema1.check_compatibility(&schema2) {
-                assert_eq!("SchemaIncompatibility { what: \"lhs and rhs have same fields, but different values\" }", err.to_string());
+                assert_eq!(
+                    "SchemaIncompatibility { what: \"lhs and rhs have same fields, but different values\" }",
+                    err.to_string()
+                );
             } else {
                 panic!();
             }

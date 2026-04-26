@@ -32,11 +32,7 @@ pub fn option<P: FnMut(&mut Guacamole) -> bool, F: FnMut(&mut Guacamole) -> T, T
     mut func: F,
 ) -> impl FnMut(&mut Guacamole) -> Option<T> {
     move |guac| {
-        if pred(guac) {
-            Some(func(guac))
-        } else {
-            None
-        }
+        if pred(guac) { Some(func(guac)) } else { None }
     }
 }
 
@@ -120,20 +116,20 @@ pub fn to_vec<L: FnMut(&mut Guacamole) -> usize, F: FnMut(&mut Guacamole) -> T, 
 
 /// Map the type returned by a function that takes guacamole to another type.
 pub fn map<F: FnMut(&mut Guacamole) -> T, M: FnMut(T) -> U, T, U>(
-    mut gen: F,
+    mut generate: F,
     mut map: M,
 ) -> impl FnMut(&mut Guacamole) -> U {
-    move |guac| map(gen(guac))
+    move |guac| map(generate(guac))
 }
 
 /// Filter values returned by guacamole, returning the first generated value that matches the
 /// prescribed predicate.
 pub fn filter<F: FnMut(&mut Guacamole) -> T, P: FnMut(&T) -> bool, T>(
-    mut gen: F,
+    mut generate: F,
     mut pred: P,
 ) -> impl FnMut(&mut Guacamole) -> T {
     move |guac| loop {
-        let t = gen(guac);
+        let t = generate(guac);
         if pred(&t) {
             return t;
         }

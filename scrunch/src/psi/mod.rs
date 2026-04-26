@@ -1,8 +1,8 @@
 use buffertk::Unpackable;
 
+use crate::Error;
 use crate::builder::{Builder, Helper};
 use crate::sigma::Sigma;
-use crate::Error;
 
 pub mod wavelet_tree;
 
@@ -158,7 +158,7 @@ pub fn compute(isa: &[usize]) -> Vec<usize> {
 pub mod tests {
     use buffertk::Unpackable;
 
-    use crate::test_util::{assert_eq_with_ctx, test_cases_for, TestCase};
+    use crate::test_util::{TestCase, assert_eq_with_ctx, test_cases_for};
 
     use super::super::builder::Builder;
     use super::super::psi::ReferencePsi;

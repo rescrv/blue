@@ -1,8 +1,8 @@
 use buffertk::Unpackable;
 
+use super::Error;
 use super::bit_array::BitArray;
 use super::bit_array::Builder as BitArrayBuilder;
-use super::Error;
 use crate::binary_search::partition_by;
 use crate::builder::{Builder, Helper};
 

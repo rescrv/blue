@@ -1,5 +1,5 @@
-use guacamole::combinators::*;
 use guacamole::Guacamole;
+use guacamole::combinators::*;
 
 use tag_index::{Tag, Tags};
 
@@ -41,8 +41,8 @@ fn generator<'a>(
 fn materialize(guac: &mut Guacamole, tag: Tag) -> Vec<Tag<'static>> {
     if tag.value().starts_with('!') {
         let mut ret = vec![];
-        let mut gen = generator(tag.key(), tag.value());
-        while let Some(tag) = gen(guac) {
+        let mut generate = generator(tag.key(), tag.value());
+        while let Some(tag) = generate(guac) {
             ret.push(tag.into_owned());
         }
         ret

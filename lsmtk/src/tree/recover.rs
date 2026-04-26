@@ -142,12 +142,10 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Vers
     }
     // Create the tree from the provided levels.
     let mut levels = vec![Level::default(); NUM_LEVELS];
-    for (v, m) in std::iter::zip(vertices.into_iter(), metadata.into_iter()) {
+    for (v, m) in std::iter::zip(vertices, metadata) {
         levels[v.level].ssts.push(Arc::new(m));
     }
-    levels[0]
-        .ssts
-        .sort_by(|lhs, rhs| lhs.smallest_timestamp.cmp(&rhs.smallest_timestamp));
+    levels[0].ssts.sort_by_key(|lhs| lhs.smallest_timestamp);
     for level in levels[1..].iter_mut() {
         // NOTE(rescrv):  This is a little sloppy.
         // It assumes the graph algorithm is correct, so comparison by smallest key is sufficient.

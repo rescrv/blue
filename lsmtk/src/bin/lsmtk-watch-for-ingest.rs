@@ -1,4 +1,4 @@
-use std::fs::{read_dir, remove_file, File};
+use std::fs::{File, read_dir, remove_file};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -43,75 +43,99 @@ fn main() {
     TRACING.register(emitter);
     TRACING.set_verbosity(indicio::INFO);
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     let tree_p = Arc::clone(&tree);
-    let _compactor = std::thread::spawn(move || loop {
-        if let Err(err) = tree_p.compaction_thread() {
-            eprintln!("{}", err.long_form());
+    let _compactor = std::thread::spawn(move || {
+        loop {
+            if let Err(err) = tree_p.compaction_thread() {
+                eprintln!("{}", err.long_form());
+            }
         }
     });
     loop {

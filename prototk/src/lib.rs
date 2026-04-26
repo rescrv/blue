@@ -8,7 +8,7 @@ mod zigzag;
 pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
-use buffertk::{stack_pack, v64, Packable, Unpackable, Unpacker};
+use buffertk::{Packable, Unpackable, Unpacker, stack_pack, v64};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 

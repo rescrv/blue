@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use biometrics::Collector;
 use mani::ManifestOptions;
 use setsum::Setsum;
+use sst::SstOptions;
 use sst::gc::GarbageCollectionPolicy;
 use sst::log::LogOptions;
-use sst::SstOptions;
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 mod kvs;
@@ -713,14 +713,16 @@ mod tests {
         mani.apply(edit).expect("manifest apply should never fail");
         drop(mani);
         let _kvs = KeyValueStore::open(options).expect("key-value store should open");
-        assert!(TRASH_SST(
-            &root,
-            Setsum::from_hexdigest(
-                "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a"
+        assert!(
+            TRASH_SST(
+                &root,
+                Setsum::from_hexdigest(
+                    "fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a"
+                )
+                .expect("valid setsum")
             )
-            .expect("valid setsum")
-        )
-        .exists());
+            .exists()
+        );
     }
     // TODO(rescrv): two log files
 }

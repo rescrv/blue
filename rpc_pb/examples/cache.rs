@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use prototk_derive::Message;
 
-use rpc_pb::{service, Context};
+use rpc_pb::{Context, service};
 
 mod common;
 

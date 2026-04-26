@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 use rustyline::history::MemHistory;
 use rustyline::{Config, Editor, Result};
 
-use texttale::{story, ExpectTextTale, ShellTextTale, StoryElement, TextTale};
+use texttale::{ExpectTextTale, ShellTextTale, StoryElement, TextTale, story};
 
 ////////////////////////////////////////////// Player //////////////////////////////////////////////
 

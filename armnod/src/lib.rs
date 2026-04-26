@@ -399,7 +399,14 @@ pub struct ArmnodOptions {
     )]
     pub max_length: Option<u32>,
     /// The charset to use.
-    #[cfg_attr(feature = "command_line", arrrg(optional, "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.", "CHARSET"))]
+    #[cfg_attr(
+        feature = "command_line",
+        arrrg(
+            optional,
+            "Use this character set.  Provided are lower, upper, alpha, digit, alnum, punct, hex, and default.",
+            "CHARSET"
+        )
+    )]
     pub charset: Option<String>,
 }
 

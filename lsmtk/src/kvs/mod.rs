@@ -1,4 +1,4 @@
-use std::fs::{hard_link, read_dir, remove_file, rename, File};
+use std::fs::{File, hard_link, read_dir, remove_file, rename};
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -9,7 +9,7 @@ use sst::bounds_cursor::BoundsCursor;
 use sst::log::{ConcurrentLogBuilder, LogOptions};
 use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
-use sst::{check_key_len, check_value_len, Builder, Cursor, KeyValuePair, KeyValueRef, SstBuilder};
+use sst::{Builder, Cursor, KeyValuePair, KeyValueRef, SstBuilder, check_key_len, check_value_len};
 use sync42::wait_list::WaitList;
 use zerror::Z;
 use zerror_core::ErrorCore;
@@ -17,8 +17,8 @@ use zerror_core::ErrorCore;
 mod memtable;
 
 use crate::{
-    ensure_dir, make_all_dirs, parse_log_file, Error, LsmTree, LsmtkOptions, LOG_FILE, MANI_ROOT,
-    SST_FILE, TEMP_FILE, TEMP_ROOT, TRASH_ROOT,
+    Error, LOG_FILE, LsmTree, LsmtkOptions, MANI_ROOT, SST_FILE, TEMP_FILE, TEMP_ROOT, TRASH_ROOT,
+    ensure_dir, make_all_dirs, parse_log_file,
 };
 use memtable::MemTable;
 

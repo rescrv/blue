@@ -778,10 +778,10 @@ where
                     }
                 }
                 self.correlates.push(exemplar);
-                if let Some(correlate) = self.correlates.peek() {
-                    if correlate.cardinality() >= cardinality {
-                        return self.correlates.pop().map(Exemplar::from);
-                    }
+                if let Some(correlate) = self.correlates.peek()
+                    && correlate.cardinality() >= cardinality
+                {
+                    return self.correlates.pop().map(Exemplar::from);
                 }
             } else if let Some(correlate) = self.correlates.pop() {
                 return Some(Exemplar::from(correlate));

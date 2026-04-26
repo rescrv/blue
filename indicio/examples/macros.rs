@@ -1,7 +1,7 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::approx_constant)]
 
-use indicio::{clue, Collector, ALWAYS};
+use indicio::{ALWAYS, Collector, clue};
 
 static TEST_COLLECTOR: Collector = Collector::new();
 

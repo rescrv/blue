@@ -3,7 +3,7 @@
 //! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 //! to create a cursor over an immutable data set.
 
-use super::{logic_error_prev_not_positioned, Cursor, Error, KeyRef, LOGIC_ERROR};
+use super::{Cursor, Error, KeyRef, LOGIC_ERROR, logic_error_prev_not_positioned};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 

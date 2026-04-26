@@ -4,7 +4,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{alpha1, alphanumeric1},
-    combinator::{cut, map, map_res, recognize},
+    combinator::{all_consuming, cut, map, map_res, recognize},
     error::context,
     multi::{many0_count, many1_count, separated_list1},
     number::complete::double,
@@ -14,7 +14,7 @@ use nom::{
 use tag_index::Tags;
 
 use crate::query;
-use crate::support_nom::{ws0, ParseError, ParseResult};
+use crate::support_nom::{ParseError, ParseResult, ws0};
 use crate::{BiometricsStore, Error, Point, Series, Time};
 
 ////////////////////////////////////////////// parsers /////////////////////////////////////////////
@@ -107,7 +107,7 @@ pub fn counters(
                           -> Result<Vec<Series>, Error> {
                         let mut serieses = vec![];
                         for tags in tags.iter() {
-                            serieses.extend(query::counters(tags)(ctx, store, params)?.into_iter());
+                            serieses.extend(query::counters(tags)(ctx, store, params)?);
                         }
                         Ok(serieses)
                     },
@@ -270,10 +270,11 @@ pub fn pointwise(
     '_,
     Box<
         dyn Fn(
-            &rpc_pb::Context,
-            &dyn BiometricsStore,
-            &query::QueryParams,
-        ) -> Result<Vec<Series>, Error>,
+                &rpc_pb::Context,
+                &dyn BiometricsStore,
+                &query::QueryParams,
+            ) -> Result<Vec<Series>, Error>
+            + '_,
     >,
 > {
     context(
@@ -439,10 +440,11 @@ pub fn expr(
     '_,
     Box<
         dyn Fn(
-            &rpc_pb::Context,
-            &dyn BiometricsStore,
-            &query::QueryParams,
-        ) -> Result<Vec<Series>, Error>,
+                &rpc_pb::Context,
+                &dyn BiometricsStore,
+                &query::QueryParams,
+            ) -> Result<Vec<Series>, Error>
+            + '_,
     >,
 > {
     context(
@@ -464,12 +466,25 @@ pub fn parse(
 ) -> Result<
     Box<
         dyn Fn(
-            &rpc_pb::Context,
-            &dyn BiometricsStore,
-            &query::QueryParams,
-        ) -> Result<Vec<Series>, Error>,
+                &rpc_pb::Context,
+                &dyn BiometricsStore,
+                &query::QueryParams,
+            ) -> Result<Vec<Series>, Error>
+            + '_,
     >,
     ParseError,
 > {
-    crate::support_nom::parse_all(expr)(input)
+    let (rem, t) = match all_consuming(expr)(input) {
+        Ok((rem, t)) => (rem, t),
+        Err(err) => match err {
+            nom::Err::Incomplete(_) => {
+                panic!("all_consuming combinator should be all consuming");
+            }
+            nom::Err::Error(err) | nom::Err::Failure(err) => {
+                return Err(crate::support_nom::interpret_verbose_error(input, err));
+            }
+        },
+    };
+    assert!(rem.is_empty());
+    Ok(t)
 }

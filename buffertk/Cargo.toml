@@ -1,8 +1,8 @@
 [package]
 name = "buffertk"
-version = "0.13.0"
+version = "0.14.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "Buffertk provides tooling for serializing and deserializing data."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

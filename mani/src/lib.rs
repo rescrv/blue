@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::fs::{create_dir, hard_link, metadata, read_dir, remove_file, rename, File, OpenOptions};
+use std::fs::{File, OpenOptions, create_dir, hard_link, metadata, read_dir, remove_file, rename};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,7 @@ use tatl::{HeyListen, Stationary};
 
 use utilz::lockfile::Lockfile;
 
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////

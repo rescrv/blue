@@ -1,7 +1,7 @@
-use guacamole::combinators::*;
 use guacamole::Guacamole;
+use guacamole::combinators::*;
 
-use statslicer::{benchmark, black_box, statslicer_main, Bencher, Parameter, Parameters};
+use statslicer::{Bencher, Parameter, Parameters, benchmark, black_box, statslicer_main};
 
 #[derive(Debug, Default, Eq, PartialEq)]
 struct MyParameters {

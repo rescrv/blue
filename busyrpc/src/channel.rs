@@ -5,7 +5,7 @@ use boring::ssl::{ErrorCode, SslStream};
 
 use biometrics::{Collector, Counter, Moments};
 
-use buffertk::{stack_pack, v64, Packable};
+use buffertk::{Packable, stack_pack, v64};
 
 use zerror_core::ErrorCore;
 

@@ -1,8 +1,8 @@
 [package]
 name = "indicio"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "Indicio provides a framework for emitting clues that may be used for debugging."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

@@ -220,7 +220,7 @@ where
 {
     // Our workload generator.
     let mut guac = Guacamole::default();
-    let mut gen = KeyValueOperationGuacamole {
+    let mut generate = KeyValueOperationGuacamole {
         weight_put: 0.99,
         weight_del: 0.01,
         guacamole_put: KeyValuePutGuacamole {
@@ -236,7 +236,7 @@ where
     // Load up a minimal key-value store.
     let mut builder = ReferenceBuilder::default();
     for _ in 0..config.num_keys {
-        let kvo: KeyValueOperation = gen.guacamole(&mut guac);
+        let kvo: KeyValueOperation = generate.guacamole(&mut guac);
         match kvo {
             KeyValueOperation::Put(ref x) => {
                 builder.put(&x.key, x.timestamp, &x.value).unwrap();
@@ -288,10 +288,14 @@ where
                 }
                 (None, None) => break,
                 (None, Some(x)) => {
-                    panic!("found bad case (open a debugger or print out a dump of info above); got: {x:?}");
+                    panic!(
+                        "found bad case (open a debugger or print out a dump of info above); got: {x:?}"
+                    );
                 }
                 (Some(x), None) => {
-                    panic!("found bad case (open a debugger or print out a dump of info above): exp: {x:?}");
+                    panic!(
+                        "found bad case (open a debugger or print out a dump of info above): exp: {x:?}"
+                    );
                 }
             };
             if let Some(x) = exp.as_ref() {
@@ -303,10 +307,14 @@ where
                     }
                     (None, None) => {}
                     (None, Some(x)) => {
-                        panic!("found bad case (open a debugger or print out a dump of info above); got: {x:?}");
+                        panic!(
+                            "found bad case (open a debugger or print out a dump of info above); got: {x:?}"
+                        );
                     }
                     (Some(x), None) => {
-                        panic!("found bad case (open a debugger or print out a dump of info above): exp: {x:?}");
+                        panic!(
+                            "found bad case (open a debugger or print out a dump of info above): exp: {x:?}"
+                        );
                     }
                 };
             }

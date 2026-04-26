@@ -15,7 +15,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
-use buffertk::{stack_pack, Unpackable, Unpacker};
+use buffertk::{Unpackable, Unpacker, stack_pack};
 
 use super::*;
 

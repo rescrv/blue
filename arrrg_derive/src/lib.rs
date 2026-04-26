@@ -8,7 +8,7 @@ extern crate syn;
 
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 use derive_util::StructVisitor;
 
@@ -36,7 +36,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let mut clv = CommandLineVisitor {};
     let (add_opts, matches, canonical_command_line) = clv.visit_struct(&ty_name, data);
 
-    let gen = quote! {
+    let expanded = quote! {
         impl #impl_generics ::arrrg::CommandLine for #ty_name #ty_generics #where_clause {
             fn add_opts(&self, prefix: Option<&str>, opts: &mut getopts::Options) {
                 #add_opts
@@ -54,16 +54,16 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
             }
         }
     };
-    gen.into()
+    expanded.into()
 }
 
 //////////////////////////////////////// CommandLineVisitor ////////////////////////////////////////
 
 fn type_is_option(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(ty) = ty {
-        if ty.into_token_stream().to_string().starts_with("Option <") {
-            return true;
-        }
+    if let syn::Type::Path(ty) = ty
+        && ty.into_token_stream().to_string().starts_with("Option <")
+    {
+        return true;
     }
     false
 }
@@ -269,7 +269,7 @@ fn parse_meta_one(attr: &syn::Attribute) -> Option<FlagMeta> {
         syn::Meta::Path(_) => {
             panic!("meta path: {USAGE}");
         }
-        syn::Meta::List(ref ml) => ml,
+        syn::Meta::List(ml) => ml,
         syn::Meta::NameValue(_) => {
             panic!("meta name value: {USAGE}");
         }

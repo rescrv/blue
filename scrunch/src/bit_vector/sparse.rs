@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 use std::iter::zip;
 
-use buffertk::{stack_pack, v64, Unpackable};
+use buffertk::{Unpackable, stack_pack, v64};
 
+use crate::Error;
 use crate::binary_search::binary_search_by;
 use crate::bit_array::{BitArray, FixedWidthIterator};
 use crate::bit_vector::BitVector as BitVectorTrait;
 use crate::builder::{Builder, Helper};
-use crate::Error;
 
 ///////////////////////////////////////////// Internals ////////////////////////////////////////////
 

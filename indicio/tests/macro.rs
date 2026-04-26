@@ -1,7 +1,7 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::approx_constant)]
 
-use indicio::{value, Value};
+use indicio::{Value, value};
 
 #[test]
 fn value_bool() {

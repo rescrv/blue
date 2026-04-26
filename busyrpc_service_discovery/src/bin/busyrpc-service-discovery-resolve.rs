@@ -1,5 +1,5 @@
 use arrrg::CommandLine;
-use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
+use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
 use rpc_pb::IoToZ;
 use tuple_routing::{ResolveRequest, ServiceDiscovery};
 

@@ -1,6 +1,6 @@
 use std::fs::File;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use arrrg::CommandLine;
@@ -11,7 +11,7 @@ use biometrics::{Collector, PlainTextEmitter};
 use rpc_pb::Client;
 use rpc_pb::{Context, IoToZ};
 
-use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
+use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
 
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct BenchmarkOptions {

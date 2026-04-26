@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use crate::bit_vector::sparse::BitVector;
-use crate::bit_vector::BitVector as BitVectorTrait;
-use crate::builder::{Builder, Helper};
 use crate::Error;
+use crate::bit_vector::BitVector as BitVectorTrait;
+use crate::bit_vector::sparse::BitVector;
+use crate::builder::{Builder, Helper};
 
 ///////////////////////////////////////////// SigmaStub ////////////////////////////////////////////
 
@@ -184,7 +184,7 @@ impl<'a> Unpackable<'a> for Sigma<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::{assert_eq_with_ctx, test_cases_for, TestCase};
+    use crate::test_util::{TestCase, assert_eq_with_ctx, test_cases_for};
 
     use super::*;
 

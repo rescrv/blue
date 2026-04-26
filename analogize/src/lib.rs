@@ -3,7 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
-use std::fs::{metadata, read_dir, rename, File, Metadata, OpenOptions};
+use std::fs::{File, Metadata, OpenOptions, metadata, read_dir, rename};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{sleep, JoinHandle};
+use std::thread::{JoinHandle, sleep};
 use std::time::Duration;
 
 use chrono::{DateTime, DurationRound, TimeDelta, Utc};
@@ -21,11 +21,11 @@ use indicio::protobuf::ClueVector;
 use indicio::{Clue, Value};
 use mani::{Edit, Manifest, ManifestOptions};
 use prototk::FieldNumber;
-use scrunch::bit_vector::sparse::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
+use scrunch::bit_vector::sparse::BitVector;
 use scrunch::builder::Builder;
 use scrunch::{CompressedDocument, Document, RecordOffset};
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 mod parser;
@@ -1082,25 +1082,29 @@ impl State {
         }
         #[cfg(not(target_os = "macos"))]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
-            libc::mmap64(
-                std::ptr::null_mut(),
-                len,
-                libc::PROT_READ,
-                libc::MAP_SHARED,
-                file,
-                0,
-            )
+            unsafe {
+                libc::mmap64(
+                    std::ptr::null_mut(),
+                    len,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    file,
+                    0,
+                )
+            }
         }
         #[cfg(target_os = "macos")]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
-            libc::mmap(
-                std::ptr::null_mut(),
-                len,
-                libc::PROT_READ,
-                libc::MAP_SHARED,
-                file,
-                0,
-            )
+            unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    len,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    file,
+                    0,
+                )
+            }
         }
         // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
         let mapping = unsafe { mmap(md.len() as usize, file.as_raw_fd()) };
@@ -1412,7 +1416,7 @@ fn date_time_to_string(when: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use indicio::{value, Clue};
+    use indicio::{Clue, value};
 
     use super::*;
 

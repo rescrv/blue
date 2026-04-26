@@ -1,7 +1,7 @@
 extern crate sst;
 
-use sst::log::{LogBuilder, LogIterator, LogOptions, WriteBatch};
 use sst::Builder;
+use sst::log::{LogBuilder, LogIterator, LogOptions, WriteBatch};
 
 #[test]
 fn read_while_writing_log() {

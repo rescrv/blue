@@ -210,7 +210,7 @@ pub trait Emitter {
     fn emit_moments(&mut self, moments: &Moments, now_millis: u64) -> Result<(), Self::Error>;
     /// Read the provided [Histogram].
     fn emit_histogram(&mut self, histogram: &Histogram, now_millis: u64)
-        -> Result<(), Self::Error>;
+    -> Result<(), Self::Error>;
 }
 
 ///////////////////////////////////////// PlainTextEmitter /////////////////////////////////////////

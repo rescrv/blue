@@ -15,7 +15,7 @@ use boring::ssl::{ErrorCode, SslAcceptor, SslConnector, SslFiletype, SslMethod, 
 
 use biometrics::{Collector, Counter, Moments};
 
-use buffertk::{stack_pack, Packable, Unpackable};
+use buffertk::{Packable, Unpackable, stack_pack};
 
 use utilz::stopwatch::Stopwatch;
 

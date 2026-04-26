@@ -1,5 +1,5 @@
 use arrrg::CommandLine;
-use busyrpc::{new_client, ClientOptions, SslOptions, StringResolver};
+use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
 use prototk::FieldNumber;
 use rpc_pb::{Host, IoToZ};
 use tuple_key::{Direction, TupleKey};

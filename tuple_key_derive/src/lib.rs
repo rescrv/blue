@@ -8,7 +8,7 @@ extern crate syn;
 
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 ///////////////////////////////////// #[derive(TypedTupleKey)] /////////////////////////////////////
 
@@ -45,7 +45,7 @@ pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::Tok
     let into_snippet = generate_into(&fields);
 
     // Generate the whole implementation.
-    let gen = quote! {
+    let expanded = quote! {
         impl #impl_generics TryFrom<::tuple_key::TupleKey> for #ty_name #ty_generics #where_clause {
             type Error = ::tuple_key::Error;
 
@@ -63,7 +63,7 @@ pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::Tok
         impl #impl_generics ::tuple_key::TypedTupleKey for #ty_name #ty_generics #where_clause {
         }
     };
-    gen.into()
+    expanded.into()
 }
 
 fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream {
@@ -168,7 +168,7 @@ fn parse_field_number_attribute(attr: &syn::Attribute) -> Option<syn::LitInt> {
         syn::Meta::Path(_) => {
             panic!("{}:{} {}", file!(), line!(), USAGE);
         }
-        syn::Meta::List(ref ml) => ml,
+        syn::Meta::List(ml) => ml,
         syn::Meta::NameValue(_) => {
             panic!("{}:{} {}", file!(), line!(), USAGE);
         }

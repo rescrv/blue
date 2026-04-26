@@ -9,7 +9,7 @@ extern crate syn;
 use proc_macro2::{Span, TokenStream};
 use quote::ToTokens;
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 use derive_util::EnumVisitor;
 
@@ -39,7 +39,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
     let display_method = dmv.visit_enum(&ty_name, &data);
     let mut pemv = PartialEqMethodVisitor {};
     let partial_eq_method = pemv.visit_enum(&ty_name, &data);
-    let gen = quote! {
+    let expanded = quote! {
         impl ::zerror::Z for #ty_name {
             type Error = Self;
 
@@ -68,7 +68,7 @@ pub fn derive_command_line(input: proc_macro::TokenStream) -> proc_macro::TokenS
         #display_method
         #partial_eq_method
     };
-    gen.into()
+    expanded.into()
 }
 
 //////////////////////////////////////// CommandLineVisitor ////////////////////////////////////////

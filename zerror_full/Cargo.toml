@@ -1,8 +1,8 @@
 [package]
 name = "zerror_full"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "zerror_full provides a macro for implementing helpful errors"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

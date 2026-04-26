@@ -993,7 +993,7 @@ mod tests {
                 "path: {:?}",
                 tc.path
             );
-            for (lhs, rhs) in std::iter::zip(tc.components.chars(), components.into_iter()) {
+            for (lhs, rhs) in std::iter::zip(tc.components.chars(), components) {
                 assert_eq!(lhs, component_to_char(rhs), "path: {:?}", tc.path);
             }
         }

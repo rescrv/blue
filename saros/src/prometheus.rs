@@ -11,7 +11,7 @@ use nom::{
     sequence::{delimited, pair, terminated, tuple},
 };
 
-use crate::support_nom::{ewsunl, string_literal, ws0, ws1, ParseResult};
+use crate::support_nom::{ParseResult, ewsunl, string_literal, ws0, ws1};
 
 /////////////////////////////////////////// MetricReading //////////////////////////////////////////
 
@@ -274,7 +274,7 @@ mod test {
     use nom::combinator::{all_consuming, complete, cut};
 
     use super::*;
-    use crate::support_nom::{interpret_error_for_test, parse_all, ParseError};
+    use crate::support_nom::{ParseError, interpret_error_for_test, parse_all};
 
     #[test]
     fn atoms() {

@@ -1,8 +1,8 @@
 [package]
 name = "shvar"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "shvar provides a POSIX-compliant shell variable substitution routine."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

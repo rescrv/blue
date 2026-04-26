@@ -3,14 +3,14 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::hash::{Hash, Hasher};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, WaitTimeoutResult};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use indicio::{clue, value, ERROR, INFO};
+use indicio::{ERROR, INFO, clue, value};
 use one_two_eight::generate_id;
-use rc_conf::{load_services, RcConf, SwitchPosition};
+use rc_conf::{RcConf, SwitchPosition, load_services};
 use utf8path::Path;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -368,9 +368,15 @@ impl From<&Target> for indicio::Value {
 /// Pid1Options captures the rc_conf and rc.d PATH variables.
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Pid1Options {
-    #[arrrg(optional, "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override.")]
+    #[arrrg(
+        optional,
+        "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override."
+    )]
     pub rc_conf_path: String,
-    #[arrrg(optional, "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit.")]
+    #[arrrg(
+        optional,
+        "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
+    )]
     pub rc_d_path: String,
 }
 
@@ -1196,11 +1202,7 @@ impl Execution {
 
     fn pid(&self) -> Option<i32> {
         let pid = self.pid.lock().unwrap();
-        if *pid > 0 {
-            Some(*pid)
-        } else {
-            None
-        }
+        if *pid > 0 { Some(*pid) } else { None }
     }
 
     fn kill(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
@@ -1210,12 +1212,12 @@ impl Execution {
         });
         if let Some(pid) = self.pid() {
             #[cfg(not(target_os = "macos"))]
-            unsafe fn errno() -> i32 {
-                *libc::__errno_location()
+            fn errno() -> i32 {
+                unsafe { *libc::__errno_location() }
             }
             #[cfg(target_os = "macos")]
-            unsafe fn errno() -> i32 {
-                *libc::__error()
+            fn errno() -> i32 {
+                unsafe { *libc::__error() }
             }
             unsafe {
                 if libc::kill(pid, signal.into_i32()) < 0 && errno() != libc::ESRCH {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Mutex;
 
-use indicio::{clue, ERROR, INFO};
+use indicio::{ERROR, INFO, clue};
 use rpc_pb::{Host, HostID};
 use tuple_key::TupleKey;
 use tuple_routing::{
@@ -127,11 +127,11 @@ impl ServiceDiscovery for MemoryServiceDiscovery {
         {
             let mut hosts = self.hosts.lock().unwrap();
             for (idx, (_, service_key, host)) in keys.iter().enumerate() {
-                if let Some(h) = hosts.get(service_key) {
-                    if h == host {
-                        removed[idx] = true;
-                        hosts.remove(service_key);
-                    }
+                if let Some(h) = hosts.get(service_key)
+                    && h == host
+                {
+                    removed[idx] = true;
+                    hosts.remove(service_key);
                 }
             }
         }

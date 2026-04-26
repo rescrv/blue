@@ -3,11 +3,11 @@
 use buffertk::{Packable, Unpackable};
 use prototk::{FieldNumber, Tag, WireType};
 
-use crate::bit_vector::rrr::BitVector;
-use crate::bit_vector::BitVector as BitVectorTrait;
-use crate::builder::{parse_one_field_bytes, Builder, Helper};
-use crate::encoder::Encoder;
 use crate::Error;
+use crate::bit_vector::BitVector as BitVectorTrait;
+use crate::bit_vector::rrr::BitVector;
+use crate::builder::{Builder, Helper, parse_one_field_bytes};
+use crate::encoder::Encoder;
 
 use super::WaveletTree as WaveletTreeTrait;
 

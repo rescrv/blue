@@ -2,7 +2,7 @@ use std::os::fd::RawFd;
 
 use biometrics::{Collector, Counter};
 
-use super::{Events, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
+use super::{Events, POLLERR, POLLHUP, POLLIN, POLLOUT, Pollster};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 

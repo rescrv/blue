@@ -1,8 +1,8 @@
 [package]
 name = "busyrpc"
-version = "0.13.0"
+version = "0.14.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "busyrpc provides synchronous/thread-pool implementations of rpc_pb."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

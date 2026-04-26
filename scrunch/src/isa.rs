@@ -1,10 +1,10 @@
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use super::sampled::SampledArray;
 use super::Builder;
 use super::Error;
 use super::Helper;
+use super::sampled::SampledArray;
 
 //////////////////////////////////////// InverseSuffixArray ////////////////////////////////////////
 

@@ -146,15 +146,14 @@ impl<M: Monitor + 'static> State<M> {
             description: _,
             context: _,
         } = &condition
+            && self.sticky.is_none()
         {
-            if self.sticky.is_none() {
-                let firing = FiringID::generate().unwrap_or_default();
-                self.sticky = Some(StickyCondition {
-                    firing,
-                    sticky: condition.clone(),
-                    recent: None,
-                });
-            }
+            let firing = FiringID::generate().unwrap_or_default();
+            self.sticky = Some(StickyCondition {
+                firing,
+                sticky: condition.clone(),
+                recent: None,
+            });
         }
         if let Some(sticky) = &mut self.sticky {
             sticky.recent = Some(condition.clone());

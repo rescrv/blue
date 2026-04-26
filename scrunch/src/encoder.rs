@@ -1,7 +1,7 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap};
 
-use buffertk::{stack_pack, Packable, Unpackable};
+use buffertk::{Packable, Unpackable, stack_pack};
 
 use crate::Error;
 
@@ -80,15 +80,15 @@ impl Node {
         if let Some(sym) = self.sym.as_ref() {
             symbols.push((depth, *sym));
         }
-        if let Some(lhs) = self.lhs.as_ref() {
-            if !lhs.append_symbols(depth + 1, symbols) {
-                return false;
-            }
+        if let Some(lhs) = self.lhs.as_ref()
+            && !lhs.append_symbols(depth + 1, symbols)
+        {
+            return false;
         }
-        if let Some(rhs) = self.rhs.as_ref() {
-            if !rhs.append_symbols(depth + 1, symbols) {
-                return false;
-            }
+        if let Some(rhs) = self.rhs.as_ref()
+            && !rhs.append_symbols(depth + 1, symbols)
+        {
+            return false;
         }
         true
     }

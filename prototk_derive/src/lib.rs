@@ -10,7 +10,7 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 //////////////////////////////////////// #[derive(Message)] ////////////////////////////////////////
 
@@ -71,7 +71,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let mut unpack = UnpackMessageVisitor::default();
     let unpack = unpack.visit(&ty_name, &input.data);
     // Generate the whole implementation.
-    let gen = quote! {
+    let expanded = quote! {
         impl #exp_impl_generics ::prototk::Message<#lifetime> for #ty_name #ty_generics #where_clause {
         }
 
@@ -135,7 +135,7 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
     };
-    gen.into()
+    expanded.into()
 }
 
 fn find_lifetime_in_generics<T: ToTokens>(generics: &T) -> Option<TokenStream> {
@@ -323,7 +323,7 @@ fn parse_attribute(attr: &syn::Attribute) -> Option<(syn::LitInt, syn::Path)> {
         syn::Meta::Path(_) => {
             panic!("{}", USAGE);
         }
-        syn::Meta::List(ref ml) => ml,
+        syn::Meta::List(ml) => ml,
         syn::Meta::NameValue(_) => {
             panic!("{}", USAGE);
         }
@@ -359,7 +359,7 @@ trait ProtoTKVisitor:
 {
     fn visit(&mut self, ty_name: &syn::Ident, data: &syn::Data) -> TokenStream {
         match data {
-            syn::Data::Struct(ref ds) => self.visit_struct(ty_name, ds),
+            syn::Data::Struct(ds) => self.visit_struct(ty_name, ds),
             syn::Data::Enum(de) => self.visit_enum(ty_name, de),
             syn::Data::Union(_) => {
                 panic!("{}", "unions are not supported");
@@ -409,27 +409,26 @@ fn field_type_tokens(field: &syn::Field, field_type: &syn::Path) -> TokenStream 
     if field_type.is_ident(&syn::Ident::new("message", field_type.span())) {
         let ret = ToTokens::into_token_stream(field_type);
         let ty = &field.ty;
-        if let syn::Type::Path(path) = ty {
-            if !path.path.segments.is_empty()
-                && (path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
-                    || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span()))
-            {
-                let tokens = ToTokens::into_token_stream(ty);
-                let mut tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
-                if tokens.len() < 3 {
-                    panic!("unhandled case in prototk_derive: please file a bug report");
-                }
-                tokens.remove(0);
-                tokens.remove(0);
-                tokens.remove(tokens.len() - 1);
-                let mut inner_type = quote! {};
-                for token in tokens.into_iter() {
-                    inner_type = quote! { #inner_type #token };
-                }
-                return quote! {
-                    #ret::<#inner_type>
-                };
+        if let syn::Type::Path(path) = ty
+            && !path.path.segments.is_empty()
+            && (path.path.segments[0].ident == syn::Ident::new("Vec", field_type.span())
+                || path.path.segments[0].ident == syn::Ident::new("Option", field_type.span()))
+        {
+            let tokens = ToTokens::into_token_stream(ty);
+            let mut tokens: Vec<_> = tokens.into_token_stream().into_iter().collect();
+            if tokens.len() < 3 {
+                panic!("unhandled case in prototk_derive: please file a bug report");
             }
+            tokens.remove(0);
+            tokens.remove(0);
+            tokens.remove(tokens.len() - 1);
+            let mut inner_type = quote! {};
+            for token in tokens.into_iter() {
+                inner_type = quote! { #inner_type #token };
+            }
+            return quote! {
+                #ret::<#inner_type>
+            };
         }
         quote! {
             #ret::<#ty>

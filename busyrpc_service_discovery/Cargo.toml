@@ -1,8 +1,8 @@
 [package]
 name = "busyrpc_service_discovery"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "busyrpc_service_discovery provides service discovery for rpc_pb." 
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

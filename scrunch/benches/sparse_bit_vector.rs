@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use guacamole::combinators::*;
 use guacamole::Guacamole;
-use statslicer::{benchmark, black_box, statslicer_main, Bencher, Parameter, Parameters};
+use guacamole::combinators::*;
+use statslicer::{Bencher, Parameter, Parameters, benchmark, black_box, statslicer_main};
 
-use scrunch::bit_vector::sparse::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
+use scrunch::bit_vector::sparse::BitVector;
 use scrunch::builder::Builder;
 
 const BITS_SET: &[usize] = &[256, 4096, 65536];

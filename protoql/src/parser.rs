@@ -1,16 +1,16 @@
 use std::fmt::{Formatter, Write};
 
 use nom::{
+    IResult, Offset,
     branch::alt,
     bytes::complete::{escaped, tag},
     character::complete::{
         self as character, alpha1, alphanumeric1, digit1, multispace0, multispace1, none_of, one_of,
     },
     combinator::{all_consuming, cut, map, map_res, opt, recognize},
-    error::{context, VerboseError, VerboseErrorKind},
+    error::{VerboseError, VerboseErrorKind, context},
     multi::{many0, many0_count, separated_list0, separated_list1},
     sequence::{delimited, pair, terminated, tuple},
-    IResult, Offset,
 };
 
 use prototk::FieldNumber;
@@ -1270,13 +1270,15 @@ map string = 42 {}
 
     #[test]
     fn empty_table() {
-        let key = vec![Key::new(
-            Identifier::must("some_key"),
-            FieldNumber::must(1),
-            KeyDataType::string,
-            Direction::Forward,
-        )
-        .unwrap()];
+        let key = vec![
+            Key::new(
+                Identifier::must("some_key"),
+                FieldNumber::must(1),
+                KeyDataType::string,
+                Direction::Forward,
+            )
+            .unwrap(),
+        ];
         assert_eq!(
             Table::new(
                 Identifier::must("__identifier9"),
@@ -1367,13 +1369,15 @@ table __identifier9 (string some_key= 1) @ 1 {
         let user = Table::new(
             Identifier::must("User"),
             FieldNumber::must(1),
-            vec![Key::new(
-                Identifier::must("user_id"),
-                FieldNumber::must(1),
-                KeyDataType::string,
-                Direction::Forward,
-            )
-            .unwrap()],
+            vec![
+                Key::new(
+                    Identifier::must("user_id"),
+                    FieldNumber::must(1),
+                    KeyDataType::string,
+                    Direction::Forward,
+                )
+                .unwrap(),
+            ],
             vec![
                 FieldDefinition::Field(
                     Field::new(
@@ -1420,13 +1424,15 @@ table __identifier9 (string some_key= 1) @ 1 {
         let avatar = Table::new(
             Identifier::must("Avatar"),
             FieldNumber::must(2),
-            vec![Key::new(
-                Identifier::must("email"),
-                FieldNumber::must(1),
-                KeyDataType::string,
-                Direction::Forward,
-            )
-            .unwrap()],
+            vec![
+                Key::new(
+                    Identifier::must("email"),
+                    FieldNumber::must(1),
+                    KeyDataType::string,
+                    Direction::Forward,
+                )
+                .unwrap(),
+            ],
             vec![FieldDefinition::Field(
                 Field::new(
                     Identifier::must("url"),

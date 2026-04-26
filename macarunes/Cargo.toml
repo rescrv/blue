@@ -1,8 +1,8 @@
 [package]
 name = "macarunes"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "Macarunes provides an implementation of macaroons."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslConnector, SslFiletype, SslMethod};
-use buffertk::{stack_pack, Unpacker};
+use buffertk::{Unpacker, stack_pack};
 use rpc_pb::{Host, HostID, Resolver};
 use sync42::monitor::{Monitor, MonitorCore};
 use sync42::spin_lock::SpinLock;
@@ -16,8 +16,8 @@ use sync42::state_hash_table::{Handle, StateHashTable};
 
 use zerror_core::ErrorCore;
 
-use super::channel::Channel;
 use super::SslOptions;
+use super::channel::Channel;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -381,10 +381,10 @@ struct ChannelHandle<'a, 'b, 'c, R: Resolver> {
 impl<R: Resolver> ChannelHandle<'_, '_, '_, R> {
     fn kill(&self) {
         let mut channels = self.manager.channels.lock().unwrap();
-        if let Some((_, channel)) = &channels[self.index] {
-            if Arc::as_ptr(channel) == Arc::as_ptr(&self.channel) {
-                channels[self.index] = None;
-            }
+        if let Some((_, channel)) = &channels[self.index]
+            && Arc::as_ptr(channel) == Arc::as_ptr(&self.channel)
+        {
+            channels[self.index] = None;
         }
     }
 }
@@ -629,7 +629,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
             chandle.kill();
             return Err(err);
         }
-        let status = if let Some(resp_buf) = ms.sht.get_response() {
+        if let Some(resp_buf) = ms.sht.get_response() {
             let mut up = Unpacker::new(&resp_buf);
             let resp: rpc_pb::Response = match up.unpack() {
                 Ok(resp) => resp,
@@ -663,8 +663,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
                 core: ErrorCore::default(),
                 what: "dropped value in response".to_owned(),
             })
-        };
-        status
+        }
     }
 }
 

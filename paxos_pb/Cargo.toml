@@ -1,8 +1,8 @@
 [package]
 name = "paxos_pb"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "paxos_pb provides protocol buffers for the Paxos prototocol."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
