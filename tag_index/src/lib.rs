@@ -195,14 +195,16 @@ impl CompressedTagIndex<'_> {
         }
         #[cfg(not(target_os = "macos"))]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
-            libc::mmap64(
-                std::ptr::null_mut(),
-                len,
-                libc::PROT_READ,
-                libc::MAP_SHARED,
-                file,
-                0,
-            )
+            unsafe {
+                libc::mmap64(
+                    std::ptr::null_mut(),
+                    len,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    file,
+                    0,
+                )
+            }
         }
         #[cfg(target_os = "macos")]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
