@@ -2,10 +2,10 @@ use buffertk::Unpackable;
 use prototk::FieldNumber;
 
 use crate::bit_array::{BitArray, Builder as BitArrayBuilder};
-use crate::bit_vector::sparse::BitVector;
 use crate::bit_vector::BitVector as BitVectorTrait;
+use crate::bit_vector::sparse::BitVector;
 use crate::builder::{Builder, Helper};
-use crate::{bits_required, Error};
+use crate::{Error, bits_required};
 
 ///////////////////////////////////////// SampledArrayStub /////////////////////////////////////////
 

@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_yaml::{to_string, Deserializer, Value};
+use serde_yaml::{Deserializer, Value, to_string};
 
 use rc_conf::RcConf;
 use utf8path::Path;

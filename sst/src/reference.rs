@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::{
-    check_key_len, check_table_size, check_value_len, Cursor, Error, KeyRef, KeyValuePair,
+    Cursor, Error, KeyRef, KeyValuePair, check_key_len, check_table_size, check_value_len,
 };
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////

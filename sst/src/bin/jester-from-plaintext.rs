@@ -5,8 +5,8 @@ use std::io::{BufRead, BufReader};
 
 use arrrg::CommandLine;
 
-use sst::ingest::{IngestOptions, Jester};
 use sst::Builder;
+use sst::ingest::{IngestOptions, Jester};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct JesterFromPlaintextOptions {

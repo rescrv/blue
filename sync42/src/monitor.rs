@@ -65,7 +65,9 @@ impl<COORD, CRIT, WS, M: MonitorCore<COORD, CRIT, WS>> Monitor<COORD, CRIT, WS, 
                 return;
             }
             if self.synchronization.swap(true, Ordering::Acquire) {
-                panic!("synchronization invariant violated: acquire should only allow one thread at a time in the critical section");
+                panic!(
+                    "synchronization invariant violated: acquire should only allow one thread at a time in the critical section"
+                );
             }
         }
         let crit: &mut CRIT = unsafe { &mut *self.critical_section.get() };

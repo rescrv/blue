@@ -1,12 +1,12 @@
 use buffertk::Unpackable;
 use prototk::FieldNumber;
 
-use super::psi;
-use super::sampled::SampledArray;
-use super::sigma::Sigma;
 use super::Builder;
 use super::Error;
 use super::Helper;
+use super::psi;
+use super::sampled::SampledArray;
+use super::sigma::Sigma;
 
 //////////////////////////////////////////// SuffixArray ///////////////////////////////////////////
 

@@ -1,13 +1,13 @@
 use std::fmt::{Formatter, Write};
 
 use nom::{
+    IResult, Offset,
     branch::alt,
     bytes::complete::{escaped, tag, take_while},
     character::complete::{multispace0, multispace1, newline, none_of, one_of},
     combinator::{all_consuming, cut, map},
-    error::{context, VerboseError, VerboseErrorKind},
+    error::{VerboseError, VerboseErrorKind, context},
     sequence::{delimited, pair},
-    IResult, Offset,
 };
 
 ////////////////////////////////////////// error handling //////////////////////////////////////////

@@ -5,15 +5,15 @@ use std::sync::{Arc, Mutex};
 
 use biometrics::{Collector, Counter};
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
-use buffertk::{stack_pack, Unpackable};
-use indicio::{clue, ERROR, INFO, TRACING};
+use buffertk::{Unpackable, stack_pack};
+use indicio::{ERROR, INFO, TRACING, clue};
 use rpc_pb::{Context, Error, Host, Request, Response, Status};
 use zerror_core::ErrorCore;
 
 use super::builtins;
 use super::channel::Channel;
-use super::poll::{default_pollster, Pollster, POLLERR, POLLHUP, POLLIN, POLLOUT};
-use super::{SslOptions, COLLECTOR};
+use super::poll::{POLLERR, POLLHUP, POLLIN, POLLOUT, Pollster, default_pollster};
+use super::{COLLECTOR, SslOptions};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 

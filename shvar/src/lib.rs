@@ -913,17 +913,16 @@ fn parse_variable(
     }
 
     // Try bareword form $VARNAME
-    if ctx.options.bareword {
-        if let Some(c) = next_char {
-            if matches!(c, 'a'..='z' | 'A'..='Z' | '_') {
-                let ident = parse_bareword_identifier(tokens)?;
-                witness.witness(&ident);
-                if let Some(val) = ctx.vars.lookup(&ident) {
-                    output.push_str(&val);
-                }
-                return Ok(());
-            }
+    if ctx.options.bareword
+        && let Some(c) = next_char
+        && matches!(c, 'a'..='z' | 'A'..='Z' | '_')
+    {
+        let ident = parse_bareword_identifier(tokens)?;
+        witness.witness(&ident);
+        if let Some(val) = ctx.vars.lookup(&ident) {
+            output.push_str(&val);
         }
+        return Ok(());
     }
 
     // No valid syntax found - output literal $

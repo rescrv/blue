@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use biometrics::Counter;
-use indicio::{clue, INFO};
+use indicio::{INFO, clue};
 use mani::{Edit, Manifest, ManifestIterator};
 use one_two_eight::{generate_id, generate_id_prototk};
 use setsum::Setsum;
@@ -23,11 +23,11 @@ use zerror::Z;
 use zerror_core::ErrorCore;
 
 use super::{
-    ensure_dir, make_all_dirs, Error, IoToZ, LsmtkOptions, COMPACTION_DIR, MANI_ROOT, SST_FILE,
-    TRASH_SST,
+    COMPACTION_DIR, Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_SST, ensure_dir,
+    make_all_dirs,
 };
 use crate::reference_counter::ReferenceCounter;
-use crate::{verifier, TRACING};
+use crate::{TRACING, verifier};
 
 mod recover;
 
@@ -650,14 +650,18 @@ impl Version {
                 // SAFTEY(rescrv):  This should never trigger because the one place where we call
                 // compute_bounds with lower_level=0 computes first_key and last_key to be the min
                 // and max keys for level 0 respectively.
-                assert!(this_level
-                    .ssts
-                    .iter()
-                    .all(|x| first_key <= x.first_key.as_slice()));
-                assert!(this_level
-                    .ssts
-                    .iter()
-                    .all(|x| x.last_key.as_slice() <= last_key));
+                assert!(
+                    this_level
+                        .ssts
+                        .iter()
+                        .all(|x| first_key <= x.first_key.as_slice())
+                );
+                assert!(
+                    this_level
+                        .ssts
+                        .iter()
+                        .all(|x| x.last_key.as_slice() <= last_key)
+                );
                 bounds.push(LevelSlice {
                     lower_bound,
                     upper_bound,

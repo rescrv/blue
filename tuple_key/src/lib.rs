@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use buffertk::{v64, Packable};
+use buffertk::{Packable, v64};
 
 use buffertk::Unpackable;
 use prototk::{FieldNumber, WireType};
 use prototk_derive::Message;
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 mod combine7;
@@ -764,7 +764,9 @@ mod tuple_key {
             // what we want to test
             tk1.append(&mut tk2);
             assert_eq!(
-                &[44, 65, 128, 76, 67, 0, 108, 67, 128, 140, 69, 0, 172, 69, 128, 204, 71, 0,],
+                &[
+                    44, 65, 128, 76, 67, 0, 108, 67, 128, 140, 69, 0, 172, 69, 128, 204, 71, 0,
+                ],
                 tk1.as_bytes()
             );
             assert!(tk2.is_empty());

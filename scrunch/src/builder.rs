@@ -1,4 +1,4 @@
-use buffertk::{stack_pack, v64, Packable};
+use buffertk::{Packable, stack_pack, v64};
 
 use prototk::{FieldNumber, FieldType, Tag, WireType};
 

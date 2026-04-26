@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 
 #[derive(Debug)]
 pub struct SampleError {

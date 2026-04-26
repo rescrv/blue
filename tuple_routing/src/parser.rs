@@ -1,14 +1,14 @@
 use std::fmt::{Formatter, Write};
 
 use nom::{
+    IResult, Offset,
     branch::alt,
     bytes::complete::tag,
     character::complete::{self as character, alpha1, alphanumeric1, multispace0},
     combinator::{all_consuming, cut, map, map_res, recognize},
-    error::{context, VerboseError, VerboseErrorKind},
+    error::{VerboseError, VerboseErrorKind, context},
     multi::{many0, many0_count},
     sequence::{pair, tuple},
-    IResult, Offset,
 };
 
 use prototk::FieldNumber;

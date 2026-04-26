@@ -7,8 +7,8 @@
 //! clone happens under a lock, so it's on the person caring about performance to consider the cost
 //! of the clone.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -207,10 +207,10 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             {
                 // SAFETY(rescrv):  The caller guarantees no nodes in the list are available as &Node
                 // or &mut Node, so we can do this deref.
-                let tail = &mut *ptr;
+                let tail = unsafe { &mut *ptr };
                 if !tail.prev.is_null() {
                     // SAFETY(rescrv):  We know this node is different, so the same argument applies.
-                    let new_tail = &mut *tail.prev;
+                    let new_tail = unsafe { &mut *tail.prev };
                     new_tail.next = std::ptr::null_mut();
                 }
                 state.size -= tail.value.approximate_size();
@@ -223,7 +223,7 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
             }
             // SAFETY(rescrv):  We dropped our reference to ptr, which was tail, and we know it to
             // be non-null by the if condition at the top.
-            Node::drop(ptr);
+            unsafe { Node::drop(ptr) };
         }
         state
     }
@@ -236,13 +236,13 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     ) {
         if ptr != state.head {
             // SAFETY(rescrv):  No references exist outside this function, and this is our first.
-            let node = &mut *ptr;
+            let node = unsafe { &mut *ptr };
             // SAFETY(rescrv):  We are not the head, so there must be a prev to adapt.
             assert_ne!(std::ptr::null_mut(), node.prev);
-            let prev = &mut *node.prev;
+            let prev = unsafe { &mut *node.prev };
             prev.next = node.next;
             if !node.next.is_null() {
-                let next = &mut *node.next;
+                let next = unsafe { &mut *node.next };
                 next.prev = node.prev;
             } else {
                 // SAFETY(rescrv):  Our next is none, so we must be the tail.
@@ -267,13 +267,13 @@ impl<K: Clone + Eq + Hash, V: Value> LeastRecentlyUsedCache<K, V> {
     ) -> MutexGuard<'a, State<K, V>> {
         if ptr != state.tail {
             // SAFETY(rescrv):  No references exist outside this function, and this is our first.
-            let node = &mut *ptr;
+            let node = unsafe { &mut *ptr };
             // SAFETY(rescrv):  We are not the tail, so there must be a next to adapt.
             assert_ne!(std::ptr::null_mut(), node.next);
-            let next = &mut *node.next;
+            let next = unsafe { &mut *node.next };
             next.prev = node.prev;
             if !node.prev.is_null() {
-                let prev = &mut *node.prev;
+                let prev = unsafe { &mut *node.prev };
                 prev.next = node.next;
             } else {
                 // SAFETY(rescrv):  Our prev is none, so we must be the head.
@@ -340,7 +340,9 @@ impl<K: Clone + Eq + Hash, V: Value> Node<K, V> {
     }
 
     unsafe fn drop(node: *mut Node<K, V>) {
-        drop(Box::from_raw(node));
+        unsafe {
+            drop(Box::from_raw(node));
+        }
     }
 }
 
@@ -348,8 +350,8 @@ impl<K: Clone + Eq + Hash, V: Value> Node<K, V> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use guacamole::{FromGuacamole, Guacamole};
 

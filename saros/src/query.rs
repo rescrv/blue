@@ -407,7 +407,7 @@ pub fn pointwise(
 }
 
 pub mod point {
-    use super::{pointwise, BiometricsStore, Error, QueryParams, Series};
+    use super::{BiometricsStore, Error, QueryParams, Series, pointwise};
 
     macro_rules! pointwise_f64 {
         ($name:ident) => {
@@ -793,9 +793,11 @@ mod tests {
         if series[0].points.is_empty() {
             return "<no_data>".to_string();
         }
-        assert!(series
-            .iter()
-            .all(|s| s.points.len() == series[0].points.len()));
+        assert!(
+            series
+                .iter()
+                .all(|s| s.points.len() == series[0].points.len())
+        );
         let mut result = String::new();
         for step in 0..series[0].points.len() {
             let mut line = String::new();

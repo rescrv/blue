@@ -1,6 +1,6 @@
 use utf8path::Path;
 
-use k8src::{regenerate, RegenerateOptions};
+use k8src::{RegenerateOptions, regenerate};
 
 macro_rules! test_case {
     ($name:ident, $num:literal) => {

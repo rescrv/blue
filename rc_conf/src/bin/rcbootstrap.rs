@@ -9,7 +9,10 @@ use arrrg::CommandLine;
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct Options {
-    #[arrrg(optional, "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override.")]
+    #[arrrg(
+        optional,
+        "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override."
+    )]
     rc_conf_path: String,
 }
 

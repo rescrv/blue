@@ -1,8 +1,8 @@
 [package]
 name = "utilz"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "utilz provides miscellaneous utilities too small for their own crates."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

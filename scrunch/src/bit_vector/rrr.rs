@@ -2,9 +2,9 @@ use std::fmt::Display;
 
 use buffertk::Unpackable;
 
+use crate::Error;
 use crate::bit_array::{BitArray, Builder as BitArrayBuilder};
 use crate::builder::{Builder, Helper};
-use crate::Error;
 
 use super::BitVector as BitVectorTrait;
 
@@ -40,11 +40,7 @@ impl u63 {
             w >>= 1;
             idx += 1;
         }
-        if rank < x {
-            None
-        } else {
-            Some(idx)
-        }
+        if rank < x { None } else { Some(idx) }
     }
 
     pub(super) fn select1(&self, x: usize) -> Option<usize> {

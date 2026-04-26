@@ -1,4 +1,4 @@
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 use zerror_derive::Z;
 

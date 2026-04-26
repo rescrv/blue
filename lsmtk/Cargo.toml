@@ -1,8 +1,8 @@
 [package]
 name = "lsmtk"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "lsmtk provides a log-structured-merge-graph"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

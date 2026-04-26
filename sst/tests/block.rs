@@ -1,7 +1,7 @@
 extern crate sst;
 
-use sst::block::{BlockBuilder, BlockBuilderOptions, BlockCursor};
 use sst::Builder;
+use sst::block::{BlockBuilder, BlockBuilderOptions, BlockCursor};
 
 mod alphabet;
 mod guacamole;

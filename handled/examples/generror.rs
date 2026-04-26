@@ -2,14 +2,14 @@
 
 use std::io::Write;
 
+use guacamole::Guacamole;
+use guacamole::combinators::CHAR_SET_ALNUM;
+use guacamole::combinators::CHAR_SET_ALPHA;
 use guacamole::combinators::range_to;
 use guacamole::combinators::select;
 use guacamole::combinators::string;
 use guacamole::combinators::to_charset;
 use guacamole::combinators::uniform;
-use guacamole::combinators::CHAR_SET_ALNUM;
-use guacamole::combinators::CHAR_SET_ALPHA;
-use guacamole::Guacamole;
 use handled::SError;
 
 const PHASES: &[&str] = &[

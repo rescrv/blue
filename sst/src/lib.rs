@@ -17,7 +17,7 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
-use buffertk::{stack_pack, Packable, Unpacker};
+use buffertk::{Packable, Unpacker, stack_pack};
 use handled::{SError, SExpr};
 use tatl::{HeyListen, Stationary};
 
@@ -40,7 +40,7 @@ pub use setsum::Setsum;
 
 use block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use bounds_cursor::BoundsCursor;
-use file_manager::{open_without_manager, FileHandle};
+use file_manager::{FileHandle, open_without_manager};
 use pruning_cursor::PruningCursor;
 use sbbf::Filter;
 
@@ -1352,8 +1352,16 @@ impl Default for SstMetadata {
 
 impl Debug for SstMetadata {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "SstMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
-            Setsum::from_digest(self.setsum).hexdigest(), self.first_key_escaped(), self.last_key_escaped(), self.smallest_timestamp, self.biggest_timestamp, self.file_size)
+        write!(
+            fmt,
+            "SstMetadata {{ setsum: {}, first_key: \"{}\", last_key: \"{}\", smallest_timestamp: {} biggest_timestamp: {}, file_size: {} }}",
+            Setsum::from_digest(self.setsum).hexdigest(),
+            self.first_key_escaped(),
+            self.last_key_escaped(),
+            self.smallest_timestamp,
+            self.biggest_timestamp,
+            self.file_size
+        )
     }
 }
 

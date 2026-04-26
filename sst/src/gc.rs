@@ -28,14 +28,14 @@ use std::fmt::{Display, Formatter, Write};
 use std::num::NonZeroU64;
 
 use nom::{
+    IResult, Offset,
     branch::alt,
     bytes::complete::tag,
     character::complete::{digit1, multispace0},
     combinator::{all_consuming, cut, map, map_res, opt, recognize},
-    error::{context, VerboseError, VerboseErrorKind},
+    error::{VerboseError, VerboseErrorKind, context},
     multi::separated_list0,
     sequence::{terminated, tuple},
-    IResult, Offset,
 };
 
 use super::{Cursor, Error, KeyRef, KeyValuePair};

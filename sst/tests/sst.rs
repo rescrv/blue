@@ -11,8 +11,8 @@ mod guacamole;
 
 ////////////////////////////////////////////// Options /////////////////////////////////////////////
 
-fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096(
-) -> SstOptions {
+fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed_target_block_size_4096()
+-> SstOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(1)
         .key_value_pairs_restart_interval(1);
@@ -22,8 +22,8 @@ fn opts_bytes_restart_interval_1_key_value_pairs_restart_interval_1_uncompressed
         .target_block_size(4096)
 }
 
-fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096(
-) -> SstOptions {
+fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_4096()
+-> SstOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(512)
         .key_value_pairs_restart_interval(16);
@@ -33,8 +33,8 @@ fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompres
         .target_block_size(4096)
 }
 
-fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536(
-) -> SstOptions {
+fn opts_bytes_restart_interval_512_key_value_pairs_restart_interval_16_uncompressed_target_block_size_65536()
+-> SstOptions {
     let builder_opts = BlockBuilderOptions::default()
         .bytes_restart_interval(512)
         .key_value_pairs_restart_interval(16);

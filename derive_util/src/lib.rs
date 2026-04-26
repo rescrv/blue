@@ -210,7 +210,7 @@ mod structs {
         let input: DeriveInput = syn::parse2(token_stream).unwrap();
         let mut visitor = TestStructVisitor {};
         let output = match input.data {
-            syn::Data::Struct(ref ds) => visitor.visit_struct(&input.ident, ds),
+            syn::Data::Struct(ds) => visitor.visit_struct(&input.ident, &ds),
             syn::Data::Enum(_) => {
                 panic!("did not expect an enum");
             }

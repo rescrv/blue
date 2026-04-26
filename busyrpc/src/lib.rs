@@ -11,7 +11,7 @@ mod server;
 
 pub mod builtins;
 
-pub use client::{new_client, ClientOptions};
+pub use client::{ClientOptions, new_client};
 pub use resolve::StringResolver;
 pub use server::{Server, ServerOptions, ServiceRegistry};
 

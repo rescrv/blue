@@ -1,6 +1,6 @@
 extern crate proptest;
 
-use proptest::prelude::{any, ProptestConfig, Strategy};
+use proptest::prelude::{ProptestConfig, Strategy, any};
 
 use protoql::parser::{self, parse_all};
 use protoql::{

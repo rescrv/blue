@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use serde::Deserialize;
-use serde_yaml::{from_str, to_string, Deserializer, Value};
+use serde_yaml::{Deserializer, Value, from_str, to_string};
 use siphasher::sip128::{Hasher128, SipHasher24};
 
 use rc_conf::RcConf;

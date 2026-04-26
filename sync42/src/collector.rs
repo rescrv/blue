@@ -1,8 +1,8 @@
 //! A RCU-like quiescent state detector.
 
 use std::collections::{BinaryHeap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 

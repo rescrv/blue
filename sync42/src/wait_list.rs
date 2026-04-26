@@ -176,7 +176,10 @@ impl<T: Clone> WaitList<T> {
     /// Panics if this guard was not one returned from a prior call to link.  Guards provided via
     /// iterators are not eligible for this function.
     pub fn unlink(&self, mut guard: WaitGuard<T>) {
-        assert!(guard.owned, "must own the guard to explicitly unlink; it is safe to leave unlinking to the drop call");
+        assert!(
+            guard.owned,
+            "must own the guard to explicitly unlink; it is safe to leave unlinking to the drop call"
+        );
         self._unlink(&mut guard);
     }
 

@@ -6,9 +6,9 @@
 
 use buffertk::Unpackable;
 
+use crate::Error;
 use crate::builder::Builder;
 use crate::sigma::Sigma;
-use crate::Error;
 
 /// LSType is an indication of how a character relates to those charcters that follow it.  An
 /// L-type character indicates the character is larger than the character that follows it.  An

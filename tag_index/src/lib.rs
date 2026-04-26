@@ -206,14 +206,16 @@ impl CompressedTagIndex<'_> {
         }
         #[cfg(target_os = "macos")]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
-            libc::mmap(
-                std::ptr::null_mut(),
-                len,
-                libc::PROT_READ,
-                libc::MAP_SHARED,
-                file,
-                0,
-            )
+            unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    len,
+                    libc::PROT_READ,
+                    libc::MAP_SHARED,
+                    file,
+                    0,
+                )
+            }
         }
         // SAFETY(rescrv):  We know this mapping is safe to dereference and later drop.
         let mapping = unsafe { mmap(md.len() as usize, file.as_raw_fd()) };

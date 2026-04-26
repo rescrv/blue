@@ -114,10 +114,12 @@ fn main() {
     let mut threads = Vec::new();
     for _ in 0..NUMBER_OF_THREADS {
         let c = Arc::clone(&clicker);
-        threads.push(std::thread::spawn(move || loop {
-            let ticket = c.click();
-            if ticket > 128_000_000 {
-                break;
+        threads.push(std::thread::spawn(move || {
+            loop {
+                let ticket = c.click();
+                if ticket > 128_000_000 {
+                    break;
+                }
             }
         }));
     }

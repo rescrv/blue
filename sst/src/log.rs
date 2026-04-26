@@ -5,23 +5,24 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write as IoWrite};
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
-use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
+use std::sync::atomic::{self, AtomicBool};
 
 use biometrics::{Collector, Counter};
-use buffertk::{stack_pack, v64, Packable, Unpackable};
+use buffertk::{Packable, Unpackable, stack_pack, v64};
 use prototk_derive::Message;
 use sync42::work_coalescing_queue::{WorkCoalescingCore, WorkCoalescingQueue};
 
 use super::setsum::Setsum;
 use super::{
-    check_key_len, check_table_size, check_value_len, corruption_crc_checksum_failed,
-    corruption_entry_size_exceeds_max, corruption_fsync_failed, corruption_header_size_exceeds_max,
-    corruption_invalid_discriminant, corruption_log_poisoned, corruption_shared_not_zero,
-    corruption_true_up_exceeds_header_max, corruption_truncation_no_second_header, empty_batch,
-    error_with_path, io_result, io_result_with_context, logic_error_buf_writer_into_inner_failed,
-    system_error, table_full, unpack_key_value_entry_prototk, unpack_log_header, Builder, Error,
-    KeyRef, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, TABLE_FULL_SIZE,
+    Builder, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef,
+    TABLE_FULL_SIZE, check_key_len, check_table_size, check_value_len,
+    corruption_crc_checksum_failed, corruption_entry_size_exceeds_max, corruption_fsync_failed,
+    corruption_header_size_exceeds_max, corruption_invalid_discriminant, corruption_log_poisoned,
+    corruption_shared_not_zero, corruption_true_up_exceeds_header_max,
+    corruption_truncation_no_second_header, empty_batch, error_with_path, io_result,
+    io_result_with_context, logic_error_buf_writer_into_inner_failed, system_error, table_full,
+    unpack_key_value_entry_prototk, unpack_log_header,
 };
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////

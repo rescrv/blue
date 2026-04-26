@@ -1,8 +1,8 @@
 [package]
 name = "biometrics_sys"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "biometrics_sys provides system stats measured from within the process"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

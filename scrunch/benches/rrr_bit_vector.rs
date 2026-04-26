@@ -1,9 +1,9 @@
-use guacamole::combinators::*;
 use guacamole::Guacamole;
-use statslicer::{benchmark, black_box, statslicer_main, Bencher, Cycle, Parameter, Parameters};
+use guacamole::combinators::*;
+use statslicer::{Bencher, Cycle, Parameter, Parameters, benchmark, black_box, statslicer_main};
 
-use scrunch::bit_vector::rrr::BitVector;
 use scrunch::bit_vector::BitVector as BitVectorTrait;
+use scrunch::bit_vector::rrr::BitVector;
 use scrunch::builder::Builder;
 
 const VECTOR_LENGTH: &[usize] = &[

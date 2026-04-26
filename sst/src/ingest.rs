@@ -1,13 +1,13 @@
 //! Tools for ingesting data into a directory.
 
-use std::fs::{remove_file, rename, File};
+use std::fs::{File, remove_file, rename};
 use std::path::PathBuf;
 
 use super::log::log_to_builder;
 use super::setsum::Setsum;
 use super::{
-    error_with_path, is_table_full, system_error_with_path_and_context, Builder, Error, LogBuilder,
-    LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE,
+    Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE,
+    error_with_path, is_table_full, system_error_with_path_and_context,
 };
 
 /////////////////////////////////////////// IngestOptions //////////////////////////////////////////

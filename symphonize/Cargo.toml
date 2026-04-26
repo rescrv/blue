@@ -1,8 +1,8 @@
 [package]
 name = "symphonize"
-version = "0.15.0"
+version = "0.16.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "symphonize is a tool for running integration tests across services"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::os::fd::RawFd;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use biometrics::{Collector, Counter};
 

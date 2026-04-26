@@ -1,10 +1,10 @@
 //! Sensors that implement the [Sensor] trait.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::moments;
 use crate::Sensor;
+use crate::moments;
 
 ////////////////////////////////////////////// Counter /////////////////////////////////////////////
 

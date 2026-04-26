@@ -2,7 +2,7 @@ use arrrg::CommandLine;
 
 use rc_conf::RcConf;
 
-use symphonize::{autoinfer_configuration, paths_to_root, Symphonize, SymphonizeOptions};
+use symphonize::{Symphonize, SymphonizeOptions, autoinfer_configuration, paths_to_root};
 
 fn usage() {
     eprintln!(

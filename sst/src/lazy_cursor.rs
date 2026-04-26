@@ -31,7 +31,7 @@ impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
     fn establish_cursor(&mut self) -> Result<&mut SstCursor, Error> {
         let cursor = (self.instantiate)()?;
         self.position = Position::Instantiated { cursor };
-        if let Position::Instantiated { ref mut cursor } = &mut self.position {
+        if let Position::Instantiated { cursor } = &mut self.position {
             Ok(cursor)
         } else {
             panic!("this should never happen");

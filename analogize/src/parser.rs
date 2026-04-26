@@ -1,15 +1,15 @@
 use std::fmt::{Formatter, Write};
 
 use nom::{
+    IResult, Offset,
     branch::alt,
     bytes::complete::{escaped, tag},
     character::complete::{digit1, multispace0, multispace1, none_of, one_of},
     combinator::{all_consuming, map, map_res, opt, recognize},
-    error::{context, VerboseError, VerboseErrorKind},
+    error::{VerboseError, VerboseErrorKind, context},
     multi::{separated_list0, separated_list1},
     number::complete::double,
     sequence::{delimited, terminated, tuple},
-    IResult, Offset,
 };
 
 use zerror_core::ErrorCore;

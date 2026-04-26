@@ -2,13 +2,13 @@ use buffertk::Unpackable;
 use prototk::FieldNumber;
 
 use crate::binary_search::partition_by;
-use crate::bit_vector::sparse::BitVector;
 use crate::bit_vector::BitVector as BitVectorTrait;
+use crate::bit_vector::sparse::BitVector;
 use crate::builder::{Builder, Helper};
 use crate::psi::Psi;
 use crate::sigma::Sigma;
 use crate::wavelet_tree::WaveletTree;
-use crate::{inverse, Error};
+use crate::{Error, inverse};
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 

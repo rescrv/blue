@@ -11,7 +11,7 @@ use biometrics::Counter;
 use one_two_eight::generate_id;
 use tag_index::Tags;
 use tatl::{HeyListen, Stationary};
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 pub mod coding;
@@ -1045,7 +1045,7 @@ impl<S: BiometricsStore> QueryEngine<S> {
         query: &str,
         params: query::QueryParams,
     ) -> Result<Vec<Series>, Error> {
-        let query = support_nom::parse_all(querylang::expr)(query)?;
+        let query = querylang::parse(query)?;
         (*query)(ctx, &self.biometrics, &params)
     }
 }

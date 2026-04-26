@@ -154,15 +154,15 @@ impl Emitter {
     }
 
     fn write_line(&mut self, line: impl AsRef<str>, now_millis: u64) -> Result<(), std::io::Error> {
-        if let Some(flush_trigger) = self.flush_trigger {
-            if now_millis > flush_trigger {
-                self.flush()?;
-                self.output.take();
-                self.written = 0;
-                self.last_flush = Instant::now();
-                self.flush_trigger = None;
-                self.emitted_types.clear();
-            }
+        if let Some(flush_trigger) = self.flush_trigger
+            && now_millis > flush_trigger
+        {
+            self.flush()?;
+            self.output.take();
+            self.written = 0;
+            self.last_flush = Instant::now();
+            self.flush_trigger = None;
+            self.emitted_types.clear();
         }
         let flush_trigger = self.flush_trigger;
         let last_flush = self.last_flush;

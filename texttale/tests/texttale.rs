@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use utilz::test_per_file;
 
-use texttale::{story, ExpectTextTale, StoryElement, TextTale};
+use texttale::{ExpectTextTale, StoryElement, TextTale, story};
 
 ////////////////////////////////////////////// Player //////////////////////////////////////////////
 

@@ -221,7 +221,7 @@ macro_rules! generate_id_prototk {
 
         impl<'a> prototk::FieldPackHelper<'a, ::prototk::field_types::message<$what>> for $what {
             fn field_pack_sz(&self, tag: &::prototk::Tag) -> usize {
-                use buffertk::{stack_pack, Packable};
+                use buffertk::{Packable, stack_pack};
                 use prototk::{FieldPackHelper, FieldType, Message};
                 stack_pack(tag)
                     .pack(stack_pack(self).length_prefixed())
@@ -229,7 +229,7 @@ macro_rules! generate_id_prototk {
             }
 
             fn field_pack(&self, tag: &::prototk::Tag, out: &mut [u8]) {
-                use buffertk::{stack_pack, Packable};
+                use buffertk::{Packable, stack_pack};
                 use prototk::{FieldPackHelper, FieldType, Message};
                 stack_pack(tag)
                     .pack(stack_pack(self).length_prefixed())

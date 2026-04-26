@@ -7,8 +7,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use chrono::Local;
-use reqwest::blocking::Client;
 use reqwest::StatusCode;
+use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
 
@@ -341,7 +341,7 @@ fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
 mod tests {
     use semver::Version;
 
-    use super::{classify, parse_mode, render_publish_script, Action, Mode, PublishCommand};
+    use super::{Action, Mode, PublishCommand, classify, parse_mode, render_publish_script};
 
     #[test]
     fn defaults_to_print_packages_mode() {

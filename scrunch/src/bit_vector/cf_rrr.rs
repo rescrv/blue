@@ -1,11 +1,11 @@
 use buffertk::Unpackable;
 
+use crate::Error;
 use crate::bit_array::{BitArray, Builder as BitArrayBuilder, FixedWidthIterator};
 use crate::builder::{Builder, Helper};
-use crate::Error;
 
-use super::rrr::{decode, encode, u63, SixtyThreeBitWords, L};
 use super::BitVector as BitVectorTrait;
+use super::rrr::{L, SixtyThreeBitWords, decode, encode, u63};
 
 /////////////////////////////////////////// BitVectorStub //////////////////////////////////////////
 

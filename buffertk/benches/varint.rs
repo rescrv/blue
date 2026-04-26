@@ -1,8 +1,8 @@
-use guacamole::combinators::*;
 use guacamole::Guacamole;
-use statslicer::{benchmark, black_box, statslicer_main, Bencher, Parameter, Parameters};
+use guacamole::combinators::*;
+use statslicer::{Bencher, Parameter, Parameters, benchmark, black_box, statslicer_main};
 
-use buffertk::{stack_pack, v64, Unpackable};
+use buffertk::{Unpackable, stack_pack, v64};
 
 const BYTES: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 

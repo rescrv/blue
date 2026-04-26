@@ -1,5 +1,5 @@
-use guacamole::combinators::any;
 use guacamole::Guacamole;
+use guacamole::combinators::any;
 
 #[test]
 fn test_any_f64_uniform_distribution() {

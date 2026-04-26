@@ -135,7 +135,7 @@ fn with_unit_types() {
 
 ///////////////////////////////////////////// proptest /////////////////////////////////////////////
 
-use proptest::prelude::{any, Strategy};
+use proptest::prelude::{Strategy, any};
 
 fn arb_key_data_type() -> impl Strategy<Value = KeyDataType> {
     use proptest::prelude::Just;

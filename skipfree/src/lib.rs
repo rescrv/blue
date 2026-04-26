@@ -7,8 +7,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 use rand::Rng;
 
@@ -168,7 +168,7 @@ impl<K: Eq + Ord + Default, V: Default, const MAX_HEIGHT: usize> SkipList<K, V, 
         const BRANCHING: u8 = 4;
         let mut height = 1usize;
         let mut rng = rand::thread_rng();
-        while height < MAX_HEIGHT && rng.gen::<u8>() % BRANCHING == 0 {
+        while height < MAX_HEIGHT && rng.r#gen::<u8>() % BRANCHING == 0 {
             height += 1;
         }
         assert!(height > 0);
@@ -373,8 +373,8 @@ impl<K: Eq + Ord + Default, V: Default, const MAX_HEIGHT: usize>
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use guacamole::{FromGuacamole, Guacamole};
 

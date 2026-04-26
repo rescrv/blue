@@ -1,8 +1,8 @@
 // TODO(rescrv): better error handling than string.
 
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use prototk::FieldNumber;
 use rpc_pb::{Host, HostID};
@@ -49,7 +49,7 @@ impl RoutingConf {
             if !args.is_empty() {
                 args.push("--".to_string());
             }
-            args.extend(a.into_iter());
+            args.extend(a);
         }
         Ok(args)
     }

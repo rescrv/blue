@@ -1,8 +1,8 @@
 [package]
 name = "saros"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
-edition = "2021"
+edition = { workspace = true }
 description = "Saros is a terminal-based time series database."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"

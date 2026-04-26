@@ -1,7 +1,7 @@
 use buffertk::Unpackable;
 
-use crate::builder::{Builder, Helper};
 use crate::Error;
+use crate::builder::{Builder, Helper};
 
 pub mod prefix;
 

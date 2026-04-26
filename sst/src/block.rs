@@ -6,16 +6,16 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use buffertk::{length_free, stack_pack, v64, Packable, Unpacker};
+use buffertk::{Packable, Unpacker, length_free, stack_pack, v64};
 
 use super::{
-    block_too_small, check_key_len, check_table_size, check_value_len,
+    Builder, CORRUPTION, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut,
+    LOGIC_ERROR, block_too_small, check_key_len, check_table_size, check_value_len,
     corruption_binary_search_left_ne_right, corruption_block_with_zero_restarts,
     corruption_offset_exceeds_restarts_boundary, corruption_restart_point_no_key_value_pair,
     logic_error_next_not_positioned, logic_error_restart_idx_exceeds_num_restarts,
     logic_error_tried_taking_negative_restart_idx, sort_order, unpack_block_restarts,
-    unpack_key_value_pair, Builder, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut,
-    CORRUPTION, LOGIC_ERROR,
+    unpack_key_value_pair,
 };
 use crate::bounds_cursor::BoundsCursor;
 use crate::pruning_cursor::PruningCursor;
@@ -390,14 +390,14 @@ impl PartialEq for CursorPosition {
                     restart_idx: ri1,
                     offset: o1,
                     next_offset: no1,
-                    key: ref k1,
+                    key: k1,
                     timestamp: t1,
                 },
                 &CursorPosition::Positioned {
                     restart_idx: ri2,
                     offset: o2,
                     next_offset: no2,
-                    key: ref k2,
+                    key: k2,
                     timestamp: t2,
                 },
             ) => ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2,

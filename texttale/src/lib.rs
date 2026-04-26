@@ -4,9 +4,9 @@ use std::fs::read_to_string;
 use std::io::Write;
 use std::path::Path;
 
+use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::MemHistory;
-use rustyline::Editor;
 
 ///////////////////////////////////////////// TextTale /////////////////////////////////////////////
 

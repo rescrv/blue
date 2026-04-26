@@ -2,8 +2,8 @@ use std::time::{Duration, SystemTime};
 
 use biometrics::{Collector, Counter, Gauge, Histogram, Moments};
 use biometrics_prometheus::{Emitter, Options};
-use guacamole::combinators::*;
 use guacamole::Guacamole;
+use guacamole::combinators::*;
 
 static REQUESTS_COUNT: Counter = Counter::new("request_count");
 static LAST_REQUEST_INTERARRIVAL_US: Gauge = Gauge::new("last_request_interarrival_us");

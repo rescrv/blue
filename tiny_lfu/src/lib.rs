@@ -3,8 +3,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use std::iter::zip;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod vector;
 
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn constants() {
-        use bloomcalc::{calc_keys_given_probability, P};
+        use bloomcalc::{P, calc_keys_given_probability};
         // The minimum probability must not yield more than MAX_KEYS hashes.
         assert!(MAX_KEYS >= calc_keys_given_probability(P(MIN_PROBABILITY)).0 as usize);
     }

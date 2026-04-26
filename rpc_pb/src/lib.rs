@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use one_two_eight::{generate_id, generate_id_prototk};
 use prototk_derive::Message;
-use zerror::{iotoz, Z};
+use zerror::{Z, iotoz};
 use zerror_core::ErrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
@@ -672,7 +672,7 @@ pub trait Resolver {
 
 #[cfg(test)]
 mod tests {
-    use buffertk::{stack_pack, Unpackable};
+    use buffertk::{Unpackable, stack_pack};
 
     use super::*;
 

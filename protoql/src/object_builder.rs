@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use buffertk::{stack_pack, v64, Packable};
+use buffertk::{Packable, stack_pack, v64};
 use prototk::field_types::*;
 use prototk::{FieldNumber, Tag, WireType};
 use sst::KeyValueRef;
@@ -839,7 +839,9 @@ mod tests {
             .unwrap();
         let buf = obj_builder.seal().unwrap();
         assert_eq!(
-            &[34, 16, 9, 42, 0, 0, 0, 0, 0, 0, 0, 18, 5, 104, 101, 108, 108, 111],
+            &[
+                34, 16, 9, 42, 0, 0, 0, 0, 0, 0, 0, 18, 5, 104, 101, 108, 108, 111
+            ],
             &buf.as_slice()
         );
     }

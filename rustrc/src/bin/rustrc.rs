@@ -9,9 +9,15 @@ use rustrc::{Pid1, Pid1Options, Target};
 pub struct Options {
     #[arrrg(optional, "Path to the UNIX control socket (must not already exist).")]
     pub control_sock: String,
-    #[arrrg(optional, "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override.")]
+    #[arrrg(
+        optional,
+        "A colon-separated PATH-like list of rc.conf files to be loaded in order.  Later files override."
+    )]
     pub rc_conf_path: String,
-    #[arrrg(optional, "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit.")]
+    #[arrrg(
+        optional,
+        "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
+    )]
     pub rc_d_path: String,
 }
 
@@ -94,10 +100,10 @@ impl unix_sock::Invokable for UnixSockAdapter {
                     }
                 }
 
-                if matches.opt_present("r") {
-                    if let Err(err) = self.pid1.reload() {
-                        response += &format!("error: {err:?}");
-                    }
+                if matches.opt_present("r")
+                    && let Err(err) = self.pid1.reload()
+                {
+                    response += &format!("error: {err:?}");
                 }
 
                 // NOTE(rescrv):  I've gone back and forth on these five lines.
@@ -175,18 +181,20 @@ fn main() {
     // Create a thread to listen for signals and cancel the context if need be.
     let signal_pid1 = Arc::downgrade(&pid1);
     let signal_context = context.clone();
-    let signal = std::thread::spawn(move || loop {
-        let signal_set = minimal_signals::SignalSet::new().fill();
-        let signal = minimal_signals::wait(signal_set);
-        if signal == Some(minimal_signals::SIGCHLD) {
-            continue;
-        }
-        signal_context.cancel();
-        let Some(pid1) = signal_pid1.upgrade() else {
-            break;
-        };
-        if let Some(signal) = signal {
-            let _ = pid1.kill(Target::All, signal);
+    let signal = std::thread::spawn(move || {
+        loop {
+            let signal_set = minimal_signals::SignalSet::new().fill();
+            let signal = minimal_signals::wait(signal_set);
+            if signal == Some(minimal_signals::SIGCHLD) {
+                continue;
+            }
+            signal_context.cancel();
+            let Some(pid1) = signal_pid1.upgrade() else {
+                break;
+            };
+            if let Some(signal) = signal {
+                let _ = pid1.kill(Target::All, signal);
+            }
         }
     });
 
