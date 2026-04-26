@@ -1,6 +1,11 @@
 //! Standard stack-manipulation builtins.
 
-use crate::{EvalError, Evaluator, Token};
+// Operators must match the `Operator<T>` type signature which requires `&mut Vec<T>`.
+#![allow(clippy::ptr_arg)]
+
+use crate::EvalError;
+use crate::Evaluator;
+use crate::Token;
 
 fn stack_underflow(expected: usize, found: usize) -> EvalError {
     EvalError::OperatorError(format!(
@@ -15,28 +20,27 @@ fn require_len<T>(stack: &[T], expected: usize) -> Result<(), EvalError> {
     Ok(())
 }
 
-fn dup<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn dup<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 1)?;
     let top = stack.last().unwrap().clone();
     stack.push(top);
     Ok(())
 }
 
-fn drop<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn drop<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 1)?;
     stack.pop();
     Ok(())
 }
 
-#[allow(clippy::ptr_arg)]
-fn swap<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn swap<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
     stack.swap(len - 2, len - 1);
     Ok(())
 }
 
-fn over<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn over<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
     let second = stack[len - 2].clone();
@@ -44,22 +48,21 @@ fn over<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
-#[allow(clippy::ptr_arg)]
-fn rot<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn rot<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 3)?;
     let len = stack.len();
     stack[len - 3..].rotate_left(1);
     Ok(())
 }
 
-fn nip<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn nip<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
     stack.remove(len - 2);
     Ok(())
 }
 
-fn tuck<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn tuck<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
     let top = stack[len - 1].clone();
@@ -67,7 +70,7 @@ fn tuck<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
-fn two_dup<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn two_dup<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
     let a = stack[len - 2].clone();
@@ -77,22 +80,21 @@ fn two_dup<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
-fn two_drop<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn two_drop<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     stack.pop();
     stack.pop();
     Ok(())
 }
 
-#[allow(clippy::ptr_arg)]
-fn two_swap<T>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn two_swap<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 4)?;
     let len = stack.len();
     stack[len - 4..].rotate_left(2);
     Ok(())
 }
 
-fn two_over<T: Clone>(stack: &mut Vec<T>) -> Result<(), EvalError> {
+fn two_over<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 4)?;
     let len = stack.len();
     let a = stack[len - 4].clone();
