@@ -6,24 +6,24 @@
 
 use std::collections::HashMap;
 
+use handled::SError;
+
 use crate::Token;
 
-/// An error that can occur during evaluation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EvalError {
-    /// Operator returned an error.
-    OperatorError(String),
-}
+/// Evaluation error type.
+pub type EvalError = SError;
 
-impl std::fmt::Display for EvalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EvalError::OperatorError(msg) => write!(f, "operator error: {msg}"),
-        }
-    }
-}
+const PHASE: &str = "caternary-eval";
 
-impl std::error::Error for EvalError {}
+/// Error code for operator failures.
+pub const CODE_OPERATOR_ERROR: &str = "operator-error";
+
+/// Construct an operator error with a structured message.
+pub(crate) fn operator_error(message: impl AsRef<str>) -> EvalError {
+    SError::new(PHASE)
+        .with_code(CODE_OPERATOR_ERROR)
+        .with_message(message.as_ref())
+}
 
 /// An operator function that manipulates the stack.
 ///
@@ -120,7 +120,7 @@ mod tests {
     }
 
     fn underflow() -> EvalError {
-        EvalError::OperatorError("stack underflow".to_string())
+        operator_error("stack underflow")
     }
 
     #[test]
@@ -211,10 +211,8 @@ mod tests {
         fn filter(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             let predicate = stack
                 .pop()
-                .ok_or(EvalError::OperatorError("need predicate".to_string()))?;
-            let data = stack
-                .pop()
-                .ok_or(EvalError::OperatorError("need data".to_string()))?;
+                .ok_or_else(|| operator_error("need predicate"))?;
+            let data = stack.pop().ok_or_else(|| operator_error("need data"))?;
             stack.push(Value::Word(format!("filtered({data:?}, {predicate:?})")));
             Ok(())
         }
@@ -268,7 +266,7 @@ mod tests {
     #[test]
     fn operator_error_propagates() {
         fn fail(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
-            Err(EvalError::OperatorError("intentional failure".to_string()))
+            Err(operator_error("intentional failure"))
         }
 
         let mut eval: Evaluator<Value> = Evaluator::new();
@@ -277,8 +275,10 @@ mod tests {
         let tokens = parse("A B FAIL C").unwrap();
         let result = eval.eval(&tokens);
 
-        assert!(matches!(result, Err(EvalError::OperatorError(_))));
-        println!("Error: {result:?}");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("intentional failure"));
+        println!("Error: {err:?}");
     }
 
     #[test]
@@ -295,8 +295,10 @@ mod tests {
         let tokens = parse("A POP2").unwrap();
         let result = eval.eval(&tokens);
 
-        assert!(matches!(result, Err(EvalError::OperatorError(_))));
-        println!("Error: {result:?}");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("stack underflow"));
+        println!("Error: {err:?}");
     }
 
     #[test]
@@ -473,7 +475,7 @@ mod tests {
     #[test]
     fn redefine_operator() {
         fn first(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
-            Err(EvalError::OperatorError("first".to_string()))
+            Err(operator_error("first"))
         }
 
         fn second(stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {

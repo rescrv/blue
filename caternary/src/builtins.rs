@@ -6,9 +6,10 @@
 use crate::EvalError;
 use crate::Evaluator;
 use crate::Token;
+use crate::evaluator::operator_error;
 
 fn stack_underflow(expected: usize, found: usize) -> EvalError {
-    EvalError::OperatorError(format!(
+    operator_error(format!(
         "stack underflow: need at least {expected} values, found {found}"
     ))
 }
@@ -159,7 +160,6 @@ mod tests {
         let tokens = parse("DROP").unwrap();
         let err = eval.eval(&tokens).unwrap_err();
 
-        assert!(matches!(err, crate::EvalError::OperatorError(_)));
         assert!(
             err.to_string()
                 .contains("stack underflow: need at least 1 values, found 0")
