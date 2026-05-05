@@ -1,8 +1,16 @@
 //! Parser for the caternary concatenative language.
 //!
-//! The language consists of whitespace-separated words and bracketed expressions.
-//! Words are interpreted exactly as written (case preserved). Bracketed expressions
-//! are parsed recursively.
+//! The language first uses shell tokenization and then applies FORTH-style
+//! quotation parsing to the resulting words. Words are interpreted exactly as
+//! written after shell splitting (case preserved). Bracketed expressions are
+//! parsed recursively from `[` and `]` characters in those shell-split words.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SplitState {
+    Unquoted,
+    Single,
+    Double,
+}
 
 /// A span in source text, measured in byte offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,6 +71,11 @@ impl SpannedToken {
 /// An error that can occur during parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
+    /// Shell tokenization failed before FORTH processing began.
+    Tokenization {
+        /// Human-readable tokenization error.
+        message: String,
+    },
     /// An opening `[` was not closed.
     UnmatchedOpenBracket {
         /// Span of the unmatched opening bracket.
@@ -79,6 +92,7 @@ impl ParseError {
     /// Returns the source span associated with this parse error.
     pub fn span(&self) -> Span {
         match self {
+            ParseError::Tokenization { .. } => Span { start: 0, end: 0 },
             ParseError::UnmatchedOpenBracket { span } => *span,
             ParseError::UnmatchedCloseBracket { span } => *span,
         }
@@ -88,6 +102,9 @@ impl ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ParseError::Tokenization { message } => {
+                write!(f, "shell tokenization failed: {message}")
+            }
             ParseError::UnmatchedOpenBracket { span } => {
                 write!(f, "unmatched opening bracket '[' at byte {}", span.start)
             }
@@ -110,110 +127,329 @@ pub fn parse(input: &str) -> Result<Vec<Token>, ParseError> {
 
 /// Parses a caternary program and returns tokens with source spans.
 pub fn parse_with_spans(input: &str) -> Result<Vec<SpannedToken>, ParseError> {
-    let mut parser = Parser::new(input);
-    parser.parse_tokens(None)
+    let mut parser = Parser::new();
+    for shell_word in shell_words(input)? {
+        parser.process_shell_word(shell_word)?;
+    }
+    parser.finish()
 }
 
-struct Parser<'a> {
-    input: &'a str,
-    cursor: usize,
+struct ShellWord {
+    text: String,
+    span: Span,
+    emitted: Vec<EmittedChar>,
 }
 
-impl<'a> Parser<'a> {
-    fn new(input: &'a str) -> Self {
-        Self { input, cursor: 0 }
+#[derive(Clone, Copy)]
+struct EmittedChar {
+    ch: char,
+    span: Span,
+}
+
+struct Frame {
+    open_bracket: Option<usize>,
+    tokens: Vec<SpannedToken>,
+}
+
+struct Parser {
+    frames: Vec<Frame>,
+}
+
+impl Parser {
+    fn new() -> Self {
+        Self {
+            frames: vec![Frame {
+                open_bracket: None,
+                tokens: Vec::new(),
+            }],
+        }
     }
 
-    fn parse_tokens(
-        &mut self,
-        open_bracket: Option<usize>,
-    ) -> Result<Vec<SpannedToken>, ParseError> {
-        let mut tokens = Vec::new();
-        loop {
-            self.skip_whitespace();
+    fn process_shell_word(&mut self, shell_word: ShellWord) -> Result<(), ParseError> {
+        if shell_word.text.is_empty() {
+            self.push_word(String::new(), shell_word.span);
+            return Ok(());
+        }
 
-            let Some((offset, ch)) = self.peek_char() else {
-                return match open_bracket {
-                    Some(byte) => Err(ParseError::UnmatchedOpenBracket {
-                        span: Span::point(byte),
-                    }),
-                    None => Ok(tokens),
-                };
-            };
+        let mut segment_start = shell_word.span.start;
+        let mut segment = String::new();
 
-            match ch {
+        for emitted in shell_word.emitted {
+            match emitted.ch {
                 '[' => {
-                    self.bump_char();
-                    let inner = self.parse_tokens(Some(offset))?;
-                    tokens.push(SpannedToken {
-                        span: Span {
-                            start: offset,
-                            end: self.cursor,
-                        },
-                        kind: SpannedTokenKind::Bracket(inner),
+                    self.flush_segment(&mut segment, segment_start, emitted.span.start);
+                    self.frames.push(Frame {
+                        open_bracket: Some(emitted.span.start),
+                        tokens: Vec::new(),
                     });
+                    segment_start = emitted.span.end;
                 }
                 ']' => {
-                    if open_bracket.is_some() {
-                        self.bump_char();
-                        return Ok(tokens);
-                    }
-                    return Err(ParseError::UnmatchedCloseBracket {
-                        span: Span::point(offset),
+                    self.flush_segment(&mut segment, segment_start, emitted.span.start);
+                    let Some(frame) = self.frames.pop() else {
+                        unreachable!("parser always has a root frame");
+                    };
+                    let Some(open_start) = frame.open_bracket else {
+                        self.frames.push(frame);
+                        return Err(ParseError::UnmatchedCloseBracket { span: emitted.span });
+                    };
+                    self.current_tokens().push(SpannedToken {
+                        span: Span {
+                            start: open_start,
+                            end: emitted.span.end,
+                        },
+                        kind: SpannedTokenKind::Bracket(frame.tokens),
                     });
+                    segment_start = emitted.span.end;
                 }
-                _ => {
-                    let (word, span) = self.parse_word();
-                    tokens.push(SpannedToken {
-                        span,
-                        kind: SpannedTokenKind::Word(word),
-                    });
+                ch => {
+                    segment.push(ch);
                 }
             }
         }
+
+        self.flush_segment(&mut segment, segment_start, shell_word.span.end);
+        Ok(())
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some((_, ch)) = self.peek_char() {
-            if ch.is_whitespace() {
-                self.bump_char();
-            } else {
-                break;
+    fn finish(mut self) -> Result<Vec<SpannedToken>, ParseError> {
+        if let Some(frame) = self.frames.pop() {
+            if let Some(open_start) = frame.open_bracket {
+                return Err(ParseError::UnmatchedOpenBracket {
+                    span: Span::point(open_start),
+                });
+            }
+            return Ok(frame.tokens);
+        }
+        unreachable!("parser always has a root frame");
+    }
+
+    fn current_tokens(&mut self) -> &mut Vec<SpannedToken> {
+        &mut self
+            .frames
+            .last_mut()
+            .expect("parser always has a root frame")
+            .tokens
+    }
+
+    fn flush_segment(&mut self, segment: &mut String, start: usize, end: usize) {
+        if !segment.is_empty() {
+            let word = std::mem::take(segment);
+            self.push_word(word, Span { start, end });
+        }
+    }
+
+    fn push_word(&mut self, word: String, span: Span) {
+        self.current_tokens().push(SpannedToken {
+            span,
+            kind: SpannedTokenKind::Word(word),
+        });
+    }
+}
+
+fn shell_words(input: &str) -> Result<Vec<ShellWord>, ParseError> {
+    let split = shvar::split(input).map_err(|err| ParseError::Tokenization {
+        message: err.to_string(),
+    })?;
+    let spans = shell_word_spans(input).map_err(|err| ParseError::Tokenization {
+        message: err.to_string(),
+    })?;
+    debug_assert_eq!(split.len(), spans.len());
+
+    let mut shell_words = Vec::with_capacity(split.len());
+    for (text, span) in split.into_iter().zip(spans.into_iter()) {
+        let emitted = decode_shell_word(&input[span.start..span.end], span.start);
+        debug_assert_eq!(text, emitted.iter().map(|c| c.ch).collect::<String>());
+        shell_words.push(ShellWord {
+            text,
+            span,
+            emitted,
+        });
+    }
+    Ok(shell_words)
+}
+
+fn shell_word_spans(input: &str) -> Result<Vec<Span>, shvar::Error> {
+    let mut spans = Vec::new();
+    let mut remaining = input;
+
+    while let Some((_, rest)) = shvar::split_once(remaining)? {
+        let base = input.len() - remaining.len();
+        let start = base + leading_whitespace_bytes(remaining);
+        let end = input.len() - rest.len();
+        spans.push(Span { start, end });
+        remaining = rest;
+    }
+
+    Ok(spans)
+}
+
+fn leading_whitespace_bytes(input: &str) -> usize {
+    input
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .map(char::len_utf8)
+        .sum()
+}
+
+fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
+    let mut emitted = Vec::new();
+    let mut state = SplitState::Unquoted;
+    let mut whack_start = None;
+
+    for (idx, ch) in input.char_indices() {
+        let start = base + idx;
+        let end = start + ch.len_utf8();
+        match (state, ch) {
+            (SplitState::Double, '$') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '$',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, '`') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '`',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, '"') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '"',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, '\\') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '\\',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, '\n') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '\n',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, 'n') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '\n',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Double, '"') => {
+                state = SplitState::Unquoted;
+            }
+            (SplitState::Double, '\\') => {
+                whack_start = Some(start);
+            }
+            (SplitState::Double, c) if whack_start.is_some() => {
+                let whack = whack_start.take().unwrap_or(start);
+                emitted.push(EmittedChar {
+                    ch: '\\',
+                    span: Span {
+                        start: whack,
+                        end: whack + 1,
+                    },
+                });
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span { start, end },
+                });
+            }
+            (SplitState::Double, c) => {
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span { start, end },
+                });
+            }
+            (SplitState::Single, '\'') => {
+                state = SplitState::Unquoted;
+            }
+            (SplitState::Single, c) => {
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span { start, end },
+                });
+            }
+            (SplitState::Unquoted, c) if c.is_whitespace() && whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Unquoted, '\'') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '\'',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Unquoted, '\'') => {
+                state = SplitState::Single;
+            }
+            (SplitState::Unquoted, '"') if whack_start.is_some() => {
+                emitted.push(EmittedChar {
+                    ch: '"',
+                    span: Span {
+                        start: whack_start.take().unwrap_or(start),
+                        end,
+                    },
+                });
+            }
+            (SplitState::Unquoted, '"') => {
+                state = SplitState::Double;
+            }
+            (SplitState::Unquoted, '\\') if whack_start.is_none() => {
+                whack_start = Some(start);
+            }
+            (SplitState::Unquoted, c) if whack_start.is_some() => {
+                let whack = whack_start.take().unwrap_or(start);
+                emitted.push(EmittedChar {
+                    ch: '\\',
+                    span: Span {
+                        start: whack,
+                        end: whack + 1,
+                    },
+                });
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span { start, end },
+                });
+            }
+            (SplitState::Unquoted, c) => {
+                emitted.push(EmittedChar {
+                    ch: c,
+                    span: Span { start, end },
+                });
             }
         }
     }
 
-    fn parse_word(&mut self) -> (String, Span) {
-        let start = self.cursor;
-        let mut word = String::new();
-        while let Some((_, ch)) = self.peek_char() {
-            if ch.is_whitespace() || ch == '[' || ch == ']' {
-                break;
-            }
-            word.push(ch);
-            self.bump_char();
-        }
-        (
-            word,
-            Span {
-                start,
-                end: self.cursor,
-            },
-        )
-    }
-
-    fn peek_char(&self) -> Option<(usize, char)> {
-        self.input[self.cursor..]
-            .char_indices()
-            .next()
-            .map(|(idx, ch)| (self.cursor + idx, ch))
-    }
-
-    fn bump_char(&mut self) -> Option<char> {
-        let (_, ch) = self.peek_char()?;
-        self.cursor += ch.len_utf8();
-        Some(ch)
-    }
+    emitted
 }
 
 #[cfg(test)]
@@ -250,11 +486,57 @@ mod tests {
     }
 
     #[test]
+    fn shell_quoted_words_preserve_spaces() {
+        let tokens = parse(r#""hello world" ['a b']"#).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Word("hello world".to_string()),
+                Token::Bracket(vec![Token::Word("a b".to_string())]),
+            ]
+        );
+    }
+
+    #[test]
+    fn compact_brackets_round_trip_shell_quoted_words() {
+        let tokens = parse(r#"["hello world" ECHO]CALL"#).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Bracket(vec![
+                    Token::Word("hello world".to_string()),
+                    Token::Word("ECHO".to_string()),
+                ]),
+                Token::Word("CALL".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn escaped_whitespace_is_one_word() {
+        let tokens = parse(r"hello\ world").unwrap();
+        assert_eq!(tokens, vec![Token::Word("hello world".to_string())]);
+    }
+
+    #[test]
+    fn empty_quoted_word_is_a_token() {
+        let tokens = parse(r#""""#).unwrap();
+        assert_eq!(tokens, vec![Token::Word(String::new())]);
+    }
+
+    #[test]
     fn span_for_word_and_bracket() {
         let tokens = parse_with_spans("aa [bbb]").unwrap();
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].span, Span { start: 0, end: 2 });
         assert_eq!(tokens[1].span, Span { start: 3, end: 8 });
+    }
+
+    #[test]
+    fn quoted_word_span_includes_quotes() {
+        let tokens = parse_with_spans(r#""aa bb""#).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].span, Span { start: 0, end: 7 });
     }
 
     #[test]
