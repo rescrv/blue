@@ -4,9 +4,10 @@ Caternary is a small concatenative language with first-class quotations and a pa
 
 ## Syntax
 
-- Program = whitespace-separated tokens.
+- Program = `shvar::split` shell words, then FORTH-style bracket processing.
 - `word` pushes a word token (or invokes an operator if one is registered under that exact name).
 - `[ ... ]` creates a quotation token.
+- Shell quotes and escapes are resolved before FORTH parsing, so `"hello world"` is one word and `hello\ world` is also one word.
 - Case is preserved and significant (`Scan`, `SCAN`, and `scan` are different words).
 - Brackets nest arbitrarily.
 
@@ -24,6 +25,10 @@ Stack:   2 1
 Program: 2 [DUP] CALL
 Meaning: push 2, push quotation [DUP], then execute the quotation
 Stack:   2 2
+
+Program: ["hello world"] CALL
+Meaning: push a quotation containing one word token `hello world`, then execute it
+Stack:   hello world
 ```
 
 Parse errors include byte spans for unmatched `[` or `]`.

@@ -9,3 +9,4 @@ repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 handled = { path = "../handled" }
+shvar = { path = "../shvar" }

@@ -633,6 +633,12 @@ mod tests {
             Ok(())
         });
 
+        eval.define("ECHO", |stack: &mut Vec<Value>, _eval| {
+            let value = stack.pop().ok_or_else(|| stack_underflow(1, stack.len()))?;
+            stack.push(value);
+            Ok(())
+        });
+
         eval
     }
 
@@ -655,6 +661,24 @@ mod tests {
         let tokens = parse("1 2 [[ADD] CALL] CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(3)]);
+        println!("Stack: {:?}", result);
+    }
+
+    #[test]
+    fn echo_preserves_shell_quoted_word() {
+        let eval = make_eval();
+        let tokens = parse(r#""hello world" ECHO"#).unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Word("hello world".to_string())]);
+        println!("Stack: {:?}", result);
+    }
+
+    #[test]
+    fn call_executes_compact_quotation_with_shell_quoted_word() {
+        let eval = make_eval();
+        let tokens = parse(r#"["hello world" ECHO]CALL"#).unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Word("hello world".to_string())]);
         println!("Stack: {:?}", result);
     }
 
