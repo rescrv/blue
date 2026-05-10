@@ -6,10 +6,11 @@ on:
     branches: [ "main" ]
 env:
   CARGO_TERM_COLOR: always
-  CARGO_TOOLS_ROOT: ${{ runner.temp }}/cargo-tools
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CARGO_TOOLS_ROOT: ${{ github.workspace }}/../.cargo-tools
     steps:
     - uses: actions/checkout@v4
     - name: rustc cache key
