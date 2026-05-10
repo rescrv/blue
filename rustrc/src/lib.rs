@@ -869,11 +869,18 @@ impl Pid1 {
         clue!(COLLECTOR, INFO, {
             reconfigure: indicio::Value::from(&options),
         });
-        {
-            let options2 = options.clone();
-            *self.options.lock().unwrap() = options2;
+        let mut options_guard = self.options.lock().unwrap();
+        let previous_options = options_guard.clone();
+        *options_guard = options.clone();
+        drop(options_guard);
+
+        if let Err(error) = self.reload() {
+            let mut options_guard = self.options.lock().unwrap();
+            *options_guard = previous_options;
+            Err(error)
+        } else {
+            Ok(())
         }
-        self.reload()
     }
 
     /// Reload the configuration from the rc_conf and rc.d paths provided as of the last
