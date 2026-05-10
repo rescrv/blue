@@ -265,6 +265,7 @@ mod tests {
 
     #[test]
     fn operator_error_propagates() {
+        #[allow(clippy::ptr_arg)]
         fn fail(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             Err(operator_error("intentional failure"))
         }
@@ -474,6 +475,7 @@ mod tests {
 
     #[test]
     fn redefine_operator() {
+        #[allow(clippy::ptr_arg)]
         fn first(_stack: &mut Vec<Value>, _eval: &Evaluator<Value>) -> Result<(), EvalError> {
             Err(operator_error("first"))
         }

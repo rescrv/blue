@@ -652,7 +652,7 @@ mod tests {
         let tokens = parse("1 2 [ADD] CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(3)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -661,7 +661,7 @@ mod tests {
         let tokens = parse("1 2 [[ADD] CALL] CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(3)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -670,7 +670,7 @@ mod tests {
         let tokens = parse(r#""hello world" ECHO"#).unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Word("hello world".to_string())]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -679,7 +679,7 @@ mod tests {
         let tokens = parse(r#"["hello world" ECHO]CALL"#).unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Word("hello world".to_string())]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -692,7 +692,7 @@ mod tests {
         let tokens = parse("1 2 3 [ADD] DIP").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(3), Value::Int(3)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -701,7 +701,7 @@ mod tests {
         let tokens = parse("10 20 [DUP] DIP").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(10), Value::Int(10), Value::Int(20)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -714,7 +714,7 @@ mod tests {
         let tokens = parse("5 [DUP MUL] KEEP").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(25), Value::Int(5)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -727,7 +727,7 @@ mod tests {
         let tokens = parse("5 [DUP ADD] [DUP MUL] BI").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(10), Value::Int(25)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -740,7 +740,7 @@ mod tests {
         let tokens = parse("3 4 [DUP MUL] [DUP ADD] BI*").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(9), Value::Int(8)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -753,7 +753,7 @@ mod tests {
         let tokens = parse("3 4 [DUP MUL] BI@").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(9), Value::Int(16)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -766,7 +766,7 @@ mod tests {
         let tokens = parse("5 [[DUP ADD] [DUP MUL] [1 ADD]] CLEAVE").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(10), Value::Int(25), Value::Int(6)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -779,7 +779,7 @@ mod tests {
         let tokens = parse("1 2 3 [[DUP ADD] [DUP MUL] [1 ADD]] SPREAD").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(2), Value::Int(4), Value::Int(4)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -792,7 +792,7 @@ mod tests {
         let tokens = parse("[1 ADD] [2 MUL] COMPOSE 5 SWAP CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(12)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -805,7 +805,7 @@ mod tests {
         let tokens = parse("10 [ADD] CURRY 5 SWAP CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(15)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -818,7 +818,7 @@ mod tests {
         let tokens = parse("true [1] [2] IF").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(1)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -827,7 +827,7 @@ mod tests {
         let tokens = parse("false [1] [2] IF").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(2)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -836,7 +836,7 @@ mod tests {
         let tokens = parse("5 3 GT [yes] [no] IF").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Word("yes".to_string())]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -849,7 +849,7 @@ mod tests {
         let tokens = parse("true [42] WHEN").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(42)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -858,7 +858,7 @@ mod tests {
         let tokens = parse("false [42] WHEN").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert!(result.is_empty());
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -871,7 +871,7 @@ mod tests {
         let tokens = parse("false [42] UNLESS").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(42)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     #[test]
@@ -880,7 +880,7 @@ mod tests {
         let tokens = parse("true [42] UNLESS").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert!(result.is_empty());
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -900,7 +900,7 @@ mod tests {
                 Value::Int(9)
             ])]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -920,7 +920,7 @@ mod tests {
                 Value::Int(6)
             ])]
         );
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -933,7 +933,7 @@ mod tests {
         let tokens = parse("[1 2 3 4 5] 0 [ADD] FOLD").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(15)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -946,7 +946,7 @@ mod tests {
         let tokens = parse("0 [1 2 3] [ADD] EACH").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(6)]);
-        println!("Stack: {:?}", result);
+        println!("Stack: {result:?}");
     }
 
     // ========================================================================
@@ -959,7 +959,7 @@ mod tests {
         let tokens = parse("42 CALL").unwrap();
         let result = eval.eval(&tokens);
         assert!(result.is_err());
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 
     #[test]
@@ -968,6 +968,6 @@ mod tests {
         let tokens = parse("[ADD] DIP").unwrap();
         let result = eval.eval(&tokens);
         assert!(result.is_err());
-        println!("Error: {:?}", result);
+        println!("Error: {result:?}");
     }
 }
