@@ -3,6 +3,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::hash::Hash;
 
+use handled::SError;
+use handled::SExpr;
 use serde::Deserialize;
 use serde_yaml::{Deserializer, Value, from_str, to_string};
 use siphasher::sip128::{Hasher128, SipHasher24};
@@ -68,221 +70,177 @@ pub fn default_service_template() -> &'static str {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Debug)]
-pub enum Error {
-    Io(std::io::Error),
-    NonUtf8Path(std::path::PathBuf),
-    ParseIntError(std::num::ParseIntError),
-    RcConf(rc_conf::Error),
-    Shvar(shvar::Error),
-    SerdeYaml(serde_yaml::Error),
-    InvalidCurrentDirectory,
-    ManifestsDirectoryExists,
-    ManifestExists(Path<'static>),
-    ManifestMissing(Path<'static>),
-    BadOptions(String),
-    VerificationError(Path<'static>),
-    MissingImage {
-        service: String,
-    },
-    MissingRequiredVariable {
-        service: String,
-        key: String,
-        rc_conf_path: String,
-        output: Path<'static>,
-        relative: Path<'static>,
-    },
-    InvalidRoot {
-        root: Path<'static>,
-        rc_conf: Path<'static>,
-    },
-    NoRcConf {
-        root: Path<'static>,
-    },
-    MultipleTerminalRcConfs {
-        rc_conf_path: String,
-    },
-    CommandFailed {
-        service: String,
-        rc_command: String,
-        status: std::process::ExitStatus,
-        stdout: String,
-        stderr: String,
-    },
+pub type Error = SError;
+
+const PHASE_REWRITE: &str = "rewrite";
+const PHASE_REGENERATE: &str = "regenerate";
+const PHASE_TEMPLATE_RESOLUTION: &str = "template-resolution";
+const PHASE_WRITE: &str = "write";
+const PHASE_RC_CONF_SEARCH: &str = "rc-conf-search";
+const PHASE_IMAGE_RCVAR: &str = "image-rcvar";
+const PHASE_RC_CONF: &str = "rc-conf";
+const PHASE_YAML: &str = "yaml";
+
+const CODE_IO_ERROR: &str = "io-error";
+const CODE_INVALID_ROOT: &str = "invalid-root";
+const CODE_MISSING_REQUIRED_VARIABLE: &str = "missing-required-variable";
+const CODE_COMMAND_FAILED: &str = "command-failed";
+const CODE_VERIFICATION_MISMATCH: &str = "verification-mismatch";
+const CODE_INVALID_OPTIONS: &str = "invalid-options";
+const CODE_NON_UTF8_PATH: &str = "non-utf8-path";
+const CODE_PARSE_ERROR: &str = "parse-error";
+const CODE_SHVAR_ERROR: &str = "shvar-error";
+
+const FIELD_PATH: &str = "path";
+const FIELD_CONTEXT: &str = "context";
+const FIELD_OPERATION: &str = "operation";
+const FIELD_SERVICE: &str = "service";
+const FIELD_TEMPLATE: &str = "template";
+const FIELD_RELATIVE: &str = "relative";
+const FIELD_OUTPUT: &str = "output";
+const FIELD_KEY: &str = "key";
+const FIELD_RC_COMMAND: &str = "rc_command";
+const FIELD_STATUS: &str = "exit_status";
+const FIELD_STDOUT: &str = "stdout";
+const FIELD_STDERR: &str = "stderr";
+const FIELD_WORKING_DIR: &str = "working_directory";
+const FIELD_MESSAGE: &str = "message";
+const FIELD_RC_CONF_PATH: &str = "rc_conf_path";
+
+const COMMAND_SAMPLE_LIMIT: usize = 1024;
+
+fn error(phase: &str, code: &str) -> Error {
+    SError::new(phase).with_code(code)
 }
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Self::Io(err)
+pub fn error_field<'a>(err: &'a Error, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-impl From<std::num::ParseIntError> for Error {
-    fn from(err: std::num::ParseIntError) -> Self {
-        Self::ParseIntError(err)
+pub fn error_code(err: &Error) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
-}
-
-impl From<rc_conf::Error> for Error {
-    fn from(err: rc_conf::Error) -> Self {
-        Self::RcConf(err)
-    }
-}
-
-impl From<shvar::Error> for Error {
-    fn from(err: shvar::Error) -> Self {
-        Self::Shvar(err)
-    }
-}
-
-impl From<serde_yaml::Error> for Error {
-    fn from(err: serde_yaml::Error) -> Self {
-        Self::SerdeYaml(err)
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Io(err) => write!(f, "IO error: {err}"),
-            Error::NonUtf8Path(path) => write!(f, "non-UTF8 path: {}", path.to_string_lossy()),
-            Error::ParseIntError(err) => write!(f, "parse int error: {err}"),
-            Error::RcConf(err) => write!(f, "rc.conf error: {err}"),
-            Error::Shvar(err) => write!(f, "shvar error: {err}"),
-            Error::SerdeYaml(err) => write!(f, "YAML error: {err}"),
-            Error::InvalidCurrentDirectory => write!(f, "current directory unavailable"),
-            Error::ManifestsDirectoryExists => {
-                write!(
-                    f,
-                    "manifests output directory exists and overwrite is disabled"
-                )
-            }
-            Error::ManifestExists(path) => {
-                write!(
-                    f,
-                    "manifest already exists and overwrite is disabled: {path}"
-                )
-            }
-            Error::ManifestMissing(path) => {
-                write!(f, "manifest is missing for verification: {path}")
-            }
-            Error::BadOptions(message) => write!(f, "{message}"),
-            Error::VerificationError(path) => {
-                write!(f, "manifest contents differ during verification: {path}")
-            }
-            Error::MissingImage { service } => {
-                write!(f, "missing IMAGE configuration for service {service}")
-            }
-            Error::MissingRequiredVariable { key, .. } => write!(f, "{key} is required"),
-            Error::InvalidRoot { root, rc_conf } => {
-                write!(f, "rc_conf {rc_conf} is not under root {root}")
-            }
-            Error::NoRcConf { root } => write!(f, "no rc.conf found under root {root}"),
-            Error::MultipleTerminalRcConfs { .. } => {
-                write!(
-                    f,
-                    "multiple terminal rc.conf files found; run from one overlay root"
-                )
-            }
-            Error::CommandFailed {
-                rc_command, status, ..
-            } => write!(f, "IMAGE_RCVAR command {rc_command:?} failed with {status}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-pub fn error_code(err: &Error) -> Option<&'static str> {
-    Some(match err {
-        Error::Io(_) => "io-error",
-        Error::NonUtf8Path(_) => "non-utf8-path",
-        Error::ParseIntError(_) | Error::RcConf(_) | Error::Shvar(_) | Error::SerdeYaml(_) => {
-            "parse-error"
-        }
-        Error::InvalidCurrentDirectory | Error::InvalidRoot { .. } | Error::NoRcConf { .. } => {
-            "invalid-root"
-        }
-        Error::ManifestsDirectoryExists | Error::ManifestExists(_) | Error::BadOptions(_) => {
-            "invalid-options"
-        }
-        Error::ManifestMissing(_) | Error::VerificationError(_) => "verification-mismatch",
-        Error::MissingImage { .. } | Error::MissingRequiredVariable { .. } => {
-            "missing-required-variable"
-        }
-        Error::MultipleTerminalRcConfs { .. } => "invalid-options",
-        Error::CommandFailed { .. } => "command-failed",
-    })
 }
 
 pub fn error_message(err: &Error) -> Option<String> {
-    Some(match err {
-        Error::NonUtf8Path(_) => "non-UTF8 directory entry path encountered".to_string(),
-        Error::MissingImage { .. } => "IMAGE is required".to_string(),
-        Error::MissingRequiredVariable { key, .. } => format!("{key} is required"),
-        Error::InvalidRoot { .. } => "rc_conf is not under root".to_string(),
-        Error::NoRcConf { .. } => "no rc.conf found under root".to_string(),
-        Error::MultipleTerminalRcConfs { .. } => {
-            "multiple terminal rc.conf files found; run from one overlay root".to_string()
-        }
-        Error::CommandFailed { .. } => "IMAGE_RCVAR command failed".to_string(),
-        _ => err.to_string(),
-    })
+    error_string_field(err, FIELD_MESSAGE)
 }
 
 pub fn error_string_field(err: &Error, name: &str) -> Option<String> {
-    match (err, name) {
-        (Error::NonUtf8Path(path), "path") => Some(path.to_string_lossy().into_owned()),
-        (Error::ManifestExists(path), "output")
-        | (Error::ManifestMissing(path), "output")
-        | (Error::VerificationError(path), "output") => Some(path.as_str().to_string()),
-        (Error::BadOptions(message), "message") => Some(message.clone()),
-        (Error::MissingImage { service }, "service") => Some(service.clone()),
-        (Error::MissingImage { .. }, "key") => Some("IMAGE".to_string()),
-        (
-            Error::MissingRequiredVariable {
-                service,
-                key,
-                rc_conf_path,
-                output,
-                relative,
-            },
-            field,
-        ) => match field {
-            "service" => Some(service.clone()),
-            "key" => Some(key.clone()),
-            "rc_conf_path" => Some(rc_conf_path.clone()),
-            "output" => Some(output.as_str().to_string()),
-            "relative" => Some(relative.as_str().to_string()),
-            _ => None,
-        },
-        (Error::InvalidRoot { root, .. }, "path") => Some(root.as_str().to_string()),
-        (Error::InvalidRoot { rc_conf, .. }, "rc_conf_path") => Some(rc_conf.as_str().to_string()),
-        (Error::NoRcConf { root }, "path") => Some(root.as_str().to_string()),
-        (Error::MultipleTerminalRcConfs { rc_conf_path }, "rc_conf_path") => {
-            Some(rc_conf_path.clone())
-        }
-        (Error::CommandFailed { service, .. }, "service") => Some(service.clone()),
-        (Error::CommandFailed { rc_command, .. }, "rc_command") => Some(rc_command.clone()),
-        (Error::CommandFailed { status, .. }, "exit_status") => Some(status.to_string()),
-        (Error::CommandFailed { stdout, .. }, "stdout") => Some(stdout.clone()),
-        (Error::CommandFailed { stderr, .. }, "stderr") => Some(stderr.clone()),
-        (Error::CommandFailed { .. }, "context") => Some("running IMAGE_RCVAR command".to_string()),
-        _ => None,
+    error_field(err, name).map(handled::extract_string)
+}
+
+fn error_with_path(err: Error, path: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_PATH, path.as_ref())
+}
+
+fn error_with_context(err: Error, context: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_CONTEXT, context.as_ref())
+}
+
+fn error_with_service(err: Error, service: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_SERVICE, service.as_ref())
+}
+
+fn error_with_template(err: Error, template: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_TEMPLATE, template.as_ref())
+}
+
+fn error_with_rc_conf_path(err: Error, rc_conf_path: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_RC_CONF_PATH, rc_conf_path.as_ref())
+}
+
+fn error_with_relative(err: Error, relative: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_RELATIVE, relative.as_ref())
+}
+
+fn error_with_output(err: Error, output: impl AsRef<str>) -> Error {
+    err.with_string_field(FIELD_OUTPUT, output.as_ref())
+}
+
+fn wrap_io_error(
+    phase: &str,
+    err: std::io::Error,
+    path: Option<&str>,
+    context: &str,
+    operation: &str,
+) -> Error {
+    let mut output = error(phase, CODE_IO_ERROR)
+        .with_message(&err.to_string())
+        .with_string_field(FIELD_OPERATION, operation);
+    output = error_with_context(output, context);
+    if let Some(path) = path {
+        output = error_with_path(output, path);
     }
+    output
+}
+
+fn path_exists(phase: &str, path: &Path, context: &str) -> Result<bool, Error> {
+    path.exists()
+        .map_err(|err| wrap_io_error(phase, err, Some(path.as_str()), context, "exists"))
+}
+
+fn wrap_rc_conf_error(err: rc_conf::Error, path: Option<&str>, context: &str) -> Error {
+    let mut output = error(PHASE_RC_CONF, CODE_PARSE_ERROR).with_message(&err.to_string());
+    output = error_with_context(output, context);
+    if let Some(path) = path {
+        output = output.with_string_field(FIELD_RC_CONF_PATH, path);
+    }
+    output
+}
+
+fn wrap_shvar_error(err: shvar::Error, context: &str) -> Error {
+    match err {
+        shvar::Error::Requested(message) => {
+            error(PHASE_REWRITE, CODE_PARSE_ERROR).with_message(&message)
+        }
+        err => error(PHASE_REWRITE, CODE_SHVAR_ERROR)
+            .with_message(&err.to_string())
+            .with_string_field(FIELD_CONTEXT, context),
+    }
+}
+
+fn wrap_yaml_error(err: serde_yaml::Error, context: &str) -> Error {
+    error(PHASE_YAML, CODE_PARSE_ERROR)
+        .with_message(&err.to_string())
+        .with_string_field(FIELD_CONTEXT, context)
+}
+
+fn sample_snippet(text: &str) -> String {
+    text.chars().take(COMMAND_SAMPLE_LIMIT).collect()
 }
 
 ////////////////////////////////////////////// rewrite /////////////////////////////////////////////
 
 pub fn rewrite(rc_conf: &RcConf, service: &str, yaml: &str) -> Result<String, Error> {
-    let vp = rc_conf.variable_provider_for(service)?;
-    _rewrite(&vp, yaml)
+    let vp = rc_conf.variable_provider_for(service).map_err(|err| {
+        error_with_context(
+            error_with_service(
+                wrap_rc_conf_error(err, None, "loading variable provider for requested service"),
+                service,
+            ),
+            "rewrite",
+        )
+    })?;
+    _rewrite(&vp, yaml).map_err(|err| error_with_context(err, "rewriting template"))
 }
 
 fn _rewrite(vp: &impl VariableProvider, yaml: &str) -> Result<String, Error> {
     let mut docs = vec![];
     for doc in Deserializer::from_str(yaml) {
-        let value = Value::deserialize(doc)?;
+        let value = Value::deserialize(doc)
+            .map_err(|err| wrap_yaml_error(err, "deserializing template document"))?;
         docs.push(value);
     }
     let docs = docs
@@ -291,7 +249,14 @@ fn _rewrite(vp: &impl VariableProvider, yaml: &str) -> Result<String, Error> {
         .collect::<Result<Vec<_>, _>>()?;
     let mut out = String::new();
     for doc in docs.into_iter().flatten() {
-        out += &to_string(&doc)?;
+        if !out.is_empty() {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out += "---\n";
+        }
+        out += &to_string(&doc)
+            .map_err(|err| wrap_yaml_error(err, "serializing rewritten template"))?;
     }
     Ok(out)
 }
@@ -333,19 +298,27 @@ fn transform(vp: &dyn VariableProvider, yaml: Value) -> Result<Option<Value>, Er
     match yaml {
         Value::String(s) => match shvar::expand_recursive(vp, &s) {
             Ok(expanded) => {
-                let pieces = shvar::split(&expanded)?;
+                let pieces = shvar::split(&expanded)
+                    .map_err(|err| wrap_shvar_error(err, "splitting expanded template"))?;
                 let quoted = shvar::quote(pieces);
-                let value: Value = from_str(&quoted)?;
+                let value: Value = from_str(&quoted)
+                    .map_err(|err| wrap_yaml_error(err, "parsing rewritten template fragment"))?;
                 Ok(Some(value))
             }
             Err(shvar::Error::Requested(msg)) => {
                 if msg.is_empty() {
                     Ok(None)
                 } else {
-                    Err(shvar::Error::Requested(msg).into())
+                    Err(error_with_context(
+                        wrap_shvar_error(
+                            shvar::Error::Requested(msg),
+                            "required variable expansion",
+                        ),
+                        "template expansion",
+                    ))
                 }
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(wrap_shvar_error(err, "template expansion")),
         },
         Value::Sequence(a) => transform_vec(vp, a),
         Value::Mapping(h) => transform_hash(vp, h.into_iter()),
@@ -423,24 +396,46 @@ fn write_yaml(
     tracking: &mut Vec<Path>,
 ) -> Result<(), Error> {
     if options.verify && options.overwrite {
-        Err(Error::BadOptions(
-            "--verify and --overwrite are mutually exclusive".to_string(),
-        ))
+        Err(error(PHASE_WRITE, CODE_INVALID_OPTIONS)
+            .with_message("--verify and --overwrite are mutually exclusive")
+            .with_string_field(FIELD_OUTPUT, output.as_str()))
     } else if options.verify {
-        if !output.exists()? {
-            return Err(Error::ManifestMissing(output.into_owned()));
+        if !path_exists(PHASE_WRITE, &output, "checking manifest for verification")? {
+            return Err(error(PHASE_WRITE, CODE_VERIFICATION_MISMATCH)
+                .with_message("manifest is missing for verification")
+                .with_string_field(FIELD_OUTPUT, output.as_str()));
         }
         let returned = yaml;
-        let expected = std::fs::read_to_string(&output)?;
+        let expected = std::fs::read_to_string(&output).map_err(|err| {
+            wrap_io_error(
+                PHASE_WRITE,
+                err,
+                Some(output.as_str()),
+                "reading manifest for verification",
+                "read_to_string",
+            )
+        })?;
         if expected != returned {
-            Err(Error::VerificationError(output.into_owned()))
+            Err(error(PHASE_WRITE, CODE_VERIFICATION_MISMATCH)
+                .with_message("manifest contents differ during verification")
+                .with_string_field(FIELD_OUTPUT, output.as_str())
+                .with_string_field("expected_length", &expected.len().to_string())
+                .with_string_field("returned_length", &returned.len().to_string()))
         } else {
             tracking.push(output.into_owned());
             Ok(())
         }
     } else if options.diff {
-        let expected = if output.exists()? {
-            Some(std::fs::read_to_string(&output)?)
+        let expected = if path_exists(PHASE_WRITE, &output, "checking manifest for diff")? {
+            Some(std::fs::read_to_string(&output).map_err(|err| {
+                wrap_io_error(
+                    PHASE_WRITE,
+                    err,
+                    Some(output.as_str()),
+                    "reading manifest for diff",
+                    "read_to_string",
+                )
+            })?)
         } else {
             None
         };
@@ -455,11 +450,29 @@ fn write_yaml(
         tracking.push(output.into_owned());
         Ok(())
     } else {
-        if output.exists()? && !options.overwrite {
-            return Err(Error::ManifestExists(output.into_owned()));
+        if path_exists(PHASE_WRITE, &output, "checking generated manifest")? && !options.overwrite {
+            return Err(error(PHASE_WRITE, CODE_INVALID_OPTIONS)
+                .with_message("manifest already exists and overwrite is disabled")
+                .with_string_field(FIELD_OUTPUT, output.as_str()));
         }
-        std::fs::create_dir_all(output.dirname())?;
-        std::fs::write(&output, yaml)?;
+        std::fs::create_dir_all(output.dirname()).map_err(|err| {
+            wrap_io_error(
+                PHASE_WRITE,
+                err,
+                Some(output.dirname().as_str()),
+                "creating output directory",
+                "create_dir_all",
+            )
+        })?;
+        std::fs::write(&output, yaml).map_err(|err| {
+            wrap_io_error(
+                PHASE_WRITE,
+                err,
+                Some(output.as_str()),
+                "writing generated manifest",
+                "write",
+            )
+        })?;
         tracking.push(output.into_owned());
         Ok(())
     }
@@ -469,7 +482,9 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     let root = if let Some(root) = options.root.as_ref() {
         Path::from(root)
     } else {
-        Path::cwd().ok_or(Error::InvalidCurrentDirectory)?
+        Path::cwd().ok_or_else(|| {
+            error(PHASE_REGENERATE, CODE_INVALID_ROOT).with_message("current directory unavailable")
+        })?
     };
     let output = if let Some(output) = options.output.as_ref() {
         Path::from(output)
@@ -480,22 +495,56 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
         && !options.overwrite
         && !options.dry_run
         && !options.diff
-        && output.exists()?
+        && path_exists(
+            PHASE_REGENERATE,
+            &output,
+            "checking manifests output directory",
+        )?
     {
-        return Err(Error::ManifestsDirectoryExists);
+        return Err(error(PHASE_REGENERATE, CODE_INVALID_OPTIONS)
+            .with_message("manifests output directory exists and overwrite is disabled")
+            .with_string_field(FIELD_OUTPUT, output.as_str()));
     }
-    if options.overwrite && !options.dry_run && !options.diff && output.exists()? {
-        std::fs::remove_dir_all(&output)?;
+    if options.overwrite
+        && !options.dry_run
+        && !options.diff
+        && path_exists(
+            PHASE_REGENERATE,
+            &output,
+            "checking manifests output directory for overwrite",
+        )?
+    {
+        std::fs::remove_dir_all(&output).map_err(|err| {
+            wrap_io_error(
+                PHASE_WRITE,
+                err,
+                Some(output.as_str()),
+                "removing existing manifests directory",
+                "remove_dir_all",
+            )
+        })?;
     }
     let rc_confs = restrict_to_terminals(find_rc_confs(&root)?);
     for rc_conf in rc_confs.into_iter() {
         let candidates = candidates(&root, &rc_conf)?;
-        let Some(relative) = candidates[candidates.len() - 1].strip_prefix(root.as_str()) else {
-            panic!("there's a logic error; this should be unreachable");
+        let Some(candidate_root) = candidates
+            .last()
+            .and_then(|candidate| candidate.strip_prefix(root.as_str()))
+        else {
+            return Err(error(PHASE_REGENERATE, CODE_INVALID_ROOT)
+                .with_message("rc_conf is not under regeneration root")
+                .with_string_field(FIELD_OUTPUT, output.as_str())
+                .with_string_field(FIELD_CONTEXT, "candidate path derivation")
+                .with_string_field(FIELD_RC_CONF_PATH, rc_conf_path(&candidates).as_str()));
         };
-        let relative = Path::from(relative.as_str().trim_start_matches('/'));
-        let rc_conf_path = rc_conf_path(&candidates);
-        let rc_conf = RcConf::parse(&rc_conf_path)?;
+        let relative = Path::from(candidate_root.as_str().trim_start_matches('/'));
+        let rc_conf_chain = rc_conf_path(&candidates);
+        let rc_conf = RcConf::parse(&rc_conf_chain).map_err(|err| {
+            error_with_rc_conf_path(
+                wrap_rc_conf_error(err, Some(&rc_conf_chain), "parsing rc.conf chain"),
+                rc_conf_chain.as_str(),
+            )
+        })?;
         let mut root_yaml = r#"apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -503,32 +552,79 @@ resources:
         .to_string();
         let mut extended = false;
         let mut tracking = vec![];
-        for service in rc_conf.list_services()? {
+        for service in rc_conf.list_services().map_err(|err| {
+            error_with_rc_conf_path(
+                wrap_rc_conf_error(err, Some(&rc_conf_chain), "listing services"),
+                rc_conf_chain.as_str(),
+            )
+        })? {
             let Some(image) = rc_conf.lookup_suffix(&service, "IMAGE") else {
-                return Err(Error::MissingRequiredVariable {
-                    service,
-                    key: "IMAGE".to_string(),
-                    rc_conf_path: rc_conf_path.clone(),
-                    output: output.clone().into_owned(),
-                    relative: relative.clone().into_owned(),
-                });
+                return Err(error(PHASE_REGENERATE, CODE_MISSING_REQUIRED_VARIABLE)
+                    .with_message("IMAGE is required")
+                    .with_string_field(FIELD_SERVICE, &service)
+                    .with_string_field(FIELD_KEY, "IMAGE")
+                    .with_string_field(FIELD_OUTPUT, output.as_str())
+                    .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain.as_str())
+                    .with_string_field(FIELD_RELATIVE, relative.as_str()));
             };
             let extra =
                 HashMap::from_iter([("IMAGE", image.clone()), ("RCVAR_ARGV0", service.clone())]);
-            let rcvar = rc_conf.argv(&service, "IMAGE_RCVAR", &extra)?;
+            let rcvar = rc_conf
+                .argv(&service, "IMAGE_RCVAR", &extra)
+                .map_err(|err| {
+                    error_with_service(
+                        wrap_rc_conf_error(
+                            err,
+                            Some(&rc_conf_chain),
+                            "expanding IMAGE_RCVAR for service",
+                        ),
+                        &service,
+                    )
+                })?;
             let rcvars = if !rcvar.is_empty() {
-                let rc_command = rcvar.join(" ");
-                let rcvar = std::process::Command::new(&rcvar[0])
-                    .args(&rcvar[1..])
-                    .output()?;
+                let working_directory = std::env::current_dir().map_err(|err| {
+                    wrap_io_error(
+                        PHASE_IMAGE_RCVAR,
+                        err,
+                        None,
+                        "looking up working directory for IMAGE_RCVAR command",
+                        "current_dir",
+                    )
+                })?;
+                let working_directory = working_directory.to_string_lossy().into_owned();
+                let mut command = std::process::Command::new(&rcvar[0]);
+                command.args(&rcvar[1..]);
+                command.current_dir(&working_directory);
+                let command_line = rcvar.join(" ");
+                let rcvar = command.output().map_err(|err| {
+                    wrap_io_error(
+                        PHASE_IMAGE_RCVAR,
+                        err,
+                        Some(&rc_conf_chain),
+                        "running IMAGE_RCVAR command",
+                        "output",
+                    )
+                    .with_string_field(FIELD_SERVICE, &service)
+                    .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain.as_str())
+                    .with_string_field(FIELD_OUTPUT, output.as_str())
+                    .with_string_field(FIELD_RC_COMMAND, &command_line)
+                    .with_string_field(FIELD_WORKING_DIR, &working_directory)
+                    .with_string_field(FIELD_CONTEXT, "running IMAGE_RCVAR command")
+                })?;
                 if !rcvar.status.success() {
-                    return Err(Error::CommandFailed {
-                        service,
-                        rc_command,
-                        status: rcvar.status,
-                        stdout: String::from_utf8_lossy(&rcvar.stdout).into_owned(),
-                        stderr: String::from_utf8_lossy(&rcvar.stderr).into_owned(),
-                    });
+                    let stdout = sample_snippet(&String::from_utf8_lossy(&rcvar.stdout));
+                    let stderr = sample_snippet(&String::from_utf8_lossy(&rcvar.stderr));
+                    let status = rcvar.status.to_string();
+                    return Err(error(PHASE_IMAGE_RCVAR, CODE_COMMAND_FAILED)
+                        .with_message("IMAGE_RCVAR command failed")
+                        .with_string_field(FIELD_SERVICE, &service)
+                        .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain.as_str())
+                        .with_string_field(FIELD_RC_COMMAND, &command_line)
+                        .with_string_field(FIELD_WORKING_DIR, &working_directory)
+                        .with_string_field(FIELD_STATUS, &status)
+                        .with_string_field(FIELD_STDOUT, &stdout)
+                        .with_string_field(FIELD_STDERR, &stderr)
+                        .with_string_field(FIELD_CONTEXT, "running IMAGE_RCVAR command"));
                 }
                 let rckeys = String::from_utf8_lossy(&rcvar.stdout);
                 let mut rckeys = rckeys
@@ -537,7 +633,19 @@ resources:
                     .collect::<Vec<_>>();
                 rckeys.sort();
                 let mut rcvars = rc_conf
-                    .generate_rcvars(&service, &rckeys)?
+                    .generate_rcvars(&service, &rckeys)
+                    .map_err(|err| {
+                        error_with_service(
+                            wrap_rc_conf_error(
+                                err,
+                                Some(&rc_conf_chain),
+                                "collecting IMAGE_RCVAR expansion variables",
+                            ),
+                            &service,
+                        )
+                        .with_string_field(FIELD_OUTPUT, output.as_str())
+                        .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain.as_str())
+                    })?
                     .into_iter()
                     .collect::<Vec<_>>();
                 rcvars.sort();
@@ -545,9 +653,27 @@ resources:
             } else {
                 vec![]
             };
-            let mut yaml = match template_for_service(&candidates, &rc_conf, &service) {
-                Some(template) => std::fs::read_to_string(template)?,
-                None => SERVICE_DEFAULT_YAML.to_string(),
+            let (template, mut yaml) = match template_for_service(&candidates, &rc_conf, &service) {
+                Some(template) => (
+                    template.as_str().to_string(),
+                    std::fs::read_to_string(&template).map_err(|err| {
+                        wrap_io_error(
+                            PHASE_TEMPLATE_RESOLUTION,
+                            err,
+                            Some(template.as_str()),
+                            "reading template file",
+                            "read_to_string",
+                        )
+                        .with_string_field(FIELD_SERVICE, &service)
+                        .with_string_field(FIELD_OUTPUT, output.as_str())
+                        .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain.as_str())
+                        .with_string_field(FIELD_CONTEXT, "template_for_service")
+                    })?,
+                ),
+                None => (
+                    "default-template".to_string(),
+                    SERVICE_DEFAULT_YAML.to_string(),
+                ),
             };
             const MAGIC_KEY: &[u8; 16] = &[
                 173, 14, 53, 145, 150, 207, 208, 116, 119, 25, 149, 255, 4, 53, 29, 50,
@@ -568,17 +694,38 @@ data:
             for (key, value) in rcvars {
                 config_map += &format!("  {key}: {value:?}");
             }
+            if !yaml.is_empty() && !yaml.ends_with('\n') {
+                yaml.push('\n');
+            }
             yaml += "---\n";
             yaml += &config_map;
-            let rcvp = rc_conf.variable_provider_for(&service)?;
+            let rcvp = rc_conf.variable_provider_for(&service).map_err(|err| {
+                error_with_service(
+                    wrap_rc_conf_error(
+                        err,
+                        Some(&rc_conf_chain),
+                        "creating service variable provider",
+                    ),
+                    &service,
+                )
+            })?;
             let locals = HashMap::from_iter([
                 ("SERVICE", service.clone()),
                 ("RCVARS", format!("config-map-{sig}")),
             ]);
             let vp = (&locals, &rcvp);
-            let yaml = _rewrite(&vp, &yaml)?;
-            let output = output.join(Path::from(format!("{relative}/herd/{service}.yaml")));
-            write_yaml(&options, output, &yaml, &mut tracking)?;
+            let yaml = _rewrite(&vp, &yaml)
+                .map_err(|err| error_with_template(error_with_service(err, &service), &template))?;
+            let service_output = output.join(Path::from(format!("{relative}/herd/{service}.yaml")));
+            write_yaml(&options, service_output, &yaml, &mut tracking).map_err(|err| {
+                error_with_template(
+                    error_with_service(
+                        error_with_rc_conf_path(err, rc_conf_chain.as_str()),
+                        &service,
+                    ),
+                    template.as_str(),
+                )
+            })?;
             root_yaml += &format!("- {service}.yaml\n");
             extended = true;
         }
@@ -588,12 +735,18 @@ data:
                 output.join(Path::from(format!("{relative}/herd/kustomization.yaml"))),
                 &root_yaml,
                 &mut tracking,
-            )?;
+            )
+            .map_err(|err| {
+                error_with_rc_conf_path(
+                    error_with_relative(error_with_output(err, output.as_str()), relative.as_str()),
+                    rc_conf_chain.as_str(),
+                )
+            })?;
         }
         let mut have_pets = false;
         for candidate in candidates.iter().rev() {
             let pets = candidate.join("pets");
-            if !pets.exists()? {
+            if !path_exists(PHASE_REGENERATE, &pets, "checking pets directory")? {
                 continue;
             }
             fn copy_pets_from_dir(
@@ -601,18 +754,57 @@ data:
                 root: &Path,
                 output: &Path,
                 pets: &Path,
+                rc_conf_chain: &str,
                 tracking: &mut Vec<Path>,
             ) -> Result<bool, Error> {
                 let mut copied = false;
-                for pet in std::fs::read_dir(pets)? {
-                    let pet = pet?;
-                    let pet =
-                        Path::try_from(pet.path()).map_err(|_| Error::NonUtf8Path(pet.path()))?;
-                    if pet.join(K8SIGNORE).exists()? {
+                for pet in std::fs::read_dir(pets).map_err(|err| {
+                    wrap_io_error(
+                        PHASE_RC_CONF_SEARCH,
+                        err,
+                        Some(pets.as_str()),
+                        "reading pets directory",
+                        "read_dir",
+                    )
+                })? {
+                    let pet = pet.map_err(|err| {
+                        wrap_io_error(
+                            PHASE_RC_CONF_SEARCH,
+                            err,
+                            Some(pets.as_str()),
+                            "reading pet directory entry",
+                            "next",
+                        )
+                    })?;
+                    let pet = Path::try_from(pet.path()).map_err(|_| {
+                        error(PHASE_RC_CONF_SEARCH, CODE_NON_UTF8_PATH)
+                            .with_message("non-UTF8 pet path encountered during copy")
+                            .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain)
+                    })?;
+                    if path_exists(
+                        PHASE_RC_CONF_SEARCH,
+                        &pet.join(K8SIGNORE),
+                        "checking pet .k8srcignore",
+                    )? {
                         continue;
                     }
-                    if pet.is_dir()? {
-                        copied |= copy_pets_from_dir(options, root, output, &pet, tracking)?;
+                    if pet.is_dir().map_err(|err| {
+                        wrap_io_error(
+                            PHASE_RC_CONF_SEARCH,
+                            err,
+                            Some(pet.as_str()),
+                            "checking pet directory",
+                            "is_dir",
+                        )
+                    })? {
+                        copied |= copy_pets_from_dir(
+                            options,
+                            root,
+                            output,
+                            &pet,
+                            rc_conf_chain,
+                            tracking,
+                        )?;
                         continue;
                     }
                     if !pet.as_str().ends_with(".yaml") {
@@ -620,17 +812,37 @@ data:
                         continue;
                     }
                     let Some(relative) = pet.strip_prefix(root.as_str()) else {
-                        panic!("there's a logic error; this should be unreachable");
+                        return Err(error(PHASE_REGENERATE, CODE_INVALID_ROOT)
+                            .with_message("pet is not inside repository root")
+                            .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain)
+                            .with_string_field(FIELD_CONTEXT, "copying pets")
+                            .with_string_field(FIELD_OUTPUT, root.as_str()));
                     };
                     let relative = Path::from(relative.as_str().trim_start_matches('/'));
                     let source = pet.clone();
                     let output = output.join(Path::from(format!("{relative}")));
-                    write_yaml(options, output, &std::fs::read_to_string(source)?, tracking)?;
+                    let contents = std::fs::read_to_string(source.as_str()).map_err(|err| {
+                        wrap_io_error(
+                            PHASE_WRITE,
+                            err,
+                            Some(source.as_str()),
+                            "reading pet file",
+                            "read_to_string",
+                        )
+                    })?;
+                    write_yaml(options, output, &contents, tracking)?;
                     copied = true;
                 }
                 Ok(copied)
             }
-            have_pets |= copy_pets_from_dir(&options, &root, &output, &pets, &mut tracking)?;
+            have_pets |= copy_pets_from_dir(
+                &options,
+                &root,
+                &output,
+                &pets,
+                rc_conf_chain.as_str(),
+                &mut tracking,
+            )?;
         }
         if extended && have_pets {
             write_yaml(
@@ -643,7 +855,13 @@ resources:
   - pets
 "#,
                 &mut tracking,
-            )?;
+            )
+            .map_err(|err| {
+                error_with_rc_conf_path(
+                    error_with_relative(error_with_output(err, output.as_str()), relative.as_str()),
+                    rc_conf_chain.as_str(),
+                )
+            })?;
         } else if extended {
             write_yaml(
                 &options,
@@ -654,7 +872,13 @@ resources:
   - herd
 "#,
                 &mut tracking,
-            )?;
+            )
+            .map_err(|err| {
+                error_with_rc_conf_path(
+                    error_with_relative(error_with_output(err, output.as_str()), relative.as_str()),
+                    rc_conf_chain.as_str(),
+                )
+            })?;
         } else if have_pets {
             write_yaml(
                 &options,
@@ -665,7 +889,13 @@ resources:
   - pets
 "#,
                 &mut tracking,
-            )?;
+            )
+            .map_err(|err| {
+                error_with_rc_conf_path(
+                    error_with_relative(error_with_output(err, output.as_str()), relative.as_str()),
+                    rc_conf_chain.as_str(),
+                )
+            })?;
         }
     }
     Ok(())
@@ -677,16 +907,54 @@ fn find_rc_confs(root: &Path) -> Result<Vec<Path<'static>>, Error> {
 
 fn find_rc_confs_inner(root: &Path, is_root: bool) -> Result<Vec<Path<'static>>, Error> {
     let mut paths = vec![];
-    if !is_root && root.join(K8SIGNORE).exists()? {
+    if !is_root
+        && path_exists(
+            PHASE_RC_CONF_SEARCH,
+            &root.join(K8SIGNORE),
+            "checking .k8srcignore",
+        )?
+    {
         return Ok(paths);
     }
-    for dirent in std::fs::read_dir(root)? {
-        let dirent = dirent?;
-        let path = Path::try_from(dirent.path()).map_err(|_| Error::NonUtf8Path(dirent.path()))?;
+    for dirent in std::fs::read_dir(root).map_err(|err| {
+        wrap_io_error(
+            PHASE_RC_CONF_SEARCH,
+            err,
+            Some(root.as_str()),
+            "scanning filesystem for rc_conf files",
+            "read_dir",
+        )
+    })? {
+        let dirent = dirent.map_err(|err| {
+            wrap_io_error(
+                PHASE_RC_CONF_SEARCH,
+                err,
+                Some(root.as_str()),
+                "reading directory entry",
+                "next",
+            )
+        })?;
+        let path = Path::try_from(dirent.path()).map_err(|_| {
+            error(PHASE_RC_CONF_SEARCH, CODE_NON_UTF8_PATH)
+                .with_message("non-UTF8 directory entry path encountered")
+                .with_string_field(FIELD_PATH, &dirent.path().to_string_lossy())
+        })?;
         if dirent.file_name() == "rc.conf" {
             paths.push(path.clone());
         }
-        if dirent.file_type()?.is_dir() {
+        if dirent
+            .file_type()
+            .map_err(|err| {
+                wrap_io_error(
+                    PHASE_RC_CONF_SEARCH,
+                    err,
+                    Some(path.as_str()),
+                    "stat'ing directory entry",
+                    "file_type",
+                )
+            })?
+            .is_dir()
+        {
             let children = find_rc_confs_inner(&path, false)?;
             paths.extend(children);
         }
@@ -715,10 +983,10 @@ fn restrict_to_terminals(mut rc_confs: Vec<Path<'static>>) -> Vec<Path<'static>>
 
 pub fn candidates(root: &Path, rc_conf: &Path) -> Result<Vec<Path<'static>>, Error> {
     if !rc_conf.as_str().starts_with(root.as_str()) {
-        return Err(Error::InvalidRoot {
-            root: root.clone().into_owned(),
-            rc_conf: rc_conf.clone().into_owned(),
-        });
+        return Err(error(PHASE_REGENERATE, CODE_INVALID_ROOT)
+            .with_message("rc_conf is not under root")
+            .with_string_field(FIELD_PATH, root.as_str())
+            .with_string_field(FIELD_RC_CONF_PATH, rc_conf.as_str()));
     }
     let mut rc_conf = rc_conf.dirname();
     let mut candidates = vec![];
@@ -830,9 +1098,9 @@ fn template_for_service(
 fn explain_context(root: &Path) -> Result<(Vec<Path<'static>>, String, RcConf), Error> {
     let rc_confs = restrict_to_terminals(find_rc_confs(root)?);
     if rc_confs.is_empty() {
-        return Err(Error::NoRcConf {
-            root: root.clone().into_owned(),
-        });
+        return Err(error(PHASE_RC_CONF_SEARCH, CODE_INVALID_ROOT)
+            .with_message("no rc.conf found under root")
+            .with_string_field(FIELD_PATH, root.as_str()));
     }
     if rc_confs.len() != 1 {
         let rc_conf_path = rc_confs
@@ -840,11 +1108,14 @@ fn explain_context(root: &Path) -> Result<(Vec<Path<'static>>, String, RcConf), 
             .map(|p| p.as_str())
             .collect::<Vec<_>>()
             .join(":");
-        return Err(Error::MultipleTerminalRcConfs { rc_conf_path });
+        return Err(error(PHASE_RC_CONF_SEARCH, CODE_INVALID_OPTIONS)
+            .with_message("multiple terminal rc.conf files found; run from one overlay root")
+            .with_string_field(FIELD_RC_CONF_PATH, &rc_conf_path));
     }
     let candidates = candidates(root, &rc_confs[0])?;
     let rc_conf_chain = rc_conf_path(&candidates);
-    let rc_conf = RcConf::parse(&rc_conf_chain)?;
+    let rc_conf = RcConf::parse(&rc_conf_chain)
+        .map_err(|err| wrap_rc_conf_error(err, Some(&rc_conf_chain), "parsing rc.conf chain"))?;
     Ok((candidates, rc_conf_chain, rc_conf))
 }
 
@@ -852,7 +1123,10 @@ pub fn explain_template(root: Option<&str>, service: &str) -> Result<String, Err
     let root = if let Some(root) = root {
         Path::from(root)
     } else {
-        Path::cwd().ok_or(Error::InvalidCurrentDirectory)?
+        Path::cwd().ok_or_else(|| {
+            error(PHASE_TEMPLATE_RESOLUTION, CODE_INVALID_ROOT)
+                .with_message("current directory unavailable")
+        })?
     };
     let (candidates, rc_conf_chain, rc_conf) = explain_context(&root)?;
     let resolution = template_resolution(&candidates, &rc_conf, service);
@@ -879,13 +1153,21 @@ pub fn explain_vars(root: Option<&str>, service: &str) -> Result<String, Error> 
     let root = if let Some(root) = root {
         Path::from(root)
     } else {
-        Path::cwd().ok_or(Error::InvalidCurrentDirectory)?
+        Path::cwd().ok_or_else(|| {
+            error(PHASE_RC_CONF, CODE_INVALID_ROOT).with_message("current directory unavailable")
+        })?
     };
     let (_candidates, rc_conf_chain, rc_conf) = explain_context(&root)?;
     let (alias_order, pre_lookup) = rc_conf.alias_lookup_order(service);
-    let vp = rc_conf.variable_provider_for(service)?;
+    let vp = rc_conf.variable_provider_for(service).map_err(|err| {
+        error_with_service(
+            wrap_rc_conf_error(err, Some(&rc_conf_chain), "loading variable provider"),
+            service,
+        )
+    })?;
     let known_prefixes = rc_conf
-        .list()?
+        .list()
+        .map_err(|err| wrap_rc_conf_error(err, Some(&rc_conf_chain), "listing services"))?
         .map(|service| rc_conf::var_prefix_from_service(&service))
         .collect::<Vec<_>>();
     let alias_prefixes = alias_order

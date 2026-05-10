@@ -1,5 +1,6 @@
 source: this is the generic template
-salutation: Hello Alice!---
+salutation: Hello Alice!
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

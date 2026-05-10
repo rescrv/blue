@@ -5,6 +5,8 @@ use k8src::{
     template_resolution,
 };
 use rc_conf::RcConf;
+use serde::Deserialize;
+use serde_yaml::{Deserializer, Value};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
@@ -72,6 +74,13 @@ foo_ENABLED="YES"
 foo_IMAGE="foo:latest"
 foo_PORT="8080"
 "#
+}
+
+fn parse_yaml_docs(manifest: &str) -> Vec<Value> {
+    Deserializer::from_str(manifest)
+        .map(Value::deserialize)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("manifest should parse as YAML documents")
 }
 
 fn k8src_bin() -> &'static str {
@@ -283,6 +292,53 @@ fn built_in_default_is_used_when_no_template_exists() {
     let manifest = std::fs::read_to_string(root.join("manifests/herd/foo.yaml").as_str())
         .expect("manifest should exist");
     assert!(manifest.contains("kind: Deployment"));
+    cleanup_root(&root);
+}
+
+#[test]
+fn generated_herd_manifest_preserves_document_separators() {
+    let root = temp_root("document-separators");
+    write(root.join("rc.conf"), basic_rc_conf());
+    regenerate(RegenerateOptions {
+        root: Some(root.as_str().to_string()),
+        output: Some(root.join("manifests").as_str().to_string()),
+        verify: false,
+        overwrite: true,
+        dry_run: false,
+        diff: false,
+    })
+    .expect("regenerate should preserve YAML document boundaries");
+    let manifest = std::fs::read_to_string(root.join("manifests/herd/foo.yaml").as_str())
+        .expect("manifest should exist");
+    let docs = parse_yaml_docs(&manifest);
+    assert_eq!(docs.len(), 3);
+    assert!(manifest.contains("\n---\napiVersion: v1\nkind: Service\n"));
+    assert!(manifest.contains("\n---\napiVersion: v1\nkind: ConfigMap\n"));
+    cleanup_root(&root);
+}
+
+#[test]
+fn config_map_append_separates_template_without_trailing_newline() {
+    let root = temp_root("document-separator-no-newline");
+    write(root.join("rc.conf"), basic_rc_conf());
+    write(
+        root.join("rc.d/foo.yaml.template"),
+        "source: foo\nname: ${SERVICE}",
+    );
+    regenerate(RegenerateOptions {
+        root: Some(root.as_str().to_string()),
+        output: Some(root.join("manifests").as_str().to_string()),
+        verify: false,
+        overwrite: true,
+        dry_run: false,
+        diff: false,
+    })
+    .expect("regenerate should put appended ConfigMap in a separate YAML document");
+    let manifest = std::fs::read_to_string(root.join("manifests/herd/foo.yaml").as_str())
+        .expect("manifest should exist");
+    let docs = parse_yaml_docs(&manifest);
+    assert_eq!(docs.len(), 2);
+    assert!(manifest.contains("name: foo\n---\napiVersion: v1\nkind: ConfigMap\n"));
     cleanup_root(&root);
 }
 

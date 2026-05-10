@@ -18,6 +18,7 @@ getopts = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
 siphasher = { workspace = true }
+handled = { workspace = true }
 
 arrrg = { workspace = true, optional = true }
 arrrg_derive = { workspace = true, optional = true }
