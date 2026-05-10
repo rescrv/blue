@@ -1135,7 +1135,12 @@ impl RcConf {
     ) -> Result<HashMap<String, String>, Error> {
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
+            .env_clear()
             .env("RCVAR_ARGV0", var_name_from_service(service))
+            .envs(
+                std::env::vars()
+                    .filter(|(key, _)| matches!(key.as_str(), "PATH" | "TERM" | "TZ" | "LANG")),
+            )
             .output()?;
         if !output.status.success() {
             return Err(Error::InvalidInvocation {
@@ -1458,7 +1463,8 @@ pub fn exec_container(
         eprintln!("failed to load services: {e}");
         std::process::exit(134);
     });
-    if !rc_conf.service_switch(service).can_be_started() {
+    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
+    if !override_service_switch && !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -1612,7 +1618,9 @@ pub fn bootstrap<'a>(
     let output = output.into();
     let rc_conf = RcConf::parse(rc_conf_path)?;
     let mut rc_d_path = String::new();
-    for variable in rc_conf.variables() {
+    let mut variables = rc_conf.variables();
+    variables.sort();
+    for variable in variables {
         if let Some(crate_name) = variable.strip_suffix("_SPEC") {
             if !rc_d_path.is_empty() {
                 rc_d_path.push(':');
