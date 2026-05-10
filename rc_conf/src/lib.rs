@@ -1587,18 +1587,20 @@ edition = "2021"
         .arg(&manifest)
         .arg(path.as_str())
         .output()?;
-    if !output.status.success() {
+    let result = if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::exec_failed(
+        Err(Error::exec_failed(
             format!(
                 "cargo vendor --no-delete --manifest-path {} {}",
                 manifest.display(),
                 path.as_str()
             ),
             std::io::Error::other(format!("command failed: {stderr}")),
-        ));
-    }
-    Ok(())
+        ))
+    } else {
+        Ok(())
+    };
+    result
 }
 
 /// Prepare the output directory for running the provided rc_conf_path.  Return the minimal
