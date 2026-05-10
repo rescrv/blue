@@ -845,7 +845,7 @@ impl RcConf {
             }
             if let Some(source) = line.trim().strip_prefix("source ") {
                 if is_safe_source_path(source) {
-                    let source = strip_self_dir_prefix(&path.dirname().join(source));
+                    let source = path.dirname().join(source);
                     Self::parse_recursive(&source, seen, items)?;
                 } else {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
@@ -1020,7 +1020,7 @@ impl RcConf {
                 if !is_safe_source_path(source) {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
-                let source = strip_self_dir_prefix(&path.dirname().join(source));
+                let source = path.dirname().join(source);
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
                     Self::examine_recursive(&source, seen, rc_conf)?;
@@ -1910,14 +1910,15 @@ COMMAND=my-command ${NAME} ${FIELD}
             assert_eq!(
                 r#"
 # rc_conf[0] = "bar.conf"
-# begin source "foo.conf"
+# begin source "./foo.conf"
 foo_ENABLE=YES
-# end source "foo.conf"
+# end source "./foo.conf"
 
 bar_ENABLE=YES
 
-# already sourced "foo.conf"
-# rc_conf[1] = "foo.conf"; already sourced
+# already sourced "./foo.conf"
+# rc_conf[1] = "foo.conf"
+foo_ENABLE=YES
             "#
                 .trim(),
                 examined.trim()
