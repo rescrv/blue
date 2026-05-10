@@ -94,6 +94,12 @@ Warts
 -----
 
 - A string with `'{'` and `'}'` characters outside the variable declarations won't parse right now.
+- `source` directives are now resolved relative to the file containing the directive.
+
+Backwards-Incompatible Changes
+------------------------------
+
+- `source` paths now resolve relative to the current rc file directory rather than process working directory.  If you previously relied on cwd-based relative sources, update those directives so they resolve from the owning file’s directory.
 
 Updating
 --------

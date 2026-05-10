@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use arrrg::CommandLine;
 use utf8path::Path;
@@ -181,10 +182,18 @@ fn main() {
     // Create a thread to listen for signals and cancel the context if need be.
     let signal_pid1 = Arc::downgrade(&pid1);
     let signal_context = context.clone();
+    let signal_running = Arc::new(AtomicBool::new(true));
+    let signal_running_thread = Arc::clone(&signal_running);
     let signal = std::thread::spawn(move || {
         loop {
+            if !signal_running_thread.load(Ordering::Acquire) {
+                break;
+            }
             let signal_set = minimal_signals::SignalSet::new().fill();
             let signal = minimal_signals::wait(signal_set);
+            if !signal_running_thread.load(Ordering::Acquire) {
+                break;
+            }
             if signal == Some(minimal_signals::SIGCHLD) {
                 continue;
             }
@@ -212,7 +221,9 @@ fn main() {
 
     // Cleanup
     server.join().unwrap();
-    drop(signal);
+    signal_running.store(false, Ordering::Release);
+    let _ = unsafe { libc::kill(libc::getpid(), libc::SIGCHLD) };
+    signal.join().unwrap();
     let _ = std::fs::remove_file(options.control_sock);
 
     // NOTE(rescrv):  This is a spin loop because there's no good way to synchronize this simply.

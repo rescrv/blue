@@ -3,6 +3,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::SystemTime;
@@ -831,7 +832,7 @@ impl RcConf {
             }
             if let Some(source) = line.trim().strip_prefix("source ") {
                 if is_safe_source_path(source) {
-                    Self::parse_recursive(&Path::from(source), seen, items)?;
+                    Self::parse_recursive(&path.dirname().join(source), seen, items)?;
                 } else {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
@@ -1005,10 +1006,9 @@ impl RcConf {
                 if !is_safe_source_path(source) {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
-                let source = Path::from(source);
+                let source = path.dirname().join(source);
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
-                    seen.insert(path.clone().into_owned());
                     Self::examine_recursive(&source, seen, rc_conf)?;
                     *rc_conf += &format!("# end source {source:?}\n");
                 } else {
@@ -1326,7 +1326,12 @@ pub fn load_services(
         }
         for dirent in std::fs::read_dir(rc_d)? {
             let dirent = dirent?;
-            let path = Path::try_from(dirent.path())?.into_owned();
+            let dirent_path = dirent.path();
+            let metadata = std::fs::metadata(&dirent_path)?;
+            if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+                continue;
+            }
+            let path = Path::try_from(dirent_path)?.into_owned();
             let name = dirent.file_name().to_string_lossy().to_string();
             match services.entry(name) {
                 Entry::Occupied(mut entry) => {
