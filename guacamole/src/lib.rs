@@ -19,26 +19,33 @@ D. J. Bernstein
 Public domain.
 */
 
-fn mash(x: u64, output: &mut [u32; 16]) {
+const MASH_C0: u32 = 1634760805;
+const MASH_C5: u32 = 857760878;
+const MASH_C10: u32 = 2036477234;
+const MASH_C15: u32 = 1797285236;
+
+#[cfg_attr(any(target_arch = "aarch64", target_arch = "x86_64"), allow(dead_code))]
+#[inline(always)]
+fn mash_scalar(x: u64, output: &mut [u32; 16]) {
     let low: u32 = (x & 0xffffffffu64) as u32;
     let high: u32 = (x >> 32) as u32;
 
-    let mut x0: u32 = 1634760805;
+    let mut x0: u32 = MASH_C0;
     let mut x1: u32 = 0;
     let mut x2: u32 = 0;
     let mut x3: u32 = 0;
     let mut x4: u32 = 0;
-    let mut x5: u32 = 857760878;
+    let mut x5: u32 = MASH_C5;
     let mut x6: u32 = low;
     let mut x7: u32 = high;
     let mut x8: u32 = 0;
     let mut x9: u32 = 0;
-    let mut x10: u32 = 2036477234;
+    let mut x10: u32 = MASH_C10;
     let mut x11: u32 = 0;
     let mut x12: u32 = 0;
     let mut x13: u32 = 0;
     let mut x14: u32 = 0;
-    let mut x15: u32 = 1797285236;
+    let mut x15: u32 = MASH_C15;
 
     for _ in 0..4 {
         let tmp = x8.wrapping_add(x12);
@@ -107,12 +114,12 @@ fn mash(x: u64, output: &mut [u32; 16]) {
         x15 ^= tmp.rotate_left(18);
     }
 
-    let x0 = x0.wrapping_add(1634760805);
-    let x5 = x5.wrapping_add(857760878);
+    let x0 = x0.wrapping_add(MASH_C0);
+    let x5 = x5.wrapping_add(MASH_C5);
     let x6 = x6.wrapping_add(low);
     let x7 = x7.wrapping_add(high);
-    let x10 = x10.wrapping_add(2036477234);
-    let x15 = x15.wrapping_add(1797285236);
+    let x10 = x10.wrapping_add(MASH_C10);
+    let x15 = x15.wrapping_add(MASH_C15);
 
     output[0] = x4;
     output[1] = x9;
@@ -130,6 +137,190 @@ fn mash(x: u64, output: &mut [u32; 16]) {
     output[13] = x5;
     output[14] = x10;
     output[15] = x15;
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+fn mash(x: u64, output: &mut [u32; 16]) {
+    unsafe { aarch64_simd::mash_neon(x, output) };
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn mash(x: u64, output: &mut [u32; 16]) {
+    unsafe { x86_simd::mash_sse2(x, output) };
+}
+
+#[cfg(target_arch = "x86")]
+#[inline(always)]
+fn mash(x: u64, output: &mut [u32; 16]) {
+    if std::arch::is_x86_feature_detected!("sse2") {
+        unsafe { x86_simd::mash_sse2(x, output) };
+    } else {
+        mash_scalar(x, output);
+    }
+}
+
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))]
+#[inline(always)]
+fn mash(x: u64, output: &mut [u32; 16]) {
+    mash_scalar(x, output);
+}
+
+#[cfg(target_arch = "aarch64")]
+mod aarch64_simd {
+    use core::arch::aarch64::{
+        uint32x4_t, vaddq_u32, vdupq_n_u32, veorq_u32, vextq_u32, vshlq_n_u32, vsriq_n_u32,
+        vst1q_u32,
+    };
+
+    use super::{MASH_C0, MASH_C5, MASH_C10, MASH_C15};
+
+    #[target_feature(enable = "neon")]
+    pub(super) unsafe fn mash_neon(x: u64, output: &mut [u32; 16]) {
+        macro_rules! mix {
+            ($x:expr, $y:expr, $z:expr, $l:literal, $r:literal) => {{
+                let sum = vaddq_u32($y, $z);
+                veorq_u32($x, vsriq_n_u32::<$r>(vshlq_n_u32::<$l>(sum), sum))
+            }};
+        }
+        macro_rules! double_round {
+            ($a:ident, $b:ident, $c:ident, $d:ident) => {{
+                $a = mix!($a, $b, $c, 7, 25);
+                $b = mix!($b, $c, $d, 9, 23);
+                $c = mix!($c, $d, $a, 13, 19);
+                $d = mix!($d, $a, $b, 18, 14);
+
+                let g = vextq_u32::<3>($a, $a);
+                let f = vextq_u32::<2>($b, $b);
+                let e = vextq_u32::<1>($c, $c);
+
+                let e = mix!(e, f, g, 7, 25);
+                let f = mix!(f, g, $d, 9, 23);
+                let g = mix!(g, $d, e, 13, 19);
+                $d = mix!($d, e, f, 18, 14);
+
+                $a = vextq_u32::<1>(g, g);
+                $b = vextq_u32::<2>(f, f);
+                $c = vextq_u32::<3>(e, e);
+            }};
+        }
+
+        let low = x as u32;
+        let high = (x >> 32) as u32;
+
+        let mut a = vdupq_n_u32(0);
+        let mut b = unsafe { core::mem::transmute::<[u32; 4], uint32x4_t>([0, 0, 0, high]) };
+        let mut c = unsafe { core::mem::transmute::<[u32; 4], uint32x4_t>([0, 0, low, 0]) };
+        let mut d = unsafe {
+            core::mem::transmute::<[u32; 4], uint32x4_t>([MASH_C0, MASH_C5, MASH_C10, MASH_C15])
+        };
+
+        let b0 = b;
+        let c0 = c;
+        let d0 = d;
+
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+
+        b = vaddq_u32(b, b0);
+        c = vaddq_u32(c, c0);
+        d = vaddq_u32(d, d0);
+
+        unsafe {
+            vst1q_u32(output.as_mut_ptr(), a);
+            vst1q_u32(output.as_mut_ptr().add(4), b);
+            vst1q_u32(output.as_mut_ptr().add(8), c);
+            vst1q_u32(output.as_mut_ptr().add(12), d);
+        }
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod x86_simd {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{
+        __m128i, _mm_add_epi32, _mm_or_si128, _mm_set_epi32, _mm_setzero_si128, _mm_shuffle_epi32,
+        _mm_slli_epi32, _mm_srli_epi32, _mm_storeu_si128, _mm_xor_si128,
+    };
+    #[cfg(target_arch = "x86_64")]
+    use core::arch::x86_64::{
+        __m128i, _mm_add_epi32, _mm_or_si128, _mm_set_epi32, _mm_setzero_si128, _mm_shuffle_epi32,
+        _mm_slli_epi32, _mm_srli_epi32, _mm_storeu_si128, _mm_xor_si128,
+    };
+
+    use super::{MASH_C0, MASH_C5, MASH_C10, MASH_C15};
+
+    #[target_feature(enable = "sse2")]
+    pub(super) unsafe fn mash_sse2(x: u64, output: &mut [u32; 16]) {
+        macro_rules! mix {
+            ($x:expr, $y:expr, $z:expr, $l:literal, $r:literal) => {{
+                let sum = _mm_add_epi32($y, $z);
+                _mm_xor_si128(
+                    $x,
+                    _mm_or_si128(_mm_slli_epi32::<$l>(sum), _mm_srli_epi32::<$r>(sum)),
+                )
+            }};
+        }
+        macro_rules! double_round {
+            ($a:ident, $b:ident, $c:ident, $d:ident) => {{
+                $a = mix!($a, $b, $c, 7, 25);
+                $b = mix!($b, $c, $d, 9, 23);
+                $c = mix!($c, $d, $a, 13, 19);
+                $d = mix!($d, $a, $b, 18, 14);
+
+                let g = _mm_shuffle_epi32::<0x93>($a);
+                let f = _mm_shuffle_epi32::<0x4e>($b);
+                let e = _mm_shuffle_epi32::<0x39>($c);
+
+                let e = mix!(e, f, g, 7, 25);
+                let f = mix!(f, g, $d, 9, 23);
+                let g = mix!(g, $d, e, 13, 19);
+                $d = mix!($d, e, f, 18, 14);
+
+                $a = _mm_shuffle_epi32::<0x39>(g);
+                $b = _mm_shuffle_epi32::<0x4e>(f);
+                $c = _mm_shuffle_epi32::<0x93>(e);
+            }};
+        }
+
+        let low = x as u32;
+        let high = (x >> 32) as u32;
+
+        // Track the state in output order so the row-round shuffles mirror guacamole_amd64.s.
+        let mut a = _mm_setzero_si128();
+        let mut b = _mm_set_epi32(high as i32, 0, 0, 0);
+        let mut c = _mm_set_epi32(0, low as i32, 0, 0);
+        let mut d = _mm_set_epi32(
+            MASH_C15 as i32,
+            MASH_C10 as i32,
+            MASH_C5 as i32,
+            MASH_C0 as i32,
+        );
+
+        let b0 = b;
+        let c0 = c;
+        let d0 = d;
+
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+        double_round!(a, b, c, d);
+
+        b = _mm_add_epi32(b, b0);
+        c = _mm_add_epi32(c, c0);
+        d = _mm_add_epi32(d, d0);
+
+        let ptr = output.as_mut_ptr().cast::<__m128i>();
+        unsafe {
+            _mm_storeu_si128(ptr, a);
+            _mm_storeu_si128(ptr.add(1), b);
+            _mm_storeu_si128(ptr.add(2), c);
+            _mm_storeu_si128(ptr.add(3), d);
+        }
+    }
 }
 
 ///////////////////////////////////////////// Guacamole ////////////////////////////////////////////
@@ -483,6 +674,8 @@ macro_rules! weighted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
 
     const TEST_CASES: &[(&str, u64, [u32; 16])] = &[
         (
@@ -529,6 +722,151 @@ mod tests {
             let buffer = &mut [0u32; 16];
             crate::mash(*seed, buffer);
             assert_eq!(output, buffer, "test case = {descr}");
+        }
+    }
+
+    #[test]
+    fn mash_optimized_matches_scalar() {
+        let mut seed = 0u64;
+        for _ in 0..1024 {
+            let mut scalar = [0u32; 16];
+            let mut optimized = [0u32; 16];
+            crate::mash_scalar(seed, &mut scalar);
+            crate::mash(seed, &mut optimized);
+            assert_eq!(scalar, optimized, "seed = {seed:#x}");
+            seed = seed
+                .wrapping_mul(0x9e3779b97f4a7c15)
+                .wrapping_add(0xda3e39cb94b95bdb);
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct BenchResult {
+        ns_per_mash: f64,
+        gib_per_s: f64,
+    }
+
+    fn benchmark_mash_variant<F>(mut f: F) -> BenchResult
+    where
+        F: FnMut(u64, &mut [u32; 16]),
+    {
+        const SEED_COUNT: usize = 4096;
+        const SAMPLE_COUNT: usize = 7;
+        const TARGET_TIME: Duration = Duration::from_millis(250);
+
+        fn run_rounds<F>(f: &mut F, seeds: &[u64], rounds: usize) -> (Duration, u64)
+        where
+            F: FnMut(u64, &mut [u32; 16]),
+        {
+            let mut output = [0u32; 16];
+            let mut checksum = 0u64;
+            let start = Instant::now();
+            for _ in 0..rounds {
+                for &seed in seeds {
+                    f(black_box(seed), &mut output);
+                    let lane = ((seed >> 32) & 15) as usize;
+                    checksum = checksum.wrapping_add(u64::from(black_box(output[lane])));
+                }
+            }
+            (start.elapsed(), checksum)
+        }
+
+        let mut seeds = [0u64; SEED_COUNT];
+        let mut state = 0x243f6a8885a308d3u64;
+        for seed in &mut seeds {
+            *seed = state;
+            state = state
+                .wrapping_mul(0x9e3779b97f4a7c15)
+                .wrapping_add(0xda3e39cb94b95bdb);
+        }
+
+        let mut rounds = 1usize;
+        loop {
+            let (elapsed, checksum) = run_rounds(&mut f, &seeds, rounds);
+            black_box(checksum);
+            if elapsed >= TARGET_TIME {
+                break;
+            }
+            rounds = rounds.saturating_mul(2);
+        }
+
+        let calls = rounds * SEED_COUNT;
+        let mut samples = [0.0f64; SAMPLE_COUNT];
+        for sample in &mut samples {
+            let (elapsed, checksum) = run_rounds(&mut f, &seeds, rounds);
+            black_box(checksum);
+            *sample = elapsed.as_secs_f64() * 1e9 / calls as f64;
+        }
+        samples.sort_by(|a, b| a.total_cmp(b));
+        let ns_per_mash = samples[SAMPLE_COUNT / 2];
+        let gib_per_s = (64.0 * 1e9 / ns_per_mash) / (1024.0 * 1024.0 * 1024.0);
+
+        BenchResult {
+            ns_per_mash,
+            gib_per_s,
+        }
+    }
+
+    fn print_bench_result(name: &str, result: BenchResult, baseline: Option<BenchResult>) {
+        match baseline {
+            Some(baseline) => {
+                let speedup = baseline.ns_per_mash / result.ns_per_mash;
+                eprintln!(
+                    "{name:>10}: {:8.2} ns/mash  {:7.2} GiB/s  {:6.2}x speedup",
+                    result.ns_per_mash, result.gib_per_s, speedup
+                );
+            }
+            None => {
+                eprintln!(
+                    "{name:>10}: {:8.2} ns/mash  {:7.2} GiB/s",
+                    result.ns_per_mash, result.gib_per_s
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "benchmark; run with --release -- --ignored --nocapture"]
+    fn benchmark_mash_variants() {
+        let reference = benchmark_mash_variant(crate::mash_scalar);
+        eprintln!("guacamole mash benchmark");
+        print_bench_result("reference", reference, None);
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            let neon = benchmark_mash_variant(|seed, output| unsafe {
+                crate::aarch64_simd::mash_neon(seed, output)
+            });
+            print_bench_result("neon", neon, Some(reference));
+            eprintln!("{:>10}: unsupported on aarch64", "sse2");
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let sse2 = benchmark_mash_variant(|seed, output| unsafe {
+                crate::x86_simd::mash_sse2(seed, output)
+            });
+            eprintln!("{:>10}: unsupported on x86_64", "neon");
+            print_bench_result("sse2", sse2, Some(reference));
+        }
+
+        #[cfg(target_arch = "x86")]
+        {
+            if std::arch::is_x86_feature_detected!("sse2") {
+                let sse2 = benchmark_mash_variant(|seed, output| unsafe {
+                    crate::x86_simd::mash_sse2(seed, output)
+                });
+                eprintln!("{:>10}: unsupported on x86", "neon");
+                print_bench_result("sse2", sse2, Some(reference));
+            } else {
+                eprintln!("{:>10}: unsupported on x86 without sse2", "sse2");
+            }
+        }
+
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))]
+        {
+            eprintln!("{:>10}: unsupported on this architecture", "neon");
+            eprintln!("{:>10}: unsupported on this architecture", "sse2");
         }
     }
 
