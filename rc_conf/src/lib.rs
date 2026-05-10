@@ -569,6 +569,10 @@ fn is_safe_source_path(path: &str) -> bool {
     true
 }
 
+fn strip_self_dir_prefix(path: &Path) -> Path<'static> {
+    Path::from(path.as_str().trim_start_matches("./").to_string())
+}
+
 impl shvar::VariableProvider for EnvironmentVariableProvider {
     fn lookup(&self, ident: &str) -> Option<String> {
         // Sanitize environment variable name: must be valid identifier
@@ -624,7 +628,7 @@ impl RcConf {
         let mut seen = HashSet::default();
         let mut items = HashMap::default();
         for piece in path.split(':') {
-            let piece = Path::from(piece);
+            let piece = strip_self_dir_prefix(&Path::from(piece));
             if !piece.exists() {
                 continue;
             }
@@ -832,7 +836,8 @@ impl RcConf {
             }
             if let Some(source) = line.trim().strip_prefix("source ") {
                 if is_safe_source_path(source) {
-                    Self::parse_recursive(&path.dirname().join(source), seen, items)?;
+                    let source = strip_self_dir_prefix(&path.dirname().join(source));
+                    Self::parse_recursive(&source, seen, items)?;
                 } else {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
@@ -975,7 +980,7 @@ impl RcConf {
         let mut seen = HashSet::default();
         let mut rc_conf = String::new();
         for (idx, piece) in path.split(':').enumerate() {
-            let piece = Path::from(piece);
+            let piece = strip_self_dir_prefix(&Path::from(piece));
             if !piece.exists() {
                 continue;
             }
@@ -1006,7 +1011,7 @@ impl RcConf {
                 if !is_safe_source_path(source) {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
-                let source = path.dirname().join(source);
+                let source = strip_self_dir_prefix(&path.dirname().join(source));
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
                     Self::examine_recursive(&source, seen, rc_conf)?;
