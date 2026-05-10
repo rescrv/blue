@@ -293,7 +293,7 @@ impl From<&Error> for indicio::Value {
             }
             Error::NulError => {
                 indicio::value!({
-                    generating_execution_id: true,
+                    nul_error: true,
                 })
             }
         }
@@ -666,12 +666,9 @@ impl Pid1 {
             {
                 let mut state = state.lock().unwrap();
                 state.processes.retain(|p| !Arc::ptr_eq(p, &exec));
-                state.converge = state.converge.saturating_add(1);
                 state.set_backoff(service, Instant::now() + backoff);
                 coord.converge.notify_all();
-                if state.converge == u64::MAX {
-                    todo!();
-                }
+                state.converge = state.converge.wrapping_add(1);
             }
         }
     }
@@ -687,7 +684,7 @@ impl Pid1 {
             let c = {
                 let mut state = state.lock().unwrap();
                 clue!(COLLECTOR, INFO, { wait: format!("{:?}", wait), });
-                while !state.shutdown && converge >= state.converge {
+                while !state.shutdown && converge == state.converge {
                     let timed_out: WaitTimeoutResult;
                     (state, timed_out) = coord.converge.wait_timeout(state, wait).unwrap();
                     if timed_out.timed_out() {
@@ -891,10 +888,7 @@ impl Pid1 {
         {
             let mut state = self.state.lock().unwrap();
             state.config = config;
-            state.converge = state.converge.saturating_add(1);
-            if state.converge == u64::MAX {
-                todo!();
-            }
+            state.converge = state.converge.wrapping_add(1);
         }
         self.coord.converge.notify_all();
         Ok(())
@@ -1003,7 +997,7 @@ impl Pid1 {
         if state.service_switch(service) == SwitchPosition::Manual {
             state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
         }
-        state.converge += 1;
+        state.converge = state.converge.wrapping_add(1);
         self.coord.converge.notify_all();
         Ok(())
     }
@@ -1024,7 +1018,7 @@ impl Pid1 {
         };
         while let Some(proc) = processes.pop() {
             if proc.pid().is_none() {
-                todo!();
+                continue;
             }
             for iter in 1..=3 {
                 for _ in 0..(1 << iter) * 10 {

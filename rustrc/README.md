@@ -12,6 +12,7 @@ Scope
 -----
 
 This library provides the rustrc binary.
+It consumes `rc_conf` configuration files and therefore inherits any breaking parser behavior changes (for example anchored `source` resolution).
 
 Documentation
 -------------

@@ -3,6 +3,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::time::SystemTime;
@@ -568,6 +569,10 @@ fn is_safe_source_path(path: &str) -> bool {
     true
 }
 
+fn strip_self_dir_prefix(path: &Path) -> Path<'static> {
+    Path::from(path.as_str().trim_start_matches("./").to_string())
+}
+
 impl shvar::VariableProvider for EnvironmentVariableProvider {
     fn lookup(&self, ident: &str) -> Option<String> {
         // Sanitize environment variable name: must be valid identifier
@@ -623,7 +628,7 @@ impl RcConf {
         let mut seen = HashSet::default();
         let mut items = HashMap::default();
         for piece in path.split(':') {
-            let piece = Path::from(piece);
+            let piece = strip_self_dir_prefix(&Path::from(piece));
             if !piece.exists() {
                 continue;
             }
@@ -831,7 +836,8 @@ impl RcConf {
             }
             if let Some(source) = line.trim().strip_prefix("source ") {
                 if is_safe_source_path(source) {
-                    Self::parse_recursive(&Path::from(source), seen, items)?;
+                    let source = strip_self_dir_prefix(&path.dirname().join(source));
+                    Self::parse_recursive(&source, seen, items)?;
                 } else {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
@@ -974,7 +980,7 @@ impl RcConf {
         let mut seen = HashSet::default();
         let mut rc_conf = String::new();
         for (idx, piece) in path.split(':').enumerate() {
-            let piece = Path::from(piece);
+            let piece = strip_self_dir_prefix(&Path::from(piece));
             if !piece.exists() {
                 continue;
             }
@@ -1005,10 +1011,9 @@ impl RcConf {
                 if !is_safe_source_path(source) {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
-                let source = Path::from(source);
+                let source = strip_self_dir_prefix(&path.dirname().join(source));
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
-                    seen.insert(path.clone().into_owned());
                     Self::examine_recursive(&source, seen, rc_conf)?;
                     *rc_conf += &format!("# end source {source:?}\n");
                 } else {
@@ -1326,7 +1331,12 @@ pub fn load_services(
         }
         for dirent in std::fs::read_dir(rc_d)? {
             let dirent = dirent?;
-            let path = Path::try_from(dirent.path())?.into_owned();
+            let dirent_path = dirent.path();
+            let metadata = std::fs::metadata(&dirent_path)?;
+            if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+                continue;
+            }
+            let path = Path::try_from(dirent_path)?.into_owned();
             let name = dirent.file_name().to_string_lossy().to_string();
             match services.entry(name) {
                 Entry::Occupied(mut entry) => {
