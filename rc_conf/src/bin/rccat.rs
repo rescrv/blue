@@ -45,7 +45,7 @@ fn main() {
     let name = if let Ok(path) = std::env::var("RCVAR_ARGV0") {
         path.to_string()
     } else {
-        rc_conf::name_from_path(&Path::new(&args[0]))
+        rc_conf::name_from_path(&Path::new(&args[1]))
     };
     let prefix = rc_conf::var_prefix_from_service(&name);
     // Read stdin.
