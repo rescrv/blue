@@ -493,6 +493,9 @@ impl RcScript {
 
         let exp = shvar::expand_recursive(&(&meta, &evp), &self.command)?;
         let mut cmd = shvar::split(&exp)?;
+        if cmd.is_empty() {
+            return Err(Error::invalid_invocation("expanded command is empty"));
+        }
         if !args.is_empty() {
             cmd.push("--".to_string());
         }
@@ -942,6 +945,9 @@ impl RcConf {
         path: &Path,
         items: &mut HashMap<String, String>,
     ) -> Result<(), Error> {
+        if !is_safe_source_path(path.as_str()) {
+            return Err(Error::invalid_rc_conf(path, 0, "unsafe source path"));
+        }
         let contents = std::fs::read_to_string(path.as_str())?;
         for (number, line, _) in linearize(path, &contents)? {
             if line.trim().starts_with('#') || line.trim().is_empty() {
@@ -1524,13 +1530,24 @@ edition = "2021"
 "#
         ),
     )?;
-    std::process::Command::new("cargo")
+    let output = std::process::Command::new("cargo")
         .arg("vendor")
         .arg("--no-delete")
         .arg("--manifest-path")
-        .arg(tmp)
+        .arg(&tmp)
         .arg(path.as_str())
         .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::exec_failed(
+            format!(
+                "cargo vendor --no-delete --manifest-path {} {}",
+                tmp.display(),
+                path.as_str()
+            ),
+            std::io::Error::other(format!("command failed: {stderr}")),
+        ));
+    }
     Ok(())
 }
 

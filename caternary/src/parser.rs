@@ -257,7 +257,7 @@ fn shell_words(input: &str) -> Result<Vec<ShellWord>, ParseError> {
     debug_assert_eq!(split.len(), spans.len());
 
     let mut shell_words = Vec::with_capacity(split.len());
-    for (text, span) in split.into_iter().zip(spans.into_iter()) {
+    for (text, span) in split.into_iter().zip(spans) {
         let emitted = decode_shell_word(&input[span.start..span.end], span.start);
         debug_assert_eq!(text, emitted.iter().map(|c| c.ch).collect::<String>());
         shell_words.push(ShellWord {
