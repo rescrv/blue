@@ -768,6 +768,13 @@ impl RcConf {
                     "inconsistent autogen statement (you'll have to pull code to debug this one)",
                 ));
             }
+            if bindings.iter().any(|values| values.is_empty()) {
+                return Err(Error::invalid_rc_conf(
+                    &Path::from(path),
+                    0,
+                    "autogen template references an empty VALUES_ definition",
+                ));
+            }
             let mut cursors = vec![0; bindings.len()];
             while cursors[0] < bindings[0].len() {
                 let candidate = bindings
@@ -1539,6 +1546,12 @@ pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
 ///////////////////////////////////////////// bootstrap ////////////////////////////////////////////
 
 fn vendor(path: utf8path::Path, crate_name: &str, spec: &str) -> Result<(), Error> {
+    struct TmpDirGuard(std::path::PathBuf);
+    impl Drop for TmpDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
     let tmp = std::env::temp_dir().join(format!(
         "{}_{}_{}",
         crate_name,
@@ -1548,12 +1561,13 @@ fn vendor(path: utf8path::Path, crate_name: &str, spec: &str) -> Result<(), Erro
             .as_millis(),
         std::process::id()
     ));
+    let _tmp_dir_guard = TmpDirGuard(tmp.clone());
     std::fs::create_dir(&tmp)?;
     std::fs::create_dir(tmp.join("src"))?;
     std::fs::write(tmp.join("src/lib.rs"), [])?;
-    let tmp = tmp.join("Cargo.toml");
+    let manifest = tmp.join("Cargo.toml");
     std::fs::write(
-        &tmp,
+        &manifest,
         format!(
             r#"
 [package]
@@ -1570,21 +1584,23 @@ edition = "2021"
         .arg("vendor")
         .arg("--no-delete")
         .arg("--manifest-path")
-        .arg(&tmp)
+        .arg(&manifest)
         .arg(path.as_str())
         .output()?;
-    if !output.status.success() {
+    let result = if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::exec_failed(
+        Err(Error::exec_failed(
             format!(
                 "cargo vendor --no-delete --manifest-path {} {}",
-                tmp.display(),
+                manifest.display(),
                 path.as_str()
             ),
             std::io::Error::other(format!("command failed: {stderr}")),
-        ));
-    }
-    Ok(())
+        ))
+    } else {
+        Ok(())
+    };
+    result
 }
 
 /// Prepare the output directory for running the provided rc_conf_path.  Return the minimal
