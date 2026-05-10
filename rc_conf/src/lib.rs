@@ -1534,13 +1534,17 @@ edition = "2021"
         .arg("vendor")
         .arg("--no-delete")
         .arg("--manifest-path")
-        .arg(tmp)
+        .arg(&tmp)
         .arg(path.as_str())
         .output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(Error::exec_failed(
-            format!("cargo vendor --no-delete --manifest-path {} {}", tmp.as_str(), path.as_str()),
+            format!(
+                "cargo vendor --no-delete --manifest-path {} {}",
+                tmp.display(),
+                path.as_str()
+            ),
             std::io::Error::other(format!("command failed: {stderr}")),
         ));
     }
