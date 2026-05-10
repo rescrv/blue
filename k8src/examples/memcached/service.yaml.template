@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SERVICE:?SERVICE not defined}
+  namespace: ${NAMESPACE:?NAMESPACE not defined}
+  labels:
+    app: ${SERVICE:?SERVICE not defined}
+spec:
+  replicas: ${REPLICAS:-1}
+  selector:
+    matchLabels:
+      app: ${SERVICE:?SERVICE not defined}
+  template:
+    metadata:
+      labels:
+        app: ${SERVICE:?SERVICE not defined}
+    spec:
+      containers:
+      - name: ${SERVICE:?SERVICE not defined}
+        image: ${IMAGE:?IMAGE not defined}
+        ports:
+        - containerPort: ${PORT:?PORT not defined}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE:?SERVICE not defined}
+  namespace: ${NAMESPACE:?NAMESPACE not defined}
+spec:
+  ports:
+  - port: ${PORT:?PORT not defined}
+    targetPort: ${PORT:?PORT not defined}
+  selector:
+    app: ${SERVICE:?SERVICE not defined}
