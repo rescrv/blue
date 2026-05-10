@@ -580,20 +580,22 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
             return None;
         }
 
-        let key = if let Some(prefix) = self.prefix.as_ref() {
-            prefix.to_string() + ident
-        } else {
-            ident.to_string()
+        let read_env = |key: &str| {
+            std::env::var(key).ok().and_then(|value| {
+                if value.contains('\0') {
+                    None // Reject values containing null bytes
+                } else {
+                    Some(value)
+                }
+            })
         };
 
-        // Get environment variable value and sanitize it
-        std::env::var(key).ok().and_then(|value| {
-            if value.contains('\0') {
-                None // Reject values containing null bytes
-            } else {
-                Some(value)
-            }
-        })
+        if let Some(prefix) = self.prefix.as_ref() {
+            let prefixed = format!("{prefix}{ident}");
+            read_env(&prefixed).or_else(|| read_env(ident))
+        } else {
+            read_env(ident)
+        }
     }
 }
 
@@ -1894,14 +1896,15 @@ COMMAND=my-command ${NAME} ${FIELD}
             assert_eq!(
                 r#"
 # rc_conf[0] = "bar.conf"
-# begin source "foo.conf"
+# begin source "./foo.conf"
 foo_ENABLE=YES
-# end source "foo.conf"
+# end source "./foo.conf"
 
 bar_ENABLE=YES
 
-# already sourced "foo.conf"
-# rc_conf[1] = "foo.conf"; already sourced
+# already sourced "./foo.conf"
+# rc_conf[1] = "foo.conf"
+foo_ENABLE=YES
             "#
                 .trim(),
                 examined.trim()
