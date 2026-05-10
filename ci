@@ -5,23 +5,145 @@ set -u
 set -o errexit
 set -o pipefail
 
-cargo fmt -- --check
+ROOTDIR="$(pwd)"
+PROFILE_LOG="${ROOTDIR}/.ci.profile"
+TAB="$(printf '\t')"
 
-ROOTDIR="`pwd`"
-export PATH="$PATH":"`pwd`"/target/release
+format_duration() {
+    local total_seconds="$1"
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+    printf '%02d:%02d:%02d' "$hours" "$minutes" "$seconds"
+}
 
-cargo build --release --bins
-target/release/publish > .ci.packages
+record_profile() {
+    local phase="$1"
+    local label="$2"
+    local elapsed="$3"
+    printf '%s\t%s\t%s\n' "$phase" "$elapsed" "$label" >> "$PROFILE_LOG"
+    printf '[ci][%s] %s %s\n' "$phase" "$(format_duration "$elapsed")" "$label"
+}
 
-for package in `cat .ci.packages`
+run_profiled() {
+    local phase="$1"
+    local label="$2"
+    shift 2
+    local start=$SECONDS
+    local status=0
+    if "$@"
+    then
+        status=0
+    else
+        status=$?
+    fi
+    local elapsed=$((SECONDS - start))
+    record_profile "$phase" "$label" "$elapsed"
+    return "$status"
+}
+
+package_name_for_member() {
+    awk '
+        $0 == "[package]" {
+            in_package = 1
+            next
+        }
+        /^\[/ {
+            in_package = 0
+        }
+        in_package && $1 == "name" {
+            gsub(/"/, "", $3)
+            print $3
+            exit
+        }
+    ' "$1/Cargo.toml"
+}
+
+run_binaries_check() {
+    (
+        cd "$1"
+        "${ROOTDIR}/target/release/binaries"
+    )
+}
+
+print_profile_summary() {
+    if [ ! -f "$PROFILE_LOG" ]
+    then
+        return
+    fi
+
+    echo "CI PROFILE SUMMARY BY PHASE"
+    awk -F "$TAB" '
+        {
+            elapsed[$1] += $2;
+            count[$1] += 1;
+        }
+        END {
+            for (phase in elapsed) {
+                printf "%s\t%d\t%d\n", phase, elapsed[phase], count[phase];
+            }
+        }
+    ' "$PROFILE_LOG" | sort -t "$TAB" -k2,2nr | while IFS="$TAB" read -r phase elapsed count
+    do
+        printf '  %s  %3s  %s\n' "$(format_duration "$elapsed")" "$count" "$phase"
+    done
+
+    echo "CI PROFILE SLOWEST STEPS"
+    sort -t "$TAB" -k2,2nr "$PROFILE_LOG" | head -n 10 | while IFS="$TAB" read -r phase elapsed label
+    do
+        printf '  %s  %-18s  %s\n' "$(format_duration "$elapsed")" "$phase" "$label"
+    done
+}
+
+on_exit() {
+    local status=$?
+    set +x
+    print_profile_summary
+    if [ "$status" -eq 0 ]
+    then
+        echo SUCCESS: this concludes our successful CI adventure
+    fi
+    return "$status"
+}
+
+: > "$PROFILE_LOG"
+trap on_exit EXIT
+
+export PATH="$PATH":"${ROOTDIR}/target/release"
+
+run_profiled workspace/fmt "cargo fmt -- --check" \
+    cargo fmt -- --check
+
+# Integration tests expect the workspace binaries to be present in target/release.
+run_profiled workspace/build-bins "cargo build --release --bins" \
+    cargo build --release --bins
+
+run_profiled workspace/package-list "target/release/publish > .ci.packages" \
+    bash -c 'target/release/publish > .ci.packages'
+
+run_profiled workspace/clippy "cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets" \
+    cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets -- -D warnings -D clippy::all
+
+packages=()
+while IFS= read -r package
 do
-    pushd $package
-    cargo clippy --no-deps --all-targets -- -D warnings -D clippy::all
-    cargo hack --feature-powerset test --release
-    cargo doc --no-deps
-    "${ROOTDIR}/target/release/binaries"
-    popd
+    packages+=("$package")
+done < .ci.packages
+
+for package in "${packages[@]}"
+do
+    package_name="$(package_name_for_member "$package")"
+    if rg -q '^default\s*=' "$package/Cargo.toml"
+    then
+        run_profiled package/test "${package_name} cargo hack" \
+            cargo hack -p "$package_name" --feature-powerset --exclude-features default test --release
+    else
+        run_profiled package/test "${package_name} cargo hack" \
+            cargo hack -p "$package_name" --feature-powerset test --release
+    fi
+    run_profiled package/binaries "${package} binaries" \
+        run_binaries_check "$package"
 done
 
-set +x
-echo SUCCESS: this concludes our successful CI adventure
+run_profiled workspace/doc "cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps" \
+    cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps

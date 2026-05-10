@@ -6,11 +6,16 @@ on:
     branches: [ "main" ]
 env:
   CARGO_TERM_COLOR: always
+  CARGO_TOOLS_ROOT: ${{ runner.temp }}/cargo-tools
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: rustc cache key
+      id: rustc
+      run: |
+        echo "commit_hash=$(rustc -Vv | sed -n 's/^commit-hash: //p')" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@v4
       with:
         path: |
@@ -19,7 +24,24 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
+    - name: add cargo tools to PATH
+      run: echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+    - uses: actions/cache@v4
+      with:
+        path: ${{ env.CARGO_TOOLS_ROOT }}
+        key: ${{ runner.os }}-cargo-tools-${{ steps.rustc.outputs.commit_hash }}-cargo-hack-v1
+    - uses: actions/cache@v4
+      with:
+        path: |
+          target/.rustc_info.json
+          target/release
+        key: ${{ runner.os }}-target-release-${{ steps.rustc.outputs.commit_hash }}-${{ hashFiles('**/Cargo.lock', '.github/workflows/rust.yml', 'ci') }}
+        restore-keys: |
+          ${{ runner.os }}-target-release-${{ steps.rustc.outputs.commit_hash }}-
     - name: cargo hack
-      run: cargo install cargo-hack
+      run: |
+        if [ ! -x "${CARGO_TOOLS_ROOT}/bin/cargo-hack" ]; then
+          cargo install --locked --root "${CARGO_TOOLS_ROOT}" cargo-hack
+        fi
     - name: run ci
       run: ./ci
