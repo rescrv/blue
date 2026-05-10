@@ -1435,7 +1435,7 @@ fn exec_rc_with_override(
 /// This does not return.
 pub fn exec_container(
     rc_conf_path: &str,
-    _: &str,
+    rc_d_path: &str,
     command: &str,
     container: &str,
     service: &str,
@@ -1445,9 +1445,33 @@ pub fn exec_container(
         eprintln!("failed to parse rc_conf: {e}");
         std::process::exit(133);
     });
+    let rc_d = load_services(rc_d_path).unwrap_or_else(|e| {
+        eprintln!("failed to load services: {e}");
+        std::process::exit(134);
+    });
     if !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
+    }
+    let path = if let Some(alias) = rc_conf.aliases.get(service) {
+        let Some(path) = rc_d.get(rc_conf.resolve_alias(&alias.aliases)) else {
+            eprintln!("expected alias of service to be available via --rc-d-path");
+            std::process::exit(130);
+        };
+        path
+    } else {
+        let Some(path) = rc_d.get(service) else {
+            eprintln!("expected service to be available via --rc-d-path");
+            std::process::exit(130);
+        };
+        path
+    };
+    match path {
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("service encountered an error: {err:?}");
+            std::process::exit(131);
+        }
     }
     let mut env = HashMap::new();
     env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
