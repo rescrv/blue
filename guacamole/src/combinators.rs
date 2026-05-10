@@ -65,11 +65,7 @@ pub fn option<P: FnMut(&mut Guacamole) -> bool, F: FnMut(&mut Guacamole) -> T, T
     mut func: F,
 ) -> impl FnMut(&mut Guacamole) -> Option<T> {
     move |guac| {
-        if pred(guac) {
-            Some(func(guac))
-        } else {
-            None
-        }
+        if pred(guac) { Some(func(guac)) } else { None }
     }
 }
 
@@ -98,11 +94,7 @@ pub fn either<
     mut right: R,
 ) -> impl FnMut(&mut Guacamole) -> T {
     move |guac| {
-        if pred(guac) {
-            left(guac)
-        } else {
-            right(guac)
-        }
+        if pred(guac) { left(guac) } else { right(guac) }
     }
 }
 
