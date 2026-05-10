@@ -59,6 +59,29 @@ package_name_for_member() {
     ' "$1/Cargo.toml"
 }
 
+manifest_has_default_feature() {
+    awk '
+        $0 == "[features]" {
+            in_features = 1
+            next
+        }
+        /^\[/ {
+            in_features = 0
+        }
+        in_features {
+            line = $0
+            sub(/[[:space:]]*#.*$/, "", line)
+            if (line ~ /^[[:space:]]*default[[:space:]]*=/) {
+                found = 1
+                exit 0
+            }
+        }
+        END {
+            exit found ? 0 : 1
+        }
+    ' "$1/Cargo.toml"
+}
+
 run_binaries_check() {
     (
         cd "$1"
@@ -133,11 +156,16 @@ done < .ci.packages
 for package in "${packages[@]}"
 do
     package_name="$(package_name_for_member "$package")"
-    if rg -q '^default\s*=' "$package/Cargo.toml"
+    if manifest_has_default_feature "$package"
     then
         run_profiled package/test "${package_name} cargo hack" \
             cargo hack -p "$package_name" --feature-powerset --exclude-features default test --release
     else
+        status=$?
+        if [ "$status" -ne 1 ]
+        then
+            exit "$status"
+        fi
         run_profiled package/test "${package_name} cargo hack" \
             cargo hack -p "$package_name" --feature-powerset test --release
     fi
