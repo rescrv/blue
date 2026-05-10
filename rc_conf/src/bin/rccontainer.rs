@@ -39,6 +39,10 @@ fn main() {
         eprintln!("expected container and service name to be provided");
         std::process::exit(129);
     }
+    if options.runtime != "docker" && options.runtime != "podman" {
+        eprintln!("runtime must be either docker or podman");
+        std::process::exit(129);
+    }
     rc_conf::exec_container(
         &options.rc_conf_path,
         &options.rc_d_path,
