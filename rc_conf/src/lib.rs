@@ -1587,7 +1587,7 @@ edition = "2021"
         .arg(&manifest)
         .arg(path.as_str())
         .output()?;
-    let result = if !output.status.success() {
+    if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(Error::exec_failed(
             format!(
@@ -1599,8 +1599,7 @@ edition = "2021"
         ))
     } else {
         Ok(())
-    };
-    result
+    }
 }
 
 /// Prepare the output directory for running the provided rc_conf_path.  Return the minimal
