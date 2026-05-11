@@ -580,20 +580,22 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
             return None;
         }
 
-        let key = if let Some(prefix) = self.prefix.as_ref() {
-            prefix.to_string() + ident
-        } else {
-            ident.to_string()
+        let read_env = |key: &str| {
+            std::env::var(key).ok().and_then(|value| {
+                if value.contains('\0') {
+                    None // Reject values containing null bytes
+                } else {
+                    Some(value)
+                }
+            })
         };
 
-        // Get environment variable value and sanitize it
-        std::env::var(key).ok().and_then(|value| {
-            if value.contains('\0') {
-                None // Reject values containing null bytes
-            } else {
-                Some(value)
-            }
-        })
+        if let Some(prefix) = self.prefix.as_ref() {
+            let prefixed = format!("{prefix}{ident}");
+            read_env(&prefixed).or_else(|| read_env(ident))
+        } else {
+            read_env(ident)
+        }
     }
 }
 
