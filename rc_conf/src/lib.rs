@@ -1896,15 +1896,14 @@ COMMAND=my-command ${NAME} ${FIELD}
             assert_eq!(
                 r#"
 # rc_conf[0] = "bar.conf"
-# begin source "./foo.conf"
+# begin source "foo.conf"
 foo_ENABLE=YES
-# end source "./foo.conf"
+# end source "foo.conf"
 
 bar_ENABLE=YES
 
-# already sourced "./foo.conf"
-# rc_conf[1] = "foo.conf"
-foo_ENABLE=YES
+# already sourced "foo.conf"
+# rc_conf[1] = "foo.conf"; already sourced
             "#
                 .trim(),
                 examined.trim()
