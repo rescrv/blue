@@ -36,7 +36,14 @@ tatl = { workspace = true }
 utilz = { workspace = true }
 
 [dev-dependencies]
+arrrg = { workspace = true }
 proptest = { workspace = true }
+statslicer = { workspace = true }
+
+[[bench]]
+name = "block_cursor"
+harness = false
+
 [[bin]]
 name = "jester-from-plaintext"
 path = "src/bin/jester-from-plaintext.rs"
