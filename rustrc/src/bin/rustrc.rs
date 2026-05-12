@@ -123,9 +123,9 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 if matches.opt_present("s") {
                     for service in free.iter() {
                         if let Err(err) = self.pid1.start(service) {
-                            response += &format!("{service}: error: {err:?}");
+                            response += &format!("{service}: error: {err:?}\n");
                         } else {
-                            response += &format!("{service}: success");
+                            response += &format!("{service}: success\n");
                         }
                     }
                 }
@@ -133,9 +133,9 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 if matches.opt_present("R") {
                     for service in free.iter() {
                         if let Err(err) = self.pid1.restart(service) {
-                            response += &format!("{service}: error: {err:?}");
+                            response += &format!("{service}: error: {err:?}\n");
                         } else {
-                            response += &format!("{service}: success");
+                            response += &format!("{service}: success\n");
                         }
                     }
                 }
@@ -143,9 +143,9 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 if matches.opt_present("S") {
                     for service in free.iter() {
                         if let Err(err) = self.pid1.stop(service) {
-                            response += &format!("{service}: error: {err:?}");
+                            response += &format!("{service}: error: {err:?}\n");
                         } else {
-                            response += &format!("{service}: success");
+                            response += &format!("{service}: success\n");
                         }
                     }
                 }

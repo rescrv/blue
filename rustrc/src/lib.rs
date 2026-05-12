@@ -1015,6 +1015,14 @@ impl Pid1 {
         let service_string = service.to_string();
         let mut processes: Vec<Arc<Execution>> = {
             let mut state = self.state.lock().unwrap();
+            if !state.processes.iter().any(|p| p.service == service)
+                && state.config.get_service_path(service).is_none()
+            {
+                return Err(Error::UnknownService);
+            }
+            if !state.processes.iter().any(|p| p.service == service) {
+                return Err(Error::ServiceError("service is not running".to_string()));
+            }
             state.set_inhibit(service_string);
             state
                 .processes
