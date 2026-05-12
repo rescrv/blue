@@ -65,9 +65,10 @@ impl<H: Helper> Drop for Builder<'_, H> {
             let pa = pa.pack(len_v64);
             let pa_size = pa.pack_sz();
             buf.resize(current_size + pa_size, 0);
-            for i in 0..len {
-                buf[current_size + pa_size - i - 1] = buf[current_size - i - 1];
-            }
+            buf.copy_within(
+                self.starting_size..current_size,
+                self.starting_size + pa_size,
+            );
             Packable::pack(
                 &pa,
                 &mut buf[self.starting_size..self.starting_size + pa_size],

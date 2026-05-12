@@ -1,18 +1,31 @@
-use std::fs::{read_to_string, write};
+use std::fs::{read, write};
 
 use scrunch::builder::Builder;
 use scrunch::{CompressedDocument, Document};
 
 pub fn load_file(file: &str) -> (Vec<u32>, Vec<usize>) {
-    let text: Vec<u32> = read_to_string(file)
-        .expect("file should read to string")
-        .chars()
-        .map(|c| c as u32)
-        .collect();
+    let bytes = read(file).expect("file should read");
     let mut record_boundaries = vec![0usize];
-    for (idx, _) in text.iter().enumerate().filter(|(_, t)| **t == '\n' as u32) {
-        record_boundaries.push(idx + 1);
-    }
+    let text: Vec<u32> = if bytes.is_ascii() {
+        let mut text = Vec::with_capacity(bytes.len());
+        for (idx, byte) in bytes.into_iter().enumerate() {
+            if byte == b'\n' {
+                record_boundaries.push(idx + 1);
+            }
+            text.push(byte as u32);
+        }
+        text
+    } else {
+        let string = String::from_utf8(bytes).expect("file should read to string");
+        let mut text = Vec::with_capacity(string.len());
+        for c in string.chars() {
+            text.push(c as u32);
+            if c == '\n' {
+                record_boundaries.push(text.len());
+            }
+        }
+        text
+    };
     if record_boundaries[record_boundaries.len() - 1] == text.len() {
         record_boundaries.pop();
     }

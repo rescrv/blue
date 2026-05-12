@@ -132,38 +132,96 @@ pub struct CodeBook {
 
 #[derive(Clone, Debug, Default)]
 pub struct HuffmanEncoder {
-    encode: HashMap<u32, (u32, u8)>,
-    decode: HashMap<u32, u32>,
+    code_book: Vec<CodeBookEntry>,
+    encode_dense: Option<Vec<(u32, u8)>>,
+    decode: Vec<(u32, u32)>,
 }
 
 impl HuffmanEncoder {
-    fn code_book(&self) -> CodeBook {
-        let mut code_book = CodeBook::default();
-        for (symbol, (code, len)) in self.encode.iter() {
-            code_book.code_book.push(CodeBookEntry {
-                symbol: *symbol,
-                code: *code,
-                len: *len as u32,
-            });
+    fn dense_frequencies(text: &[u32]) -> Option<Vec<(u32, u64)>> {
+        let max_symbol = text.iter().copied().max()? as usize;
+        if max_symbol > (1 << 20) || max_symbol > text.len().saturating_mul(4) {
+            return None;
         }
+        let mut counts = vec![0u64; max_symbol + 1];
+        for &t in text {
+            counts[t as usize] += 1;
+        }
+        let mut frequencies = Vec::new();
+        for (symbol, count) in counts.into_iter().enumerate() {
+            if count > 0 {
+                frequencies.push((symbol as u32, count));
+            }
+        }
+        Some(frequencies)
+    }
+
+    fn sparse_frequencies(text: &[u32]) -> Vec<(u32, u64)> {
+        let mut probabilities = HashMap::new();
+        for &t in text {
+            *probabilities.entry(t).or_insert(0u64) += 1;
+        }
+        let mut probabilities: Vec<(u32, u64)> = probabilities.into_iter().collect();
+        probabilities.sort_unstable_by_key(|(symbol, _)| *symbol);
+        probabilities
+    }
+
+    fn build_code_book(symbols: Vec<(u8, u32)>) -> Vec<CodeBookEntry> {
+        let mut code_book = Vec::with_capacity(symbols.len());
+        let mut code = 0u32;
+        let mut prev_len = 1u8;
+        for (len, sym) in symbols {
+            code <<= len - prev_len;
+            let flipped = code.reverse_bits() >> (32 - len);
+            code_book.push(CodeBookEntry {
+                symbol: sym,
+                code: flipped,
+                len: len as u32,
+            });
+            code += 1;
+            prev_len = len;
+        }
+        code_book.sort_unstable_by_key(|entry| entry.symbol);
         code_book
+    }
+
+    fn build_dense_encode(code_book: &[CodeBookEntry]) -> Option<Vec<(u32, u8)>> {
+        let max_symbol = code_book.last()?.symbol as usize;
+        if max_symbol > code_book.len().saturating_mul(64).max(1024) {
+            return None;
+        }
+        let mut encode_dense = vec![(0u32, 0u8); max_symbol + 1];
+        for entry in code_book {
+            encode_dense[entry.symbol as usize] = (entry.code, entry.len as u8);
+        }
+        Some(encode_dense)
+    }
+
+    fn from_code_book(mut code_book: Vec<CodeBookEntry>) -> Self {
+        code_book.sort_unstable_by_key(|entry| entry.symbol);
+        let encode_dense = Self::build_dense_encode(&code_book);
+        let mut decode: Vec<(u32, u32)> = code_book
+            .iter()
+            .map(|entry| (entry.code, entry.symbol))
+            .collect();
+        decode.sort_unstable_by_key(|(code, _)| *code);
+        Self {
+            code_book,
+            encode_dense,
+            decode,
+        }
     }
 }
 
 impl Encoder for HuffmanEncoder {
     fn construct(text: &[u32]) -> Self {
         if text.is_empty() {
-            return Self {
-                encode: HashMap::new(),
-                decode: HashMap::new(),
-            };
+            return Self::default();
         }
-        let mut probabilities = HashMap::new();
-        for t in text.iter() {
-            *probabilities.entry(*t).or_insert(0) += 1;
-        }
+        let probabilities =
+            Self::dense_frequencies(text).unwrap_or_else(|| Self::sparse_frequencies(text));
         let mut heap = BinaryHeap::new();
-        for (sym, prob) in probabilities.into_iter() {
+        for (sym, prob) in probabilities {
             heap.push(Reverse(Node {
                 prob: prob as f64,
                 sym: Some(sym),
@@ -192,43 +250,47 @@ impl Encoder for HuffmanEncoder {
             tree.append_symbols(0, &mut symbols);
         }
         symbols.sort();
-        // Make the canonical code book.
-        let mut encode = HashMap::new();
-        let mut decode = HashMap::new();
-        let mut code = 0u32;
-        let mut prev_len = 1u8;
-        for (len, sym) in symbols.into_iter() {
-            code <<= len - prev_len;
-            let flipped = code.reverse_bits() >> (32 - len);
-            encode.insert(sym, (flipped, len));
-            decode.insert(flipped, sym);
-            code += 1;
-            prev_len = len;
-        }
-        Self { encode, decode }
+        let code_book = Self::build_code_book(symbols);
+        Self::from_code_book(code_book)
     }
 
     fn encode(&self, t: u32) -> Option<(u32, u8)> {
-        self.encode.get(&t).copied()
+        if let Some(encode_dense) = self.encode_dense.as_ref() {
+            let &(code, len) = encode_dense.get(t as usize)?;
+            if len > 0 {
+                return Some((code, len));
+            }
+        }
+        let idx = self
+            .code_book
+            .binary_search_by_key(&t, |entry| entry.symbol)
+            .ok()?;
+        let entry = &self.code_book[idx];
+        Some((entry.code, entry.len as u8))
     }
 
     fn decode(&self, v: u32, _: u8) -> Option<u32> {
-        self.decode.get(&v).copied()
+        let idx = self.decode.binary_search_by_key(&v, |(code, _)| *code).ok()?;
+        Some(self.decode[idx].1)
     }
 
     fn symbols(&self) -> usize {
-        self.encode.len()
+        self.code_book.len()
     }
 }
 
 impl Packable for HuffmanEncoder {
     fn pack_sz(&self) -> usize {
-        let code_book = self.code_book();
+        let code_book = CodeBook {
+            code_book: self.code_book.clone(),
+        };
         stack_pack(code_book).pack_sz()
     }
 
     fn pack(&self, buf: &mut [u8]) {
-        let code_book = self.code_book();
+        let code_book = CodeBook {
+            code_book: self.code_book.clone(),
+        };
         stack_pack(code_book).into_slice(buf);
     }
 }
@@ -238,23 +300,27 @@ impl<'a> Unpackable<'a> for HuffmanEncoder {
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
         let (code_book, buf) = CodeBook::unpack(buf).map_err(|_| Error::InvalidEncoder)?;
-        let mut encode = HashMap::new();
-        let mut decode = HashMap::new();
-        for cbe in code_book.code_book.into_iter() {
-            if encode.contains_key(&cbe.symbol) {
+        let mut entries = code_book.code_book;
+        entries.sort_unstable_by_key(|entry| entry.symbol);
+        let mut prev_symbol = None;
+        let mut decode: Vec<(u32, u32)> = Vec::with_capacity(entries.len());
+        for cbe in entries.iter() {
+            if prev_symbol == Some(cbe.symbol) {
                 return Err(Error::InvalidEncoder);
             }
-            if cbe.len > u8::MAX as u32 {
+            prev_symbol = Some(cbe.symbol);
+            if cbe.len == 0 || cbe.len > u8::MAX as u32 {
                 return Err(Error::InvalidEncoder);
             }
-            let len = cbe.len as u8;
-            if decode.contains_key(&cbe.code) {
-                return Err(Error::InvalidEncoder);
-            }
-            encode.insert(cbe.symbol, (cbe.code, len));
-            decode.insert(cbe.code, cbe.symbol);
+            decode.push((cbe.code, cbe.symbol));
         }
-        let this = HuffmanEncoder { encode, decode };
+        decode.sort_unstable_by_key(|(code, _)| *code);
+        for pair in decode.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                return Err(Error::InvalidEncoder);
+            }
+        }
+        let this = Self::from_code_book(entries);
         Ok((this, buf))
     }
 }

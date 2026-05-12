@@ -14,6 +14,14 @@ pub trait InverseSuffixArray {
         to_sample: &[usize],
         builder: &mut Builder<H>,
     ) -> Result<(), Error>;
+    fn construct_u32<H: Helper>(
+        isa: &[u32],
+        to_sample: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let isa: Vec<usize> = isa.iter().map(|x| *x as usize).collect();
+        Self::construct(&isa, to_sample, builder)
+    }
     fn lookup(&self, idx: usize) -> Result<usize, Error>;
 }
 
@@ -125,6 +133,24 @@ impl InverseSuffixArray for SampledInverseSuffixArray<'_> {
             values.push((*sampled, isa[*sampled]));
         }
         SampledArray::construct(&values, &mut builder.sub(FieldNumber::must(1)))?;
+        Ok(())
+    }
+
+    fn construct_u32<H: Helper>(
+        isa: &[u32],
+        to_sample: &[usize],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let mut values: Vec<(usize, u32)> = vec![];
+        for sampled in to_sample.iter() {
+            if *sampled >= isa.len()
+                || (!values.is_empty() && values[values.len() - 1].0 >= *sampled)
+            {
+                return Err(Error::InvalidInverseSuffixArray);
+            }
+            values.push((*sampled, isa[*sampled]));
+        }
+        SampledArray::construct_u32(&values, &mut builder.sub(FieldNumber::must(1)))?;
         Ok(())
     }
 

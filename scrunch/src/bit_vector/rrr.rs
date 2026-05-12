@@ -95,6 +95,46 @@ impl Iterator for SixtyThreeBitWords<'_> {
     }
 }
 
+struct SixtyThreeBitWordsFromIterator<I> {
+    bits: I,
+    len: usize,
+    index: usize,
+}
+
+impl<I: Iterator<Item = bool>> SixtyThreeBitWordsFromIterator<I> {
+    fn new(bits: I, len: usize) -> Self {
+        Self {
+            bits,
+            len,
+            index: 0,
+        }
+    }
+}
+
+impl<I: Iterator<Item = bool>> Iterator for SixtyThreeBitWordsFromIterator<I> {
+    type Item = u63;
+
+    fn next(&mut self) -> Option<u63> {
+        if self.index < self.len {
+            let amt = if self.index + 63 > self.len {
+                self.len - self.index
+            } else {
+                63
+            };
+            let mut answer = 0u64;
+            for i in 0..amt {
+                if self.bits.next()? {
+                    answer |= 1 << i;
+                }
+            }
+            self.index += amt;
+            Some(u63::must(answer))
+        } else {
+            None
+        }
+    }
+}
+
 ///////////////////////////////////////////// Binomials ////////////////////////////////////////////
 
 pub(super) const L: &[usize] = &[
@@ -1819,27 +1859,34 @@ impl BitVector<'_> {
             idx += 63;
         }
     }
-}
 
-impl super::BitVector for BitVector<'_> {
-    type Output<'b> = BitVector<'b>;
+    pub(crate) fn words_from_iter<I>(bits: usize, iter: I) -> Vec<u63>
+    where
+        I: IntoIterator<Item = bool>,
+    {
+        SixtyThreeBitWordsFromIterator::new(iter.into_iter(), bits).collect()
+    }
 
-    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
+    pub(crate) fn construct_from_words<H: Helper>(
+        bits: usize,
+        words: impl IntoIterator<Item = u63>,
+        builder: &mut Builder<'_, H>,
+    ) -> Result<(), Error> {
         const WORD: usize = 8;
         const SELECT: u64 = 64;
-        let mut build_p = BitArrayBuilder::with_capacity(bits.len());
-        let mut build_c = BitArrayBuilder::with_capacity(bits.len());
-        let mut build_o = BitArrayBuilder::with_capacity(bits.len());
-        let mut build_r = BitArrayBuilder::with_capacity(bits.len());
-        let mut build_s0 = BitArrayBuilder::with_capacity(bits.len());
-        let mut build_s1 = BitArrayBuilder::with_capacity(bits.len());
-        let width = Self::calc_p_r_width(bits.len()).ok_or(Error::IntoUsize)?;
+        let mut build_p = BitArrayBuilder::with_capacity(bits);
+        let mut build_c = BitArrayBuilder::with_capacity(bits);
+        let mut build_o = BitArrayBuilder::with_capacity(bits);
+        let mut build_r = BitArrayBuilder::with_capacity(bits);
+        let mut build_s0 = BitArrayBuilder::with_capacity(bits);
+        let mut build_s1 = BitArrayBuilder::with_capacity(bits);
+        let width = Self::calc_p_r_width(bits).ok_or(Error::IntoUsize)?;
         let mut o_len = 0u64;
         let mut rank = 0u64;
         let mut rank0 = 0u64;
         let mut next_select0 = 0u64;
         let mut next_select1 = 0u64;
-        for (idx, word) in SixtyThreeBitWords::new(bits).enumerate() {
+        for (idx, word) in words.into_iter().enumerate() {
             if idx % WORD == 0 {
                 build_p.push_word(o_len, width);
                 build_r.push_word(rank, width);
@@ -1871,7 +1918,7 @@ impl super::BitVector for BitVector<'_> {
         builder.append_raw_packable(&BitVectorStub {
             word: WORD.try_into().expect("WORD must always fit a u8"),
             select: SELECT.try_into().expect("SELECT must always fit a u32"),
-            bits: bits.len() as u64,
+            bits: bits as u64,
             p: &buf_p,
             c: &buf_c,
             o: &buf_o,
@@ -1880,6 +1927,14 @@ impl super::BitVector for BitVector<'_> {
             s1: &buf_s1,
         });
         Ok(())
+    }
+}
+
+impl super::BitVector for BitVector<'_> {
+    type Output<'b> = BitVector<'b>;
+
+    fn construct<H: Helper>(bits: &[bool], builder: &mut Builder<'_, H>) -> Result<(), Error> {
+        Self::construct_from_words(bits.len(), SixtyThreeBitWords::new(bits), builder)
     }
 
     fn parse<'b, 'c: 'b>(buf: &'c [u8]) -> Result<(Self::Output<'b>, &'c [u8]), Error> {
@@ -1892,9 +1947,37 @@ impl super::BitVector for BitVector<'_> {
         self.bits
     }
 
-    // TODO(rescrv): make this as efficient as it can be (compute both together).
     fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
-        Some((self.access(x)?, self.rank(x)?))
+        if x >= self.len() {
+            return None;
+        }
+        // Width of values in P, R.
+        let width = Self::calc_p_r_width(self.bits)?;
+        // P strides by self.word * 63 bits at a time.
+        let stride: usize = self.word as usize * 63;
+        // The offset into P.
+        let p_offset = x / stride;
+        // The offset into O.
+        let mut o_offset: usize = self.p.load(p_offset * width, width)?.try_into().ok()?;
+        // The offset into C.
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        // Our base rank is the number of ones before our p_offset.
+        let mut rank: usize = self.r.load(p_offset * width, width)?.try_into().ok()?;
+        // Adjust index to account for our jump through P.
+        let mut index = x - p_offset * stride;
+        // Step through the words until we have fewer than 63 bits left.
+        while index >= 63 {
+            let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+            index -= 63;
+            c_offset += 6;
+            o_offset += o_bits;
+            rank += c;
+        }
+        let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+        let w = self.load_o(c, o_offset, o_bits)?;
+        let mask = if index == 0 { 0 } else { (1u64 << index) - 1 };
+        rank += (w.0 & mask).count_ones() as usize;
+        Some((w.0 & (1 << index) != 0, rank))
     }
 
     fn access(&self, mut index: usize) -> Option<bool> {

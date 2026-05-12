@@ -327,33 +327,77 @@ where
         let sigma_buf = sigma_builder.relative_bytes(0).to_vec();
         let sigma = sigma::Sigma::unpack(&sigma_buf)?.0;
         drop(sigma_builder);
-        // convert the text into a compacted alphabet
-        let mut s = Vec::with_capacity(text.len() + 1);
-        for t in text.iter().copied() {
-            s.push(sigma.char_to_sigma(t).ok_or(Error::LogicError(
-                "freshly constructed sigma cannot translate text",
-            ))?);
+        macro_rules! construct_u32_offsets {
+            ($s:expr, $sais:path) => {{
+                let s = $s;
+                // compute the suffix array
+                let mut sa = vec![0u32; s.len()];
+                $sais(&sigma, &s, &mut sa)?;
+                drop(s);
+                // TODO(rescrv): parameterize
+                SA::construct_u32(6, &sa, &mut builder.sub(FieldNumber::must(3)))?;
+                // compute the inverse suffix array
+                let (isa, psi) = inverse_and_psi_u32(&sa);
+                ISA::construct_u32(
+                    &isa,
+                    &record_boundaries,
+                    &mut builder.sub(FieldNumber::must(4)),
+                )?;
+                drop(sa);
+                drop(isa);
+                PSI::construct_u32(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
+            }};
         }
-        s.push(0);
-        drop(text);
-        // compute the suffix array
-        let mut sa = vec![0usize; s.len()];
-        sais::sais(&sigma, &s, &mut sa)?;
-        drop(s);
-        // TODO(rescrv): parameterize
-        SA::construct(6, &sa, &mut builder.sub(FieldNumber::must(3)))?;
-        // compute the inverse suffix array
-        let isa = inverse(&sa);
-        drop(sa);
-        ISA::construct(
-            &isa,
-            &record_boundaries,
-            &mut builder.sub(FieldNumber::must(4)),
-        )?;
-        // compute the successor array, psi
-        let psi = psi::compute(&isa);
-        drop(isa);
-        PSI::construct(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
+        let fits_u32_offsets = text.len() < u32::MAX as usize - 1;
+        if fits_u32_offsets && sigma.K() <= u8::MAX as usize + 1 {
+            let s = translate_text_u8(&text, &sigma)?;
+            drop(text);
+            construct_u32_offsets!(s, sais::sais_u8_u32);
+        } else if fits_u32_offsets && sigma.K() <= u16::MAX as usize + 1 {
+            let s = translate_text_u16(&text, &sigma)?;
+            drop(text);
+            construct_u32_offsets!(s, sais::sais_u16_u32);
+        } else {
+            // convert the text into a compacted alphabet
+            let s = translate_text::<u32>(&text, &sigma)?;
+            drop(text);
+            // compute the suffix array
+            if s.len() < u32::MAX as usize {
+                let mut sa = vec![0u32; s.len()];
+                sais::sais_u32(&sigma, &s, &mut sa)?;
+                drop(s);
+                // TODO(rescrv): parameterize
+                SA::construct_u32(6, &sa, &mut builder.sub(FieldNumber::must(3)))?;
+                // compute the inverse suffix array
+                let (isa, psi) = inverse_and_psi_u32(&sa);
+                ISA::construct_u32(
+                    &isa,
+                    &record_boundaries,
+                    &mut builder.sub(FieldNumber::must(4)),
+                )?;
+                drop(sa);
+                drop(isa);
+                PSI::construct_u32(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
+            } else {
+                let mut sa = vec![0usize; s.len()];
+                sais::sais(&sigma, &s, &mut sa)?;
+                drop(s);
+                // TODO(rescrv): parameterize
+                SA::construct(6, &sa, &mut builder.sub(FieldNumber::must(3)))?;
+                // compute the inverse suffix array
+                let isa = inverse(&sa);
+                drop(sa);
+                ISA::construct(
+                    &isa,
+                    &record_boundaries,
+                    &mut builder.sub(FieldNumber::must(4)),
+                )?;
+                // compute the successor array, psi
+                let psi = psi::compute(&isa);
+                drop(isa);
+                PSI::construct(&sigma, &psi, &mut builder.sub(FieldNumber::must(5)))?;
+            }
+        }
         Ok(())
     }
 
@@ -501,11 +545,7 @@ impl From<ExemplarState> for Exemplar {
     fn from(mut es: ExemplarState) -> Self {
         es.needle.reverse();
         Self {
-            count: es
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add),
+            count: es.cardinality,
             needle: es.needle,
         }
     }
@@ -518,18 +558,135 @@ struct CorrelateDocState {
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
+enum ExemplarDocs {
+    #[default]
+    Empty,
+    One(usize, CorrelateDocState),
+    Many(HashMap<usize, CorrelateDocState>),
+}
+
+impl ExemplarDocs {
+    fn with_capacity(capacity: usize) -> Self {
+        if capacity <= 1 {
+            Self::Empty
+        } else {
+            Self::Many(HashMap::with_capacity(capacity))
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::One(_, _) => 1,
+            Self::Many(docs) => docs.len(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn one(&self) -> Option<(usize, &CorrelateDocState)> {
+        match self {
+            Self::Empty => None,
+            Self::One(idx, state) => Some((*idx, state)),
+            Self::Many(docs) if docs.len() == 1 => {
+                docs.iter().next().map(|(idx, state)| (*idx, state))
+            }
+            Self::Many(_) => None,
+        }
+    }
+
+    fn insert(&mut self, idx: usize, state: CorrelateDocState) -> Option<CorrelateDocState> {
+        match std::mem::take(self) {
+            Self::Empty => {
+                *self = Self::One(idx, state);
+                None
+            }
+            Self::One(existing_idx, existing_state) => {
+                if existing_idx == idx {
+                    *self = Self::One(idx, state);
+                    Some(existing_state)
+                } else {
+                    let mut docs = HashMap::with_capacity(2);
+                    docs.insert(existing_idx, existing_state);
+                    let previous = docs.insert(idx, state);
+                    *self = Self::Many(docs);
+                    previous
+                }
+            }
+            Self::Many(mut docs) => {
+                let previous = docs.insert(idx, state);
+                *self = Self::Many(docs);
+                previous
+            }
+        }
+    }
+
+    fn iter(&self) -> ExemplarDocsIter<'_> {
+        match self {
+            Self::Empty => ExemplarDocsIter::Empty,
+            Self::One(idx, state) => ExemplarDocsIter::One(Some((*idx, state))),
+            Self::Many(docs) => ExemplarDocsIter::Many(docs.iter()),
+        }
+    }
+
+    fn iter_mut(&mut self) -> ExemplarDocsIterMut<'_> {
+        match self {
+            Self::Empty => ExemplarDocsIterMut::Empty,
+            Self::One(idx, state) => ExemplarDocsIterMut::One(Some((*idx, state))),
+            Self::Many(docs) => ExemplarDocsIterMut::Many(docs.iter_mut()),
+        }
+    }
+}
+
+enum ExemplarDocsIter<'a> {
+    Empty,
+    One(Option<(usize, &'a CorrelateDocState)>),
+    Many(std::collections::hash_map::Iter<'a, usize, CorrelateDocState>),
+}
+
+impl<'a> Iterator for ExemplarDocsIter<'a> {
+    type Item = (usize, &'a CorrelateDocState);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::One(item) => item.take(),
+            Self::Many(iter) => iter.next().map(|(idx, state)| (*idx, state)),
+        }
+    }
+}
+
+enum ExemplarDocsIterMut<'a> {
+    Empty,
+    One(Option<(usize, &'a mut CorrelateDocState)>),
+    Many(std::collections::hash_map::IterMut<'a, usize, CorrelateDocState>),
+}
+
+impl<'a> Iterator for ExemplarDocsIterMut<'a> {
+    type Item = (usize, &'a mut CorrelateDocState);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::One(item) => item.take(),
+            Self::Many(iter) => iter.next().map(|(idx, state)| (*idx, state)),
+        }
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
 struct ExemplarState {
     stop: Vec<u32>,
     needle: Vec<u32>,
-    docs: HashMap<usize, CorrelateDocState>,
+    cardinality: usize,
+    docs: ExemplarDocs,
 }
 
 impl ExemplarState {
     fn cardinality(&self) -> usize {
-        self.docs
-            .values()
-            .map(|d| d.numer)
-            .fold(0, usize::saturating_add)
+        self.cardinality
     }
 }
 
@@ -538,17 +695,7 @@ impl Ord for ExemplarState {
         if self == other {
             Ordering::Equal
         } else {
-            let numer_lhs = self
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add);
-            let numer_rhs = other
-                .docs
-                .values()
-                .map(|d| d.numer)
-                .fold(0, usize::saturating_add);
-            numer_lhs.cmp(&numer_rhs)
+            self.cardinality.cmp(&other.cardinality)
         }
     }
 }
@@ -568,29 +715,50 @@ where
     ISA: isa::InverseSuffixArray,
     PSI: psi::Psi,
 {
+    exemplars_with_min_length(docs, boundaries, 0)
+}
+
+pub fn exemplars_with_min_length<'a, SA, ISA, PSI>(
+    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    boundaries: &[(u32, u32)],
+    min_length: usize,
+) -> Exemplars<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    let docs = ExemplarDoc::from_documents(docs);
     let mut heap = BinaryHeap::new();
     for boundary in boundaries.iter() {
         let mut state = ExemplarState {
             // the starting boundary because we do backwards search.
             stop: vec![boundary.0],
             needle: vec![boundary.1],
-            docs: HashMap::new(),
+            cardinality: 0,
+            docs: ExemplarDocs::with_capacity(docs.len()),
         };
         for (idx, doc) in docs.iter().enumerate() {
-            let Ok(range) = doc.sigma.sa_range_for(boundary.1) else {
+            let Ok(range) = doc.document.sigma.sa_range_for(boundary.1) else {
                 continue;
             };
             if range.0 > range.1 {
                 continue;
             }
             let numer = range.1 - range.0 + 1;
+            state.cardinality = state.cardinality.saturating_add(numer);
             state.docs.insert(idx, CorrelateDocState { numer, range });
         }
         if !state.docs.is_empty() {
             heap.push(state);
         }
     }
-    Exemplars { docs, heap }
+    Exemplars {
+        docs,
+        heap,
+        min_length,
+        sigma_ranges: Vec::new(),
+    }
 }
 
 pub fn exemplars_from_needle<'a, SA, ISA, PSI>(
@@ -603,26 +771,101 @@ where
     ISA: isa::InverseSuffixArray,
     PSI: psi::Psi,
 {
+    let docs = ExemplarDoc::from_documents(docs);
     let mut heap = BinaryHeap::new();
     let mut state = ExemplarState {
         stop: stop.to_vec(),
         needle: needle.clone(),
-        docs: HashMap::new(),
+        cardinality: 0,
+        docs: ExemplarDocs::with_capacity(docs.len()),
     };
     for (idx, doc) in docs.iter().enumerate() {
-        let Ok(range) = doc.backwards_search(&state.needle) else {
+        let Ok(range) = doc.document.backwards_search(&state.needle) else {
             continue;
         };
         if range.0 > range.1 {
             continue;
         }
         let numer = range.1 - range.0 + 1;
+        state.cardinality = state.cardinality.saturating_add(numer);
         state.docs.insert(idx, CorrelateDocState { numer, range });
     }
     if !state.docs.is_empty() {
         heap.push(state);
     }
-    Exemplars { docs, heap }
+    Exemplars {
+        docs,
+        heap,
+        min_length: 0,
+        sigma_ranges: Vec::new(),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ExemplarSymbol {
+    text: u32,
+    range: (usize, usize),
+}
+
+struct ExemplarDoc<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    document: &'a PsiDocument<'a, SA, ISA, PSI>,
+    symbols: Vec<ExemplarSymbol>,
+    symbols_by_sigma: Vec<Option<ExemplarSymbol>>,
+}
+
+impl<'a, SA, ISA, PSI> ExemplarDoc<'a, SA, ISA, PSI>
+where
+    SA: sa::SuffixArray,
+    ISA: isa::InverseSuffixArray,
+    PSI: psi::Psi,
+{
+    fn from_documents(docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>]) -> Vec<Self> {
+        docs.iter().copied().map(Self::new).collect()
+    }
+
+    fn new(document: &'a PsiDocument<'a, SA, ISA, PSI>) -> Self {
+        let mut symbols = Vec::with_capacity(document.sigma.K().saturating_sub(1));
+        let mut symbols_by_sigma = vec![None; document.sigma.K()];
+        for symbol in 1..document.sigma.K() as u32 {
+            let Some(text) = document.sigma.sigma_to_char(symbol) else {
+                continue;
+            };
+            let Ok(range) = document.sigma.sa_range_for_sigma(symbol) else {
+                continue;
+            };
+            if range.0 <= range.1 {
+                let exemplar_symbol = ExemplarSymbol { text, range };
+                symbols_by_sigma[symbol as usize] = Some(exemplar_symbol);
+                symbols.push(exemplar_symbol);
+            }
+        }
+        Self {
+            document,
+            symbols,
+            symbols_by_sigma,
+        }
+    }
+
+    fn constrain(
+        &self,
+        doc_state: &CorrelateDocState,
+        symbol: ExemplarSymbol,
+    ) -> Option<(usize, (usize, usize))> {
+        let range = self
+            .document
+            .psi
+            .constrain(&self.document.sigma, symbol.range, doc_state.range)
+            .ok()?;
+        if range.0 > range.1 {
+            return None;
+        }
+        Some((range.1 - range.0 + 1, range))
+    }
 }
 
 pub struct Exemplars<'a, SA, ISA, PSI>
@@ -631,8 +874,10 @@ where
     ISA: isa::InverseSuffixArray,
     PSI: psi::Psi,
 {
-    docs: &'a [&'a PsiDocument<'a, SA, ISA, PSI>],
+    docs: Vec<ExemplarDoc<'a, SA, ISA, PSI>>,
     heap: BinaryHeap<ExemplarState>,
+    min_length: usize,
+    sigma_ranges: Vec<(u32, (usize, usize))>,
 }
 
 impl<SA, ISA, PSI> Exemplars<'_, SA, ISA, PSI>
@@ -649,45 +894,113 @@ where
                     .iter(),
             )
             .all(|(x, y)| *x == *y)
+                && exemplar.needle.len() >= self.min_length
             {
                 return Some(exemplar);
             }
-            let mut new_exemplars: HashMap<u32, ExemplarState> = HashMap::new();
-            for (idx, doc_state) in exemplar.docs.iter() {
-                let doc = &self.docs[*idx];
-                for i in 1..=doc.sigma.K() as u32 {
-                    let Some(t) = doc.sigma.sigma_to_char(i) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    let new_exemplar = new_exemplars.entry(t).or_insert_with(|| {
+            if exemplar.docs.len() == 1 {
+                let (idx, doc_state) = exemplar.docs.one().expect("len checked");
+                let doc = &self.docs[idx];
+                self.sigma_ranges.clear();
+                if doc
+                    .document
+                    .psi
+                    .predecessor_sigma_ranges(
+                        &doc.document.sigma,
+                        doc_state.range,
+                        &mut self.sigma_ranges,
+                    )
+                    .unwrap_or(false)
+                {
+                    for (sigma, range) in self.sigma_ranges.iter().copied() {
+                        let Some(symbol) =
+                            doc.symbols_by_sigma.get(sigma as usize).copied().flatten()
+                        else {
+                            continue;
+                        };
+                        let numer = range.1 - range.0 + 1;
                         let mut needle = exemplar.needle.clone();
-                        needle.push(t);
-                        ExemplarState {
+                        needle.push(symbol.text);
+                        self.heap.push(ExemplarState {
                             stop: exemplar.stop.clone(),
                             needle,
-                            docs: HashMap::new(),
-                        }
-                    });
-                    let Ok(range) = doc.sigma.sa_range_for_sigma(i) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    if range.0 > range.1 {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
+                            cardinality: numer,
+                            docs: ExemplarDocs::One(idx, CorrelateDocState { numer, range }),
+                        });
                     }
-                    let Ok(range) = doc.psi.constrain(&doc.sigma, range, doc_state.range) else {
-                        // TODO(rescrv): Metrics because this should never happen.
-                        continue;
-                    };
-                    if range.0 > range.1 {
-                        continue;
+                } else {
+                    for symbol in doc.symbols.iter().copied() {
+                        let Some((numer, range)) = doc.constrain(doc_state, symbol) else {
+                            continue;
+                        };
+                        let mut needle = exemplar.needle.clone();
+                        needle.push(symbol.text);
+                        self.heap.push(ExemplarState {
+                            stop: exemplar.stop.clone(),
+                            needle,
+                            cardinality: numer,
+                            docs: ExemplarDocs::One(idx, CorrelateDocState { numer, range }),
+                        });
                     }
-                    let numer = range.1 - range.0 + 1;
-                    new_exemplar
-                        .docs
-                        .insert(*idx, CorrelateDocState { numer, range });
+                }
+                continue;
+            }
+            let mut new_exemplars: HashMap<u32, ExemplarState> = HashMap::new();
+            for (idx, doc_state) in exemplar.docs.iter() {
+                let doc = &self.docs[idx];
+                self.sigma_ranges.clear();
+                if doc
+                    .document
+                    .psi
+                    .predecessor_sigma_ranges(
+                        &doc.document.sigma,
+                        doc_state.range,
+                        &mut self.sigma_ranges,
+                    )
+                    .unwrap_or(false)
+                {
+                    for (sigma, range) in self.sigma_ranges.iter().copied() {
+                        let Some(symbol) =
+                            doc.symbols_by_sigma.get(sigma as usize).copied().flatten()
+                        else {
+                            continue;
+                        };
+                        let numer = range.1 - range.0 + 1;
+                        let new_exemplar = new_exemplars.entry(symbol.text).or_insert_with(|| {
+                            let mut needle = exemplar.needle.clone();
+                            needle.push(symbol.text);
+                            ExemplarState {
+                                stop: exemplar.stop.clone(),
+                                needle,
+                                cardinality: 0,
+                                docs: ExemplarDocs::with_capacity(exemplar.docs.len()),
+                            }
+                        });
+                        new_exemplar.cardinality = new_exemplar.cardinality.saturating_add(numer);
+                        new_exemplar
+                            .docs
+                            .insert(idx, CorrelateDocState { numer, range });
+                    }
+                } else {
+                    for symbol in doc.symbols.iter().copied() {
+                        let Some((numer, range)) = doc.constrain(doc_state, symbol) else {
+                            continue;
+                        };
+                        let new_exemplar = new_exemplars.entry(symbol.text).or_insert_with(|| {
+                            let mut needle = exemplar.needle.clone();
+                            needle.push(symbol.text);
+                            ExemplarState {
+                                stop: exemplar.stop.clone(),
+                                needle,
+                                cardinality: 0,
+                                docs: ExemplarDocs::with_capacity(exemplar.docs.len()),
+                            }
+                        });
+                        new_exemplar.cardinality = new_exemplar.cardinality.saturating_add(numer);
+                        new_exemplar
+                            .docs
+                            .insert(idx, CorrelateDocState { numer, range });
+                    }
                 }
             }
             for (_, new_exemplar) in new_exemplars {
@@ -760,22 +1073,24 @@ where
         loop {
             if let Some(mut exemplar) = self.exemplars.next_inner() {
                 let cardinality = exemplar.cardinality();
+                exemplar.cardinality = 0;
                 for (idx, doc) in exemplar.docs.iter_mut() {
                     doc.numer = 0;
                     for offset in doc.range.0..=doc.range.1 {
                         // TODO(rescrv): no unwrap
                         let offset = TextOffset(
-                            self.docs[*idx]
+                            self.docs[idx]
                                 .sa
-                                .lookup(&self.docs[*idx].sigma, &self.docs[*idx].psi, offset)
+                                .lookup(&self.docs[idx].sigma, &self.docs[idx].psi, offset)
                                 .unwrap(),
                         );
                         // TODO(rescrv): no unwrap
-                        let offset = self.docs[*idx].lookup(offset).unwrap();
-                        if (self.select)(*idx, offset) {
+                        let offset = self.docs[idx].lookup(offset).unwrap();
+                        if (self.select)(idx, offset) {
                             doc.numer += 1;
                         }
                     }
+                    exemplar.cardinality = exemplar.cardinality.saturating_add(doc.numer);
                 }
                 self.correlates.push(exemplar);
                 if let Some(correlate) = self.correlates.peek()
@@ -800,6 +1115,125 @@ fn inverse(x: &[usize]) -> Vec<usize> {
         ix[x[i]] = i
     }
     ix
+}
+
+fn inverse_and_psi_u32(sa: &[u32]) -> (Vec<u32>, Vec<u32>) {
+    let len = sa.len();
+    let mut isa = vec![u32::MAX; len];
+    let mut psi: Vec<std::mem::MaybeUninit<u32>> = Vec::with_capacity(len);
+    // SAFETY(codex): MaybeUninit<u32> has no initialization invariant, and set_len only exposes
+    // uninitialized slots that this function writes before converting to Vec<u32>. We never read a
+    // slot until it has been written, which follows the Rustonomicon's MaybeUninit rules.
+    unsafe {
+        psi.set_len(len);
+    }
+    for (idx, pos) in sa.iter().copied().enumerate() {
+        let idx = idx as u32;
+        let pos = pos as usize;
+        isa[pos] = idx;
+
+        let prev_pos = if pos == 0 { len - 1 } else { pos - 1 };
+        // SAFETY(codex): prev_pos is either pos - 1 or len - 1 and pos came from the suffix array,
+        // so prev_pos < len == isa.len(); isa contains initialized u32 sentinels, making this
+        // immutable read in-bounds and alias-safe under the Rustonomicon.
+        let prev_isa = unsafe { *isa.get_unchecked(prev_pos) };
+        if prev_isa != u32::MAX {
+            // SAFETY(codex): prev_isa was read from isa after being initialized to a suffix-array
+            // index, so prev_isa < len; each psi slot is written exactly when its predecessor is
+            // discovered, and MaybeUninit::write avoids dropping uninitialized memory.
+            unsafe {
+                psi.get_unchecked_mut(prev_isa as usize).write(idx);
+            }
+        }
+
+        let next_pos = if pos + 1 == len { 0 } else { pos + 1 };
+        // SAFETY(codex): next_pos is either pos + 1 within len or 0, so it is in-bounds for isa;
+        // isa is fully initialized with sentinel values before the loop and shared reads do not
+        // violate Rustonomicon aliasing rules.
+        let next_isa = unsafe { *isa.get_unchecked(next_pos) };
+        if next_isa != u32::MAX {
+            // SAFETY(codex): idx is the enumerate index converted to u32 with len < u32::MAX on
+            // callers of this path, so idx < psi.len(); the slot is written with MaybeUninit::write
+            // exactly when its successor is known, satisfying initialization requirements.
+            unsafe {
+                psi.get_unchecked_mut(idx as usize).write(next_isa);
+            }
+        }
+    }
+    // SAFETY(codex): valid suffix arrays are permutations, so the predecessor/successor loop writes
+    // every psi slot exactly once before conversion; assume_init_vec_u32 only reinterprets fully
+    // initialized u32 storage and preserves pointer, length, and capacity.
+    (isa, unsafe { assume_init_vec_u32(psi) })
+}
+
+unsafe fn assume_init_vec_u32(mut values: Vec<std::mem::MaybeUninit<u32>>) -> Vec<u32> {
+    let ptr = values.as_mut_ptr() as *mut u32;
+    let len = values.len();
+    let capacity = values.capacity();
+    std::mem::forget(values);
+    // SAFETY(codex): the caller guarantees every MaybeUninit<u32> element is initialized; u32 has
+    // identical layout in MaybeUninit<u32>, and Vec::from_raw_parts receives the original pointer,
+    // length, and capacity, satisfying the Rustonomicon ownership and allocation rules.
+    unsafe { Vec::from_raw_parts(ptr, len, capacity) }
+}
+
+fn translate_text<Sym>(text: &[u32], sigma: &sigma::Sigma<'_>) -> Result<Vec<Sym>, Error>
+where
+    Sym: From<u8> + TryFrom<u32>,
+{
+    let mut s = Vec::with_capacity(text.len() + 1);
+    for t in text.iter().copied() {
+        let symbol = sigma.char_to_sigma(t).ok_or(Error::LogicError(
+            "freshly constructed sigma cannot translate text",
+        ))?;
+        s.push(Sym::try_from(symbol).map_err(|_| Error::InvalidSigma)?);
+    }
+    s.push(Sym::from(0));
+    Ok(s)
+}
+
+fn translate_text_u8(text: &[u32], sigma: &sigma::Sigma<'_>) -> Result<Vec<u8>, Error> {
+    let mut s = Vec::with_capacity(text.len() + 1);
+    if let Some(dense) = sigma.dense_char_to_sigma_table() {
+        for t in text.iter().copied() {
+            let symbol = dense.get(t as usize).copied().unwrap_or(0);
+            if symbol == 0 || symbol > u8::MAX as u32 {
+                return Err(Error::InvalidSigma);
+            }
+            s.push(symbol as u8);
+        }
+    } else {
+        for t in text.iter().copied() {
+            let symbol = sigma.char_to_sigma(t).ok_or(Error::LogicError(
+                "freshly constructed sigma cannot translate text",
+            ))?;
+            s.push(u8::try_from(symbol).map_err(|_| Error::InvalidSigma)?);
+        }
+    }
+    s.push(0);
+    Ok(s)
+}
+
+fn translate_text_u16(text: &[u32], sigma: &sigma::Sigma<'_>) -> Result<Vec<u16>, Error> {
+    let mut s = Vec::with_capacity(text.len() + 1);
+    if let Some(dense) = sigma.dense_char_to_sigma_table() {
+        for t in text.iter().copied() {
+            let symbol = dense.get(t as usize).copied().unwrap_or(0);
+            if symbol == 0 || symbol > u16::MAX as u32 {
+                return Err(Error::InvalidSigma);
+            }
+            s.push(symbol as u16);
+        }
+    } else {
+        for t in text.iter().copied() {
+            let symbol = sigma.char_to_sigma(t).ok_or(Error::LogicError(
+                "freshly constructed sigma cannot translate text",
+            ))?;
+            s.push(u16::try_from(symbol).map_err(|_| Error::InvalidSigma)?);
+        }
+    }
+    s.push(0);
+    Ok(s)
 }
 
 ////////////////////////////////////// check_record_boundaries /////////////////////////////////////

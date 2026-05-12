@@ -25,6 +25,7 @@ struct SigmaStub<'a> {
 
 pub struct Sigma<'a> {
     char_to_sigma: HashMap<u32, usize>,
+    char_to_sigma_dense: Option<Vec<u32>>,
     sigma_to_char: Vec<u32>,
     columns: BitVector<'a>,
 }
@@ -34,23 +35,44 @@ impl Sigma<'_> {
         iter: I,
         builder: &mut Builder<H>,
     ) -> Result<(), Error> {
+        const DENSE_COUNT_LIMIT: usize = 1 << 20;
+
         // count each character
-        let mut counts: HashMap<u32, usize> = HashMap::new();
+        let mut dense_counts = vec![0usize; 256];
+        let mut sparse_counts: HashMap<u32, usize> = HashMap::new();
         for t in iter.into_iter() {
-            *counts.entry(t).or_insert(0) += 1;
+            let idx = t as usize;
+            if idx <= DENSE_COUNT_LIMIT {
+                if idx >= dense_counts.len() {
+                    dense_counts.resize(
+                        std::cmp::min((idx + 1).next_power_of_two(), DENSE_COUNT_LIMIT + 1),
+                        0,
+                    );
+                }
+                dense_counts[idx] += 1;
+            } else {
+                *sparse_counts.entry(t).or_insert(0) += 1;
+            }
         }
         // create an array of characters in ascending order
-        let mut sigma_to_char: Vec<u32> = Vec::with_capacity(counts.len());
-        for (t, _) in counts.iter() {
-            sigma_to_char.push(*t);
+        let mut sigma_counts: Vec<(u32, usize)> =
+            Vec::with_capacity(dense_counts.len() + sparse_counts.len());
+        for (t, count) in dense_counts.into_iter().enumerate() {
+            if count > 0 {
+                sigma_counts.push((t as u32, count));
+            }
         }
-        sigma_to_char.sort();
+        for (t, count) in sparse_counts.into_iter() {
+            sigma_counts.push((t, count));
+        }
+        sigma_counts.sort_by_key(|(t, _)| *t);
+        let sigma_to_char: Vec<u32> = sigma_counts.iter().map(|(t, _)| *t).collect();
         // use the counts and the ascending order to create buckets
         let mut buckets: Vec<usize> = Vec::with_capacity(sigma_to_char.len() + 1);
         buckets.push(0);
         let mut total = 0;
-        for t in sigma_to_char.iter() {
-            total += counts.get(t).ok_or(Error::LogicError("count not found"))?;
+        for (_, count) in sigma_counts.iter() {
+            total += count;
             buckets.push(total);
         }
         // sanity checks on the way out the door.
@@ -73,8 +95,17 @@ impl Sigma<'_> {
 
     /// char_to_sigma takes a character from its original domain to the range [0, K).
     pub fn char_to_sigma(&self, t: u32) -> Option<u32> {
+        if let Some(dense) = &self.char_to_sigma_dense
+            && let Some(sigma) = dense.get(t as usize).copied()
+        {
+            return if sigma == 0 { None } else { Some(sigma) };
+        }
         // SAFETY(rescrv): Sigma should never have more than u32::MAX symbols.
         self.char_to_sigma.get(&t).copied().map(|x| x as u32)
+    }
+
+    pub(crate) fn dense_char_to_sigma_table(&self) -> Option<&[u32]> {
+        self.char_to_sigma_dense.as_deref()
     }
 
     /// sigma_to_char takes a character from the range [1, K] to its original domain.
@@ -152,6 +183,7 @@ impl std::fmt::Debug for Sigma<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("Sigma")
             .field("char_to_sigma", &self.char_to_sigma)
+            .field("char_to_sigma_dense", &self.char_to_sigma_dense)
             .field("sigma_to_char", &self.sigma_to_char)
             .field("columns", &self.columns)
             .finish()
@@ -169,15 +201,34 @@ impl<'a> Unpackable<'a> for Sigma<'a> {
         for (idx, t) in sigma_to_char.iter().enumerate() {
             char_to_sigma.insert(*t, idx + 1);
         }
+        let char_to_sigma_dense = dense_char_to_sigma(&sigma_to_char)?;
         Ok((
             Self {
                 sigma_to_char,
                 char_to_sigma,
+                char_to_sigma_dense,
                 columns,
             },
             buf,
         ))
     }
+}
+
+fn dense_char_to_sigma(sigma_to_char: &[u32]) -> Result<Option<Vec<u32>>, Error> {
+    const DENSE_LOOKUP_LIMIT: usize = 1 << 20;
+
+    let Some(max) = sigma_to_char.iter().copied().max() else {
+        return Ok(None);
+    };
+    let max = max as usize;
+    if max > DENSE_LOOKUP_LIMIT {
+        return Ok(None);
+    }
+    let mut dense = vec![0u32; max + 1];
+    for (idx, t) in sigma_to_char.iter().copied().enumerate() {
+        dense[t as usize] = u32::try_from(idx + 1)?;
+    }
+    Ok(Some(dense))
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
