@@ -15,6 +15,7 @@ use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::ops::Bound;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biometrics::Counter;
 use buffertk::{Packable, Unpacker, stack_pack};
@@ -1256,6 +1257,14 @@ impl BlockMetadata {
     }
 }
 
+////////////////////////////////////////// SstIndexEntry ///////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+struct SstIndexEntry {
+    key: Vec<u8>,
+    metadata: BlockMetadata,
+}
+
 //////////////////////////////////////////// FinalBlock ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message)]
@@ -1387,6 +1396,8 @@ pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
     final_block: FinalBlock,
     // Sst metadata.
     index_block: Block,
+    // Decoded index entries for cursoring.
+    index_entries: Arc<Vec<SstIndexEntry>>,
     // Bloom filter.
     filter: Filter,
     // Cache for metadata call.
@@ -1451,11 +1462,13 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
             ));
         }
         let index_block = Sst::load_block(&handle, &final_block.index_block)?;
+        let index_entries = Arc::new(Sst::<W>::load_index_entries(&index_block)?);
         let filter = Sst::load_filter_block(&handle, &final_block.filter_block)?;
         Ok(Self {
             handle,
             final_block,
             index_block,
+            index_entries,
             filter,
             file_size,
         })
@@ -1465,6 +1478,11 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     pub fn approximate_size(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.index_block.approximate_size()
+            + self
+                .index_entries
+                .iter()
+                .map(|entry| std::mem::size_of::<SstIndexEntry>() + entry.key.len())
+                .sum::<usize>()
             + self.filter.approximate_size()
     }
 
@@ -1516,7 +1534,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         meta_cursor.seek_to_first()?;
         meta_cursor.next()?;
         while let Some(kvr) = meta_cursor.key_value() {
-            let metadata = SstCursor::<W>::metadata_from_kvr(kvr)
+            let metadata = SstCursor::<W>::metadata_from_kvr(&kvr)
                 .expect("metadata should parse")
                 .unwrap();
             println!("{metadata:?}");
@@ -1565,6 +1583,24 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
                 Err(corruption_tried_loading_final_block_as_plain())
             }
         }
+    }
+
+    fn load_index_entries(index_block: &Block) -> Result<Vec<SstIndexEntry>, SError> {
+        let mut entries = Vec::new();
+        let mut cursor = index_block.cursor();
+        cursor.seek_to_first()?;
+        cursor.next()?;
+        while let Some(kvr) = cursor.key_value() {
+            let Some(metadata) = SstCursor::<W>::metadata_from_kvr(&kvr)? else {
+                break;
+            };
+            entries.push(SstIndexEntry {
+                key: kvr.key.to_vec(),
+                metadata,
+            });
+            cursor.next()?;
+        }
+        Ok(entries)
     }
 
     fn load_filter_block(file: &W, block_metadata: &BlockMetadata) -> Result<Filter, SError> {
@@ -2120,60 +2156,34 @@ impl Builder for SstMultiBuilder {
 #[derive(Clone, Debug)]
 pub struct SstCursor<W: Clone + Seek + Write + FileExt = FileHandle> {
     table: Sst<W>,
-    // The position in the table.  When meta_cursor is at its extremes, block_cursor is None.
-    // Otherwise, block_cursor is positioned at the block referred to by the most recent
-    // KVP-returning call to meta_cursor.
-    meta_cursor: BlockCursor,
+    // The current index entry.  When block_cursor is None, meta_idx is the next block for forward
+    // traversal and one past the next block for reverse traversal.
+    meta_idx: usize,
     block_cursor: Option<BlockCursor>,
 }
 
 impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
     fn new(table: Sst<W>) -> Self {
-        let meta_cursor = table.index_block.cursor();
         Self {
             table,
-            meta_cursor,
+            meta_idx: 0,
             block_cursor: None,
         }
     }
 
-    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, SError> {
-        SST_CURSOR_META_PREV.click();
-        self.meta_cursor.prev()?;
-        let kvr = match self.meta_cursor.key_value() {
-            Some(kvr) => kvr,
-            None => {
-                self.seek_to_first()?;
-                return Ok(None);
-            }
-        };
-        SstCursor::<W>::metadata_from_kvr(kvr)
+    fn seek_index(&self, key: &[u8]) -> usize {
+        self.table
+            .index_entries
+            .partition_point(|entry| entry.key.as_slice() < key)
     }
 
-    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, SError> {
-        SST_CURSOR_META_NEXT.click();
-        self.meta_cursor.next()?;
-        let kvr = match self.meta_cursor.key_value() {
-            Some(kvr) => kvr,
-            None => {
-                self.seek_to_last()?;
-                return Ok(None);
-            }
-        };
-        SstCursor::<W>::metadata_from_kvr(kvr)
+    fn load_block_cursor(&self, idx: usize) -> Result<BlockCursor, SError> {
+        let block =
+            Sst::<W>::load_block(&self.table.handle, &self.table.index_entries[idx].metadata)?;
+        Ok(block.cursor())
     }
 
-    fn meta_value(&mut self) -> Result<Option<BlockMetadata>, SError> {
-        let kvr = match self.meta_cursor.key_value() {
-            Some(kvr) => kvr,
-            None => {
-                return Ok(None);
-            }
-        };
-        SstCursor::<W>::metadata_from_kvr(kvr)
-    }
-
-    fn metadata_from_kvr(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, SError> {
+    fn metadata_from_kvr(kvr: &KeyValueRef) -> Result<Option<BlockMetadata>, SError> {
         let value = match kvr.value {
             Some(v) => v,
             None => {
@@ -2190,95 +2200,81 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
 impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
     fn seek_to_first(&mut self) -> Result<(), SError> {
         SST_CURSOR_SEEK_TO_FIRST.click();
-        self.meta_cursor.seek_to_first()?;
+        self.meta_idx = 0;
         self.block_cursor = None;
         Ok(())
     }
 
     fn seek_to_last(&mut self) -> Result<(), SError> {
         SST_CURSOR_SEEK_TO_LAST.click();
-        self.meta_cursor.seek_to_last()?;
+        self.meta_idx = self.table.index_entries.len();
         self.block_cursor = None;
         Ok(())
     }
 
     fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         SST_CURSOR_SEEK.click();
-        self.meta_cursor.seek(key)?;
-        let metadata = match self.meta_value()? {
-            Some(m) => m,
-            None => {
-                return self.seek_to_last();
-            }
-        };
-        let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
-        let mut block_cursor = block.cursor();
+        let mut idx = self.seek_index(key);
+        if idx >= self.table.index_entries.len() {
+            return self.seek_to_last();
+        }
+        let mut block_cursor = self.load_block_cursor(idx)?;
         block_cursor.seek(key)?;
         if block_cursor.key().is_none() {
-            let metadata = match self.meta_next()? {
-                Some(m) => m,
-                None => {
-                    return self.seek_to_last();
-                }
-            };
-            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
-            let mut block_cursor = block.cursor();
+            idx += 1;
+            if idx >= self.table.index_entries.len() {
+                return self.seek_to_last();
+            }
+            block_cursor = self.load_block_cursor(idx)?;
             block_cursor.seek(key)?;
-            self.block_cursor = Some(block_cursor);
-        } else {
-            self.block_cursor = Some(block_cursor);
         }
+        self.meta_idx = idx;
+        self.block_cursor = Some(block_cursor);
         Ok(())
     }
 
     fn prev(&mut self) -> Result<(), SError> {
         SST_CURSOR_PREV.click();
-        if self.block_cursor.is_none() {
-            let metadata = match self.meta_prev()? {
-                Some(m) => m,
-                None => {
+        loop {
+            if self.block_cursor.is_none() {
+                if self.meta_idx == 0 {
                     return self.seek_to_first();
                 }
-            };
-            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
-            let mut block_cursor = block.cursor();
-            block_cursor.seek_to_last()?;
-            self.block_cursor = Some(block_cursor);
-        }
-        assert!(self.block_cursor.is_some());
-        let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
-        block_cursor.prev()?;
-        match block_cursor.key_value() {
-            Some(_) => Ok(()),
-            None => {
+                SST_CURSOR_META_PREV.click();
+                self.meta_idx -= 1;
+                let mut block_cursor = self.load_block_cursor(self.meta_idx)?;
+                block_cursor.seek_to_last()?;
+                self.block_cursor = Some(block_cursor);
+            }
+            let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
+            block_cursor.prev()?;
+            if block_cursor.key_value().is_some() {
+                return Ok(());
+            } else {
                 self.block_cursor = None;
-                self.prev()
             }
         }
     }
 
     fn next(&mut self) -> Result<(), SError> {
         SST_CURSOR_NEXT.click();
-        if self.block_cursor.is_none() {
-            let metadata = match self.meta_next()? {
-                Some(m) => m,
-                None => {
+        loop {
+            if self.block_cursor.is_none() {
+                if self.meta_idx >= self.table.index_entries.len() {
                     return self.seek_to_last();
                 }
-            };
-            let block = Sst::<W>::load_block(&self.table.handle, &metadata)?;
-            let mut block_cursor = block.cursor();
-            block_cursor.seek_to_first()?;
-            self.block_cursor = Some(block_cursor);
-        }
-        assert!(self.block_cursor.is_some());
-        let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
-        block_cursor.next()?;
-        match block_cursor.key_value() {
-            Some(_) => Ok(()),
-            None => {
+                SST_CURSOR_META_NEXT.click();
+                let mut block_cursor = self.load_block_cursor(self.meta_idx)?;
+                block_cursor.seek_to_first()?;
+                self.block_cursor = Some(block_cursor);
+            }
+            let block_cursor: &mut BlockCursor = self.block_cursor.as_mut().unwrap();
+            block_cursor.next()?;
+            if block_cursor.key_value().is_some() {
+                return Ok(());
+            } else {
                 self.block_cursor = None;
-                self.next()
+                self.meta_idx += 1;
             }
         }
     }
