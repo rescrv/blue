@@ -137,39 +137,6 @@ impl Block {
         u32::from_le_bytes(restart) as usize
     }
 
-    fn restart_for_offset(&self, offset: usize) -> usize {
-        let mut left: usize = 0usize;
-        let mut right: usize = self.num_restarts - 1;
-
-        // NOTE(rescrv):  This is not the same as the binary search below because we are looking
-        // for incomplete ranges.  The value at i may cover a range [x, y) where restart[i + 1] = y.
-        while left < right {
-            // Pick a mid such that when left and right are adjacent, mid equal right.
-            let mid = (left + right).div_ceil(2);
-            let value = self.restart_point(mid);
-            match offset.cmp(&value) {
-                Ordering::Less => {
-                    // The offset is less than this restart point.  It cannot be contained within
-                    // this restart.
-                    right = mid - 1;
-                }
-                Ordering::Equal => {
-                    // The offset exactly equals this restart point.  We're lucky that we can go
-                    // home early.
-                    left = mid;
-                    right = mid;
-                }
-                Ordering::Greater => {
-                    // The offset > value.  The best we can do is to move the left to the mid
-                    // because it could still equal left.
-                    left = mid;
-                }
-            }
-        }
-
-        left
-    }
-
     pub fn load(
         &self,
         key: &[u8],
@@ -367,6 +334,7 @@ enum CursorPosition {
         next_offset: usize,
         key: Vec<u8>,
         timestamp: u64,
+        value: Option<(usize, usize)>,
     },
 }
 
@@ -392,6 +360,7 @@ impl PartialEq for CursorPosition {
                     next_offset: no1,
                     key: k1,
                     timestamp: t1,
+                    value: v1,
                 },
                 &CursorPosition::Positioned {
                     restart_idx: ri2,
@@ -399,11 +368,18 @@ impl PartialEq for CursorPosition {
                     next_offset: no2,
                     key: k2,
                     timestamp: t2,
+                    value: v2,
                 },
-            ) => ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2,
+            ) => ri1 == ri2 && o1 == o2 && no1 == no2 && k1 == k2 && t1 == t2 && v1 == v2,
             _ => false,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct RestartCache {
+    restart_idx: usize,
+    positions: Vec<CursorPosition>,
 }
 
 //////////////////////////////////////////// BlockCursor ///////////////////////////////////////////
@@ -413,6 +389,7 @@ impl PartialEq for CursorPosition {
 pub struct BlockCursor {
     block: Block,
     position: CursorPosition,
+    reverse_cache: Option<RestartCache>,
 }
 
 impl BlockCursor {
@@ -421,6 +398,7 @@ impl BlockCursor {
         BlockCursor {
             block,
             position: CursorPosition::First,
+            reverse_cache: None,
         }
     }
 
@@ -434,6 +412,7 @@ impl BlockCursor {
                 next_offset: _,
                 key: _,
                 timestamp: _,
+                value: _,
             } => *offset,
         }
     }
@@ -448,6 +427,7 @@ impl BlockCursor {
                 next_offset,
                 key: _,
                 timestamp: _,
+                value: _,
             } => *next_offset,
         }
     }
@@ -462,6 +442,7 @@ impl BlockCursor {
                 next_offset: _,
                 key: _,
                 timestamp: _,
+                value: _,
             } => *restart_idx,
         }
     }
@@ -494,6 +475,7 @@ impl BlockCursor {
                 next_offset: _,
                 ref mut key,
                 timestamp: _,
+                value: _,
             } => {
                 let mut ret = Vec::new();
                 key.truncate(0);
@@ -503,7 +485,7 @@ impl BlockCursor {
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key(&self.block, restart_idx, offset, prev_key)?;
         // Return the kvp for this offset.
         self.key_ref()
     }
@@ -518,6 +500,7 @@ impl BlockCursor {
                 next_offset: _,
                 key,
                 timestamp,
+                value: _,
             } => Ok(Some(KeyRef {
                 key,
                 timestamp: *timestamp,
@@ -527,6 +510,7 @@ impl BlockCursor {
 
     fn extract_key(
         block: &Block,
+        restart_idx: usize,
         offset: usize,
         mut key: Vec<u8>,
     ) -> Result<CursorPosition, SError> {
@@ -539,7 +523,11 @@ impl BlockCursor {
         let mut up = Unpacker::new(&bytes[offset..block.restarts_boundary]);
         let be: KeyValueEntry = up.unpack().map_err(|e| unpack_key_value_pair(e, offset))?;
         let next_offset = block.restarts_boundary - up.remain().len();
-        let restart_idx = block.restart_for_offset(offset);
+        let value = be.value().map(|value| {
+            let block_start = bytes.as_ptr() as usize;
+            let value_start = value.as_ptr() as usize - block_start;
+            (value_start, value.len())
+        });
         // Assemble the returnable cursor.
         key.truncate(be.shared());
         key.extend_from_slice(be.key_frag());
@@ -549,7 +537,46 @@ impl BlockCursor {
             next_offset,
             key,
             timestamp: be.timestamp(),
+            value,
         })
+    }
+
+    fn cache_restart(&mut self, restart_idx: usize) -> Result<(), SError> {
+        if self
+            .reverse_cache
+            .as_ref()
+            .is_some_and(|cache| cache.restart_idx == restart_idx)
+        {
+            return Ok(());
+        }
+        let mut positions = Vec::new();
+        let mut offset = self.block.restart_point(restart_idx);
+        let limit = if restart_idx + 1 < self.block.num_restarts {
+            self.block.restart_point(restart_idx + 1)
+        } else {
+            self.block.restarts_boundary
+        };
+        let mut key = Vec::new();
+        while offset < limit {
+            let position = BlockCursor::extract_key(&self.block, restart_idx, offset, key)?;
+            match &position {
+                CursorPosition::Positioned {
+                    next_offset,
+                    key: position_key,
+                    ..
+                } => {
+                    offset = *next_offset;
+                    key = position_key.clone();
+                    positions.push(position);
+                }
+                CursorPosition::First | CursorPosition::Last => break,
+            }
+        }
+        self.reverse_cache = Some(RestartCache {
+            restart_idx,
+            positions,
+        });
+        Ok(())
     }
 }
 
@@ -651,6 +678,7 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 key: _,
                 timestamp: _,
+                value: _,
             } => offset,
         };
 
@@ -675,10 +703,27 @@ impl Cursor for BlockCursor {
             current_restart_idx
         };
 
-        // Seek and scan.
-        self.seek_restart(restart_idx)?;
-        while self.next_offset() < target_next_offset {
-            self.next()?;
+        // Seek and scan.  Reverse scans otherwise pay O(restart_interval) work on every prev().
+        // Cache one restart interval at a time so consecutive prev() calls are O(1) inside it.
+        self.cache_restart(restart_idx)?;
+        if let Some(position) = self.reverse_cache.as_ref().and_then(|cache| {
+            cache
+                .positions
+                .iter()
+                .rev()
+                .find(|position| match position {
+                    CursorPosition::Positioned { next_offset, .. } => {
+                        *next_offset == target_next_offset
+                    }
+                    CursorPosition::First | CursorPosition::Last => false,
+                })
+        }) {
+            self.position = position.clone();
+        } else {
+            self.seek_restart(restart_idx)?;
+            while self.next_offset() < target_next_offset {
+                self.next()?;
+            }
         }
         Ok(())
     }
@@ -717,6 +762,7 @@ impl Cursor for BlockCursor {
         }
 
         // Extract the key from self.position.
+        let restart_idx = self.restart_idx();
         let prev_key = match self.position {
             CursorPosition::First => Vec::new(),
             CursorPosition::Last => Vec::new(),
@@ -726,11 +772,12 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 ref mut key,
                 timestamp: _,
+                value: _,
             } => std::mem::take(key),
         };
 
         // Setup the position correctly and return what we see.
-        self.position = BlockCursor::extract_key(&self.block, offset, prev_key)?;
+        self.position = BlockCursor::extract_key(&self.block, restart_idx, offset, prev_key)?;
         Ok(())
     }
 
@@ -744,6 +791,7 @@ impl Cursor for BlockCursor {
                 next_offset: _,
                 key,
                 timestamp,
+                value: _,
             } => Some(KeyRef {
                 key,
                 timestamp: *timestamp,
@@ -757,19 +805,12 @@ impl Cursor for BlockCursor {
             CursorPosition::Last => None,
             CursorPosition::Positioned {
                 restart_idx: _,
-                offset,
+                offset: _,
                 next_offset: _,
                 key: _,
                 timestamp: _,
-            } => {
-                // Parse the value from the block entry.
-                let bytes = &self.block.bytes;
-                let mut up = Unpacker::new(&bytes[*offset..self.block.restarts_boundary]);
-                let be: KeyValueEntry = up
-                    .unpack()
-                    .expect("already parsed this block with extract_key; corruption");
-                be.value()
-            }
+                value,
+            } => value.map(|(offset, len)| &self.block.bytes[offset..offset + len]),
         }
     }
 }
@@ -964,6 +1005,7 @@ mod tests {
             next_offset: 19,
             key: "E".into(),
             timestamp: 17563921251225492277,
+            value: Some((19, 0)),
         };
         let rhs = CursorPosition::Positioned {
             restart_idx: 0,
@@ -971,6 +1013,7 @@ mod tests {
             next_offset: 19,
             key: "E".into(),
             timestamp: 17563921251225492277,
+            value: Some((19, 0)),
         };
         assert_eq!(lhs, rhs);
     }
@@ -1010,8 +1053,9 @@ mod tests {
             next_offset: 20,
             key: "E".into(),
             timestamp: 17563921251225492277,
+            value: Some((20, 0)),
         };
-        let got = BlockCursor::extract_key(&block, 0, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 0, 0, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Positioned {
@@ -1020,12 +1064,13 @@ mod tests {
             next_offset: 39,
             key: "k".into(),
             timestamp: 4092481979873166344,
+            value: Some((39, 0)),
         };
-        let got = BlockCursor::extract_key(&block, 20, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 0, 20, Vec::new()).unwrap();
         assert_eq!(exp, got);
 
         let exp = CursorPosition::Last;
-        let got = BlockCursor::extract_key(&block, 39, Vec::new()).unwrap();
+        let got = BlockCursor::extract_key(&block, 0, 39, Vec::new()).unwrap();
         assert_eq!(exp, got);
     }
 }
