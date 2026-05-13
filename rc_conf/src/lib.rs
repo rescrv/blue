@@ -845,7 +845,7 @@ impl RcConf {
             }
             if let Some(source) = line.trim().strip_prefix("source ") {
                 if is_safe_source_path(source) {
-                    let source = strip_self_dir_prefix(&path.dirname().join(source));
+                    let source = path.dirname().join(source);
                     Self::parse_recursive(&source, seen, items)?;
                 } else {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
@@ -1020,7 +1020,7 @@ impl RcConf {
                 if !is_safe_source_path(source) {
                     return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
                 }
-                let source = strip_self_dir_prefix(&path.dirname().join(source));
+                let source = path.dirname().join(source);
                 if !seen.contains(&source) {
                     *rc_conf += &format!("# begin source {source:?}\n");
                     Self::examine_recursive(&source, seen, rc_conf)?;
@@ -1135,7 +1135,12 @@ impl RcConf {
     ) -> Result<HashMap<String, String>, Error> {
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
+            .env_clear()
             .env("RCVAR_ARGV0", var_name_from_service(service))
+            .envs(
+                std::env::vars()
+                    .filter(|(key, _)| matches!(key.as_str(), "PATH" | "TERM" | "TZ" | "LANG")),
+            )
             .output()?;
         if !output.status.success() {
             return Err(Error::InvalidInvocation {
@@ -1458,7 +1463,8 @@ pub fn exec_container(
         eprintln!("failed to load services: {e}");
         std::process::exit(134);
     });
-    if !rc_conf.service_switch(service).can_be_started() {
+    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
+    if !override_service_switch && !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -1611,7 +1617,9 @@ pub fn bootstrap<'a>(
     let output = output.into();
     let rc_conf = RcConf::parse(rc_conf_path)?;
     let mut rc_d_path = String::new();
-    for variable in rc_conf.variables() {
+    let mut variables = rc_conf.variables();
+    variables.sort();
+    for variable in variables {
         if let Some(crate_name) = variable.strip_suffix("_SPEC") {
             if !rc_d_path.is_empty() {
                 rc_d_path.push(':');
@@ -1911,14 +1919,15 @@ COMMAND=my-command ${NAME} ${FIELD}
             assert_eq!(
                 r#"
 # rc_conf[0] = "bar.conf"
-# begin source "foo.conf"
+# begin source "./foo.conf"
 foo_ENABLE=YES
-# end source "foo.conf"
+# end source "./foo.conf"
 
 bar_ENABLE=YES
 
-# already sourced "foo.conf"
-# rc_conf[1] = "foo.conf"; already sourced
+# already sourced "./foo.conf"
+# rc_conf[1] = "foo.conf"
+foo_ENABLE=YES
             "#
                 .trim(),
                 examined.trim()
