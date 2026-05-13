@@ -700,7 +700,7 @@ fn parse_statement(
             '$' => {
                 parse_variable(ctx, witness, tokens, output)?;
             }
-            '}' if ctx.options.curly_braces => {
+            '}' if ctx.options.curly_braces && ctx.depth > 0 => {
                 break;
             }
             c => {
@@ -1168,6 +1168,174 @@ mod tests {
         let env: HashMap<&str, &str> =
             HashMap::from([("FOO", "foo"), ("BAR", "bar"), ("BAZ", "baz")]);
         assert_eq!("foo-bar-baz", expand(&env, "${FOO}-${BAR}-${BAZ}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_is_literal_at_root() {
+        let env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!("}", expand(&env, "}").unwrap());
+        assert_eq!("literal}", expand(&env, "literal}").unwrap());
+        assert_eq!("}literal", expand(&env, "}literal").unwrap());
+        assert_eq!("literal}literal", expand(&env, "literal}literal").unwrap());
+        assert_eq!("}}", expand(&env, "}}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_is_literal_after_expansion() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        assert_eq!("foo}", expand(&env, "${FOO}}").unwrap());
+    }
+
+    #[test]
+    fn right_brace_is_literal_in_quotes_at_root() {
+        let env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!(r#""}""#, expand(&env, "'}'").unwrap());
+        assert_eq!(r#""}""#, expand(&env, r#""}""#).unwrap());
+        assert_eq!(
+            r#"prefix"}"suffix"#,
+            expand(&env, r#"prefix"}"suffix"#).unwrap()
+        );
+    }
+
+    #[test]
+    fn right_brace_is_literal_for_all_root_variable_forms() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo"), ("@", "target.o")]);
+        let opts = ExpandOptions::all();
+        assert_eq!("foo}", expand_with_options(opts, &env, "$FOO}").unwrap());
+        assert_eq!("foo}", expand_with_options(opts, &env, "${FOO}}").unwrap());
+        assert_eq!("foo}", expand_with_options(opts, &env, "$(FOO)}").unwrap());
+        assert_eq!("target.o}", expand_with_options(opts, &env, "$@}").unwrap());
+        assert_eq!(
+            "target.o}",
+            expand_with_options(opts, &env, "${@}}").unwrap()
+        );
+        assert_eq!(
+            "target.o}",
+            expand_with_options(opts, &env, "$(@)}").unwrap()
+        );
+    }
+
+    #[test]
+    fn right_brace_is_literal_when_curly_braces_are_disabled() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        assert_eq!(
+            "${FOO}}",
+            expand_with_options(ExpandOptions::bareword_only(), &env, "${FOO}}").unwrap()
+        );
+        assert_eq!(
+            "${FOO}}",
+            expand_with_options(ExpandOptions::parens_only(), &env, "${FOO}}").unwrap()
+        );
+        assert_eq!(
+            "foo}",
+            expand_with_options(ExpandOptions::parens_only(), &env, "$(FOO)}").unwrap()
+        );
+    }
+
+    #[test]
+    fn right_brace_still_terminates_nested_default_expansion() {
+        let env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!("default}", expand(&env, "${FOO:-default}}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_after_curly_default_modifier() {
+        let unset: HashMap<&str, &str> = HashMap::new();
+        let set: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        assert_eq!("default}", expand(&unset, "${FOO:-default}}").unwrap());
+        assert_eq!("foo}", expand(&set, "${FOO:-default}}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_after_curly_alternate_modifier() {
+        let unset: HashMap<&str, &str> = HashMap::new();
+        let set: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        assert_eq!("}", expand(&unset, "${FOO:+alternate}}").unwrap());
+        assert_eq!("alternate}", expand(&set, "${FOO:+alternate}}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_after_curly_error_modifier() {
+        let unset: HashMap<&str, &str> = HashMap::new();
+        let set: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        match expand(&unset, "${FOO:?missing}}") {
+            Err(Error::Requested(msg)) => assert_eq!("missing", msg),
+            other => panic!("expected requested error, got {other:?}"),
+        }
+        assert_eq!("foo}", expand(&set, "${FOO:?missing}}").unwrap());
+    }
+
+    #[test]
+    fn trailing_right_brace_after_nested_curly_expansion() {
+        let unset: HashMap<&str, &str> = HashMap::new();
+        let bar_set: HashMap<&str, &str> = HashMap::from([("BAR", "bar")]);
+        let foo_set: HashMap<&str, &str> = HashMap::from([("FOO", "foo"), ("BAR", "bar")]);
+        assert_eq!("bar}", expand(&bar_set, "${FOO:-${BAR}}}").unwrap());
+        assert_eq!("baz}", expand(&unset, "${FOO:-${BAR:-baz}}}").unwrap());
+        assert_eq!("foo}", expand(&foo_set, "${FOO:-${BAR}}}").unwrap());
+    }
+
+    #[test]
+    fn right_brace_inside_quoted_nested_expansion_is_literal() {
+        let env: HashMap<&str, &str> = HashMap::new();
+        assert_eq!(
+            vec!["}}".to_string()],
+            split(&expand(&env, "${FOO:-'}'}}").unwrap()).unwrap()
+        );
+        assert_eq!(
+            vec!["}}".to_string()],
+            split(&expand(&env, r#"${FOO:-"}"}}"#).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn rcvar_accepts_trailing_right_brace_at_root() {
+        assert_eq!(Vec::<String>::new(), rcvar("}").unwrap());
+        assert_eq!(vec!["FOO".to_string()], rcvar("${FOO}}").unwrap());
+        assert_eq!(
+            vec!["BAR".to_string(), "FOO".to_string()],
+            rcvar("${FOO:-${BAR}}}").unwrap()
+        );
+    }
+
+    #[test]
+    fn rcvar_with_options_accepts_trailing_right_brace_at_root() {
+        let opts = ExpandOptions::all();
+        assert_eq!(
+            vec!["BAR".to_string(), "BAZ".to_string(), "FOO".to_string()],
+            rcvar_with_options(opts, "$FOO} ${BAR} $(BAZ)}").unwrap()
+        );
+    }
+
+    #[test]
+    fn recursive_expansion_accepts_trailing_right_brace_at_root() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "foo")]);
+        assert_eq!("foo}", super::expand_recursive(&env, "${FOO}}").unwrap());
+    }
+
+    #[test]
+    fn recursive_expansion_accepts_brace_from_variable_value() {
+        let env: HashMap<&str, &str> = HashMap::from([("FOO", "${BAR}"), ("BAR", "bar")]);
+        assert_eq!("bar}", super::expand_recursive(&env, "${FOO}}").unwrap());
+    }
+
+    #[test]
+    fn missing_closing_right_brace_still_errors() {
+        let env: HashMap<&str, &str> = HashMap::new();
+        match expand(&env, "${FOO") {
+            Err(Error::InvalidCharacter {
+                expected: '}',
+                returned: None,
+            }) => {}
+            other => panic!("expected missing right-brace error, got {other:?}"),
+        }
+        match expand(&env, "${FOO:-default") {
+            Err(Error::InvalidCharacter {
+                expected: '}',
+                returned: None,
+            }) => {}
+            other => panic!("expected missing right-brace error, got {other:?}"),
+        }
     }
 
     #[test]
