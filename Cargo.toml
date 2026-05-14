@@ -61,7 +61,7 @@ members = [
     "zerror",
     "zerror_derive",
     "zerror_core",
-    "zerror_full",
+    "zerror_full", "tuple_key2",
 ]
 
 [workspace.package]
