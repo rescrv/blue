@@ -1,0 +1,24 @@
+[package]
+name = "asllm"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "asllm paces text output to resemble streamed LLM tokens."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts"]
+
+[dependencies]
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+getopts = { workspace = true, optional = true }
+
+[[bin]]
+name = "asllm"
+path = "src/bin/asllm.rs"
+required-features=["binaries"]

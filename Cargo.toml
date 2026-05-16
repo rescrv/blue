@@ -5,6 +5,7 @@ members = [
     "armnod",
     "arrrg",
     "arrrg_derive",
+    "asllm",
     "biometrics",
     "biometrics_pb",
     "biometrics_prometheus",
