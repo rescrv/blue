@@ -1,0 +1,9 @@
+[package]
+name = "asllm"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+getopts = { workspace = true }
