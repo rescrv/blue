@@ -15,6 +15,8 @@ use super::BitVector as BitVectorTrait;
 pub struct u63(pub(super) u64);
 
 impl u63 {
+    const MASK: u64 = (1u64 << 63) - 1;
+
     const fn must(x: u64) -> Self {
         match Self::new(x) {
             Some(x) => x,
@@ -31,24 +33,43 @@ impl u63 {
         Some(Self(x))
     }
 
-    fn select<F: FnMut(bool) -> bool>(&self, x: usize, mut f: F) -> Option<usize> {
-        let mut idx = 0;
-        let mut rank = 0;
-        let mut w = self.0;
-        while idx < 63 && rank < x {
-            rank += if f((w & 1) == 1) { 1 } else { 0 };
-            w >>= 1;
-            idx += 1;
+    fn select_word(mut word: u64, mut x: usize) -> Option<usize> {
+        if x == 0 {
+            return Some(0);
         }
-        if rank < x { None } else { Some(idx) }
+        if (word.count_ones() as usize) < x {
+            return None;
+        }
+        let mut idx = 0;
+        let lo = word & ((1u64 << 32) - 1);
+        let count = lo.count_ones() as usize;
+        if x > count {
+            x -= count;
+            idx += 32;
+            word >>= 32;
+        } else {
+            word = lo;
+        }
+        for shift in [16, 8, 4, 2, 1] {
+            let lo = word & ((1u64 << shift) - 1);
+            let count = lo.count_ones() as usize;
+            if x > count {
+                x -= count;
+                idx += shift;
+                word >>= shift;
+            } else {
+                word = lo;
+            }
+        }
+        Some(idx + 1)
     }
 
     pub(super) fn select1(&self, x: usize) -> Option<usize> {
-        self.select(x, |b| b)
+        Self::select_word(self.0, x)
     }
 
     pub(super) fn select0(&self, x: usize) -> Option<usize> {
-        self.select(x, |b| !b)
+        Self::select_word(!self.0 & Self::MASK, x)
     }
 }
 
@@ -1702,6 +1723,9 @@ pub(super) const K: &[&[u64]] = &[
 
 pub(super) fn encode(decoded: u63) -> (u64, usize) {
     let c: usize = decoded.0.count_ones() as usize;
+    if c == 0 || c == 63 {
+        return (0, c);
+    }
     let mut o = 0u64;
     let mut bits_remain = c;
     for bit in 0..63 {
@@ -1716,6 +1740,12 @@ pub(super) fn encode(decoded: u63) -> (u64, usize) {
 }
 
 pub(super) fn decode(mut o: u64, mut c: usize) -> Option<u63> {
+    if c == 0 {
+        return Some(u63(0));
+    }
+    if c == 63 {
+        return Some(u63(u63::MASK));
+    }
     let mut word = 0u64;
     o += c as u64;
     for bit in 0..63 {
@@ -1820,6 +1850,31 @@ impl BitVector<'_> {
     fn load_o(&self, c: usize, o_offset: usize, o_bits: usize) -> Option<u63> {
         let o: u64 = self.o.load(o_offset, o_bits)?;
         decode(o, c)
+    }
+
+    fn access_rank_at(&self, mut index: usize) -> Option<(bool, usize)> {
+        if index >= self.len() {
+            return None;
+        }
+        let width = Self::calc_p_r_width(self.bits)?;
+        let stride: usize = self.word as usize * 63;
+        let p_offset = index / stride;
+        let mut o_offset: usize = self.p.load(p_offset * width, width)?.try_into().ok()?;
+        let mut c_offset: usize = p_offset * 6 * self.word as usize;
+        let mut rank: usize = self.r.load(p_offset * width, width)?.try_into().ok()?;
+        index -= p_offset * stride;
+        while index >= 63 {
+            let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+            index -= 63;
+            c_offset += 6;
+            o_offset += o_bits;
+            rank += c;
+        }
+        let (c, o_bits) = self.load_c_o_bits(c_offset)?;
+        let w = self.load_o(c, o_offset, o_bits)?;
+        rank += (w.0 & ((1u64 << index) - 1)).count_ones() as usize;
+        let access = w.0 & (1 << index) != 0;
+        Some((access, rank))
     }
 
     fn select_helper(
@@ -1948,36 +2003,7 @@ impl super::BitVector for BitVector<'_> {
     }
 
     fn access_rank(&self, x: usize) -> Option<(bool, usize)> {
-        if x >= self.len() {
-            return None;
-        }
-        // Width of values in P, R.
-        let width = Self::calc_p_r_width(self.bits)?;
-        // P strides by self.word * 63 bits at a time.
-        let stride: usize = self.word as usize * 63;
-        // The offset into P.
-        let p_offset = x / stride;
-        // The offset into O.
-        let mut o_offset: usize = self.p.load(p_offset * width, width)?.try_into().ok()?;
-        // The offset into C.
-        let mut c_offset: usize = p_offset * 6 * self.word as usize;
-        // Our base rank is the number of ones before our p_offset.
-        let mut rank: usize = self.r.load(p_offset * width, width)?.try_into().ok()?;
-        // Adjust index to account for our jump through P.
-        let mut index = x - p_offset * stride;
-        // Step through the words until we have fewer than 63 bits left.
-        while index >= 63 {
-            let (c, o_bits) = self.load_c_o_bits(c_offset)?;
-            index -= 63;
-            c_offset += 6;
-            o_offset += o_bits;
-            rank += c;
-        }
-        let (c, o_bits) = self.load_c_o_bits(c_offset)?;
-        let w = self.load_o(c, o_offset, o_bits)?;
-        let mask = if index == 0 { 0 } else { (1u64 << index) - 1 };
-        rank += (w.0 & mask).count_ones() as usize;
-        Some((w.0 & (1 << index) != 0, rank))
+        self.access_rank_at(x)
     }
 
     fn access(&self, mut index: usize) -> Option<bool> {
@@ -2028,11 +2054,11 @@ impl super::BitVector for BitVector<'_> {
         // The offset into P.
         let p_offset = index / stride;
         // The offset into O.
-        let mut o_offset: usize = self.p.load(p_offset * width, width)? as usize;
+        let mut o_offset: usize = self.p.load(p_offset * width, width)?.try_into().ok()?;
         // The offset into C
         let mut c_offset: usize = p_offset * 6 * self.word as usize;
         // Our base rank is the number of ones before our p_offset.
-        let mut rank: usize = self.r.load(p_offset * width, width)? as usize;
+        let mut rank: usize = self.r.load(p_offset * width, width)?.try_into().ok()?;
         // Adjust index to account for our jump through P.
         index -= p_offset * stride;
         // Step through the words until we have fewer than 63 bits left.
