@@ -459,9 +459,13 @@ fn getrusage() -> Result<libc::rusage, std::io::Error> {
 }
 
 fn timeval_delta_us(after: libc::timeval, before: libc::timeval) -> i64 {
-    let after = after.tv_sec.saturating_mul(1_000_000) + i64::from(after.tv_usec);
-    let before = before.tv_sec.saturating_mul(1_000_000) + i64::from(before.tv_usec);
+    let after = after.tv_sec.saturating_mul(1_000_000) + into_i64(after.tv_usec);
+    let before = before.tv_sec.saturating_mul(1_000_000) + into_i64(before.tv_usec);
     after - before
+}
+
+fn into_i64<T: Into<i64>>(value: T) -> i64 {
+    value.into()
 }
 
 fn maxrss_units() -> &'static str {
