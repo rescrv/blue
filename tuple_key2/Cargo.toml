@@ -1,7 +1,11 @@
 [package]
 name = "tuple_key2"
 version = "0.1.0"
-edition.workspace = true
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "tuple_key2 provides a compact, lexicographically-sortable-via-memcmp abstraction"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 
