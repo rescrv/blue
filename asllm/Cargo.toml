@@ -1,7 +1,11 @@
 [package]
 name = "asllm"
 version = "0.1.0"
-edition.workspace = true
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "asllm paces text output to resemble streamed LLM tokens."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 arrrg = { workspace = true }
