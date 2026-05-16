@@ -22,6 +22,7 @@ members = [
     "listfree",
     "lsmtk",
     "macarunes",
+    "maildir2026",
     "mani",
     "meta",
     "minimal_signals",
