@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
+use std::process::{Command, ExitStatus};
 
 use rc_conf::RcConf;
 use shvar::VariableProvider;
@@ -14,6 +15,29 @@ pub enum Error {
     Io(std::io::Error),
     RcConf(rc_conf::Error),
     K8sRc(k8src::Error),
+    MissingImage {
+        service: String,
+    },
+    MissingCommand {
+        service: String,
+        variable: String,
+    },
+    CommandIo {
+        service: String,
+        variable: String,
+        argv: Vec<String>,
+        err: std::io::Error,
+    },
+    CommandFailed {
+        service: String,
+        variable: String,
+        argv: Vec<String>,
+        status: ExitStatus,
+    },
+    CurrentDirectoryNotInRepository {
+        cwd: Path<'static>,
+        root: Path<'static>,
+    },
 }
 
 impl From<std::io::Error> for Error {
@@ -34,6 +58,62 @@ impl From<k8src::Error> for Error {
     }
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Io(err) => write!(f, "IO error: {err}"),
+            Error::RcConf(err) => write!(f, "rc.conf error: {err}"),
+            Error::K8sRc(k8src::Error::MissingImage { service }) => {
+                write!(f, "missing IMAGE configuration for service {service}")
+            }
+            Error::K8sRc(err) => write!(f, "k8src error: {err:?}"),
+            Error::MissingImage { service } => {
+                write!(f, "missing IMAGE configuration for service {service}")
+            }
+            Error::MissingCommand { service, variable } => {
+                write!(f, "missing {variable} command for service {service}")
+            }
+            Error::CommandIo {
+                service,
+                variable,
+                argv,
+                err,
+            } => write!(
+                f,
+                "{variable} command for service {service} could not execute {:?}: {err}",
+                argv
+            ),
+            Error::CommandFailed {
+                service,
+                variable,
+                argv,
+                status,
+            } => write!(
+                f,
+                "{variable} command for service {service} failed with status {status}: {:?}",
+                argv
+            ),
+            Error::CurrentDirectoryNotInRepository { cwd, root } => write!(
+                f,
+                "current directory {} is not inside repository root {}",
+                cwd.as_str(),
+                root.as_str()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io(err) => Some(err),
+            Error::RcConf(err) => Some(err),
+            Error::CommandIo { err, .. } => Some(err),
+            _ => None,
+        }
+    }
+}
+
 ///////////////////////////////////////// SymphonizeOptions ////////////////////////////////////////
 
 /// SymphonizeOptions provides the options to symphonize.  Provide it with a working directory and
@@ -49,8 +129,10 @@ pub struct SymphonizeOptions {
 pub fn paths_to_root(_options: &SymphonizeOptions) -> Result<Vec<Path<'static>>, std::io::Error> {
     let mut cwd = Path::try_from(std::env::current_dir()?)
         .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
-    if !cwd.is_abs() && !cwd.has_root() {
-        return Err(std::io::Error::other("current working directory absolute"));
+    if !cwd.is_abs() {
+        return Err(std::io::Error::other(
+            "current working directory is not absolute",
+        ));
     }
     let mut candidates = vec![];
     while cwd != Path::from("/") {
@@ -108,111 +190,326 @@ impl Symphonize {
     }
 
     pub fn build_images(&mut self) -> Result<(), Error> {
-        for containerfile in self.rc_conf.variables() {
+        let mut variables = self.rc_conf.variables();
+        variables.sort();
+        for containerfile in variables {
             let Some(prefix) = containerfile.strip_suffix("_CONTAINERFILE") else {
                 continue;
             };
             let Some(containerfile) = self.rc_conf.lookup(&containerfile) else {
                 continue;
             };
-            let mut containerfile = Path::from(containerfile);
-            if containerfile.has_app_defined() {
-                containerfile = self.root.join(&containerfile.as_str()[2..]).into_owned();
-            }
             let service = rc_conf::service_from_var_name(prefix);
-            let Some(image) = self.rc_conf.lookup_suffix(prefix, "IMAGE") else {
-                todo!();
+            let containerfile = self.resolve_app_defined_path(Path::from(containerfile));
+            let Some(image) = self.rc_conf.lookup_suffix(&service, "IMAGE") else {
+                return Err(Error::MissingImage { service });
             };
             let extra = HashMap::from_iter([
                 ("IMAGE", image.clone()),
                 ("CONTAINERFILE", containerfile.to_string()),
                 ("CONTAINERFILE_DIRNAME", containerfile.dirname().to_string()),
             ]);
-            // Build the image.
             let build = self.rc_conf.argv(&service, "IMAGE_BUILD", &extra)?;
-            if build.is_empty() {
-                todo!();
-            }
-            eprintln!("running {build:?}");
-            let child = std::process::Command::new(&build[0])
-                .args(&build[1..])
-                .spawn()?
-                .wait()?;
-            if !child.success() {
-                todo!();
-            }
-            // Push the image.
+            self.run_configured_command(&service, "IMAGE_BUILD", build)?;
             let push = self.rc_conf.argv(&service, "IMAGE_PUSH", &extra)?;
-            if push.is_empty() {
-                todo!();
-            }
-            eprintln!("running {push:?}");
-            let child = std::process::Command::new(&push[0])
-                .args(&push[1..])
-                .spawn()?
-                .wait()?;
-            if !child.success() {
-                todo!();
-            }
+            self.run_configured_command(&service, "IMAGE_PUSH", push)?;
         }
         Ok(())
     }
 
     pub fn build_manifests(&mut self) -> Result<(), Error> {
+        let target_dir = self.target_dir();
+        let manifests = target_dir.join("manifests");
         let options = k8src::RegenerateOptions {
-            output: Some(self.target_dir().join("manifests").as_str().to_string()),
+            output: Some(manifests.as_str().to_string()),
             root: Some(self.root.as_str().to_string()),
             overwrite: false,
             verify: false,
         };
+        std::fs::create_dir_all(&target_dir)?;
         drop(
             OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
-                .open(self.target_dir().join(".k8srcignore"))?,
+                .open(target_dir.join(".k8srcignore"))?,
         );
-        if self.target_dir().join("manifests").exists()? {
-            std::fs::remove_dir_all(self.target_dir().join("manifests"))?;
+        if manifests.exists()? {
+            std::fs::remove_dir_all(manifests)?;
         }
         k8src::regenerate(options)?;
         Ok(())
     }
 
     pub fn apply_manifests(&mut self) -> Result<(), Error> {
-        let cwd = Path::try_from(std::env::current_dir()?)
-            .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
-        if !cwd.is_abs() && !cwd.has_root() {
-            return Err(std::io::Error::other("current working directory absolute").into());
-        }
-        let Some(relative) = cwd.as_str().strip_prefix(self.root.as_str()) else {
-            todo!();
-        };
-        let relative = relative.trim_start_matches('/');
-        let output = self.target_dir().join("manifests").join(relative);
-        let status = std::process::Command::new("kubectl")
+        let cwd_std = std::env::current_dir()?;
+        let output = self.manifests_dir_for_cwd(&cwd_std)?;
+        let argv = vec![
+            "kubectl".to_string(),
+            "apply".to_string(),
+            "-k".to_string(),
+            output.as_str().to_string(),
+        ];
+        let status = Command::new(&argv[0])
             .arg("apply")
             .arg("-k")
             .arg(output.as_str())
-            .spawn()?
-            .wait()?;
+            .status()
+            .map_err(|err| Error::CommandIo {
+                service: "manifests".to_string(),
+                variable: "kubectl apply".to_string(),
+                argv: argv.clone(),
+                err,
+            })?;
         if status.success() {
             Ok(())
         } else {
-            todo!();
+            Err(Error::CommandFailed {
+                service: "manifests".to_string(),
+                variable: "kubectl apply".to_string(),
+                argv,
+                status,
+            })
         }
+    }
+
+    fn manifests_dir_for_cwd(&self, cwd_std: &std::path::Path) -> Result<Path<'static>, Error> {
+        let cwd = Path::try_from(cwd_std)
+            .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
+        if !cwd.is_abs() {
+            return Err(std::io::Error::other("current working directory is not absolute").into());
+        }
+        let relative = cwd_std.strip_prefix(self.root.as_str()).map_err(|_| {
+            Error::CurrentDirectoryNotInRepository {
+                cwd: cwd.clone().into_owned(),
+                root: self.root.clone(),
+            }
+        })?;
+        let relative = Path::try_from(relative)
+            .map_err(|_| std::io::Error::other("current working directory not unicode"))?;
+        let mut output = self.target_dir().join("manifests");
+        if !relative.as_str().is_empty() {
+            output = output.join(relative).into_owned();
+        };
+        Ok(output)
     }
 
     fn target_dir(&self) -> Path<'static> {
         if let Some(target_dir) = self.rc_conf.lookup("SYMPHONIZE_TARGET_DIR") {
-            let target_dir = Path::from(target_dir);
-            if target_dir.has_app_defined() {
-                self.root.join(&target_dir.as_str()[2..]).into_owned()
-            } else {
-                target_dir
-            }
+            self.resolve_app_defined_path(Path::from(target_dir))
         } else {
             self.root.join("target/symphonize")
         }
+    }
+
+    fn resolve_app_defined_path(&self, path: Path) -> Path<'static> {
+        if path.has_app_defined() {
+            self.root.join(&path.as_str()[2..]).into_owned()
+        } else {
+            path.into_owned()
+        }
+    }
+
+    fn run_configured_command(
+        &self,
+        service: &str,
+        variable: &str,
+        argv: Vec<String>,
+    ) -> Result<(), Error> {
+        if argv.is_empty() {
+            return Err(Error::MissingCommand {
+                service: service.to_string(),
+                variable: variable.to_string(),
+            });
+        }
+        eprintln!("running {argv:?}");
+        let status = Command::new(&argv[0])
+            .args(&argv[1..])
+            .status()
+            .map_err(|err| Error::CommandIo {
+                service: service.to_string(),
+                variable: variable.to_string(),
+                argv: argv.clone(),
+                err,
+            })?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(Error::CommandFailed {
+                service: service.to_string(),
+                variable: variable.to_string(),
+                argv,
+                status,
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        root: Path<'static>,
+    }
+
+    impl TempRepo {
+        fn new() -> Self {
+            let id = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("symphonize_test_{}_{}", std::process::id(), id));
+            std::fs::create_dir_all(path.join(".git")).expect("temp git dir should be writable");
+            let root = Path::try_from(path).expect("temp path should be UTF-8");
+            Self { root }
+        }
+
+        fn write_rc_conf(&self, contents: &str) {
+            std::fs::write(self.root.join("rc.conf"), contents)
+                .expect("rc.conf should be writable");
+        }
+
+        fn rc_conf(&self) -> RcConf {
+            RcConf::parse(self.root.join("rc.conf").as_str()).expect("rc.conf should parse")
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn symphonize_for(repo: &TempRepo, contents: &str) -> Symphonize {
+        repo.write_rc_conf(contents);
+        Symphonize::new(
+            SymphonizeOptions::default(),
+            repo.root.clone(),
+            repo.rc_conf(),
+        )
+    }
+
+    #[test]
+    fn build_images_requires_image_for_containerfile() {
+        let repo = TempRepo::new();
+        let mut symphonize = symphonize_for(
+            &repo,
+            r#"
+svc_ENABLED="YES"
+svc_CONTAINERFILE="//Containerfile"
+IMAGE_BUILD=""
+IMAGE_PUSH=""
+"#,
+        );
+        match symphonize.build_images() {
+            Err(Error::MissingImage { service }) => assert_eq!("svc", service),
+            Err(err) => panic!("expected MissingImage; got {err:?}"),
+            Ok(()) => panic!("expected MissingImage; got Ok"),
+        }
+    }
+
+    #[test]
+    fn build_images_requires_build_command() {
+        let repo = TempRepo::new();
+        let mut symphonize = symphonize_for(
+            &repo,
+            r#"
+svc_ENABLED="YES"
+svc_IMAGE="localhost/svc:latest"
+svc_CONTAINERFILE="//Containerfile"
+IMAGE_BUILD=""
+IMAGE_PUSH=""
+"#,
+        );
+        match symphonize.build_images() {
+            Err(Error::MissingCommand { service, variable }) => {
+                assert_eq!("svc", service);
+                assert_eq!("IMAGE_BUILD", variable);
+            }
+            Err(err) => panic!("expected MissingCommand; got {err:?}"),
+            Ok(()) => panic!("expected MissingCommand; got Ok"),
+        }
+    }
+
+    #[test]
+    fn build_manifests_creates_clean_target_dir() {
+        let repo = TempRepo::new();
+        repo.write_rc_conf(
+            r#"
+NAMESPACE="symphonize-test"
+SYMPHONIZE_TARGET_DIR="//target/symphonize"
+IMAGE_RCVAR=""
+svc_ENABLED="YES"
+svc_IMAGE="localhost/svc:latest"
+svc_PORT="1234"
+"#,
+        );
+        let mut symphonize = Symphonize::new(
+            SymphonizeOptions::default(),
+            repo.root.clone(),
+            repo.rc_conf(),
+        );
+        symphonize
+            .build_manifests()
+            .expect("manifest generation should not need a cluster");
+        assert!(
+            repo.root
+                .join("target/symphonize/.k8srcignore")
+                .exists()
+                .expect(".k8srcignore existence check should succeed")
+        );
+        assert!(
+            repo.root
+                .join("target/symphonize/manifests/herd/svc.yaml")
+                .exists()
+                .expect("service manifest existence check should succeed")
+        );
+        assert!(
+            repo.root
+                .join("target/symphonize/manifests/kustomization.yaml")
+                .exists()
+                .expect("kustomization existence check should succeed")
+        );
+    }
+
+    #[test]
+    fn manifests_dir_rejects_sibling_with_same_prefix() {
+        let repo = TempRepo::new();
+        let symphonize = symphonize_for(
+            &repo,
+            r#"
+SYMPHONIZE_TARGET_DIR="//target/symphonize"
+"#,
+        );
+        let sibling = std::path::PathBuf::from(format!("{}-sibling", repo.root.as_str()));
+        match symphonize.manifests_dir_for_cwd(&sibling) {
+            Err(Error::CurrentDirectoryNotInRepository { cwd, root }) => {
+                assert_eq!(sibling.to_string_lossy(), cwd.as_str());
+                assert_eq!(repo.root, root);
+            }
+            Err(err) => panic!("expected CurrentDirectoryNotInRepository; got {err:?}"),
+            Ok(path) => panic!("expected CurrentDirectoryNotInRepository; got {path:?}"),
+        }
+    }
+
+    #[test]
+    fn manifests_dir_tracks_repo_relative_cwd() {
+        let repo = TempRepo::new();
+        let symphonize = symphonize_for(
+            &repo,
+            r#"
+SYMPHONIZE_TARGET_DIR="//target/symphonize"
+"#,
+        );
+        let cwd = std::path::PathBuf::from(repo.root.join("services/api").as_str());
+        assert_eq!(
+            repo.root.join("target/symphonize/manifests/services/api"),
+            symphonize
+                .manifests_dir_for_cwd(&cwd)
+                .expect("repo subdir should map to manifests subdir")
+        );
     }
 }

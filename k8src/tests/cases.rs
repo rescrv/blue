@@ -2,6 +2,32 @@ use utf8path::Path;
 
 use k8src::{RegenerateOptions, regenerate};
 
+static TEMP_CASE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+struct TempCase {
+    root: Path<'static>,
+}
+
+impl TempCase {
+    fn new() -> Self {
+        let id = TEMP_CASE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("k8src_test_{}_{}", std::process::id(), id));
+        std::fs::create_dir_all(&path).expect("temp case directory should be writable");
+        let root = Path::try_from(path).expect("temp case path should be UTF-8");
+        Self { root }
+    }
+
+    fn write_rc_conf(&self, contents: &str) {
+        std::fs::write(self.root.join("rc.conf"), contents).expect("rc.conf should be writable");
+    }
+}
+
+impl Drop for TempCase {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 macro_rules! test_case {
     ($name:ident, $num:literal) => {
         #[test]
@@ -21,6 +47,30 @@ fn test_case(path: Path, output: Path) {
         overwrite: false,
     };
     regenerate(options).expect("regenerate should never fail");
+}
+
+#[test]
+fn missing_image_returns_error() {
+    let case = TempCase::new();
+    case.write_rc_conf(
+        r#"
+NAMESPACE="k8src-test"
+IMAGE_RCVAR=""
+svc_ENABLED="YES"
+svc_PORT="1234"
+"#,
+    );
+    let options = RegenerateOptions {
+        root: Some(case.root.as_str().to_string()),
+        output: Some(case.root.join("manifests").as_str().to_string()),
+        verify: false,
+        overwrite: false,
+    };
+    match regenerate(options) {
+        Err(k8src::Error::MissingImage { service }) => assert_eq!("svc", service),
+        Err(err) => panic!("expected MissingImage; got {err:?}"),
+        Ok(()) => panic!("expected MissingImage; got Ok"),
+    }
 }
 
 test_case!(case0, 0);
