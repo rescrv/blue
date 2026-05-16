@@ -66,9 +66,9 @@ fn main() {
                 std::process::exit(130);
             }
         }
-            .into_iter()
-            .map(|v| format!("{prefix}{v}"))
-            .collect::<Vec<_>>();
+        .into_iter()
+        .map(|v| format!("{prefix}{v}"))
+        .collect::<Vec<_>>();
         rcvar.sort();
         println!("{}", rcvar.join("\n"));
     } else if args[2] == "run" {

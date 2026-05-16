@@ -1375,12 +1375,7 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
     exec_rc_with_override(rc_conf_path, rc_d_path, service, cmd)
 }
 
-fn exec_rc_with_override(
-    rc_conf_path: &str,
-    rc_d_path: &str,
-    service: &str,
-    cmd: &[&str],
-) -> ! {
+fn exec_rc_with_override(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
     let rc_conf = RcConf::parse(rc_conf_path).unwrap_or_else(|e| {
         eprintln!("failed to parse rc_conf: {e}");
         std::process::exit(133);
@@ -1519,24 +1514,14 @@ pub fn exec_container(
 pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
     let mut cmd = vec!["run"];
     cmd.extend(args);
-    exec_rc_with_override(
-        rc_conf_path,
-        rc_d_path,
-        service,
-        &cmd,
-    )
+    exec_rc_with_override(rc_conf_path, rc_d_path, service, &cmd)
 }
 
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
 /// exec_rc the service in a way that prints rcvariables.
 pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
-    exec_rc_with_override(
-        rc_conf_path,
-        rc_d_path,
-        service,
-        &["rcvar"],
-    )
+    exec_rc_with_override(rc_conf_path, rc_d_path, service, &["rcvar"])
 }
 
 ///////////////////////////////////////////// bootstrap ////////////////////////////////////////////
