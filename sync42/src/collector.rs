@@ -44,6 +44,30 @@ struct ThreadStateNode {
 }
 
 impl ThreadStateNode {
+    fn online_timestamp(&self) -> Option<u64> {
+        if !self.in_use.load(Ordering::Acquire) {
+            return None;
+        }
+        let quiescent_timestamp = self.quiescent_timestamp.load(Ordering::Acquire);
+        let offline_timestamp = self.offline_timestamp.load(Ordering::Relaxed);
+        if quiescent_timestamp > offline_timestamp {
+            Some(quiescent_timestamp)
+        } else {
+            None
+        }
+    }
+
+    fn mark_offline(&self, timestamp: u64) {
+        // Store offline first so an acquire read of quiescent_timestamp observes the transition.
+        self.offline_timestamp.store(timestamp, Ordering::Release);
+        self.quiescent_timestamp.store(timestamp, Ordering::Release);
+    }
+
+    fn mark_online(&self, timestamp: u64) {
+        self.quiescent_timestamp.store(timestamp, Ordering::Release);
+        self.in_use.store(true, Ordering::Release);
+    }
+
     fn purge(&self, min_timestamp: u64) {
         let mut collected = self.collected.lock().unwrap();
         while let Some(garbage) = collected.pop() {
@@ -85,11 +109,8 @@ impl ThreadState<'_> {
 
             for (idx, node) in self.collector.nodes.iter().enumerate() {
                 if idx != self.index {
-                    let qst = self.node().quiescent_timestamp.load(Ordering::Acquire);
-                    let oft = self.node().quiescent_timestamp.load(Ordering::Relaxed);
-
-                    if qst > oft {
-                        min_timestamp = std::cmp::min(qst, min_timestamp);
+                    if let Some(quiescent_timestamp) = node.online_timestamp() {
+                        min_timestamp = std::cmp::min(quiescent_timestamp, min_timestamp);
                     } else {
                         // We purge here so that offline garbage gets collected.
                         node.purge(prev_min_timestamp);
@@ -109,12 +130,16 @@ impl ThreadState<'_> {
         };
 
         self.collector.update_watermark(min_timestamp);
-        // No need to force quiescent_timestamp to be visible with a call to read_timestamp()
-        // because it's strictly increasing, and seeing a lower value only delays garbage
-        // collection, but cannot hurt safety.
-        self.node()
-            .quiescent_timestamp
-            .store(timestamp, Ordering::Release);
+        if self.node().online_timestamp().is_some() {
+            // No need to force quiescent_timestamp to be visible with a call to read_timestamp()
+            // because it's strictly increasing, and seeing a lower value only delays garbage
+            // collection, but cannot hurt safety.
+            self.node()
+                .quiescent_timestamp
+                .store(timestamp, Ordering::Release);
+        } else {
+            self.node().mark_offline(timestamp);
+        }
         self.node().purge(min_timestamp);
     }
 
@@ -123,14 +148,7 @@ impl ThreadState<'_> {
         let timestamp = self.collector.read_timestamp();
         assert!(self.node().quiescent_timestamp.load(Ordering::Relaxed) < timestamp);
         assert!(self.node().offline_timestamp.load(Ordering::Relaxed) < timestamp);
-        // NOTE(rescrv): Store offline timestamp first so that any acquire read of quiescent
-        // timestamp will pick it up.  We will read in reverse order elsewhere.
-        self.node()
-            .offline_timestamp
-            .store(timestamp, Ordering::Release);
-        self.node()
-            .quiescent_timestamp
-            .store(timestamp, Ordering::Release);
+        self.node().mark_offline(timestamp);
         self.collector.read_timestamp();
     }
 
@@ -139,24 +157,8 @@ impl ThreadState<'_> {
         let timestamp = self.collector.read_timestamp();
         assert!(self.node().quiescent_timestamp.load(Ordering::Relaxed) < timestamp);
         assert!(self.node().offline_timestamp.load(Ordering::Relaxed) < timestamp);
-        self.node()
-            .quiescent_timestamp
-            .store(timestamp, Ordering::Release);
-        let mut last_online_timestamp =
-            self.collector.last_online_timestamp.load(Ordering::Relaxed);
-        while self
-            .collector
-            .last_online_timestamp
-            .compare_exchange(
-                last_online_timestamp,
-                timestamp,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            )
-            .is_err()
-        {
-            last_online_timestamp = self.collector.last_online_timestamp.load(Ordering::Relaxed);
-        }
+        self.node().mark_online(timestamp);
+        self.collector.update_last_online(timestamp);
         self.collector.read_timestamp();
     }
 
@@ -178,9 +180,10 @@ impl ThreadState<'_> {
 
 impl Drop for ThreadState<'_> {
     fn drop(&mut self) {
-        self.collector.nodes[self.index]
-            .in_use
-            .store(false, Ordering::Release);
+        let timestamp = self.collector.read_timestamp();
+        self.node().mark_offline(timestamp);
+        self.collector.read_timestamp();
+        self.node().in_use.store(false, Ordering::Release);
         self.collector.free.lock().unwrap().push_back(self.index);
     }
 }
@@ -217,11 +220,14 @@ impl Collector {
     /// Register a thread and get the thread state.
     pub fn register_thread(&self) -> Option<ThreadState<'_>> {
         if let Some(index) = self.free.lock().unwrap().pop_front() {
+            let timestamp = self.read_timestamp();
+            self.nodes[index].mark_online(timestamp);
+            self.update_last_online(timestamp);
+            self.read_timestamp();
             let ts = ThreadState {
                 collector: self,
                 index,
             };
-            ts.node().in_use.store(true, Ordering::Release);
             Some(ts)
         } else {
             None
@@ -233,14 +239,13 @@ impl Collector {
     }
 
     fn update_watermark(&self, timestamp: u64) {
-        let mut value = self.watermark_timestamp.load(Ordering::Relaxed);
-        while self
-            .watermark_timestamp
-            .compare_exchange(value, timestamp, Ordering::AcqRel, Ordering::Relaxed)
-            .is_err()
-        {
-            value = self.watermark_timestamp.load(Ordering::Relaxed);
-        }
+        self.watermark_timestamp
+            .fetch_max(timestamp, Ordering::AcqRel);
+    }
+
+    fn update_last_online(&self, timestamp: u64) {
+        self.last_online_timestamp
+            .fetch_max(timestamp, Ordering::AcqRel);
     }
 }
 
@@ -282,6 +287,34 @@ mod tests {
         assert!(!checker.load(Ordering::Relaxed));
         thread_state2.quiescent();
         assert!(!checker.load(Ordering::Relaxed));
+        thread_state1.quiescent();
+        assert!(checker.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn collection_waits_for_newly_registered_thread() {
+        let collector = Collector::new(2);
+        let mut thread_state1 = collector.register_thread().unwrap();
+        let mut thread_state2 = collector.register_thread().unwrap();
+        let checker = Arc::new(AtomicBool::default());
+        let checkerp = Arc::clone(&checker);
+        thread_state1.collect(move || checkerp.store(true, Ordering::Relaxed));
+        thread_state1.quiescent();
+        assert!(!checker.load(Ordering::Relaxed));
+        thread_state2.quiescent();
+        thread_state1.quiescent();
+        assert!(checker.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn dropped_thread_does_not_pin_collection() {
+        let collector = Collector::new(2);
+        let mut thread_state1 = collector.register_thread().unwrap();
+        let thread_state2 = collector.register_thread().unwrap();
+        let checker = Arc::new(AtomicBool::default());
+        let checkerp = Arc::clone(&checker);
+        thread_state1.collect(move || checkerp.store(true, Ordering::Relaxed));
+        drop(thread_state2);
         thread_state1.quiescent();
         assert!(checker.load(Ordering::Relaxed));
     }
