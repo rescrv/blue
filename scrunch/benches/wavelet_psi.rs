@@ -472,9 +472,25 @@ fn getrusage() -> Result<libc::rusage, std::io::Error> {
     }
 }
 
+trait TimevalUsec {
+    fn widen_to_i64(self) -> i64;
+}
+
+impl TimevalUsec for i32 {
+    fn widen_to_i64(self) -> i64 {
+        i64::from(self)
+    }
+}
+
+impl TimevalUsec for i64 {
+    fn widen_to_i64(self) -> i64 {
+        self
+    }
+}
+
 fn timeval_delta_us(after: libc::timeval, before: libc::timeval) -> i64 {
-    let after = after.tv_sec.saturating_mul(1_000_000) + i64::from(after.tv_usec);
-    let before = before.tv_sec.saturating_mul(1_000_000) + i64::from(before.tv_usec);
+    let after = after.tv_sec.saturating_mul(1_000_000) + after.tv_usec.widen_to_i64();
+    let before = before.tv_sec.saturating_mul(1_000_000) + before.tv_usec.widen_to_i64();
     after - before
 }
 
