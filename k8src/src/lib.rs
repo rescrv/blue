@@ -224,7 +224,7 @@ fn write_yaml(
             "--verify and --overwrite are mutually exclusive".to_string(),
         ))
     } else if options.verify {
-        if !output.exists() {
+        if !output.exists()? {
             return Err(Error::ManifestMissing(output.into_owned()));
         }
         let returned = yaml;
@@ -236,7 +236,7 @@ fn write_yaml(
             Ok(())
         }
     } else {
-        if output.exists() && !options.overwrite {
+        if output.exists()? && !options.overwrite {
             return Err(Error::ManifestExists(output.into_owned()));
         }
         std::fs::create_dir_all(output.dirname())?;
@@ -257,10 +257,10 @@ pub fn regenerate(options: RegenerateOptions) -> Result<(), Error> {
     } else {
         root.join("manifests")
     };
-    if !options.verify && !options.overwrite && output.exists() {
+    if !options.verify && !options.overwrite && output.exists()? {
         return Err(Error::ManifestsDirectoryExists);
     }
-    if options.overwrite && output.exists() {
+    if options.overwrite && output.exists()? {
         std::fs::remove_dir_all(&output)?;
     }
     let rc_confs = restrict_to_terminals(find_rc_confs(&root)?);
@@ -305,7 +305,7 @@ resources:
             } else {
                 vec![]
             };
-            let mut yaml = match template_for_service(&candidates, &rc_conf, &service) {
+            let mut yaml = match template_for_service(&candidates, &rc_conf, &service)? {
                 Some(template) => std::fs::read_to_string(template)?,
                 None => SERVICE_DEFAULT_YAML.to_string(),
             };
@@ -353,7 +353,7 @@ data:
         let mut have_pets = false;
         for candidate in candidates.iter().rev() {
             let pets = candidate.join("pets");
-            if !pets.exists() {
+            if !pets.exists()? {
                 continue;
             }
             fn copy_pets_from_dir(
@@ -368,10 +368,10 @@ data:
                     let pet = pet?;
                     let pet =
                         Path::try_from(pet.path()).map_err(|_| Error::NonUtf8Path(pet.path()))?;
-                    if pet.join(K8SIGNORE).exists() {
+                    if pet.join(K8SIGNORE).exists()? {
                         continue;
                     }
-                    if pet.is_dir() {
+                    if pet.is_dir()? {
                         copied |= copy_pets_from_dir(options, root, output, &pet, tracking)?;
                         continue;
                     }
@@ -433,7 +433,7 @@ resources:
 
 fn find_rc_confs(root: &Path) -> Result<Vec<Path<'static>>, Error> {
     let mut paths = vec![];
-    if root.join(K8SIGNORE).exists() {
+    if root.join(K8SIGNORE).exists()? {
         return Ok(paths);
     }
     for dirent in std::fs::read_dir(root)? {
@@ -497,15 +497,15 @@ fn template_for_service(
     candidates: &[Path],
     rc_conf: &RcConf,
     service: &str,
-) -> Option<Path<'static>> {
+) -> Result<Option<Path<'static>>, Error> {
     let mut service = service.to_string();
     loop {
         for candidate in candidates.iter().rev() {
             let candidate = candidate
                 .join("templates/rc.d")
                 .join(format!("{service}.yaml.template"));
-            if candidate.exists() {
-                return Some(candidate.into_owned());
+            if candidate.exists()? {
+                return Ok(Some(candidate.into_owned()));
             }
         }
         let direct_alias = rc_conf.direct_alias(&service);
@@ -517,9 +517,9 @@ fn template_for_service(
     }
     for candidate in candidates.iter().rev() {
         let candidate = candidate.join("templates/service.yaml.template");
-        if candidate.exists() {
-            return Some(candidate.into_owned());
+        if candidate.exists()? {
+            return Ok(Some(candidate.into_owned()));
         }
     }
-    None
+    Ok(None)
 }

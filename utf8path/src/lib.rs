@@ -1,6 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 use std::borrow::{Borrow, Cow};
+use std::ffi::OsStr;
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 /////////////////////////////////////////////// Path ///////////////////////////////////////////////
@@ -26,9 +29,88 @@ impl<'a> Path<'a> {
         }
     }
 
-    /// Convert the path into a std::path::PathBuf.
+    fn try_from_std_path_buf(path: PathBuf) -> io::Result<Path<'static>> {
+        Path::try_from(path).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "path contains non-utf8 characters",
+            )
+        })
+    }
+
+    fn join_str<'b>(lhs: &str, rhs: &str) -> Path<'b> {
+        if Path::new(rhs).is_abs() || lhs.is_empty() {
+            Path::from(rhs.to_string())
+        } else if lhs.ends_with('/') {
+            Path::from(format!("{lhs}{rhs}"))
+        } else {
+            Path::from(format!("{lhs}/{rhs}"))
+        }
+    }
+
+    fn split_str(&self) -> (&str, &str) {
+        if self.path.is_empty() {
+            return (".", ".");
+        }
+        if let Some(index) = self.path.rfind('/') {
+            let dirname = if index == 0 {
+                "/"
+            } else if index == 1 && self.path.starts_with("//") {
+                "//"
+            } else if self.path[..index].chars().all(|c| c == '/') {
+                "/"
+            } else {
+                self.path[..index].trim_end_matches('/')
+            };
+            let basename = if index + 1 == self.path.len() {
+                "."
+            } else {
+                &self.path[index + 1..]
+            };
+            (dirname, basename)
+        } else {
+            (".", &self.path)
+        }
+    }
+
+    fn file_stem_and_extension(&self) -> Option<(&str, Option<&str>)> {
+        let file_name = self.file_name()?;
+        if matches!(file_name, "." | "..") {
+            return Some((file_name, None));
+        }
+        match file_name.rfind('.') {
+            Some(0) | None => Some((file_name, None)),
+            Some(dot) => Some((&file_name[..dot], Some(&file_name[dot + 1..]))),
+        }
+    }
+
+    fn file_prefix_and_extension(&self) -> Option<(&str, Option<&str>)> {
+        let file_name = self.file_name()?;
+        if matches!(file_name, "." | "..") {
+            return Some((file_name, None));
+        }
+        match file_name.as_bytes()[1..].iter().position(|b| *b == b'.') {
+            Some(dot) => {
+                let dot = dot + 1;
+                Some((&file_name[..dot], Some(&file_name[dot + 1..])))
+            }
+            None => Some((file_name, None)),
+        }
+    }
+
+    /// View the path as a std::path::Path.
     pub fn into_std(&self) -> &std::path::Path {
         std::path::Path::new::<str>(self.path.as_ref())
+    }
+
+    /// Convert the path to a std::path::Path.
+    pub fn as_std_path(&self) -> &std::path::Path {
+        self.into_std()
+    }
+
+    /// Convert the path to an OsStr.
+    pub fn as_os_str(&self) -> &OsStr {
+        OsStr::new(self.as_str())
     }
 
     /// Convert the path to a str.
@@ -36,17 +118,38 @@ impl<'a> Path<'a> {
         &self.path
     }
 
-    /// Is the path a directory?
-    pub fn is_dir(&self) -> bool {
-        std::path::Path::new(self.path.as_ref()).is_dir()
+    /// Convert the path to a str.
+    pub fn to_str(&self) -> Option<&str> {
+        Some(self.as_str())
+    }
+
+    /// Convert the path to a string, losslessly because this type is always UTF-8.
+    pub fn to_string_lossy(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.as_str())
+    }
+
+    /// Convert the path to a std::path::PathBuf.
+    pub fn to_path_buf(&self) -> PathBuf {
+        PathBuf::from(self.as_str())
     }
 
     /// Is the path a directory?
-    pub fn is_file(&self) -> bool {
-        std::path::Path::new(self.path.as_ref()).is_file()
+    pub fn is_dir(&self) -> io::Result<bool> {
+        self.metadata().map(|metadata| metadata.is_dir())
     }
 
-    /// Compute the basename of the path.  This is guaraneed to be a non-empty path component
+    /// Is the path a file?
+    pub fn is_file(&self) -> io::Result<bool> {
+        self.metadata().map(|metadata| metadata.is_file())
+    }
+
+    /// Is the path a symbolic link?
+    pub fn is_symlink(&self) -> io::Result<bool> {
+        self.symlink_metadata()
+            .map(|metadata| metadata.is_symlink())
+    }
+
+    /// Compute the basename of the path.  This is guaranteed to be a non-empty path component
     /// (falling back to "." for paths that end with "/").
     pub fn basename(&self) -> Path<'_> {
         self.split().1
@@ -59,9 +162,37 @@ impl<'a> Path<'a> {
     }
 
     /// True if the path exists.
-    pub fn exists(&self) -> bool {
-        let path: &str = &self.path;
-        PathBuf::from(path).exists()
+    pub fn exists(&self) -> io::Result<bool> {
+        self.try_exists()
+    }
+
+    /// Return whether the path exists, preserving I/O errors.
+    pub fn try_exists(&self) -> io::Result<bool> {
+        match self.metadata() {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Query the filesystem for metadata, following symbolic links.
+    pub fn metadata(&self) -> io::Result<fs::Metadata> {
+        fs::metadata(self)
+    }
+
+    /// Query the filesystem for metadata without following symbolic links.
+    pub fn symlink_metadata(&self) -> io::Result<fs::Metadata> {
+        fs::symlink_metadata(self)
+    }
+
+    /// Read the target of a symbolic link.
+    pub fn read_link(&self) -> io::Result<Path<'static>> {
+        Self::try_from_std_path_buf(fs::read_link(self)?)
+    }
+
+    /// Return an iterator over the entries in this directory.
+    pub fn read_dir(&self) -> io::Result<fs::ReadDir> {
+        fs::read_dir(self)
     }
 
     /// True if the path begins with some number of slashes, other than the POSIX-exception of //.
@@ -71,12 +202,22 @@ impl<'a> Path<'a> {
 
     /// True if the path begins with //, but not ///.
     pub fn has_app_defined(&self) -> bool {
-        self.path.starts_with("//") && (self.path.len() == 2 || &self.path[2..3] != "/")
+        self.path.starts_with("//") && self.path.as_bytes().get(2) != Some(&b'/')
     }
 
     /// True if the path is absolute.
     pub fn is_abs(&self) -> bool {
         self.has_root() || self.has_app_defined()
+    }
+
+    /// True if the path is absolute.
+    pub fn is_absolute(&self) -> bool {
+        self.is_abs()
+    }
+
+    /// True if the path is relative.
+    pub fn is_relative(&self) -> bool {
+        !self.is_abs()
     }
 
     /// True if the path contains no "." components; and, is absolute and has no ".." components,
@@ -120,11 +261,7 @@ impl<'a> Path<'a> {
         'b: 'c,
     {
         let with = with.into();
-        if with.is_abs() {
-            with.clone()
-        } else {
-            Path::from(format!("{}/{}", self.path, with.path))
-        }
+        Self::join_str(&self.path, &with.path)
     }
 
     /// Strip a prefix from the path.  The prefix and path are allowed to be non-normal and will
@@ -135,88 +272,204 @@ impl<'a> Path<'a> {
         // simplify this.  That fails for one reason:  "components()" intentionally rewrites `foo/`
         // as `foo/.`, but this method should preserve the path that remains as much as possible,
         // including `.` components.
-        if self.has_root() && !prefix.has_root() {
-            return None;
+        #[derive(Clone, Copy, Eq, PartialEq)]
+        enum RootKind {
+            Relative,
+            Regular,
+            AppDefined,
         }
-        if self.has_app_defined() && !prefix.has_app_defined() {
-            return None;
+
+        fn root(path: &Path) -> RootKind {
+            if path.has_app_defined() {
+                RootKind::AppDefined
+            } else if path.has_root() {
+                RootKind::Regular
+            } else {
+                RootKind::Relative
+            }
         }
-        let mut path = if self.has_root() {
-            &self.path[1..]
-        } else if self.has_app_defined() {
-            &self.path[2..]
-        } else {
-            &self.path[..]
-        };
-        let mut prefix = if prefix.has_root() {
-            &prefix.path[1..]
-        } else if prefix.has_app_defined() {
-            &prefix.path[2..]
-        } else {
-            &prefix.path[..]
-        };
-        loop {
-            if path.is_empty() && !prefix.is_empty() {
+
+        fn without_root(path: &str, root: RootKind) -> &str {
+            match root {
+                RootKind::Relative => path,
+                RootKind::Regular => &path[1..],
+                RootKind::AppDefined => &path[2..],
+            }
+        }
+
+        fn next_component(path: &str) -> Option<(&str, &str)> {
+            let path = path.trim_start_matches('/');
+            if path.is_empty() {
                 return None;
-            } else if let Some(prefix_slash) = prefix.find('/') {
-                let path_slash = path.find('/')?;
-                if prefix[..prefix_slash] != path[..path_slash] {
+            }
+            if let Some(slash) = path.find('/') {
+                Some((&path[..slash], &path[slash + 1..]))
+            } else {
+                Some((path, ""))
+            }
+        }
+
+        fn skip_path_dots(mut path: &str) -> &str {
+            loop {
+                let trimmed = path.trim_start_matches('/');
+                if let Some(rest) = trimmed.strip_prefix("./") {
+                    path = rest;
+                } else if trimmed == "." {
+                    return "";
+                } else {
+                    return trimmed;
+                }
+            }
+        }
+
+        fn consume_path_dot(path: &str) -> &str {
+            let trimmed = path.trim_start_matches('/');
+            if let Some(rest) = trimmed.strip_prefix("./") {
+                rest
+            } else if trimmed == "." {
+                ""
+            } else {
+                trimmed
+            }
+        }
+
+        let path_root = root(self);
+        let prefix_root = root(&prefix);
+        if path_root != prefix_root {
+            return None;
+        }
+        let mut path = without_root(&self.path, path_root);
+        let mut prefix = without_root(&prefix.path, prefix_root);
+        loop {
+            if let Some((prefix_component, prefix_rest)) = next_component(prefix) {
+                prefix = prefix_rest;
+                if prefix_component == "." {
+                    path = consume_path_dot(path);
+                    continue;
+                }
+                path = skip_path_dots(path);
+                if let Some((path_component, path_rest)) = next_component(path) {
+                    if path_component != prefix_component {
+                        return None;
+                    }
+                    path = path_rest;
+                } else {
                     return None;
                 }
-                path = path[path_slash + 1..].trim_start_matches('/');
-                prefix = prefix[prefix_slash + 1..].trim_start_matches('/');
-            } else if prefix == path {
-                return Some(Path::new("."));
-            } else if let Some(path) = path.strip_prefix(prefix) {
-                let path = path.trim_start_matches('/');
+            } else {
+                path = path.trim_start_matches('/');
                 if path.is_empty() {
                     return Some(Path::new("."));
                 } else {
                     return Some(Path::new(path));
                 }
-            } else if prefix.starts_with("./") {
-                prefix = prefix[2..].trim_start_matches('/');
-            } else if path.starts_with("./") {
-                path = path[2..].trim_start_matches('/');
-            } else if prefix.is_empty() || prefix == "." {
-                if path.is_empty() {
-                    return Some(Path::new("."));
-                } else {
-                    return Some(Path::new(path));
-                }
-            } else if !path.starts_with(prefix) {
-                return None;
             }
         }
     }
 
-    /// Split the path into basename and dirname components.
-    pub fn split(&self) -> (Path<'_>, Path<'_>) {
-        if let Some(index) = self.path.rfind('/') {
-            let dirname = if index == 0 {
-                Path::new("/")
-            } else if index == 1 && self.path.starts_with("//") {
-                Path::new("//")
-            } else if self.path[..index].chars().all(|c| c == '/') {
-                Path::new("/")
-            } else {
-                Path::new(self.path[..index].trim_end_matches('/'))
-            };
-            let basename = if index + 1 == self.path.len() {
-                Path::new(".")
-            } else {
-                Path::new(&self.path[index + 1..])
-            };
-            (dirname, basename)
+    /// True if the path starts with the provided base path.
+    pub fn starts_with<'b>(&self, base: impl Into<Path<'b>>) -> bool {
+        self.strip_prefix(base).is_some()
+    }
+
+    /// True if the path ends with the provided child path.
+    pub fn ends_with<'b>(&self, child: impl Into<Path<'b>>) -> bool {
+        let child = child.into();
+        let path_components = self.components().collect::<Vec<_>>();
+        let child_components = child.components().collect::<Vec<_>>();
+        path_components.get(path_components.len().saturating_sub(child_components.len())..)
+            == Some(child_components.as_slice())
+    }
+
+    /// Return the path without its final component, if any.
+    pub fn parent(&self) -> Option<Path<'_>> {
+        if self.path.is_empty() {
+            return None;
+        }
+        let parent = self.dirname();
+        if parent.as_str() == self.as_str() {
+            None
         } else {
-            (Path::new("."), Path::new(&self.path))
+            Some(parent)
         }
     }
 
-    /// Return an iterator ovre the path components.  A path with a basename of "." will always end
+    /// Iterate over the path and its parents.
+    pub fn ancestors(&self) -> impl Iterator<Item = Path<'static>> + '_ {
+        std::iter::successors(Some(self.clone().into_owned()), |path| {
+            path.parent().map(|parent| parent.into_owned())
+        })
+    }
+
+    /// Return the final path component, if it is a normal file name.
+    pub fn file_name(&self) -> Option<&str> {
+        Some(self.split_str().1)
+    }
+
+    /// Return the file name without its final extension.
+    pub fn file_stem(&self) -> Option<&str> {
+        self.file_stem_and_extension().map(|(stem, _)| stem)
+    }
+
+    /// Return the file name without its first extension.
+    pub fn file_prefix(&self) -> Option<&str> {
+        self.file_prefix_and_extension().map(|(prefix, _)| prefix)
+    }
+
+    /// Return the final file extension without the leading dot.
+    pub fn extension(&self) -> Option<&str> {
+        self.file_stem_and_extension()
+            .and_then(|(_, extension)| extension)
+    }
+
+    /// Create a path like this one, but with its file name replaced.
+    pub fn with_file_name(&self, file_name: impl AsRef<str>) -> Path<'static> {
+        Self::join_str(self.dirname().as_str(), file_name.as_ref())
+    }
+
+    /// Create a path like this one, but with its extension replaced.
+    pub fn with_extension(&self, extension: impl AsRef<str>) -> Path<'static> {
+        let Some((stem, old_extension)) = self.file_stem_and_extension() else {
+            return self.clone().into_owned();
+        };
+        if matches!(stem, "." | "..") {
+            return self.clone().into_owned();
+        }
+        let extension = extension.as_ref();
+        let file_name = match (old_extension, extension.is_empty()) {
+            (Some(_), true) => stem.to_string(),
+            (Some(_), false) | (None, false) => format!("{stem}.{extension}"),
+            (None, true) => return self.clone().into_owned(),
+        };
+        self.with_file_name(file_name)
+    }
+
+    /// Create a path like this one, but with an extension added.
+    pub fn with_added_extension(&self, extension: impl AsRef<str>) -> Path<'static> {
+        let extension = extension.as_ref();
+        let Some(file_name) = self.file_name() else {
+            return self.clone().into_owned();
+        };
+        if extension.is_empty() || matches!(file_name, "." | "..") {
+            return self.clone().into_owned();
+        }
+        self.with_file_name(format!("{file_name}.{extension}"))
+    }
+
+    /// Split the path into basename and dirname components.
+    pub fn split(&self) -> (Path<'_>, Path<'_>) {
+        let (dirname, basename) = self.split_str();
+        (Path::new(dirname), Path::new(basename))
+    }
+
+    /// Return an iterator over the path components.  A path with a basename of "." will always end
     /// with Component::CurDir.
     pub fn components(&self) -> impl Iterator<Item = Component<'_>> {
         let mut components = vec![];
+        if self.path.is_empty() {
+            components.push(Component::CurDir);
+            return components.into_iter();
+        }
         let mut limit = self.path.len();
         while let Some(slash) = self.path[..limit].rfind('/') {
             if slash + 1 == limit {
@@ -257,6 +510,25 @@ impl<'a> Path<'a> {
         components.into_iter()
     }
 
+    /// Iterate over the path components as strings.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.components().map(|component| match component {
+            Component::RootDir => "/",
+            Component::AppDefined => "//",
+            Component::CurDir => ".",
+            Component::ParentDir => "..",
+            Component::Normal(path) => match path.path {
+                Cow::Borrowed(path) => path,
+                Cow::Owned(_) => unreachable!("components always borrow from self"),
+            },
+        })
+    }
+
+    /// Return a display adapter for the path.
+    pub fn display(&self) -> impl std::fmt::Display + '_ {
+        self
+    }
+
     /// Return the current working directory, if it can be fetched and converted to unicode without
     /// error.
     pub fn cwd() -> Option<Path<'a>> {
@@ -266,12 +538,7 @@ impl<'a> Path<'a> {
     /// Return the canonicalized path with all intermediate components normalized and symbolic
     /// links resolved.
     pub fn canonicalize(&self) -> Result<Path<'static>, std::io::Error> {
-        Path::try_from(std::fs::canonicalize(self)?).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "real path contains non-utf8 characters",
-            )
-        })
+        Self::try_from_std_path_buf(fs::canonicalize(self)?)
     }
 }
 
@@ -411,6 +678,38 @@ mod tests {
     }
 
     static TEST_CASES: &[TestCase] = &[
+        TestCase {
+            path: Path::new(""),
+            basename: Path::new("."),
+            dirname: Path::new("."),
+            is_abs: false,
+            is_normal: false,
+            components: "C",
+        },
+        TestCase {
+            path: Path::new("."),
+            basename: Path::new("."),
+            dirname: Path::new("."),
+            is_abs: false,
+            is_normal: false,
+            components: "C",
+        },
+        TestCase {
+            path: Path::new(".."),
+            basename: Path::new(".."),
+            dirname: Path::new("."),
+            is_abs: false,
+            is_normal: true,
+            components: "P",
+        },
+        TestCase {
+            path: Path::new("foo"),
+            basename: Path::new("foo"),
+            dirname: Path::new("."),
+            is_abs: false,
+            is_normal: true,
+            components: "N",
+        },
         TestCase {
             path: Path::new("//"),
             basename: Path::new("."),
@@ -1017,5 +1316,509 @@ mod tests {
                 components.pop()
             );
         }
+    }
+
+    #[test]
+    fn has_app_defined_handles_non_ascii_paths() {
+        let path = Path::new("//\u{e9}");
+        assert!(path.has_app_defined());
+        assert!(!path.has_root());
+        assert!(path.is_abs());
+
+        let path = Path::new("///\u{e9}");
+        assert!(!path.has_app_defined());
+        assert!(path.has_root());
+        assert!(path.is_abs());
+    }
+
+    #[test]
+    fn join_has_utf8path_edge_case_values() {
+        for (base, child, expected) in [
+            ("", "", ""),
+            ("", "bar", "bar"),
+            (".", "", "./"),
+            (".", "bar", "./bar"),
+            ("/", "", "/"),
+            ("/", "bar", "/bar"),
+            ("//", "", "//"),
+            ("//", "bar", "//bar"),
+            ("foo", "", "foo/"),
+            ("foo", "bar", "foo/bar"),
+            ("foo/", "", "foo/"),
+            ("foo/", "bar", "foo/bar"),
+            ("foo/bar", "", "foo/bar/"),
+            ("foo/bar", "baz", "foo/bar/baz"),
+            ("foo/bar", "/abs", "/abs"),
+            ("foo/bar", "//app", "//app"),
+        ] {
+            assert_eq!(
+                Path::new(expected),
+                Path::new(base).join(child),
+                "base: {base:?} child: {child:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strip_prefix_matches_whole_components() {
+        assert_eq!(None, Path::new("foobar").strip_prefix("foo"));
+        assert_eq!(
+            Some(Path::new("bar")),
+            Path::new("foo/bar").strip_prefix("foo")
+        );
+        assert_eq!(
+            Some(Path::new("./bar")),
+            Path::new("foo/./bar").strip_prefix("foo")
+        );
+        assert_eq!(
+            Some(Path::new(".")),
+            Path::new("foo/./bar").strip_prefix("foo/bar")
+        );
+        assert_eq!(None, Path::new("/foo").strip_prefix("foo"));
+        assert_eq!(None, Path::new("//foo").strip_prefix("/"));
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct ObserverOutputs {
+        as_str: String,
+        to_str: Option<String>,
+        to_string_lossy: String,
+        to_path_buf: String,
+        is_absolute: bool,
+        is_relative: bool,
+        parent: Option<String>,
+        ancestors: Vec<String>,
+        file_name: Option<String>,
+        file_stem: Option<String>,
+        file_prefix: Option<String>,
+        extension: Option<String>,
+        iter: Vec<String>,
+        display: String,
+    }
+
+    fn observe(path: Path) -> ObserverOutputs {
+        ObserverOutputs {
+            as_str: path.as_str().to_string(),
+            to_str: path.to_str().map(str::to_string),
+            to_string_lossy: path.to_string_lossy().to_string(),
+            to_path_buf: path.to_path_buf().to_string_lossy().to_string(),
+            is_absolute: path.is_absolute(),
+            is_relative: path.is_relative(),
+            parent: path.parent().map(|parent| parent.as_str().to_string()),
+            ancestors: path
+                .ancestors()
+                .map(|ancestor| ancestor.as_str().to_string())
+                .collect(),
+            file_name: path.file_name().map(str::to_string),
+            file_stem: path.file_stem().map(str::to_string),
+            file_prefix: path.file_prefix().map(str::to_string),
+            extension: path.extension().map(str::to_string),
+            iter: path.iter().map(str::to_string).collect(),
+            display: path.display().to_string(),
+        }
+    }
+
+    #[test]
+    fn path_named_observers_have_expected_values() {
+        assert_eq!(
+            ObserverOutputs {
+                as_str: "".to_string(),
+                to_str: Some("".to_string()),
+                to_string_lossy: "".to_string(),
+                to_path_buf: "".to_string(),
+                is_absolute: false,
+                is_relative: true,
+                parent: None,
+                ancestors: vec!["".to_string()],
+                file_name: Some(".".to_string()),
+                file_stem: Some(".".to_string()),
+                file_prefix: Some(".".to_string()),
+                extension: None,
+                iter: vec![".".to_string()],
+                display: "".to_string(),
+            },
+            observe(Path::new(""))
+        );
+        assert_eq!(
+            ObserverOutputs {
+                as_str: ".".to_string(),
+                to_str: Some(".".to_string()),
+                to_string_lossy: ".".to_string(),
+                to_path_buf: ".".to_string(),
+                is_absolute: false,
+                is_relative: true,
+                parent: None,
+                ancestors: vec![".".to_string()],
+                file_name: Some(".".to_string()),
+                file_stem: Some(".".to_string()),
+                file_prefix: Some(".".to_string()),
+                extension: None,
+                iter: vec![".".to_string()],
+                display: ".".to_string(),
+            },
+            observe(Path::new("."))
+        );
+        assert_eq!(
+            ObserverOutputs {
+                as_str: "/tmp/foo.tar.gz".to_string(),
+                to_str: Some("/tmp/foo.tar.gz".to_string()),
+                to_string_lossy: "/tmp/foo.tar.gz".to_string(),
+                to_path_buf: "/tmp/foo.tar.gz".to_string(),
+                is_absolute: true,
+                is_relative: false,
+                parent: Some("/tmp".to_string()),
+                ancestors: vec![
+                    "/tmp/foo.tar.gz".to_string(),
+                    "/tmp".to_string(),
+                    "/".to_string(),
+                ],
+                file_name: Some("foo.tar.gz".to_string()),
+                file_stem: Some("foo.tar".to_string()),
+                file_prefix: Some("foo".to_string()),
+                extension: Some("gz".to_string()),
+                iter: vec!["/".to_string(), "tmp".to_string(), "foo.tar.gz".to_string()],
+                display: "/tmp/foo.tar.gz".to_string(),
+            },
+            observe(Path::new("/tmp/foo.tar.gz"))
+        );
+        assert_eq!(
+            ObserverOutputs {
+                as_str: "foo.txt/..".to_string(),
+                to_str: Some("foo.txt/..".to_string()),
+                to_string_lossy: "foo.txt/..".to_string(),
+                to_path_buf: "foo.txt/..".to_string(),
+                is_absolute: false,
+                is_relative: true,
+                parent: Some("foo.txt".to_string()),
+                ancestors: vec![
+                    "foo.txt/..".to_string(),
+                    "foo.txt".to_string(),
+                    ".".to_string()
+                ],
+                file_name: Some("..".to_string()),
+                file_stem: Some("..".to_string()),
+                file_prefix: Some("..".to_string()),
+                extension: None,
+                iter: vec!["foo.txt".to_string(), "..".to_string()],
+                display: "foo.txt/..".to_string(),
+            },
+            observe(Path::new("foo.txt/.."))
+        );
+        assert_eq!(
+            ObserverOutputs {
+                as_str: ".config.toml".to_string(),
+                to_str: Some(".config.toml".to_string()),
+                to_string_lossy: ".config.toml".to_string(),
+                to_path_buf: ".config.toml".to_string(),
+                is_absolute: false,
+                is_relative: true,
+                parent: Some(".".to_string()),
+                ancestors: vec![".config.toml".to_string(), ".".to_string()],
+                file_name: Some(".config.toml".to_string()),
+                file_stem: Some(".config".to_string()),
+                file_prefix: Some(".config".to_string()),
+                extension: Some("toml".to_string()),
+                iter: vec![".config.toml".to_string()],
+                display: ".config.toml".to_string(),
+            },
+            observe(Path::new(".config.toml"))
+        );
+    }
+
+    #[test]
+    fn starts_with_and_ends_with_have_utf8path_values() {
+        for (path, other, starts_with, ends_with) in [
+            ("/etc/passwd", "/etc", true, false),
+            ("/etc/passwd", "/e", false, false),
+            ("/etc/passwd", "passwd", false, true),
+            ("/etc/passwd", "etc/passwd", false, true),
+            ("/etc/passwd", "/etc/passwd", true, true),
+            ("foo/bar/baz", "foo/bar", true, false),
+            ("foo/bar/baz", "bar/baz", false, true),
+            ("foo/bar/baz", "baz", false, true),
+            ("foo/bar/baz", "az", false, false),
+            ("foo/./bar", "foo/bar", true, false),
+            ("foo/bar/", "foo/bar", true, false),
+            ("//app/path", "/app", false, false),
+            ("//app/path", "//app", true, false),
+        ] {
+            assert_eq!(
+                starts_with,
+                Path::new(path).starts_with(other),
+                "path: {path:?} other: {other:?}"
+            );
+            assert_eq!(
+                ends_with,
+                Path::new(path).ends_with(other),
+                "path: {path:?} other: {other:?}"
+            );
+        }
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct BuilderOutputs {
+        join_empty: Path<'static>,
+        join_relative: Path<'static>,
+        join_absolute: Path<'static>,
+        join_app_defined: Path<'static>,
+        with_file_name: Path<'static>,
+        with_extension: Path<'static>,
+        without_extension: Path<'static>,
+        with_added_extension: Path<'static>,
+        with_added_empty_extension: Path<'static>,
+    }
+
+    fn build(path: Path<'static>) -> BuilderOutputs {
+        BuilderOutputs {
+            join_empty: path.join(""),
+            join_relative: path.join("child"),
+            join_absolute: path.join("/absolute"),
+            join_app_defined: path.join("//app"),
+            with_file_name: path.with_file_name("name.txt"),
+            with_extension: path.with_extension("rs"),
+            without_extension: path.with_extension(""),
+            with_added_extension: path.with_added_extension("bak"),
+            with_added_empty_extension: path.with_added_extension(""),
+        }
+    }
+
+    #[test]
+    fn path_named_builders_have_expected_values() {
+        assert_eq!(
+            BuilderOutputs {
+                join_empty: Path::from(""),
+                join_relative: Path::from("child"),
+                join_absolute: Path::from("/absolute"),
+                join_app_defined: Path::from("//app"),
+                with_file_name: Path::from("./name.txt"),
+                with_extension: Path::from(""),
+                without_extension: Path::from(""),
+                with_added_extension: Path::from(""),
+                with_added_empty_extension: Path::from(""),
+            },
+            build(Path::new(""))
+        );
+        assert_eq!(
+            BuilderOutputs {
+                join_empty: Path::from("./"),
+                join_relative: Path::from("./child"),
+                join_absolute: Path::from("/absolute"),
+                join_app_defined: Path::from("//app"),
+                with_file_name: Path::from("./name.txt"),
+                with_extension: Path::from("."),
+                without_extension: Path::from("."),
+                with_added_extension: Path::from("."),
+                with_added_empty_extension: Path::from("."),
+            },
+            build(Path::new("."))
+        );
+        assert_eq!(
+            BuilderOutputs {
+                join_empty: Path::from("/tmp/foo.tar.gz/"),
+                join_relative: Path::from("/tmp/foo.tar.gz/child"),
+                join_absolute: Path::from("/absolute"),
+                join_app_defined: Path::from("//app"),
+                with_file_name: Path::from("/tmp/name.txt"),
+                with_extension: Path::from("/tmp/foo.tar.rs"),
+                without_extension: Path::from("/tmp/foo.tar"),
+                with_added_extension: Path::from("/tmp/foo.tar.gz.bak"),
+                with_added_empty_extension: Path::from("/tmp/foo.tar.gz"),
+            },
+            build(Path::new("/tmp/foo.tar.gz"))
+        );
+        assert_eq!(
+            BuilderOutputs {
+                join_empty: Path::from("foo.txt/../"),
+                join_relative: Path::from("foo.txt/../child"),
+                join_absolute: Path::from("/absolute"),
+                join_app_defined: Path::from("//app"),
+                with_file_name: Path::from("foo.txt/name.txt"),
+                with_extension: Path::from("foo.txt/.."),
+                without_extension: Path::from("foo.txt/.."),
+                with_added_extension: Path::from("foo.txt/.."),
+                with_added_empty_extension: Path::from("foo.txt/.."),
+            },
+            build(Path::new("foo.txt/.."))
+        );
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct PrefixOutputs {
+        strip: Option<Path<'static>>,
+        starts_with: bool,
+        ends_with: bool,
+    }
+
+    fn prefix_outputs(path: &str, other: &str) -> PrefixOutputs {
+        PrefixOutputs {
+            strip: Path::new(path)
+                .strip_prefix(other)
+                .map(|path| path.into_owned()),
+            starts_with: Path::new(path).starts_with(other),
+            ends_with: Path::new(path).ends_with(other),
+        }
+    }
+
+    #[test]
+    fn prefix_methods_have_expected_values() {
+        assert_eq!(
+            PrefixOutputs {
+                strip: Some(Path::from("bar")),
+                starts_with: true,
+                ends_with: false,
+            },
+            prefix_outputs("foo/bar", "foo")
+        );
+        assert_eq!(
+            PrefixOutputs {
+                strip: None,
+                starts_with: false,
+                ends_with: false,
+            },
+            prefix_outputs("foobar", "foo")
+        );
+        assert_eq!(
+            PrefixOutputs {
+                strip: Some(Path::from("./bar")),
+                starts_with: true,
+                ends_with: false,
+            },
+            prefix_outputs("foo/./bar", "foo")
+        );
+        assert_eq!(
+            PrefixOutputs {
+                strip: Some(Path::from(".")),
+                starts_with: true,
+                ends_with: false,
+            },
+            prefix_outputs("foo/./bar", "foo/bar")
+        );
+        assert_eq!(
+            PrefixOutputs {
+                strip: None,
+                starts_with: false,
+                ends_with: true,
+            },
+            prefix_outputs("/etc/passwd", "passwd")
+        );
+        assert_eq!(
+            PrefixOutputs {
+                strip: None,
+                starts_with: false,
+                ends_with: false,
+            },
+            prefix_outputs("//app/path", "/app")
+        );
+    }
+
+    #[test]
+    fn conversions_accept_utf8_and_reject_non_utf8() {
+        let borrowed = Path::try_from(std::path::Path::new("foo/bar")).unwrap();
+        assert_eq!(Path::new("foo/bar"), borrowed);
+        let owned = Path::try_from(std::path::PathBuf::from("foo/bar")).unwrap();
+        assert_eq!(Path::from("foo/bar"), owned);
+        let os_owned = Path::try_from(std::ffi::OsString::from("foo/bar")).unwrap();
+        assert_eq!(Path::from("foo/bar"), os_owned);
+
+        #[cfg(unix)]
+        {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::OsStringExt;
+
+            let invalid = OsString::from_vec(vec![0xff, b'f', b'o', b'o']);
+            assert!(Path::try_from(invalid).is_err());
+            let invalid = OsString::from_vec(vec![0xff, b'f', b'o', b'o']);
+            assert!(Path::try_from(std::path::PathBuf::from(invalid)).is_err());
+        }
+    }
+
+    #[test]
+    fn trait_views_match_std_path() {
+        let path = Path::new("foo/bar");
+        let os_str: &std::ffi::OsStr = path.as_ref();
+        let std_path: &std::path::Path = path.as_ref();
+        let borrowed: &std::path::Path = std::borrow::Borrow::borrow(&path);
+        assert_eq!(std::ffi::OsStr::new("foo/bar"), os_str);
+        assert_eq!(std::path::Path::new("foo/bar"), std_path);
+        assert_eq!(std::path::Path::new("foo/bar"), borrowed);
+        assert_eq!(std::path::Path::new("foo/bar"), path.as_std_path());
+        assert_eq!(std::path::Path::new("foo/bar"), path.into_std());
+    }
+
+    #[test]
+    fn filesystem_methods_report_existing_paths() {
+        let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let src = crate_dir.join("src");
+        let lib = src.join("lib.rs");
+        assert!(src.exists().unwrap());
+        assert!(src.try_exists().unwrap());
+        assert!(src.is_dir().unwrap());
+        assert!(!src.is_file().unwrap());
+        assert!(!src.is_symlink().unwrap());
+        assert!(src.metadata().unwrap().is_dir());
+        assert!(src.symlink_metadata().unwrap().is_dir());
+        assert!(src.read_dir().unwrap().next().is_some());
+
+        assert!(lib.exists().unwrap());
+        assert!(lib.try_exists().unwrap());
+        assert!(lib.is_file().unwrap());
+        assert!(!lib.is_dir().unwrap());
+        assert!(!lib.is_symlink().unwrap());
+        assert!(lib.metadata().unwrap().is_file());
+        assert!(lib.symlink_metadata().unwrap().is_file());
+        assert!(lib.canonicalize().unwrap().is_abs());
+    }
+
+    #[test]
+    fn filesystem_methods_report_missing_paths() {
+        let missing = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("definitely-not-present-utf8path-test");
+        assert!(!missing.exists().unwrap());
+        assert!(!missing.try_exists().unwrap());
+        assert!(missing.is_dir().is_err());
+        assert!(missing.is_file().is_err());
+        assert!(missing.is_symlink().is_err());
+        assert!(missing.metadata().is_err());
+        assert!(missing.symlink_metadata().is_err());
+        assert!(missing.read_dir().is_err());
+        assert!(missing.read_link().is_err());
+        assert!(missing.canonicalize().is_err());
+    }
+
+    #[test]
+    fn filesystem_predicates_report_invalid_input_errors() {
+        let invalid = Path::new("\0");
+        assert!(invalid.exists().is_err());
+        assert!(invalid.try_exists().is_err());
+        assert!(invalid.is_dir().is_err());
+        assert!(invalid.is_file().is_err());
+        assert!(invalid.is_symlink().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_link_returns_utf8_path_for_symlinks() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utf8path-read-link-{nonce}"));
+        let root_path = Path::try_from(root.clone()).unwrap();
+        let target = root_path.join("target.txt");
+        let link = root_path.join("link.txt");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(&target, b"contents").unwrap();
+        symlink(target.as_std_path(), link.as_std_path()).unwrap();
+
+        assert!(link.is_symlink().unwrap());
+        assert_eq!(target, link.read_link().unwrap());
+
+        std::fs::remove_file(link).unwrap();
+        std::fs::remove_file(target).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 }

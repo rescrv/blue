@@ -48,7 +48,7 @@ impl Maildir2026 {
             let tmp_path = self.tmp_path().join(&name).into_owned();
             let new_path = self.new_path().join(&name).into_owned();
             let cur_path = self.cur_path().join(&name).into_owned();
-            if new_path.exists() || cur_path.exists() {
+            if new_path.exists()? || cur_path.exists()? {
                 continue;
             }
             let mut file = match OpenOptions::new()
@@ -69,7 +69,7 @@ impl Maildir2026 {
                 return Err(err);
             }
             drop(file);
-            if new_path.exists() || cur_path.exists() {
+            if new_path.exists()? || cur_path.exists()? {
                 let _ = std::fs::remove_file(&tmp_path);
                 continue;
             }
@@ -109,12 +109,13 @@ impl Maildir2026 {
             let cur_path = self.cur_path().join(file_name.as_str()).into_owned();
             // NOTE(rescrv):  We test this in order so sequencing guarantees we see cur_path before
             // new_path.
-            if cur_path.exists() && new_path.exists() {
+            let cur_path_exists = cur_path.exists()?;
+            if cur_path_exists && new_path.exists()? {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     format!("claimed file path already exists: {cur_path}"),
                 ));
-            } else if cur_path.exists() {
+            } else if cur_path_exists {
                 continue;
             }
             match std::fs::rename(&new_path, &cur_path) {
@@ -269,9 +270,9 @@ mod tests {
         let root = TempRoot::new("open-creates-directories");
         let maildir = Maildir2026::open(root.path.clone()).unwrap();
         assert_eq!(&root.path, maildir.root());
-        assert!(root.path.join("tmp").is_dir());
-        assert!(root.path.join("new").is_dir());
-        assert!(root.path.join("cur").is_dir());
+        assert!(root.path.join("tmp").is_dir().unwrap());
+        assert!(root.path.join("new").is_dir().unwrap());
+        assert!(root.path.join("cur").is_dir().unwrap());
     }
 
     #[test]

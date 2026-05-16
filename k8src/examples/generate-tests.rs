@@ -116,7 +116,10 @@ foo1_PORT="6600"
     let mut idx = 0;
     for files in generate_combinations(&files, 4) {
         let case_path = Path::from(format!("tests/cases/{idx}"));
-        if case_path.exists() {
+        if case_path
+            .exists()
+            .expect("should be able to inspect case path")
+        {
             std::fs::remove_dir_all(&case_path).expect("should be able to remove directory");
         }
         if !files.iter().any(|f| f.0 == "rc.conf") {

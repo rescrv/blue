@@ -442,7 +442,7 @@ foo 0 42
         static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         // SAFETY(rescrv):  Mutex poisoning.
         let _guard = MUTEX.lock().unwrap();
-        if Path::from("tmp.foo.42.prom").exists() {
+        if Path::from("tmp.foo.42.prom").exists().unwrap() {
             remove_file("tmp.foo.42.prom").unwrap();
         }
         let mut emitter = Emitter::new(Options {
@@ -459,7 +459,7 @@ foo 0 42
         static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         // SAFETY(rescrv):  Mutex poisoning.
         let _guard = MUTEX.lock().unwrap();
-        if Path::from("tmp.type.7.prom").exists() {
+        if Path::from("tmp.type.7.prom").exists().unwrap() {
             remove_file("tmp.type.7.prom").unwrap();
         }
         let mut emitter = Emitter::new(Options {

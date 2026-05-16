@@ -631,7 +631,7 @@ impl RcConf {
         let mut items = HashMap::default();
         for piece in path.split(':') {
             let piece = strip_self_dir_prefix(&Path::from(piece));
-            if !piece.exists() {
+            if !piece.exists()? {
                 continue;
             }
             Self::parse_recursive(&piece, &mut seen, &mut items)?;
@@ -990,7 +990,7 @@ impl RcConf {
         let mut rc_conf = String::new();
         for (idx, piece) in path.split(':').enumerate() {
             let piece = strip_self_dir_prefix(&Path::from(piece));
-            if !piece.exists() {
+            if !piece.exists()? {
                 continue;
             }
             if seen.contains(&piece) {
@@ -1338,7 +1338,7 @@ pub fn load_services(
 ) -> Result<HashMap<String, Result<Path<'static>, String>>, Error> {
     let mut services = HashMap::default();
     for rc_d in rc_d_path.split(':') {
-        if !Path::from(rc_d).exists() {
+        if !Path::from(rc_d).exists()? {
             continue;
         }
         for dirent in std::fs::read_dir(rc_d)? {
