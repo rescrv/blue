@@ -3,7 +3,7 @@ name = "minimal_signals"
 version = "0.6.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
-description = "minimal_signals provides a minimal API for working with signals."
+description = "minimal_signals provides a small API for working with Unix signals."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 

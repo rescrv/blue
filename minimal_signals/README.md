@@ -1,7 +1,41 @@
 minimal_signals
 ===============
 
-Minimal signals provides the minimum necessary set of tools to block signals and receive them synchronously.
+Minimal signals provides a small set of tools to block signals, receive them synchronously, or install a Ctrl-C-style callback handler.
+
+Examples
+--------
+
+Install a simple Ctrl-C handler:
+
+```rust
+minimal_signals::set_handler(|| {
+    eprintln!("shutting down");
+})?;
+# Ok::<(), minimal_signals::Error>(())
+```
+
+Handle several termination signals with one callback:
+
+```rust
+minimal_signals::set_handler_for(minimal_signals::SignalSet::termination(), |signal| {
+    eprintln!("received {signal}");
+})?;
+# Ok::<(), minimal_signals::Error>(())
+```
+
+Wait synchronously from a dedicated thread:
+
+```rust
+minimal_signals::block();
+
+std::thread::spawn(|| {
+    let signals = minimal_signals::SignalSet::termination();
+    while let Some(signal) = minimal_signals::wait(signals.clone()) {
+        eprintln!("received {signal}");
+    }
+});
+```
 
 Status
 ------
@@ -11,7 +45,7 @@ Maintenance track.  The library is considered stable and will be put into mainte
 Scope
 -----
 
-This library provides the `block`, `kill`, and `wait` calls; the `SignalSet`; and, the signal number for common signals.
+This library provides `set_handler`, `set_handler_for`, `block`, `unblock`, `kill`, `raise`, `pending`, and `wait`; the `SignalSet`; and named signal constants for common Unix signals.
 
 Warts
 -----
