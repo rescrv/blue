@@ -55,7 +55,7 @@ pub fn paths_to_root(_options: &SymphonizeOptions) -> Result<Vec<Path<'static>>,
     let mut candidates = vec![];
     while cwd != Path::from("/") {
         candidates.push(cwd.clone().into_owned());
-        if cwd.join(".git").exists() {
+        if cwd.join(".git").exists()? {
             candidates.reverse();
             return Ok(candidates);
         }
@@ -172,7 +172,7 @@ impl Symphonize {
                 .truncate(true)
                 .open(self.target_dir().join(".k8srcignore"))?,
         );
-        if self.target_dir().join("manifests").exists() {
+        if self.target_dir().join("manifests").exists()? {
             std::fs::remove_dir_all(self.target_dir().join("manifests"))?;
         }
         k8src::regenerate(options)?;

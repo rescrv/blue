@@ -25,9 +25,16 @@ fn top_level_help() {
 fn edit(rc_conf: &str) {
     let editor = std::env::var("EDITOR").unwrap_or("nano".to_string());
     let tmpfile = rc_conf.to_string() + ".tmp";
-    if Path::from(&tmpfile).exists() {
-        eprintln!("erase {tmpfile} and try again");
-        std::process::exit(253);
+    match Path::from(&tmpfile).exists() {
+        Ok(true) => {
+            eprintln!("erase {tmpfile} and try again");
+            std::process::exit(253);
+        }
+        Ok(false) => {}
+        Err(err) => {
+            eprintln!("could not inspect tempfile: {err}");
+            std::process::exit(253);
+        }
     }
     if let Err(err) = copy(rc_conf, &tmpfile) {
         eprintln!("could not copy to tempfile: {err}");
