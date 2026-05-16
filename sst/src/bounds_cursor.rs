@@ -93,6 +93,9 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
             Bound::Unbounded => {
                 self.bounds = Bounds::BeforeStart;
                 self.cursor.seek_to_first()?;
+                if self.cursor.key().is_some() {
+                    self.cursor.prev()?;
+                }
             }
             Bound::Included(start_bound) => {
                 self.bounds = Bounds::BeforeStart;
@@ -104,6 +107,9 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
             Bound::Excluded(start_bound) => {
                 self.bounds = Bounds::BeforeStart;
                 self.cursor.seek(start_bound)?;
+                if self.cursor.key().is_some() {
+                    self.cursor.prev()?;
+                }
             }
         }
         self.check_for_end_bound_exceeded();
@@ -158,11 +164,15 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
     }
 
     fn next(&mut self) -> Result<(), Error> {
-        if self.bounds != Bounds::AfterEnd {
+        while self.bounds != Bounds::AfterEnd {
             self.cursor.next()?;
             self.bounds = Bounds::Positioned;
+            self.check_for_start_bound_exceeded();
+            self.check_for_end_bound_exceeded();
+            if self.bounds != Bounds::BeforeStart {
+                return Ok(());
+            }
         }
-        self.check_for_end_bound_exceeded();
         Ok(())
     }
 
