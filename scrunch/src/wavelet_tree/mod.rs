@@ -24,6 +24,32 @@ pub trait WaveletTree {
     fn rank_q(&self, q: u32, x: usize) -> Option<usize>;
     /// Computes `select_q[x]`, the offset of the x'th symbol q.
     fn select_q(&self, q: u32, x: usize) -> Option<usize>;
+
+    /// Populate `ranges` with each symbol in `[lower, upper)` and its rank interval for that
+    /// symbol.  The rank interval is half-open.
+    fn symbol_rank_ranges(
+        &self,
+        lower: usize,
+        upper: usize,
+        ranges: &mut Vec<(u32, (usize, usize))>,
+    ) -> Option<()> {
+        if lower > upper || upper > self.len() {
+            return None;
+        }
+        ranges.clear();
+        for idx in lower..upper {
+            let symbol = self.access(idx)?;
+            if ranges.iter().any(|(candidate, _)| *candidate == symbol) {
+                continue;
+            }
+            let lower_rank = self.rank_q(symbol, lower)?;
+            let upper_rank = self.rank_q(symbol, upper)?;
+            if lower_rank < upper_rank {
+                ranges.push((symbol, (lower_rank, upper_rank)));
+            }
+        }
+        Some(())
+    }
 }
 
 ///////////////////////////////////// ReferenceWaveletTreeStub /////////////////////////////////////

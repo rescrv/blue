@@ -67,14 +67,6 @@ struct Node {
     right: u64,
 }
 
-fn all_sized(mut iter: impl Iterator<Item = (u32, u8)>) -> bool {
-    iter.all(|s| s.1 > 0)
-}
-
-fn all_zero(mut iter: impl Iterator<Item = (u32, u8)>) -> bool {
-    iter.all(|s| s.1 == 0)
-}
-
 //////////////////////////////////////////// WaveletTree ///////////////////////////////////////////
 
 pub struct WaveletTree<'a, E: Encoder> {
@@ -153,50 +145,78 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
         Some(self.nodes.len() as u64)
     }
 
-    fn construct_from_iter<H: Helper>(
-        builder: &mut Builder<H>,
-        intermediate: &mut Vec<(u32, u8)>,
-        iter: impl Iterator<Item = (u32, u8)> + Clone,
-    ) -> Result<u64, Error> {
-        if iter.clone().next().is_some() && all_sized(iter.clone()) {
-            intermediate.clear();
-            for x in iter {
-                intermediate.push(x);
-            }
-            Self::construct_recursive(builder, intermediate)
-        } else if all_zero(iter) {
-            Ok(0)
-        } else {
-            Err(Error::LogicError(
-                "wavelet tree should be all zero or all sized",
-            ))
-        }
-    }
-
     fn construct_recursive<H: Helper>(
         builder: &mut Builder<H>,
-        symbols: &[(u32, u8)],
+        symbols: &mut [(u32, u8)],
+        scratch: &mut [(u32, u8)],
     ) -> Result<u64, Error> {
-        let (left, right) = if !all_zero(symbols.iter().copied()) {
-            let lhs_iter = symbols
-                .iter()
-                .filter(|s| s.0 & 1 == 0)
-                .map(|s| (s.0 >> 1, s.1 - 1));
-            let rhs_iter = symbols
-                .iter()
-                .filter(|s| s.0 & 1 == 1)
-                .map(|s| (s.0 >> 1, s.1 - 1));
-            let mut intermediate = Vec::with_capacity(symbols.len());
-            let left = Self::construct_from_iter(builder, &mut intermediate, lhs_iter)?;
-            let right = Self::construct_from_iter(builder, &mut intermediate, rhs_iter)?;
-            (left, right)
+        let mut left_count = 0usize;
+        let mut right_count = 0usize;
+        let mut left_done = false;
+        let mut right_done = false;
+        for &(code, len) in symbols.iter() {
+            if len == 0 {
+                return Err(Error::LogicError(
+                    "wavelet tree should be all zero or all sized",
+                ));
+            }
+            let is_right = code & 1 == 1;
+            if is_right {
+                if len == 1 {
+                    right_done = true;
+                } else {
+                    right_count += 1;
+                }
+            } else if len == 1 {
+                left_done = true;
+            } else {
+                left_count += 1;
+            }
+        }
+        if (left_done && left_count > 0) || (right_done && right_count > 0) {
+            return Err(Error::LogicError(
+                "wavelet tree should be all zero or all sized",
+            ));
+        }
+        let words = BitVector::words_from_iter(
+            symbols.len(),
+            symbols.iter().map(|(code, _)| code & 1 == 1),
+        );
+        let mut left_idx = 0usize;
+        let mut right_idx = left_count;
+        for &(code, len) in symbols.iter() {
+            if len > 1 {
+                let next = (code >> 1, len - 1);
+                if code & 1 == 0 {
+                    scratch[left_idx] = next;
+                    left_idx += 1;
+                } else {
+                    scratch[right_idx] = next;
+                    right_idx += 1;
+                }
+            }
+        }
+        let left = if left_count > 0 {
+            Self::construct_recursive(
+                builder,
+                &mut scratch[..left_count],
+                &mut symbols[..left_count],
+            )?
         } else {
-            (0, 0)
+            0
         };
-        let this: Vec<bool> = symbols.iter().map(|s| s.0 & 1 == 1).collect();
+        let right = if right_count > 0 {
+            Self::construct_recursive(
+                builder,
+                &mut scratch[left_count..left_count + right_count],
+                &mut symbols[left_count..left_count + right_count],
+            )?
+        } else {
+            0
+        };
         let length: u64 = symbols.len() as u64;
         let start: u64 = builder.relative_len() as u64;
-        BitVector::construct(&this, builder)?;
+        BitVector::construct_from_words(symbols.len(), words, builder)?;
         let limit: u64 = builder.relative_len() as u64;
         let node = Node {
             length,
@@ -214,12 +234,12 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
             self.encoder.decode(e, sz)
         } else {
             let (node, bv) = self.load_node_and_bit_vector(node_offset)?;
-            let bit = bv.access(x)?;
+            let (bit, rank) = bv.access_rank(x)?;
             let (x, node_offset) = if bit {
                 e |= 1 << sz;
-                (bv.rank(x)?, node.right)
+                (rank, node.right)
             } else {
-                (bv.rank0(x)?, node.left)
+                (x - rank, node.left)
             };
             sz += 1;
             self.recursive_access(e, sz, node_offset, x)
@@ -276,6 +296,51 @@ impl<'a, E: Encoder> WaveletTree<'a, E> {
             bv.select0(x)
         }
     }
+
+    fn recursive_symbol_rank_ranges(
+        &self,
+        e: u32,
+        sz: u8,
+        node_offset: u64,
+        lower: usize,
+        upper: usize,
+        ranges: &mut Vec<(u32, (usize, usize))>,
+    ) -> Option<()> {
+        if lower == upper {
+            return Some(());
+        }
+        if node_offset == 0 {
+            let symbol = self.encoder.decode(e, sz)?;
+            ranges.push((symbol, (lower, upper)));
+            return Some(());
+        }
+        let (node, bv) = self.load_node_and_bit_vector(node_offset)?;
+        let lower_ones = bv.rank(lower)?;
+        let upper_ones = bv.rank(upper)?;
+        let lower_zeros = lower - lower_ones;
+        let upper_zeros = upper - upper_ones;
+        if lower_zeros < upper_zeros {
+            self.recursive_symbol_rank_ranges(
+                e,
+                sz + 1,
+                node.left,
+                lower_zeros,
+                upper_zeros,
+                ranges,
+            )?;
+        }
+        if lower_ones < upper_ones {
+            self.recursive_symbol_rank_ranges(
+                e | (1 << sz),
+                sz + 1,
+                node.right,
+                lower_ones,
+                upper_ones,
+                ranges,
+            )?;
+        }
+        Some(())
+    }
 }
 
 impl<E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'_, E> {
@@ -294,7 +359,8 @@ impl<E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'_, E> {
         let length = encoded.len() as u64;
         drop(enc);
         // Recursively construct the tree.
-        let tree = Self::construct_recursive(&mut builder, &encoded)?;
+        let mut scratch = vec![(0u32, 0u8); encoded.len()];
+        let tree = Self::construct_recursive(&mut builder, &mut encoded, &mut scratch)?;
         // Append the root node.
         let root = Root {
             encoder_start,
@@ -328,6 +394,19 @@ impl<E: Encoder + Packable> WaveletTreeTrait for WaveletTree<'_, E> {
         let (node, bv) = self.load_node_and_bit_vector(self.root.tree)?;
         let (e, sz) = self.encoder.encode(q)?;
         self.recursive_select(e, sz, node, bv, x)
+    }
+
+    fn symbol_rank_ranges(
+        &self,
+        lower: usize,
+        upper: usize,
+        ranges: &mut Vec<(u32, (usize, usize))>,
+    ) -> Option<()> {
+        if lower > upper || upper > self.len() {
+            return None;
+        }
+        ranges.clear();
+        self.recursive_symbol_rank_ranges(0, 0, self.root.tree, lower, upper, ranges)
     }
 }
 

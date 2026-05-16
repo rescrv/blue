@@ -146,8 +146,21 @@ impl Builder {
     pub fn push_word(&mut self, word: u64, bits: usize) {
         assert!(bits < 64);
         assert!(word & !((1u64 << bits) - 1) == 0);
-        for i in 0..bits {
-            self.push(word & (1u64 << i) != 0);
+        let mut word = word;
+        let mut bits = bits;
+        while bits > 0 {
+            let available = 8 - self.bits;
+            let take = std::cmp::min(available, bits);
+            let mask = (1u64 << take) - 1;
+            self.byte |= ((word & mask) as u8) << self.bits;
+            self.bits += take;
+            word >>= take;
+            bits -= take;
+            if self.bits == 8 {
+                self.bytes.push(self.byte);
+                self.byte = 0;
+                self.bits = 0;
+            }
         }
     }
 

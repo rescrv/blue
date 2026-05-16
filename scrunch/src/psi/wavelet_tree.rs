@@ -83,6 +83,8 @@ impl<WT: WaveletTree> Context<WT> {
 
 /////////////////////////////////////////// BuildContext ///////////////////////////////////////////
 
+#[cfg(test)]
+#[allow(dead_code)]
 #[derive(Debug)]
 struct BuildContext {
     ctx: [u32; CTX_MAX],
@@ -91,8 +93,275 @@ struct BuildContext {
     sums: Vec<usize>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CellSummary {
+    row: usize,
+    count: usize,
+}
+
+trait PsiIndex: Copy {
+    fn to_usize(self) -> usize;
+}
+
+impl PsiIndex for usize {
+    fn to_usize(self) -> usize {
+        self
+    }
+}
+
+impl PsiIndex for u32 {
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+}
+
+enum SaToSigma {
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+}
+
+impl SaToSigma {
+    fn new(k: usize, len: usize, bucket_limits: &[usize]) -> Result<Self, Error> {
+        if k <= u8::MAX as usize + 1 {
+            Ok(Self::U8(Self::build(k, len, bucket_limits)?))
+        } else if k <= u16::MAX as usize + 1 {
+            Ok(Self::U16(Self::build(k, len, bucket_limits)?))
+        } else {
+            Ok(Self::U32(Self::build(k, len, bucket_limits)?))
+        }
+    }
+
+    fn build<T: Copy + Default + TryFrom<usize>>(
+        k: usize,
+        len: usize,
+        bucket_limits: &[usize],
+    ) -> Result<Vec<T>, Error> {
+        if bucket_limits.len() != k {
+            return Err(Error::InvalidSigma);
+        }
+        let mut values = vec![T::default(); len];
+        let mut previous_limit = 0usize;
+        for (symbol, limit) in bucket_limits.iter().copied().enumerate() {
+            if limit < previous_limit || limit > len {
+                return Err(Error::InvalidSigma);
+            }
+            let symbol = T::try_from(symbol).map_err(|_| Error::IntoUsize)?;
+            values[previous_limit..limit].fill(symbol);
+            previous_limit = limit;
+        }
+        if previous_limit != len {
+            return Err(Error::InvalidSigma);
+        }
+        Ok(values)
+    }
+}
+
+trait SigmaMap {
+    unsafe fn get_unchecked_usize(&self, idx: usize) -> usize;
+}
+
+impl SigmaMap for [u8] {
+    #[inline(always)]
+    unsafe fn get_unchecked_usize(&self, idx: usize) -> usize {
+        // SAFETY(codex): this unsafe trait method requires callers to prove idx < self.len(); the
+        // slice contains initialized u8 values, and the shared read creates no aliasing violation
+        // under the Rustonomicon's unchecked indexing rules.
+        unsafe { *self.get_unchecked(idx) as usize }
+    }
+}
+
+impl SigmaMap for [u16] {
+    #[inline(always)]
+    unsafe fn get_unchecked_usize(&self, idx: usize) -> usize {
+        // SAFETY(codex): callers uphold the method contract that idx is in-bounds; reading an
+        // initialized u16 through a shared slice reference preserves Rustonomicon aliasing and
+        // lifetime requirements.
+        unsafe { *self.get_unchecked(idx) as usize }
+    }
+}
+
+impl SigmaMap for [u32] {
+    #[inline(always)]
+    unsafe fn get_unchecked_usize(&self, idx: usize) -> usize {
+        // SAFETY(codex): the unsafe method contract requires idx < self.len(); the u32 element is
+        // initialized and read immutably, so unchecked access satisfies Rustonomicon bounds,
+        // provenance, and aliasing rules.
+        unsafe { *self.get_unchecked(idx) as usize }
+    }
+}
+
+struct ContextState {
+    tree: Vec<u32>,
+    counts: Vec<usize>,
+    active: Vec<usize>,
+    cells_by_sigma: Vec<Vec<CellSummary>>,
+}
+
+fn flush_context<WT: WaveletTree, H: Helper>(
+    builder: &mut Builder<H>,
+    ctx: &[u32],
+    start: usize,
+    state: &mut ContextState,
+    row: usize,
+) -> Result<(), Error> {
+    for symbol in state.active.iter().copied() {
+        let count = std::mem::take(&mut state.counts[symbol]);
+        state.cells_by_sigma[symbol].push(CellSummary { row, count });
+    }
+    state.active.clear();
+    let mut builder = builder.sub(FieldNumber::must(CONTEXT_FIELD_NUMBER));
+    builder.append_vec_u32(FieldNumber::must(1), ctx);
+    builder.append_u64(FieldNumber::must(2), start as u64);
+    WT::construct(&state.tree, &mut builder.sub(FieldNumber::must(3)))?;
+    state.tree.clear();
+    Ok(())
+}
+
+fn construct_streaming<WT: WaveletTree, H: Helper, I: PsiIndex>(
+    sigma: &Sigma,
+    len: usize,
+    builder: &mut Builder<H>,
+    ipsi: impl IntoIterator<Item = I>,
+    psi_lookup: impl FnMut(usize) -> usize,
+) -> Result<(), Error> {
+    let mut bucket_limits = Vec::new();
+    sigma.bucket_limits(&mut bucket_limits)?;
+    let sa_to_sigma = SaToSigma::new(sigma.K(), len, &bucket_limits)?;
+    match sa_to_sigma {
+        SaToSigma::U8(values) => construct_streaming_mapped::<WT, H, I, _, _>(
+            sigma,
+            len,
+            builder,
+            ipsi,
+            psi_lookup,
+            values.as_slice(),
+        ),
+        SaToSigma::U16(values) => construct_streaming_mapped::<WT, H, I, _, _>(
+            sigma,
+            len,
+            builder,
+            ipsi,
+            psi_lookup,
+            values.as_slice(),
+        ),
+        SaToSigma::U32(values) => construct_streaming_mapped::<WT, H, I, _, _>(
+            sigma,
+            len,
+            builder,
+            ipsi,
+            psi_lookup,
+            values.as_slice(),
+        ),
+    }
+}
+
+fn construct_streaming_mapped<WT, H, I, F, M>(
+    sigma: &Sigma,
+    len: usize,
+    builder: &mut Builder<H>,
+    ipsi: impl IntoIterator<Item = I>,
+    mut psi_lookup: F,
+    sa_to_sigma: &M,
+) -> Result<(), Error>
+where
+    WT: WaveletTree,
+    H: Helper,
+    I: PsiIndex,
+    F: FnMut(usize) -> usize,
+    M: SigmaMap + ?Sized,
+{
+    const CTX_SZ: usize = 2;
+    let mut ctx = [0u32; CTX_MAX];
+    let mut state = ContextState {
+        tree: Vec::new(),
+        counts: vec![0usize; sigma.K()],
+        active: Vec::new(),
+        cells_by_sigma: vec![Vec::new(); sigma.K()],
+    };
+    let mut start = 0usize;
+    let mut row = 0usize;
+    let mut seen = 0usize;
+    for (i, ipsi) in ipsi.into_iter().enumerate() {
+        if i >= len {
+            return Err(Error::InvalidPsi);
+        }
+        seen += 1;
+        let mut tmp = ctx;
+        // SAFETY(codex): i is checked against len above, and SaToSigma::new builds sa_to_sigma with
+        // exactly len initialized entries; the unsafe trait method's in-bounds precondition is met.
+        tmp[0] = unsafe { sa_to_sigma.get_unchecked_usize(i) as u32 };
+        let mut idx = i;
+        for t in tmp.iter_mut().take(CTX_SZ).skip(1) {
+            idx = psi_lookup(idx);
+            if idx >= len {
+                return Err(Error::InvalidSigma);
+            }
+            // SAFETY(codex): idx was checked to be less than len, and sa_to_sigma has len
+            // initialized entries; this shared read is in-bounds and preserves Rustonomicon
+            // aliasing guarantees.
+            *t = unsafe { sa_to_sigma.get_unchecked_usize(idx) as u32 };
+        }
+        if ctx != tmp {
+            if i > 0 {
+                flush_context::<WT, H>(builder, &ctx[..CTX_SZ], start, &mut state, row)?;
+                row += 1;
+            }
+            ctx = tmp;
+            start = i;
+        }
+        let ipsi = ipsi.to_usize();
+        if ipsi >= len {
+            return Err(Error::InvalidSigma);
+        }
+        // SAFETY(codex): ipsi was checked against len, and SaToSigma's backing map has exactly len
+        // initialized symbols; the unchecked read therefore meets Rustonomicon bounds and aliasing
+        // requirements.
+        let symbol = unsafe { sa_to_sigma.get_unchecked_usize(ipsi) };
+        state.tree.push(symbol as u32);
+        // SAFETY(codex): sa_to_sigma values are built from bucket symbols in 0..sigma.K(), and
+        // counts.len() == sigma.K(); this immutable initialized read is in-bounds and alias-safe.
+        if unsafe { *state.counts.get_unchecked(symbol) } == 0 {
+            state.active.push(symbol);
+        }
+        // SAFETY(codex): the same symbol-domain proof gives symbol < counts.len(); counts is
+        // uniquely borrowed mutably here, so the initialized increment follows Rustonomicon
+        // exclusivity and bounds rules.
+        unsafe {
+            *state.counts.get_unchecked_mut(symbol) += 1;
+        }
+    }
+    if seen != len {
+        return Err(Error::InvalidPsi);
+    }
+    flush_context::<WT, H>(builder, &ctx[..CTX_SZ], start, &mut state, row)?;
+    let mut y_value = vec![];
+    let mut y_key = vec![];
+    let mut sum = 0usize;
+    for cells in state.cells_by_sigma {
+        for cell in cells {
+            if sum > 0 {
+                y_key.push(sum - 1);
+            }
+            y_value.push(cell.row);
+            sum += cell.count;
+        }
+    }
+    y_key.push(sum - 1);
+    BitVector::from_indices(
+        128,
+        sum,
+        &y_key,
+        &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER)),
+    )
+    .ok_or(Error::InvalidBitVector)?;
+    builder.append_vec_usize(FieldNumber::must(Y_VALUE_FIELD_NUMBER), &y_value);
+    Ok(())
+}
+
 /////////////////////////////////////////////// Table //////////////////////////////////////////////
 
+#[cfg(test)]
 fn compute_table(sigma: &Sigma, ctx_sz: usize, psi: &[usize]) -> Result<Vec<BuildContext>, Error> {
     let mut ctx = [0u32; CTX_MAX];
     // compute the inverse of psi so that we can bounce around the columns in order
@@ -218,6 +487,35 @@ where
 }
 
 impl<WT: WaveletTree> WaveletTreePsi<'_, WT> {
+    fn row_for_index(&self, idx: usize) -> Result<usize, Error> {
+        let row = self.table.partition_point(|row| row.start <= idx);
+        row.checked_sub(1).ok_or(Error::BadIndex(idx))
+    }
+
+    fn cell_start_for_symbol_row(
+        &self,
+        sigma: &Sigma,
+        symbol: u32,
+        row: usize,
+    ) -> Result<Option<usize>, Error> {
+        let range = sigma.sa_range_for_sigma(symbol)?;
+        if range.0 > range.1 {
+            return Ok(None);
+        }
+        let first_cell = self.y_key.rank(range.0).ok_or(Error::BadRank(range.0))?;
+        let last_cell = self.y_key.rank(range.1).ok_or(Error::BadRank(range.1))?;
+        let cells = &self.y_value[first_cell..=last_cell];
+        let offset = cells.partition_point(|candidate| *candidate < row);
+        if offset >= cells.len() || cells[offset] != row {
+            return Ok(None);
+        }
+        let cell = first_cell + offset;
+        self.y_key
+            .select(cell)
+            .ok_or(Error::BadSelect(cell))
+            .map(Some)
+    }
+
     // Find the lowest index of psi in the range [into.0, into.1] s.t. psi[idx] >= point.
     //
     // Requires that into be a closed range.
@@ -344,39 +642,51 @@ impl<WT: WaveletTree> super::Psi for WaveletTreePsi<'_, WT> {
         psi: &[usize],
         builder: &mut Builder<H>,
     ) -> Result<(), Error> {
-        const CTX_SZ: usize = 2;
-        let table = compute_table(sigma, CTX_SZ, psi)?;
-        let mut y_value = vec![];
-        let mut y_key = vec![];
-        let mut sum = 0;
-        for i in 0..sigma.K() {
-            for (idx, t) in table.iter().enumerate() {
-                let in_cell = t.sums.get(i).copied().unwrap_or(0);
-                if in_cell > 0 {
-                    if sum > 0 {
-                        y_key.push(sum - 1);
-                    }
-                    y_value.push(idx);
-                    sum += in_cell;
-                }
+        if u32::try_from(psi.len()).is_ok() {
+            let mut ipsi = vec![0u32; psi.len()];
+            for (idx, value) in psi.iter().copied().enumerate() {
+                ipsi[value] = idx as u32;
             }
+            construct_streaming::<WT, H, _>(sigma, psi.len(), builder, ipsi, |idx| psi[idx])
+        } else {
+            construct_streaming::<WT, H, _>(sigma, psi.len(), builder, inverse(psi), |idx| psi[idx])
         }
-        for t in table.iter() {
-            let mut builder = builder.sub(FieldNumber::must(CONTEXT_FIELD_NUMBER));
-            builder.append_vec_u32(FieldNumber::must(1), &t.ctx[..CTX_SZ]);
-            builder.append_u64(FieldNumber::must(2), t.start as u64);
-            WT::construct(&t.tree, &mut builder.sub(FieldNumber::must(3)))?;
+    }
+
+    fn construct_u32<H: Helper>(
+        sigma: &Sigma,
+        psi: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let ipsi = inverse_psi_u32(psi);
+        construct_streaming::<WT, H, _>(sigma, psi.len(), builder, ipsi, |idx| psi[idx] as usize)
+    }
+
+    fn construct_from_sa_isa_u32<H: Helper>(
+        sigma: &Sigma,
+        sa: &[u32],
+        isa: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        if sa.len() != isa.len() {
+            return Err(Error::InvalidPsi);
         }
-        y_key.push(sum - 1);
-        BitVector::from_indices(
-            128,
-            sum,
-            &y_key,
-            &mut builder.sub(FieldNumber::must(Y_KEY_FIELD_NUMBER)),
-        )
-        .ok_or(Error::InvalidBitVector)?;
-        builder.append_vec_usize(FieldNumber::must(Y_VALUE_FIELD_NUMBER), &y_value);
-        Ok(())
+        let ipsi = sa.iter().copied().map(|pos| {
+            let pos = pos as usize;
+            if pos == 0 {
+                isa[isa.len() - 1]
+            } else {
+                isa[pos - 1]
+            }
+        });
+        construct_streaming::<WT, H, _>(sigma, sa.len(), builder, ipsi, |idx| {
+            let pos = sa[idx] as usize;
+            if pos + 1 == isa.len() {
+                isa[0] as usize
+            } else {
+                isa[pos + 1] as usize
+            }
+        })
     }
 
     fn len(&self) -> usize {
@@ -420,6 +730,96 @@ impl<WT: WaveletTree> super::Psi for WaveletTreePsi<'_, WT> {
         let upper = self.upper_bound(sigma, into.1, range)?;
         Ok((lower, upper))
     }
+
+    fn predecessor_sigma_symbols(
+        &self,
+        sigma: &Sigma,
+        range: (usize, usize),
+        symbols: &mut Vec<u32>,
+    ) -> Result<bool, Error> {
+        symbols.clear();
+        if range.0 > range.1 || self.table.is_empty() {
+            return Ok(true);
+        }
+        let len = range.1 - range.0 + 1;
+        if len.saturating_mul(32) >= sigma.K().saturating_sub(1) {
+            return Ok(false);
+        }
+        for idx in range.0..=range.1 {
+            let row = self.table.partition_point(|row| row.start <= idx);
+            let Some(row) = row.checked_sub(1) else {
+                return Err(Error::BadIndex(idx));
+            };
+            let row = &self.table[row];
+            let Some(symbol) = row.tree.access(idx - row.start) else {
+                return Err(Error::BadIndex(idx));
+            };
+            if symbol != 0 && !symbols.contains(&symbol) {
+                symbols.push(symbol);
+            }
+        }
+        Ok(true)
+    }
+
+    fn predecessor_sigma_ranges(
+        &self,
+        sigma: &Sigma,
+        range: (usize, usize),
+        ranges: &mut Vec<(u32, (usize, usize))>,
+    ) -> Result<bool, Error> {
+        ranges.clear();
+        if range.0 > range.1 || self.table.is_empty() {
+            return Ok(true);
+        }
+        let first_row = self.row_for_index(range.0)?;
+        let last_row = self.row_for_index(range.1)?;
+        if first_row == last_row {
+            let row = &self.table[first_row];
+            let lower = range.0 - row.start;
+            let upper = range.1 - row.start + 1;
+            row.tree
+                .symbol_rank_ranges(lower, upper, ranges)
+                .ok_or(Error::BadIndex(upper))?;
+            let mut write = 0;
+            for read in 0..ranges.len() {
+                let (symbol, (lower_rank, upper_rank)) = ranges[read];
+                if symbol == 0 {
+                    continue;
+                }
+                let Some(cell_start) = self.cell_start_for_symbol_row(sigma, symbol, first_row)?
+                else {
+                    return Err(Error::BadIndex(first_row));
+                };
+                ranges[write] = (
+                    symbol,
+                    (cell_start + lower_rank, cell_start + upper_rank - 1),
+                );
+                write += 1;
+            }
+            ranges.truncate(write);
+            return Ok(true);
+        }
+        let mut symbols = Vec::new();
+        if !self.predecessor_sigma_symbols(sigma, range, &mut symbols)? {
+            return Ok(false);
+        }
+        for symbol in symbols {
+            let symbol_range = sigma.sa_range_for_sigma(symbol)?;
+            let constrained = self.constrain(sigma, symbol_range, range)?;
+            if constrained.0 <= constrained.1 {
+                ranges.push((symbol, constrained));
+            }
+        }
+        Ok(true)
+    }
+}
+
+fn inverse_psi_u32(psi: &[u32]) -> Vec<u32> {
+    let mut ipsi = vec![0u32; psi.len()];
+    for (idx, value) in psi.iter().copied().enumerate() {
+        ipsi[value as usize] = idx as u32;
+    }
+    ipsi
 }
 
 impl<'a, WT> Unpackable<'a> for WaveletTreePsi<'a, WT>

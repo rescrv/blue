@@ -15,6 +15,23 @@ pub trait Psi {
         psi: &[usize],
         builder: &mut Builder<H>,
     ) -> Result<(), Error>;
+    fn construct_u32<H: Helper>(
+        sigma: &Sigma,
+        psi: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let psi: Vec<usize> = psi.iter().map(|x| *x as usize).collect();
+        Self::construct(sigma, &psi, builder)
+    }
+    fn construct_from_sa_isa_u32<H: Helper>(
+        sigma: &Sigma,
+        sa: &[u32],
+        isa: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let psi = compute_from_sa_isa_u32(sa, isa);
+        Self::construct_u32(sigma, &psi, builder)
+    }
 
     /// The length of the psi.  Should be the same as the number of symbols in the text +
     /// terminating symbol.
@@ -43,6 +60,30 @@ pub trait Psi {
         range: (usize, usize),
         into: (usize, usize),
     ) -> Result<(usize, usize), Error>;
+
+    /// Populate `symbols` with sigma-domain predecessor symbols for `range` when this Psi can do
+    /// so cheaply.  Returns `Ok(true)` if `symbols` is complete and `Ok(false)` if callers should
+    /// fall back to trying the full alphabet.
+    fn predecessor_sigma_symbols(
+        &self,
+        _sigma: &Sigma,
+        _range: (usize, usize),
+        _symbols: &mut Vec<u32>,
+    ) -> Result<bool, Error> {
+        Ok(false)
+    }
+
+    /// Populate `ranges` with sigma-domain predecessor symbols and their constrained suffix-array
+    /// ranges for a backwards-search step into `range`.  Returns `Ok(true)` if `ranges` is complete
+    /// and `Ok(false)` if callers should fall back to repeated `constrain` calls.
+    fn predecessor_sigma_ranges(
+        &self,
+        _sigma: &Sigma,
+        _range: (usize, usize),
+        _ranges: &mut Vec<(u32, (usize, usize))>,
+    ) -> Result<bool, Error> {
+        Ok(false)
+    }
 }
 
 ///////////////////////////////////////// ReferencePsiStub /////////////////////////////////////////
@@ -152,6 +193,29 @@ pub fn compute(isa: &[usize]) -> Vec<usize> {
     psi
 }
 
+pub fn compute_u32(isa: &[u32]) -> Vec<u32> {
+    let mut psi = vec![0u32; isa.len()];
+    psi[isa[isa.len() - 1] as usize] = isa[0];
+    for i in 1..isa.len() {
+        psi[isa[i - 1] as usize] = isa[i];
+    }
+    psi
+}
+
+pub fn compute_from_sa_isa_u32(sa: &[u32], isa: &[u32]) -> Vec<u32> {
+    assert_eq!(sa.len(), isa.len());
+    let mut psi = vec![0u32; sa.len()];
+    for (idx, pos) in sa.iter().copied().enumerate() {
+        let pos = pos as usize;
+        psi[idx] = if pos + 1 == isa.len() {
+            isa[0]
+        } else {
+            isa[pos + 1]
+        };
+    }
+    psi
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -214,6 +278,27 @@ pub mod tests {
                 *into,
                 *answer
             );
+            let mut ranges = Vec::new();
+            if psi
+                .predecessor_sigma_ranges(&sigma, *into, &mut ranges)
+                .unwrap()
+            {
+                for (symbol, returned) in ranges.iter().copied() {
+                    let symbol_range = sigma.sa_range_for_sigma(symbol).unwrap();
+                    let expected = psi.constrain(&sigma, symbol_range, *into).unwrap();
+                    assert_eq_with_ctx!(expected, returned, symbol, *into);
+                }
+                let symbol = sigma.sa_index_to_sigma(range.0).unwrap();
+                let returned = ranges
+                    .iter()
+                    .find(|(candidate, _)| *candidate == symbol)
+                    .map(|(_, range)| *range);
+                if answer.0 <= answer.1 {
+                    assert_eq_with_ctx!(Some(*answer), returned, symbol, *into);
+                } else {
+                    assert_eq_with_ctx!(None, returned, symbol, *into);
+                }
+            }
         }
     }
 

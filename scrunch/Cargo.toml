@@ -22,6 +22,7 @@ proptest = { workspace = true }
 
 arrrg = { workspace = true }
 guacamole = { workspace = true }
+libc = { workspace = true }
 statslicer = { workspace = true }
 
 [[bin]]
@@ -40,4 +41,16 @@ harness = false
 
 [[bench]]
 name = "rrr_bit_vector"
+harness = false
+
+[[bench]]
+name = "wavelet_psi"
+harness = false
+
+[[bench]]
+name = "sais"
+harness = false
+
+[[bench]]
+name = "exemplars"
 harness = false

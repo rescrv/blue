@@ -52,6 +52,29 @@ impl SampledArray<'_> {
         Ok(())
     }
 
+    pub fn construct_u32<H: Helper>(
+        values: &[(usize, u32)],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let bits = bits_required(values.iter().map(|(_, x)| *x as u64).max().unwrap_or(1));
+        let mut sparse = Vec::with_capacity(values.len());
+        let mut bitwords = BitArrayBuilder::with_capacity(values.len());
+        for (offset, value) in values.iter() {
+            sparse.push(*offset);
+            bitwords.push_word(*value as u64, bits as usize);
+        }
+        builder.append_u32(FieldNumber::must(1), bits as u32);
+        BitVector::from_indices(
+            128,
+            values[values.len() - 1].0 + 1,
+            &sparse,
+            &mut builder.sub(FieldNumber::must(3)),
+        );
+        let bitwords = bitwords.seal();
+        builder.append_bytes(FieldNumber::must(2), &bitwords);
+        Ok(())
+    }
+
     pub fn parse<'b, 'c: 'b>(buf: &'c [u8]) -> Result<(SampledArray<'b>, &'c [u8]), Error> {
         let (
             SampledArrayStub {

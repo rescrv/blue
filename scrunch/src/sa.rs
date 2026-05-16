@@ -17,6 +17,14 @@ pub trait SuffixArray {
         sa: &[usize],
         builder: &mut Builder<H>,
     ) -> Result<(), Error>;
+    fn construct_u32<H: Helper>(
+        sampling: usize,
+        sa: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        let sa: Vec<usize> = sa.iter().map(|x| *x as usize).collect();
+        Self::construct(sampling, &sa, builder)
+    }
     fn lookup<PSI: psi::Psi>(&self, sigma: &Sigma, psi: &PSI, idx: usize) -> Result<usize, Error>;
 }
 
@@ -140,6 +148,29 @@ impl SuffixArray for SampledSuffixArray<'_> {
         builder.append_u32(FieldNumber::must(1), sampling as u32);
         builder.append_u64(FieldNumber::must(2), sa[0] as u64);
         SampledArray::construct(&values, &mut builder.sub(FieldNumber::must(3)))?;
+        Ok(())
+    }
+
+    fn construct_u32<H: Helper>(
+        sampling: usize,
+        sa: &[u32],
+        builder: &mut Builder<H>,
+    ) -> Result<(), Error> {
+        if sampling > 31 {
+            return Err(Error::InvalidSuffixArray);
+        }
+        let stride = 1u32
+            .checked_shl(sampling as u32)
+            .ok_or(Error::InvalidSuffixArray)?;
+        let mut values = vec![];
+        for (idx, &sa) in sa.iter().enumerate() {
+            if sa % stride == 0 {
+                values.push((idx, sa >> sampling));
+            }
+        }
+        builder.append_u32(FieldNumber::must(1), sampling as u32);
+        builder.append_u64(FieldNumber::must(2), sa[0] as u64);
+        SampledArray::construct_u32(&values, &mut builder.sub(FieldNumber::must(3)))?;
         Ok(())
     }
 
