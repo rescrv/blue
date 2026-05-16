@@ -130,7 +130,7 @@ quote = { version = "1.0" }
 serde_yaml = { version = "0.9" }
 serde_json = { version = "1.0" }
 siphasher = { version = "1.0.0" }
-libsodium-sys-stable = { version = "1.19" }
+libsodium-sys-stable = { version = "1.24.0" }
 
 [profile.dev]
 panic = "abort"

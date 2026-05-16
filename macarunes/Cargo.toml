@@ -14,3 +14,6 @@ biometrics = { workspace = true }
 buffertk = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
