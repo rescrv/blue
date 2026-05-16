@@ -1,0 +1,12 @@
+[package]
+name = "maildir2026"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "maildir2026 provides a small Maildir-style file handoff protocol."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
+libc = { workspace = true }
+utf8path = { workspace = true }
