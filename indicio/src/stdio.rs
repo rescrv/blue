@@ -2,8 +2,8 @@ use std::time::SystemTime;
 
 use super::*;
 
-/// An Emitter that writes clues to stderr.  When the file reaches its size
-/// threshold, it rolls over to the next file.
+/// An Emitter that writes clues to stderr.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StdioEmitter;
 
 impl Emitter for StdioEmitter {

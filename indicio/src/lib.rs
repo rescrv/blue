@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,12 @@ use biometrics::Counter;
 use tatl::{HeyListen, Stationary};
 
 pub mod stdio;
+pub use stdio::StdioEmitter;
 
 #[cfg(feature = "prototk")]
 pub mod protobuf;
+#[cfg(feature = "prototk")]
+pub use protobuf::{ClueFrame, ClueVector, ProtobufEmitter};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -47,6 +50,32 @@ pub struct Values {
     values: Vec<Value>,
 }
 
+impl Values {
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+
+    pub fn push(&mut self, value: Value) {
+        self.values.push(value);
+    }
+
+    pub fn as_slice(&self) -> &[Value] {
+        self.values.as_slice()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Value> + '_ {
+        self.values.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
 impl Deref for Values {
     type Target = Vec<Value>;
 
@@ -72,12 +101,27 @@ pub struct MapEntry {
     value: Value,
 }
 
+impl MapEntry {
+    pub fn new(key: String, value: Value) -> Self {
+        Self { key, value }
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    pub fn into_pair(self) -> (String, Value) {
+        (self.key, self.value)
+    }
+}
+
 impl From<(String, Value)> for MapEntry {
     fn from(entry: (String, Value)) -> Self {
-        Self {
-            key: entry.0,
-            value: entry.1,
-        }
+        Self::new(entry.0, entry.1)
     }
 }
 
@@ -95,8 +139,27 @@ impl Map {
         self.entries.push(MapEntry::from((key, value)));
     }
 
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.entries
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| &entry.value)
+    }
+
+    pub fn entries(&self) -> &[MapEntry] {
+        self.entries.as_slice()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> + '_ {
         self.entries.iter().map(|e| (e.key.as_str(), &e.value))
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
@@ -107,6 +170,97 @@ impl FromIterator<(String, Value)> for Map {
         }
     }
 }
+
+///////////////////////////////////////////// ValueKind ////////////////////////////////////////////
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValueKind {
+    Bool,
+    U64,
+    I64,
+    F64,
+    String,
+    Array,
+    Object,
+}
+
+impl Display for ValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            ValueKind::Bool => write!(f, "bool"),
+            ValueKind::U64 => write!(f, "u64"),
+            ValueKind::I64 => write!(f, "i64"),
+            ValueKind::F64 => write!(f, "f64"),
+            ValueKind::String => write!(f, "string"),
+            ValueKind::Array => write!(f, "array"),
+            ValueKind::Object => write!(f, "object"),
+        }
+    }
+}
+
+////////////////////////////////////////// ExtractionError /////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExtractionErrorKind {
+    Missing,
+    TypeMismatch {
+        expected: &'static str,
+        actual: ValueKind,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtractionError {
+    path: Vec<String>,
+    kind: ExtractionErrorKind,
+}
+
+impl ExtractionError {
+    pub fn missing(path: &[&str]) -> Self {
+        Self {
+            path: path.iter().map(|segment| segment.to_string()).collect(),
+            kind: ExtractionErrorKind::Missing,
+        }
+    }
+
+    pub fn type_mismatch(path: &[&str], expected: &'static str, actual: ValueKind) -> Self {
+        Self {
+            path: path.iter().map(|segment| segment.to_string()).collect(),
+            kind: ExtractionErrorKind::TypeMismatch { expected, actual },
+        }
+    }
+
+    pub fn path(&self) -> &[String] {
+        self.path.as_slice()
+    }
+
+    pub fn kind(&self) -> &ExtractionErrorKind {
+        &self.kind
+    }
+}
+
+impl Display for ExtractionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let path = if self.path.is_empty() {
+            "<root>".to_string()
+        } else {
+            self.path.join(".")
+        };
+        match self.kind {
+            ExtractionErrorKind::Missing => {
+                write!(f, "missing value at {path}")
+            }
+            ExtractionErrorKind::TypeMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "type mismatch at {path}: expected {expected}, found {actual}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExtractionError {}
 
 /////////////////////////////////////////////// Value //////////////////////////////////////////////
 
@@ -132,16 +286,92 @@ pub enum Value {
 impl Value {
     pub fn lookup(&self, key: &str) -> Option<&Value> {
         if let Value::Object(map) = self {
-            map.entries
-                .iter()
-                .filter(|e| e.key == key)
-                .take(1)
-                .map(|e| &e.value)
-                .next()
+            map.get(key)
         } else {
             None
         }
     }
+
+    pub fn lookup_path(&self, path: &[&str]) -> Option<&Value> {
+        let mut value = self;
+        for segment in path {
+            value = value.lookup(segment)?;
+        }
+        Some(value)
+    }
+
+    pub fn kind(&self) -> ValueKind {
+        match self {
+            Value::Bool(_) => ValueKind::Bool,
+            Value::U64(_) => ValueKind::U64,
+            Value::I64(_) => ValueKind::I64,
+            Value::F64(_) => ValueKind::F64,
+            Value::String(_) => ValueKind::String,
+            Value::Array(_) => ValueKind::Array,
+            Value::Object(_) => ValueKind::Object,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        if let Value::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        if let Value::U64(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        if let Value::I64(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        if let Value::F64(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        if let Value::String(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&Values> {
+        if let Value::Array(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Map> {
+        if let Value::Object(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+#[doc(hidden)]
+pub fn lookup_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    value.lookup_path(path)
 }
 
 impl Default for Value {
@@ -152,43 +382,48 @@ impl Default for Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        fn write_escaped_string(f: &mut fmt::Formatter<'_>, input: &str) -> Result<(), fmt::Error> {
+            write!(f, "\"")?;
+            for c in input.chars() {
+                match c {
+                    '\\' => write!(f, "\\\\")?,
+                    '\n' => write!(f, "\\n")?,
+                    '\r' => write!(f, "\\r")?,
+                    '\t' => write!(f, "\\t")?,
+                    '"' => write!(f, "\\\"")?,
+                    c if c.is_control() => write!(f, "\\u{:04x}", c as u32)?,
+                    c => write!(f, "{c}")?,
+                }
+            }
+            write!(f, "\"")
+        }
+
         match self {
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::U64(x) => write!(f, "{x}"),
             Value::I64(x) => write!(f, "{x}"),
             Value::F64(x) => write!(f, "{x}"),
-            Value::String(s) => {
-                pub fn escape(input: &str) -> String {
-                    let mut out: Vec<char> = Vec::new();
-                    for c in input.chars() {
-                        if c == '\\' {
-                            out.push('\\');
-                            out.push('\\');
-                        } else if c == '\n' {
-                            out.push('\\');
-                            out.push('n');
-                        } else if c == '"' {
-                            out.push('\\');
-                            out.push('"');
-                        } else {
-                            out.push(c);
-                        }
-                    }
-                    out.into_iter().collect()
-                }
-                write!(f, "\"{}\"", escape(s))
-            }
+            Value::String(s) => write_escaped_string(f, s),
             Value::Array(values) => {
-                let values = values.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-                write!(f, "[{}]", values.join(", "))
+                write!(f, "[")?;
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{value}")?;
+                }
+                write!(f, "]")
             }
             Value::Object(values) => {
-                let values = values
-                    .entries
-                    .iter()
-                    .map(|entry| format!("\"{}\": {}", entry.key, entry.value))
-                    .collect::<Vec<_>>();
-                write!(f, "{{{}}}", values.join(", "))
+                write!(f, "{{")?;
+                for (index, entry) in values.entries.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write_escaped_string(f, &entry.key)?;
+                    write!(f, ": {}", entry.value)?;
+                }
+                write!(f, "}}")
             }
         }
     }
@@ -356,6 +591,7 @@ macro_rules! value {
     };
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! value_internal {
     (@array [$($elems:expr,)*]) => {
@@ -469,20 +705,20 @@ macro_rules! value_internal {
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
 /// An emitter for indicio that emits values.
-pub trait Emitter: Send {
+pub trait Emitter: Send + Sync {
     /// Emit the provided value at the specified file/line.
     fn emit(&self, file: &str, line: u32, level: u64, value: Value);
     /// Flush the emitter with whatever semantics the emitter chooses.
     fn flush(&self) {}
 }
 
-impl<E: Emitter + Sync> Emitter for Arc<E> {
+impl<E: Emitter + ?Sized> Emitter for Arc<E> {
     fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
-        <E as Emitter>::emit(self, file, line, level, value)
+        <E as Emitter>::emit(self.as_ref(), file, line, level, value)
     }
 
     fn flush(&self) {
-        <E as Emitter>::flush(self)
+        <E as Emitter>::flush(self.as_ref())
     }
 }
 
@@ -554,7 +790,7 @@ impl_tuple_emitter! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
 pub struct Collector {
     should_log: AtomicBool,
     verbosity: AtomicU64,
-    emitter: Mutex<Option<Box<dyn Emitter>>>,
+    emitter: Mutex<Option<Arc<dyn Emitter>>>,
 }
 
 impl Collector {
@@ -569,25 +805,30 @@ impl Collector {
 
     /// True iff the collector is actively logging.
     pub fn is_logging(&self) -> bool {
-        self.should_log.load(Ordering::Relaxed)
+        self.should_log.load(Ordering::Acquire)
     }
 
     /// The verbosity of the log.  0 is least verbose, N is N levels of verbosity.
     pub fn verbosity(&self) -> u64 {
-        self.verbosity.load(Ordering::Relaxed)
+        self.verbosity.load(Ordering::Acquire)
     }
 
     /// Set the verbosity of the log.
     pub fn set_verbosity(&self, verbosity: u64) {
-        self.verbosity.store(verbosity, Ordering::Relaxed);
+        self.verbosity.store(verbosity, Ordering::Release);
+    }
+
+    /// True iff the collector will emit for the specified level.
+    pub fn enabled(&self, level: u64) -> bool {
+        self.is_logging() && self.verbosity() >= level
     }
 
     /// Emit the value via the collector if and only if it is logging and has an emitter
     /// configured.
     pub fn emit(&self, file: &str, line: u32, level: u64, value: Value) {
-        if self.is_logging() && self.verbosity() >= level {
-            let mut emitter = self.emitter.lock().unwrap();
-            if let Some(emitter) = emitter.as_deref_mut() {
+        if self.enabled(level) {
+            let emitter = self.emitter.lock().unwrap().clone();
+            if let Some(emitter) = emitter {
                 emitter.emit(file, line, level, value);
             }
         }
@@ -595,25 +836,29 @@ impl Collector {
 
     /// Call flush on the underlying emitter, if one is registered.
     pub fn flush(&self) {
-        let mut emitter = self.emitter.lock().unwrap();
-        if let Some(emitter) = emitter.as_deref_mut() {
+        let emitter = self.emitter.lock().unwrap().clone();
+        if let Some(emitter) = emitter {
             emitter.flush();
         }
     }
 
     /// Register the emitter with the collector.
     pub fn register<E: Emitter + 'static>(&self, emitter: E) {
-        let boxed: Box<dyn Emitter> = Box::new(emitter);
-        let mut emitter = self.emitter.lock().unwrap();
-        *emitter = Some(boxed);
-        self.should_log.store(true, Ordering::Relaxed);
+        self.register_arc(Arc::new(emitter));
+    }
+
+    /// Register a shared emitter with the collector.
+    pub fn register_arc(&self, emitter: Arc<dyn Emitter>) {
+        let mut current = self.emitter.lock().unwrap();
+        *current = Some(emitter);
+        self.should_log.store(true, Ordering::Release);
     }
 
     /// Unregister any emitter from the collector.
     pub fn deregister(&self) {
         let mut emitter = self.emitter.lock().unwrap();
         *emitter = None;
-        self.should_log.store(false, Ordering::Relaxed);
+        self.should_log.store(false, Ordering::Release);
     }
 }
 
@@ -625,7 +870,7 @@ impl Default for Collector {
 
 /////////////////////////////////////////////// Clue ///////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "prototk", derive(prototk_derive::Message))]
 pub struct Clue {
     #[cfg_attr(feature = "prototk", prototk(1, string))]
@@ -657,12 +902,14 @@ impl Display for Clue {
 /// This will be lazy, and only evaluate the key-value pair if the collector is logging.
 #[macro_export]
 macro_rules! clue {
-    ($collector:path, $level:expr, { $($value:tt)* }) => {
-        if $collector.is_logging() && $collector.verbosity() >= $level {
+    ($collector:expr, $level:expr, { $($value:tt)* }) => {{
+        let collector = &$collector;
+        let level = $level;
+        if collector.enabled(level) {
             let loc = concat!(module_path!(), " ", file!());
-            $collector.emit(loc, line!(), $level, $crate::value!({ $($value)* }));
+            collector.emit(loc, line!(), level, $crate::value!({ $($value)* }));
         }
-    };
+    }};
 }
 
 ////////////////////////////////////// the puzzle_piece macro //////////////////////////////////////
@@ -671,68 +918,92 @@ macro_rules! clue {
 #[macro_export]
 macro_rules! puzzle_piece {
     ($type_name:ident { $($tt:tt)* }) => {
-        puzzle_piece!(@struct [$type_name] {} ($($tt)*));
+        $crate::puzzle_piece!(@struct [$type_name] {} ($($tt)*));
         impl $type_name {
-            pub fn extract(value: &indicio::Value) -> Option<Self> {
+            pub fn try_extract(value: &$crate::Value) -> Result<Self, $crate::ExtractionError> {
                 let mut this = Self::default();
-                puzzle_piece!(@extract this value [] ($($tt)*));
-                Some(this)
+                $crate::puzzle_piece!(@extract this value [] ($($tt)*));
+                Ok(this)
+            }
+
+            pub fn extract(value: &$crate::Value) -> Option<Self> {
+                Self::try_extract(value).ok()
             }
         }
     };
 
-    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ()) => {
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ()) => {
         #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
         pub struct $type_name {
             $($field: $ty,)*
         }
     };
 
-    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: $new_ty:path, $($tt:tt)*)) => {
-        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* $new_field: $new_ty, } ($($tt)*));
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ($new_field:ident: $new_ty:ty, $($tt:tt)*)) => {
+        $crate::puzzle_piece!(@struct [$type_name] { $($field: $ty,)* $new_field: $new_ty, } ($($tt)*));
     };
 
-    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* })) => {
-        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ($new_field:ident: $new_ty:ty)) => {
+        $crate::puzzle_piece!(@struct [$type_name] { $($field: $ty,)* $new_field: $new_ty, } ());
     };
 
-    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* },)) => {
-        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ($new_field:ident: { $($tt1:tt)* })) => {
+        $crate::puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
     };
 
-    (@struct [$type_name:ident] { $($field:ident: $ty:path,)* } ($new_field:ident: { $($tt1:tt)* }, $($tt2:tt)*)) => {
-        puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)* $($tt2)*));
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ($new_field:ident: { $($tt1:tt)* },)) => {
+        $crate::puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)*));
+    };
+
+    (@struct [$type_name:ident] { $($field:ident: $ty:ty,)* } ($new_field:ident: { $($tt1:tt)* }, $($tt2:tt)*)) => {
+        $crate::puzzle_piece!(@struct [$type_name] { $($field: $ty,)* } ($($tt1)* $($tt2)*));
     };
 
     (@extract $this:ident $value:ident [] ()) => {
     };
 
-    (@extract $this:ident $value:ident [$($key:ident)*] $new_field:ident) => {
-        let v = $value;
-        $(let v = v.lookup(stringify!($key))?;)*
-        $this.$new_field = v.try_into().ok()?;
+    (@extract $this:ident $value:ident [$($key:ident)*] $new_field:ident: $new_ty:ty) => {
+        {
+            const __PATH: &[&str] = &[$(stringify!($key),)* stringify!($new_field)];
+            let v = $crate::lookup_path($value, __PATH)
+                .ok_or_else(|| $crate::ExtractionError::missing(__PATH))?;
+            $this.$new_field = match <$new_ty as std::convert::TryFrom<&$crate::Value>>::try_from(v) {
+                Ok(value) => value,
+                Err(_) => {
+                    return Err($crate::ExtractionError::type_mismatch(
+                        __PATH,
+                        stringify!($new_ty),
+                        v.kind(),
+                    ));
+                }
+            };
+        }
     };
 
-    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:path,)) => {
-        puzzle_piece!(@extract $this $value [$($key)* $new_field] $new_field);
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:ty,)) => {
+        $crate::puzzle_piece!(@extract $this $value [$($key)*] $new_field: $new_ty);
     };
 
-    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:path, $($tt:tt)*)) => {
-        puzzle_piece!(@extract $this $value [$($key)* $new_field] $new_field);
-        puzzle_piece!(@extract $this $value [$($key)*] ($($tt)*));
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:ty)) => {
+        $crate::puzzle_piece!(@extract $this $value [$($key)*] $new_field: $new_ty);
+    };
+
+    (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: $new_ty:ty, $($tt:tt)*)) => {
+        $crate::puzzle_piece!(@extract $this $value [$($key)*] $new_field: $new_ty);
+        $crate::puzzle_piece!(@extract $this $value [$($key)*] ($($tt)*));
     };
 
     (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* }, $($tt2:tt)*)) => {
-        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt1)*));
-        puzzle_piece!(@extract $this $value [$($key)*] ($($tt2)*));
+        $crate::puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt1)*));
+        $crate::puzzle_piece!(@extract $this $value [$($key)*] ($($tt2)*));
     };
 
     (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* })) => {
-        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt)*));
+        $crate::puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt1)*));
     };
 
     (@extract $this:ident $value:ident [$($key:ident)*] ($new_field:ident: { $($tt1:tt)* },)) => {
-        puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt)*));
+        $crate::puzzle_piece!(@extract $this $value [$($key)* $new_field] ($($tt1)*));
     };
 }
 

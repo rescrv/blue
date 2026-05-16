@@ -1,7 +1,7 @@
 #![allow(clippy::excessive_precision)]
 #![allow(clippy::approx_constant)]
 
-use indicio::{Value, value};
+use indicio::{Map, Value, value};
 
 #[test]
 fn value_bool() {
@@ -106,5 +106,61 @@ fn value_object() {
                 ],
             }
         })
+    );
+}
+
+#[test]
+fn map_lookup_returns_first_duplicate_key() {
+    let mut map = Map::default();
+    map.insert("key".to_string(), Value::I64(1));
+    map.insert("key".to_string(), Value::I64(2));
+
+    assert_eq!(2, map.len());
+    assert!(!map.is_empty());
+    assert_eq!(Some(&Value::I64(1)), map.get("key"));
+    assert_eq!(
+        vec![
+            ("key".to_string(), Value::I64(1)),
+            ("key".to_string(), Value::I64(2)),
+        ],
+        map.entries()
+            .iter()
+            .cloned()
+            .map(indicio::MapEntry::into_pair)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn display_escapes_string_values_and_object_keys() {
+    let mut map = Map::default();
+    map.insert("a\n\"b".to_string(), Value::String("x\t\\\r".to_string()));
+
+    assert_eq!(
+        "{\"a\\n\\\"b\": \"x\\t\\\\\\r\"}",
+        Value::Object(map).to_string()
+    );
+}
+
+#[test]
+fn value_accessors_report_kinds() {
+    let value = value!({
+        enabled: true,
+        signed: -1i64,
+        unsigned: 1u64,
+        nested: ["value"],
+    });
+
+    assert_eq!(indicio::ValueKind::Object, value.kind());
+    assert_eq!(Some(true), value.lookup("enabled").and_then(Value::as_bool));
+    assert_eq!(Some(-1), value.lookup("signed").and_then(Value::as_i64));
+    assert_eq!(Some(1), value.lookup("unsigned").and_then(Value::as_u64));
+    assert_eq!(
+        Some("value"),
+        value
+            .lookup_path(&["nested"])
+            .and_then(Value::as_array)
+            .and_then(|values| values.first())
+            .and_then(Value::as_str)
     );
 }
