@@ -49,23 +49,39 @@ fn main() {
     };
     let prefix = rc_conf::var_prefix_from_service(&name);
     // Read stdin.
-    let stdin = std::fs::read_to_string(&args[1]).unwrap();
+    let stdin = match std::fs::read_to_string(&args[1]) {
+        Ok(stdin) => stdin,
+        Err(err) => {
+            eprintln!("failed to read rcscript file {}: {err}", args[1]);
+            std::process::exit(129);
+        }
+    };
     if args[2] == "describe" {
         println!("{}", stdin.trim_end());
     } else if args[2] == "rcvar" {
-        let mut rcvar = shvar::rcvar(&stdin)
-            .expect("shell variable substitution should be valid")
-            .into_iter()
-            .map(|v| format!("{prefix}{v}"))
-            .collect::<Vec<_>>();
+        let mut rcvar = match shvar::rcvar(&stdin) {
+            Ok(vars) => vars,
+            Err(err) => {
+                eprintln!("invalid rcscript input: {err}");
+                std::process::exit(130);
+            }
+        }
+        .into_iter()
+        .map(|v| format!("{prefix}{v}"))
+        .collect::<Vec<_>>();
         rcvar.sort();
         println!("{}", rcvar.join("\n"));
     } else if args[2] == "run" {
         let evp = rc_conf::EnvironmentVariableProvider::new(Some(prefix.clone()));
-        let meta = HashMap::from([("NAME".to_string(), prefix)]);
+        let meta = HashMap::from([("NAME".to_string(), name)]);
         for line in stdin.lines() {
-            let out = shvar::expand_recursive(&(&meta, &evp), line)
-                .expect("shell variable expansion should be valid");
+            let out = match shvar::expand_recursive(&(&meta, &evp), line) {
+                Ok(out) => out,
+                Err(err) => {
+                    eprintln!("failed to expand rcscript line: {err}");
+                    std::process::exit(131);
+                }
+            };
             println!("{}", out.trim_end());
         }
     } else {

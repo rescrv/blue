@@ -99,6 +99,9 @@ Warts
 Backwards-Incompatible Changes
 ------------------------------
 
+- `RCCONF_OVERRIDE_SERVICE_SWITCH` was removed. Service enablement checks are now always
+  enforced when invoking services via `rcinvoke`, `rcvar`, or `rccontainer`.
+
 - `source` paths now resolve relative to the current rc file directory rather than process working directory.  If you previously relied on cwd-based relative sources, update those directives so they resolve from the owning file’s directory.
 
 Updating

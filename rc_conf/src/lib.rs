@@ -1165,8 +1165,6 @@ impl RcConf {
             .arg("-t")
             .arg("-e")
             .arg(format!("RCVAR_ARGV0={}", var_name_from_service(service)))
-            .arg("-e")
-            .arg("RCCONF_OVERRIDE_SERVICE_SWITCH=true")
             .arg("--entrypoint")
             .arg("rcvar")
             .arg(container)
@@ -1374,16 +1372,10 @@ pub fn load_services(
 ///
 /// This does not return.
 pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
-    exec_rc_with_override(rc_conf_path, rc_d_path, false, service, cmd)
+    exec_rc_with_override(rc_conf_path, rc_d_path, service, cmd)
 }
 
-fn exec_rc_with_override(
-    rc_conf_path: &str,
-    rc_d_path: &str,
-    override_service_switch: bool,
-    service: &str,
-    cmd: &[&str],
-) -> ! {
+fn exec_rc_with_override(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
     let rc_conf = RcConf::parse(rc_conf_path).unwrap_or_else(|e| {
         eprintln!("failed to parse rc_conf: {e}");
         std::process::exit(133);
@@ -1392,7 +1384,7 @@ fn exec_rc_with_override(
         eprintln!("failed to load services: {e}");
         std::process::exit(134);
     });
-    if !override_service_switch && !rc_conf.service_switch(service).can_be_started() {
+    if !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -1463,8 +1455,7 @@ pub fn exec_container(
         eprintln!("failed to load services: {e}");
         std::process::exit(134);
     });
-    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
-    if !override_service_switch && !rc_conf.service_switch(service).can_be_started() {
+    if !rc_conf.service_switch(service).can_be_started() {
         eprintln!("service not enabled");
         std::process::exit(132);
     }
@@ -1502,8 +1493,6 @@ pub fn exec_container(
         argv.push("--env".to_string());
         argv.push(format!("{key}={value}"));
     }
-    argv.push("--env".to_string());
-    argv.push("RCCONF_OVERRIDE_SERVICE_SWITCH=true".to_string());
     argv.push(container.to_string());
     argv.extend(rc_conf.argv(service, "WRAPPER", &()).unwrap_or_else(|e| {
         eprintln!("failed to generate argv: {e}");
@@ -1525,28 +1514,14 @@ pub fn exec_container(
 pub fn invoke(rc_conf_path: &str, rc_d_path: &str, service: &str, args: &[&str]) -> ! {
     let mut cmd = vec!["run"];
     cmd.extend(args);
-    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
-    exec_rc_with_override(
-        rc_conf_path,
-        rc_d_path,
-        override_service_switch,
-        service,
-        &cmd,
-    )
+    exec_rc_with_override(rc_conf_path, rc_d_path, service, &cmd)
 }
 
 /////////////////////////////////////////////// rcvar //////////////////////////////////////////////
 
 /// exec_rc the service in a way that prints rcvariables.
 pub fn rcvar(rc_conf_path: &str, rc_d_path: &str, service: &str) -> ! {
-    let override_service_switch = std::env::var("RCCONF_OVERRIDE_SERVICE_SWITCH").is_ok();
-    exec_rc_with_override(
-        rc_conf_path,
-        rc_d_path,
-        override_service_switch,
-        service,
-        &["rcvar"],
-    )
+    exec_rc_with_override(rc_conf_path, rc_d_path, service, &["rcvar"])
 }
 
 ///////////////////////////////////////////// bootstrap ////////////////////////////////////////////
