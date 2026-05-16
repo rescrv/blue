@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use buffertk::Unpackable;
 
+use scrunch::Error;
 use scrunch::builder::Builder;
 use scrunch::encoder::HuffmanEncoder;
 use scrunch::psi::Psi;
@@ -15,7 +16,6 @@ use scrunch::psi::wavelet_tree::WaveletTreePsi;
 use scrunch::sais;
 use scrunch::sigma::Sigma;
 use scrunch::wavelet_tree::prefix::WaveletTree;
-use scrunch::Error;
 
 type PrefixWaveletPsi<'a> = WaveletTreePsi<'a, WaveletTree<'a, HuffmanEncoder>>;
 
@@ -251,7 +251,12 @@ fn artifact_path(symbols: usize) -> PathBuf {
     std::env::temp_dir().join(format!("scrunch-wavelet-psi-{pid}-{symbols}.bin"))
 }
 
-fn run_prepare(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -> Result<(), String> {
+fn run_prepare(
+    exe: &Path,
+    options: &Options,
+    symbols: usize,
+    artifact: &Path,
+) -> Result<(), String> {
     let status = Command::new(exe)
         .arg("--input")
         .arg(&options.input)
@@ -268,7 +273,12 @@ fn run_prepare(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -
     }
 }
 
-fn run_child(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -> Result<String, String> {
+fn run_child(
+    exe: &Path,
+    options: &Options,
+    symbols: usize,
+    artifact: &Path,
+) -> Result<String, String> {
     let output = Command::new(exe)
         .arg("--symbols")
         .arg(symbols.to_string())
@@ -342,7 +352,11 @@ fn read_case(path: &Path) -> Result<PreparedCase, String> {
     let mut psi = Vec::with_capacity(psi_len);
     for _ in 0..psi_len {
         let value = read_u64(&mut file)?;
-        psi.push(value.try_into().map_err(|_| "psi value does not fit usize")?);
+        psi.push(
+            value
+                .try_into()
+                .map_err(|_| "psi value does not fit usize")?,
+        );
     }
     Ok(PreparedCase { sigma_buf, psi })
 }

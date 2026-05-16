@@ -237,7 +237,12 @@ fn artifact_path(symbols: usize) -> PathBuf {
     std::env::temp_dir().join(format!("scrunch-sais-{pid}-{symbols}.bin"))
 }
 
-fn run_prepare(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -> Result<(), String> {
+fn run_prepare(
+    exe: &Path,
+    options: &Options,
+    symbols: usize,
+    artifact: &Path,
+) -> Result<(), String> {
     let status = Command::new(exe)
         .arg("--input")
         .arg(&options.input)
@@ -254,7 +259,12 @@ fn run_prepare(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -
     }
 }
 
-fn run_child(exe: &Path, options: &Options, symbols: usize, artifact: &Path) -> Result<String, String> {
+fn run_child(
+    exe: &Path,
+    options: &Options,
+    symbols: usize,
+    artifact: &Path,
+) -> Result<String, String> {
     let output = Command::new(exe)
         .arg("--symbols")
         .arg(symbols.to_string())

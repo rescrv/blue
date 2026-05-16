@@ -270,7 +270,10 @@ impl Encoder for HuffmanEncoder {
     }
 
     fn decode(&self, v: u32, _: u8) -> Option<u32> {
-        let idx = self.decode.binary_search_by_key(&v, |(code, _)| *code).ok()?;
+        let idx = self
+            .decode
+            .binary_search_by_key(&v, |(code, _)| *code)
+            .ok()?;
         Some(self.decode[idx].1)
     }
 
