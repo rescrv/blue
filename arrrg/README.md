@@ -35,6 +35,64 @@ This library takes an opinionated stance on the command line.  There should be e
 canonical argument order on the command-line and all applications must be built with this in
 mind.  Users of the library can call [CommandLine::from_command_line_relaxed] to disable this checking.
 
+Subcommands
+-----------
+
+Subcommands are parsed recursively from the free arguments left by the current [CommandLine].  For
+example, this command line:
+
+```text
+/path/to/binary --arg1 root --arg2 subcommand1 --sc1-arg1 one --sc1-arg2 subcommand2 --sc2-arg1 two
+```
+
+can be dispatched with typed command-name, [CommandLine] pairs:
+
+```rust,no_run
+use arrrg::CommandLine;
+use arrrg_derive::CommandLine;
+
+#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
+struct Top {
+    #[arrrg(optional, "top-level option")]
+    arg1: String,
+    #[arrrg(flag, "top-level flag")]
+    arg2: bool,
+}
+
+#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
+struct Subcommand1 {
+    #[arrrg(optional, "subcommand option")]
+    sc1_arg1: String,
+    #[arrrg(flag, "subcommand flag")]
+    sc1_arg2: bool,
+}
+
+#[derive(CommandLine, Debug, Default, Eq, PartialEq)]
+struct Subcommand2 {
+    #[arrrg(required, "leaf option")]
+    sc2_arg1: String,
+}
+
+fn main() {
+    let (top, free) = Top::from_command_line("Usage: binary [OPTIONS] <command>");
+    let result = arrrg::dispatch_subcommands!(free, {
+        "subcommand1" => Subcommand1 as sc1, sc1_free => {
+            arrrg::dispatch_subcommands!(sc1_free, {
+                "subcommand2" => Subcommand2 as sc2, sc2_free => {
+                    println!("{top:?} {sc1:?} {sc2:?} {sc2_free:?}");
+                    Ok(())
+                },
+            })
+        },
+    });
+
+    if let Err(err) = result {
+        eprintln!("{err}");
+        std::process::exit(64);
+    }
+}
+```
+
 Status
 ------
 
