@@ -262,7 +262,7 @@ fn induce_L<Sym: Symbol, Idx: Index, Bucket: Index>(
     S: &[Sym],
     SA: &mut [Idx],
     T: &TypeBits,
-    buckets: &mut Vec<Bucket>,
+    buckets: &mut [Bucket],
 ) -> Result<(), Error> {
     buckets.copy_from_slice(bucket_starts);
     for i in 0..S.len() {
@@ -299,7 +299,7 @@ fn induce_S<Sym: Symbol, Idx: Index, Bucket: Index>(
     S: &[Sym],
     SA: &mut [Idx],
     T: &TypeBits,
-    buckets: &mut Vec<Bucket>,
+    buckets: &mut [Bucket],
 ) -> Result<(), Error> {
     buckets.copy_from_slice(bucket_limits);
     for i in (0..S.len()).rev() {

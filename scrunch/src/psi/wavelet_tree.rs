@@ -191,27 +191,30 @@ impl SigmaMap for [u32] {
     }
 }
 
+struct ContextState {
+    tree: Vec<u32>,
+    counts: Vec<usize>,
+    active: Vec<usize>,
+    cells_by_sigma: Vec<Vec<CellSummary>>,
+}
+
 fn flush_context<WT: WaveletTree, H: Helper>(
     builder: &mut Builder<H>,
-    ctx: [u32; CTX_MAX],
-    ctx_sz: usize,
+    ctx: &[u32],
     start: usize,
-    tree: &mut Vec<u32>,
-    counts: &mut [usize],
-    active: &mut Vec<usize>,
-    cells_by_sigma: &mut [Vec<CellSummary>],
+    state: &mut ContextState,
     row: usize,
 ) -> Result<(), Error> {
-    for symbol in active.iter().copied() {
-        let count = std::mem::take(&mut counts[symbol]);
-        cells_by_sigma[symbol].push(CellSummary { row, count });
+    for symbol in state.active.iter().copied() {
+        let count = std::mem::take(&mut state.counts[symbol]);
+        state.cells_by_sigma[symbol].push(CellSummary { row, count });
     }
-    active.clear();
+    state.active.clear();
     let mut builder = builder.sub(FieldNumber::must(CONTEXT_FIELD_NUMBER));
-    builder.append_vec_u32(FieldNumber::must(1), &ctx[..ctx_sz]);
+    builder.append_vec_u32(FieldNumber::must(1), ctx);
     builder.append_u64(FieldNumber::must(2), start as u64);
-    WT::construct(tree, &mut builder.sub(FieldNumber::must(3)))?;
-    tree.clear();
+    WT::construct(&state.tree, &mut builder.sub(FieldNumber::must(3)))?;
+    state.tree.clear();
     Ok(())
 }
 
@@ -270,10 +273,12 @@ where
 {
     const CTX_SZ: usize = 2;
     let mut ctx = [0u32; CTX_MAX];
-    let mut tree: Vec<u32> = Vec::new();
-    let mut counts = vec![0usize; sigma.K()];
-    let mut active: Vec<usize> = Vec::new();
-    let mut cells_by_sigma: Vec<Vec<CellSummary>> = vec![Vec::new(); sigma.K()];
+    let mut state = ContextState {
+        tree: Vec::new(),
+        counts: vec![0usize; sigma.K()],
+        active: Vec::new(),
+        cells_by_sigma: vec![Vec::new(); sigma.K()],
+    };
     let mut start = 0usize;
     let mut row = 0usize;
     let mut seen = 0usize;
@@ -299,17 +304,7 @@ where
         }
         if ctx != tmp {
             if i > 0 {
-                flush_context::<WT, H>(
-                    builder,
-                    ctx,
-                    CTX_SZ,
-                    start,
-                    &mut tree,
-                    &mut counts,
-                    &mut active,
-                    &mut cells_by_sigma,
-                    row,
-                )?;
+                flush_context::<WT, H>(builder, &ctx[..CTX_SZ], start, &mut state, row)?;
                 row += 1;
             }
             ctx = tmp;
@@ -323,37 +318,27 @@ where
         // initialized symbols; the unchecked read therefore meets Rustonomicon bounds and aliasing
         // requirements.
         let symbol = unsafe { sa_to_sigma.get_unchecked_usize(ipsi) };
-        tree.push(symbol as u32);
+        state.tree.push(symbol as u32);
         // SAFETY(codex): sa_to_sigma values are built from bucket symbols in 0..sigma.K(), and
         // counts.len() == sigma.K(); this immutable initialized read is in-bounds and alias-safe.
-        if unsafe { *counts.get_unchecked(symbol) } == 0 {
-            active.push(symbol);
+        if unsafe { *state.counts.get_unchecked(symbol) } == 0 {
+            state.active.push(symbol);
         }
         // SAFETY(codex): the same symbol-domain proof gives symbol < counts.len(); counts is
         // uniquely borrowed mutably here, so the initialized increment follows Rustonomicon
         // exclusivity and bounds rules.
         unsafe {
-            *counts.get_unchecked_mut(symbol) += 1;
+            *state.counts.get_unchecked_mut(symbol) += 1;
         }
     }
     if seen != len {
         return Err(Error::InvalidPsi);
     }
-    flush_context::<WT, H>(
-        builder,
-        ctx,
-        CTX_SZ,
-        start,
-        &mut tree,
-        &mut counts,
-        &mut active,
-        &mut cells_by_sigma,
-        row,
-    )?;
+    flush_context::<WT, H>(builder, &ctx[..CTX_SZ], start, &mut state, row)?;
     let mut y_value = vec![];
     let mut y_key = vec![];
     let mut sum = 0usize;
-    for cells in cells_by_sigma {
+    for cells in state.cells_by_sigma {
         for cell in cells {
             if sum > 0 {
                 y_key.push(sum - 1);
