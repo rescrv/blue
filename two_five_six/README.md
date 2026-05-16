@@ -67,11 +67,12 @@ assert!(matches!(
 Compatibility
 -------------
 
-The encoded representation remains a 43-character URL-safe Base64 string. Existing constructors and
-parsers are still available. The user-facing changes are additive, except that previously ambiguous
-invalid inputs now return errors instead of panicking or being accepted:
+The encoded representation remains a 43-character URL-safe Base64 string. Existing `TwoFiveSix`
+constructors and parsers are still available. The user-facing changes are additive, except that
+previously ambiguous invalid inputs now return errors instead of panicking or being accepted:
 
 - non-ASCII input with a 43-byte length returns `InvalidBase64Character`;
 - invalid label separators return `InvalidSeparatorCharacter`;
 - labels longer than `MAX_LABEL_LENGTH` return `LabelTooLong`;
-- generated typed IDs validate their configured label during `decode`.
+- generated typed IDs validate their configured label during `decode`, raw-byte construction, and
+  untyped conversions.
