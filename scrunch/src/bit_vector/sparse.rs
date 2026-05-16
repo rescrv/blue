@@ -256,60 +256,59 @@ impl<'a> BitVector<'a> {
                 }
             }
         }
-        let mut bytes = vec![];
-        stack_pack(len as u64).append_to_vec(&mut bytes);
+        let bytes = builder.vec_mut();
+        let base_offset = bytes.len();
+        stack_pack(len as u64).append_to_vec(bytes);
         bytes.push(branch as u8);
         if indices.is_empty() {
-            push_slice_u64(&mut bytes, branch, &[]);
-            // TODO(rescrv): Make this not copy.
-            builder.append_raw(&bytes);
+            push_slice_u64(bytes, branch, &[]);
             return Some(());
         }
         let mut leaves = Vec::with_capacity(branch);
-        let mut dividers = vec![];
-        let mut pointers = vec![];
+        let leaf_count = indices.len().div_ceil(branch);
+        let mut dividers = Vec::with_capacity(leaf_count);
+        let mut pointers = Vec::with_capacity(leaf_count);
         for index in indices.iter() {
             leaves.push(*index as u64);
             if leaves.len() >= branch {
                 dividers.push(leaves[leaves.len() - 1]);
-                pointers.push(bytes.len() as u64);
-                push_slice_u64(&mut bytes, branch, &leaves);
+                pointers.push((bytes.len() - base_offset) as u64);
+                push_slice_u64(bytes, branch, &leaves);
                 leaves.clear();
             }
         }
         if !leaves.is_empty() {
             dividers.push(leaves[leaves.len() - 1]);
-            pointers.push(bytes.len() as u64);
-            push_slice_u64(&mut bytes, branch, &leaves);
+            pointers.push((bytes.len() - base_offset) as u64);
+            push_slice_u64(bytes, branch, &leaves);
         }
         assert_eq!(dividers.len(), pointers.len());
         let mut levels = 1u8;
         while pointers.len() > 1 {
-            let mut new_dividers = vec![];
-            let mut new_pointers = vec![];
+            let next_len = pointers.len().div_ceil(branch);
+            let mut new_dividers = Vec::with_capacity(next_len);
+            let mut new_pointers = Vec::with_capacity(next_len);
             let mut idx = 0;
             while idx + branch < pointers.len() {
                 new_dividers.push(dividers[idx + branch - 1]);
-                new_pointers.push(bytes.len() as u64);
-                push_slice_u64(&mut bytes, branch - 1, &dividers[idx..idx + branch - 1]);
-                push_slice_u64(&mut bytes, branch, &pointers[idx..idx + branch]);
+                new_pointers.push((bytes.len() - base_offset) as u64);
+                push_slice_u64(bytes, branch - 1, &dividers[idx..idx + branch - 1]);
+                push_slice_u64(bytes, branch, &pointers[idx..idx + branch]);
                 idx += branch;
             }
             let amt = pointers.len() - idx;
             if amt > 0 {
-                new_pointers.push(bytes.len() as u64);
-                push_slice_u64(&mut bytes, branch - 1, &dividers[idx..idx + amt - 1]);
-                push_slice_u64(&mut bytes, branch, &pointers[idx..idx + amt]);
+                new_pointers.push((bytes.len() - base_offset) as u64);
+                push_slice_u64(bytes, branch - 1, &dividers[idx..idx + amt - 1]);
+                push_slice_u64(bytes, branch, &pointers[idx..idx + amt]);
             }
             dividers = new_dividers;
             pointers = new_pointers;
             levels += 1;
         }
         assert_eq!(1, pointers.len());
-        stack_pack(pointers[0]).append_to_vec(&mut bytes);
+        stack_pack(pointers[0]).append_to_vec(bytes);
         bytes.push(levels);
-        // TODO(rescrv): Make this not copy.
-        builder.append_raw(&bytes);
         Some(())
     }
 

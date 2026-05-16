@@ -88,7 +88,7 @@ fn bench_bit_vector_access(params: &RrrBitVectorParameters, b: &mut Bencher) {
     let accesses = Cycle::new(accesses).take(b.size());
     fn access(bv: &BitVector, accesses: impl Iterator<Item = usize>) {
         for access in accesses {
-            black_box(bv).access(black_box(access));
+            black_box(black_box(bv).access(black_box(access)));
         }
     }
     b.run(|| {
@@ -103,6 +103,40 @@ benchmark! {
         probability in BIT_PROBABILITY,
     }
     bench_bit_vector_access
+}
+
+//////////////////////////////////////////// access_rank ///////////////////////////////////////////
+
+fn bench_bit_vector_access_rank(params: &RrrBitVectorParameters, b: &mut Bencher) {
+    let mut guac = Guacamole::new(b.seed());
+    let mut buf = vec![];
+    let mut builder = Builder::new(&mut buf);
+    let vector = generate_bit_vector(params, &mut guac);
+    BitVector::construct(&vector, &mut builder).unwrap();
+    drop(builder);
+    let vector = BitVector::parse(&buf).unwrap().0;
+    let mut accesses = Vec::with_capacity(b.size());
+    for _ in 0..4096 {
+        accesses.push(range_to(vector.len())(&mut guac));
+    }
+    let accesses = Cycle::new(accesses).take(b.size());
+    fn access_rank(bv: &BitVector, accesses: impl Iterator<Item = usize>) {
+        for access in accesses {
+            black_box(black_box(bv).access_rank(black_box(access)));
+        }
+    }
+    b.run(|| {
+        access_rank(&vector, accesses);
+    });
+}
+
+benchmark! {
+    name = rrr_bit_vector_access_rank;
+    RrrBitVectorParameters {
+        vector_length in VECTOR_LENGTH,
+        probability in BIT_PROBABILITY,
+    }
+    bench_bit_vector_access_rank
 }
 
 /////////////////////////////////////////////// rank ///////////////////////////////////////////////
@@ -122,7 +156,7 @@ fn bench_bit_vector_rank(params: &RrrBitVectorParameters, b: &mut Bencher) {
     let ranks = Cycle::new(ranks).take(b.size());
     fn rank(bv: &BitVector, ranks: impl Iterator<Item = usize>) {
         for rank in ranks {
-            black_box(bv).rank(black_box(rank));
+            black_box(black_box(bv).rank(black_box(rank)));
         }
     }
     b.run(|| {
@@ -157,7 +191,7 @@ fn bench_bit_vector_select(params: &RrrBitVectorParameters, b: &mut Bencher) {
     let selects = Cycle::new(selects).take(b.size());
     fn select(bv: &BitVector, selects: impl Iterator<Item = usize>) {
         for select in selects {
-            black_box(bv).select(black_box(select));
+            black_box(black_box(bv).select(black_box(select)));
         }
     }
     b.run(|| {
@@ -179,6 +213,7 @@ benchmark! {
 statslicer_main! {
     rrr_bit_vector_new,
     rrr_bit_vector_access,
+    rrr_bit_vector_access_rank,
     rrr_bit_vector_rank,
     rrr_bit_vector_select,
 }
