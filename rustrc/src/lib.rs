@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::hash::{Hash, Hasher};
+use std::mem::MaybeUninit;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, WaitTimeoutResult};
 use std::thread::JoinHandle;
@@ -25,6 +26,7 @@ static STATE_NEW: biometrics::Counter = biometrics::Counter::new("rustrc.state.n
 static INHIBITED_SERVICE: biometrics::Counter = biometrics::Counter::new("rustrc.inhibited");
 static WAITPID_ENTER: biometrics::Counter = biometrics::Counter::new("rustrc.waitpid.enter");
 static WAITPID_EXIT: biometrics::Counter = biometrics::Counter::new("rustrc.waitpid.exit");
+static ORPHAN_REAP: biometrics::Counter = biometrics::Counter::new("rustrc.orphan_reap");
 static NON_POSITIVE_PID: biometrics::Counter = biometrics::Counter::new("rustrc.non_positive_pid");
 static RECLAIM: biometrics::Counter = biometrics::Counter::new("rustrc.reclaim");
 static JOINING_THREAD: biometrics::Counter = biometrics::Counter::new("rustrc.join");
@@ -52,6 +54,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&INHIBITED_SERVICE);
     collector.register_counter(&WAITPID_ENTER);
     collector.register_counter(&WAITPID_EXIT);
+    collector.register_counter(&ORPHAN_REAP);
     collector.register_counter(&NON_POSITIVE_PID);
     collector.register_counter(&RECLAIM);
     collector.register_counter(&JOINING_THREAD);
@@ -68,6 +71,68 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&UNKNOWN_SERVICE);
     collector.register_counter(&EXECUTION_KILL);
     collector.register_counter(&EXECUTION_EXEC);
+}
+
+//////////////////////////////////////////// init support //////////////////////////////////////////
+
+#[cfg(target_os = "linux")]
+fn enable_child_subreaper() -> Result<(), Error> {
+    // SAFETY(rescrv): prctl observes only integer arguments here.  PR_SET_CHILD_SUBREAPER asks
+    // Linux to reparent orphaned descendants to this process before init(1).
+    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    clue!(COLLECTOR, INFO, {
+        child_subreaper: true,
+    });
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn enable_child_subreaper() -> Result<(), Error> {
+    clue!(COLLECTOR, INFO, {
+        child_subreaper: false,
+        unsupported: true,
+    });
+    Ok(())
+}
+
+fn peek_waitable_child() -> Result<Option<libc::pid_t>, Error> {
+    loop {
+        let mut info = MaybeUninit::<libc::siginfo_t>::zeroed();
+        // SAFETY(rescrv): waitid initializes info when a waitable child exists.  WNOWAIT leaves
+        // the child for its owner to reap after we classify it.
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_ALL,
+                0,
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if rc != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            if err.raw_os_error() == Some(libc::ECHILD) {
+                return Ok(None);
+            }
+            return Err(err.into());
+        }
+        // SAFETY(rescrv): waitid returned success.  The value was zero-initialized, and si_signo
+        // remains zero when WNOHANG found no waitable child.
+        let info = unsafe { info.assume_init() };
+        if info.si_signo == 0 {
+            return Ok(None);
+        }
+        // SAFETY(rescrv): POSIX requires si_pid to identify the child for SIGCHLD waitid results.
+        let pid = unsafe { info.si_pid() };
+        if pid > 0 {
+            return Ok(Some(pid));
+        }
+        return Ok(None);
+    }
 }
 
 ////////////////////////////////////////////// indicio /////////////////////////////////////////////
@@ -365,7 +430,7 @@ impl From<&Target> for indicio::Value {
 
 //////////////////////////////////////////// Pid1Options ///////////////////////////////////////////
 
-/// Pid1Options captures the rc_conf and rc.d PATH variables.
+/// Pid1Options captures configuration paths and init-style process behavior.
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Pid1Options {
     #[arrrg(
@@ -378,6 +443,16 @@ pub struct Pid1Options {
         "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
     )]
     pub rc_d_path: String,
+    #[arrrg(
+        flag,
+        "Reap exited child processes that are not managed rustrc services."
+    )]
+    pub reap_orphans: bool,
+    #[arrrg(
+        flag,
+        "On Linux, ask the kernel to reparent orphaned descendants to this process."
+    )]
+    pub child_subreaper: bool,
 }
 
 impl Default for Pid1Options {
@@ -385,6 +460,8 @@ impl Default for Pid1Options {
         Self {
             rc_conf_path: "rc.conf".to_string(),
             rc_d_path: "rc.d".to_string(),
+            reap_orphans: false,
+            child_subreaper: false,
         }
     }
 }
@@ -394,6 +471,8 @@ impl From<&Pid1Options> for indicio::Value {
         value!({
             rc_conf_path: options.rc_conf_path.as_str(),
             rc_d_path: options.rc_d_path.as_str(),
+            reap_orphans: options.reap_orphans,
+            child_subreaper: options.child_subreaper,
         })
     }
 }
@@ -604,6 +683,8 @@ pub struct Pid1 {
     // Reclaim threads that waitpid on processes.
     reclaim: SyncSender<Arc<Execution>>,
     reclaimer: JoinHandle<()>,
+    // Reap orphaned descendants when rustrc is acting as an init process.
+    orphan_reaper: Option<JoinHandle<()>>,
     // Converge to the configuration regularly, respawning when necessary.
     converger: JoinHandle<()>,
 }
@@ -611,6 +692,9 @@ pub struct Pid1 {
 impl Pid1 {
     /// Create a new Pid1 from the provided options.
     pub fn new(options: Pid1Options) -> Result<Self, Error> {
+        if options.child_subreaper {
+            enable_child_subreaper()?;
+        }
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
         let state = Arc::new(Mutex::new(Pid1State::new(config)));
         let coord = Arc::new(Pid1Coordination::default());
@@ -621,6 +705,18 @@ impl Pid1 {
             .stack_size(65536)
             .spawn(move || Self::reclaim_thread(recv, reclaim_state, reclaim_coord))
             .unwrap();
+        let orphan_reaper = if options.reap_orphans {
+            let orphan_state = Arc::clone(&state);
+            let orphan_coord = Arc::clone(&coord);
+            Some(
+                std::thread::Builder::new()
+                    .stack_size(65536)
+                    .spawn(move || Self::orphan_reaper_thread(orphan_state, orphan_coord))
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
         let converge_reclaim = reclaim.clone();
         let converge_state = Arc::clone(&state);
         let converge_coord = Arc::clone(&coord);
@@ -635,6 +731,7 @@ impl Pid1 {
             coord,
             reclaim,
             reclaimer,
+            orphan_reaper,
             converger,
         })
     }
@@ -671,6 +768,78 @@ impl Pid1 {
                 state.converge = state.converge.wrapping_add(1);
             }
         }
+    }
+
+    fn orphan_reaper_thread(state: Arc<Mutex<Pid1State>>, coord: Arc<Pid1Coordination>) {
+        loop {
+            if let Err(err) = Self::reap_orphans_once(&state) {
+                clue!(COLLECTOR, ERROR, {
+                    orphan_reap: false,
+                    error: indicio::Value::from(&err),
+                });
+            }
+            let state_guard = state.lock().unwrap();
+            if state_guard.shutdown {
+                break;
+            }
+            let (state_guard, _) = coord
+                .converge
+                .wait_timeout(state_guard, Duration::from_millis(250))
+                .unwrap();
+            if state_guard.shutdown {
+                break;
+            }
+        }
+    }
+
+    fn reap_orphans_once(state: &Mutex<Pid1State>) -> Result<(), Error> {
+        loop {
+            let Some(pid) = peek_waitable_child()? else {
+                return Ok(());
+            };
+            if Self::is_managed_pid(state, pid) {
+                return Ok(());
+            }
+            let mut status = 0;
+            let reaped = loop {
+                WAITPID_ENTER.click();
+                // SAFETY(rescrv): waitpid observes only the supplied pid and status pointer.
+                let rc = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+                WAITPID_EXIT.click();
+                if rc == pid {
+                    break true;
+                }
+                if rc == 0 {
+                    break false;
+                }
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                if err.raw_os_error() == Some(libc::ECHILD) {
+                    break false;
+                }
+                return Err(err.into());
+            };
+            if reaped {
+                ORPHAN_REAP.click();
+                clue!(COLLECTOR, INFO, {
+                    orphan_reap: {
+                        pid: pid,
+                        status: status,
+                    },
+                });
+            }
+        }
+    }
+
+    fn is_managed_pid(state: &Mutex<Pid1State>, pid: libc::pid_t) -> bool {
+        state
+            .lock()
+            .unwrap()
+            .processes
+            .iter()
+            .any(|exec| exec.pid() == Some(pid))
     }
 
     fn converge_thread(
@@ -853,11 +1022,15 @@ impl Pid1 {
             coord,
             reclaim,
             reclaimer,
+            orphan_reaper,
             converger,
         } = self;
         coord.converge.notify_all();
         drop(reclaim);
         reclaimer.join().unwrap();
+        if let Some(orphan_reaper) = orphan_reaper {
+            orphan_reaper.join().unwrap();
+        }
         converger.join().unwrap();
         Ok(())
     }
