@@ -10,6 +10,18 @@ pub const BYTES: usize = 32;
 /// The length of the encoded string (43 characters, no padding).
 pub const ENCODED_LENGTH: usize = 43;
 
+/// The default separator between a label and random suffix.
+pub const DEFAULT_SEPARATOR: char = '_';
+
+/// The largest label accepted by [`TwoFiveSix::generate_with_label`].
+///
+/// One character is reserved for the separator and at least one character is
+/// reserved for the random suffix.
+pub const MAX_LABEL_LENGTH: usize = ENCODED_LENGTH - 2;
+
+/// The largest recommended label when preserving at least 156 bits of entropy.
+pub const RECOMMENDED_MAX_LABEL_LENGTH: usize = 15;
+
 /// URL-safe Base64 alphabet (RFC 4648).
 const BASE64_ALPHABET: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -30,6 +42,17 @@ const BASE64_DECODE: [u8; 128] = {
 pub enum Error {
     /// The label contains invalid Base64 characters.
     InvalidLabelCharacter(char),
+    /// The separator is not `-` or `_`.
+    InvalidSeparatorCharacter(char),
+    /// The label is too long to leave room for randomness.
+    LabelTooLong(usize),
+    /// The identifier does not have the expected label and separator.
+    InvalidLabel {
+        /// The expected label.
+        expected_label: &'static str,
+        /// The expected separator.
+        expected_separator: char,
+    },
     /// The encoded string has an invalid length.
     InvalidLength(usize),
     /// The encoded string contains invalid Base64 characters.
@@ -42,6 +65,19 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::InvalidLabelCharacter(c) => write!(f, "invalid label character: {c:?}"),
+            Error::InvalidSeparatorCharacter(c) => {
+                write!(f, "invalid separator character: {c:?}")
+            }
+            Error::LabelTooLong(len) => {
+                write!(f, "label too long: maximum {MAX_LABEL_LENGTH}, got {len}")
+            }
+            Error::InvalidLabel {
+                expected_label,
+                expected_separator,
+            } => write!(
+                f,
+                "invalid label: expected {expected_label:?} followed by {expected_separator:?}"
+            ),
             Error::InvalidLength(len) => {
                 write!(f, "invalid length: expected {ENCODED_LENGTH}, got {len}")
             }
@@ -61,6 +97,30 @@ fn is_valid_base64_char(c: char) -> bool {
 /// Check if a character is alphanumeric (Base62, excluding `-` and `_`).
 fn is_alphanumeric(c: char) -> bool {
     c.is_ascii_alphanumeric()
+}
+
+/// Check if a character is a supported label separator.
+fn is_valid_separator(c: char) -> bool {
+    c == '-' || c == '_'
+}
+
+/// Validate a label and separator, returning the prefix length.
+fn validate_label(label: &str, separator: char) -> Result<usize, Error> {
+    for c in label.chars() {
+        if !is_valid_base64_char(c) {
+            return Err(Error::InvalidLabelCharacter(c));
+        }
+    }
+
+    if !is_valid_separator(separator) {
+        return Err(Error::InvalidSeparatorCharacter(separator));
+    }
+
+    if label.len() > MAX_LABEL_LENGTH {
+        return Err(Error::LabelTooLong(label.len()));
+    }
+
+    Ok(label.len() + 1)
 }
 
 /// Encode 32 bytes to a 43-character URL-safe Base64 string (no padding).
@@ -102,7 +162,11 @@ fn decode(s: &str) -> Result<[u8; BYTES], Error> {
         return Err(Error::InvalidLength(s.len()));
     }
 
-    let chars: Vec<char> = s.chars().collect();
+    if let Some(c) = s.chars().find(|c| !c.is_ascii()) {
+        return Err(Error::InvalidBase64Character(c));
+    }
+
+    let chars = s.as_bytes();
     let mut result = [0u8; BYTES];
 
     // Decode 4 characters at a time to produce 3 bytes.
@@ -113,12 +177,9 @@ fn decode(s: &str) -> Result<[u8; BYTES], Error> {
         let mut values = [0u8; 4];
         for (j, v) in values.iter_mut().enumerate() {
             let c = chars[char_idx + j];
-            if !c.is_ascii() || c as usize >= 128 {
-                return Err(Error::InvalidBase64Character(c));
-            }
             let val = BASE64_DECODE[c as usize];
             if val == 0xFF {
-                return Err(Error::InvalidBase64Character(c));
+                return Err(Error::InvalidBase64Character(c as char));
             }
             *v = val;
         }
@@ -137,12 +198,9 @@ fn decode(s: &str) -> Result<[u8; BYTES], Error> {
         let mut values = [0u8; 3];
         for (j, v) in values.iter_mut().enumerate() {
             let c = chars[char_idx + j];
-            if !c.is_ascii() || c as usize >= 128 {
-                return Err(Error::InvalidBase64Character(c));
-            }
             let val = BASE64_DECODE[c as usize];
             if val == 0xFF {
-                return Err(Error::InvalidBase64Character(c));
+                return Err(Error::InvalidBase64Character(c as char));
             }
             *v = val;
         }
@@ -194,26 +252,37 @@ impl TwoFiveSix {
         &self.id
     }
 
+    /// Return the raw bytes of this identifier by value.
+    pub fn into_bytes(self) -> [u8; BYTES] {
+        self.id
+    }
+
     /// Generate a new random identifier without a label.
     pub fn generate() -> Result<Self, Error> {
-        Self::generate_with_label(None, '_')
+        Self::generate_with_label(None, DEFAULT_SEPARATOR)
+    }
+
+    /// Generate a new identifier with a label and the default `_` separator.
+    pub fn generate_labeled(label: &str) -> Result<Self, Error> {
+        Self::generate_with_label(Some(label), DEFAULT_SEPARATOR)
+    }
+
+    /// Validate a label and separator for use with [`Self::generate_with_label`].
+    pub fn validate_label(label: &str, separator: char) -> Result<(), Error> {
+        validate_label(label, separator).map(|_| ())
     }
 
     /// Generate a new identifier with an optional label and separator.
     ///
     /// The label must consist only of valid Base64 characters (`A-Za-z0-9-_`).
-    /// The separator must be either `-` or `_`.
+    /// When a label is present, the separator must be either `-` or `_`.
     ///
     /// The algorithm uses rejection sampling to ensure the suffix (after the label
     /// and separator) contains only alphanumeric characters (no `-` or `_`).
     pub fn generate_with_label(label: Option<&str>, separator: char) -> Result<Self, Error> {
-        // Validate label characters.
+        // Validate label settings before entering the random sampling loop.
         let prefix = if let Some(label) = label {
-            for c in label.chars() {
-                if !is_valid_base64_char(c) {
-                    return Err(Error::InvalidLabelCharacter(c));
-                }
-            }
+            validate_label(label, separator)?;
             format!("{label}{separator}")
         } else {
             String::new()
@@ -275,6 +344,12 @@ impl TwoFiveSix {
         Self::parse_label(&encoded).0.map(|s| s.to_string())
     }
 
+    /// Extract the suffix from this identifier.
+    pub fn suffix(&self) -> String {
+        let encoded = self.encode();
+        Self::parse_label(&encoded).1.to_string()
+    }
+
     /// Increment the identifier by one.
     pub fn next(mut self) -> Self {
         for byte_index in (0..BYTES).rev() {
@@ -290,6 +365,24 @@ impl TwoFiveSix {
 impl Default for TwoFiveSix {
     fn default() -> Self {
         Self::BOTTOM
+    }
+}
+
+impl AsRef<[u8]> for TwoFiveSix {
+    fn as_ref(&self) -> &[u8] {
+        &self.id
+    }
+}
+
+impl From<[u8; BYTES]> for TwoFiveSix {
+    fn from(id: [u8; BYTES]) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<TwoFiveSix> for [u8; BYTES] {
+    fn from(id: TwoFiveSix) -> Self {
+        id.into_bytes()
     }
 }
 
@@ -310,6 +403,22 @@ impl std::str::FromStr for TwoFiveSix {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::decode(s)
+    }
+}
+
+impl TryFrom<&str> for TwoFiveSix {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::decode(value)
+    }
+}
+
+impl TryFrom<String> for TwoFiveSix {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::decode(&value)
     }
 }
 
@@ -339,16 +448,64 @@ macro_rules! generate_id {
                 })
             }
 
-            /// Create from raw bytes.
-            pub fn new(id: [u8; $crate::BYTES]) -> Self {
-                Self {
-                    id: $crate::TwoFiveSix::new(id),
+            fn expected_prefix() -> String {
+                let mut prefix = String::with_capacity($label.len() + 1);
+                prefix.push_str($label);
+                prefix.push($separator);
+                prefix
+            }
+
+            fn invalid_label_error() -> $crate::Error {
+                $crate::Error::InvalidLabel {
+                    expected_label: $label,
+                    expected_separator: $separator,
                 }
+            }
+
+            fn validate_encoded_label(encoded: &str) -> Result<(), $crate::Error> {
+                let prefix = Self::expected_prefix();
+                // TODO(claude): This accepts IDs whose actual parsed label merely
+                // extends the configured label, e.g. `user_admin_...` is accepted
+                // for label `user` with `_`. Validate the parsed label and ensure
+                // the suffix is separator-free so typed IDs preserve their fixed
+                // label invariant across decode/raw-byte conversions.
+                if encoded.starts_with(&prefix) {
+                    Ok(())
+                } else {
+                    Err(Self::invalid_label_error())
+                }
+            }
+
+            /// Create from raw bytes, validating the configured label.
+            pub fn new(id: [u8; $crate::BYTES]) -> Result<Self, $crate::Error> {
+                Self::from_two_five_six($crate::TwoFiveSix::new(id))
             }
 
             /// Return the raw bytes.
             pub fn as_bytes(&self) -> &[u8; $crate::BYTES] {
                 self.id.as_bytes()
+            }
+
+            /// Return the raw bytes by value.
+            pub fn into_bytes(self) -> [u8; $crate::BYTES] {
+                self.id.into_bytes()
+            }
+
+            /// Borrow the underlying untyped identifier.
+            pub fn as_two_five_six(&self) -> &$crate::TwoFiveSix {
+                &self.id
+            }
+
+            /// Return the underlying untyped identifier.
+            pub fn into_two_five_six(self) -> $crate::TwoFiveSix {
+                self.id
+            }
+
+            /// Create from an untyped identifier, validating the configured label.
+            pub fn from_two_five_six(id: $crate::TwoFiveSix) -> Result<Self, $crate::Error> {
+                let encoded = id.encode();
+                Self::validate_encoded_label(&encoded)?;
+                Ok(Self { id })
             }
 
             /// Encode to string.
@@ -359,20 +516,47 @@ macro_rules! generate_id {
             /// Decode from string, validating the label prefix.
             pub fn decode(s: &str) -> Result<Self, $crate::Error> {
                 let id = $crate::TwoFiveSix::decode(s)?;
+                Self::validate_encoded_label(s)?;
                 Ok(Self { id })
             }
 
-            /// Increment the identifier by one.
-            pub fn next(self) -> Self {
-                Self { id: self.id.next() }
+            /// Increment the identifier by one, validating the configured label.
+            pub fn next(self) -> Result<Self, $crate::Error> {
+                Self::from_two_five_six(self.id.next())
             }
         }
 
-        impl Default for $what {
-            fn default() -> Self {
-                Self {
-                    id: $crate::TwoFiveSix::BOTTOM,
-                }
+        impl AsRef<[u8]> for $what {
+            fn as_ref(&self) -> &[u8] {
+                self.id.as_ref()
+            }
+        }
+
+        impl std::convert::TryFrom<$crate::TwoFiveSix> for $what {
+            type Error = $crate::Error;
+
+            fn try_from(id: $crate::TwoFiveSix) -> Result<Self, Self::Error> {
+                Self::from_two_five_six(id)
+            }
+        }
+
+        impl std::convert::TryFrom<[u8; $crate::BYTES]> for $what {
+            type Error = $crate::Error;
+
+            fn try_from(id: [u8; $crate::BYTES]) -> Result<Self, Self::Error> {
+                Self::new(id)
+            }
+        }
+
+        impl From<$what> for $crate::TwoFiveSix {
+            fn from(id: $what) -> Self {
+                id.into_two_five_six()
+            }
+        }
+
+        impl From<$what> for [u8; $crate::BYTES] {
+            fn from(id: $what) -> Self {
+                id.into_bytes()
             }
         }
 
@@ -473,6 +657,14 @@ mod tests {
     }
 
     #[test]
+    fn invalid_non_ascii_character() {
+        let s = format!("{}é", "A".repeat(41));
+        assert_eq!(s.len(), ENCODED_LENGTH);
+        let err = decode(&s).unwrap_err();
+        assert_eq!(err, Error::InvalidBase64Character('é'));
+    }
+
+    #[test]
     fn generate_without_label() {
         let id = TwoFiveSix::generate().unwrap();
         let encoded = id.encode();
@@ -501,6 +693,15 @@ mod tests {
             "suffix should be alphanumeric: {suffix}"
         );
         println!("generate_with_label: {encoded}");
+    }
+
+    #[test]
+    fn generate_labeled_uses_default_separator() {
+        let id = TwoFiveSix::generate_labeled("user").unwrap();
+        let encoded = id.encode();
+        assert!(encoded.starts_with("user_"));
+        assert_eq!(id.label(), Some("user".to_string()));
+        assert!(id.suffix().chars().all(is_alphanumeric));
     }
 
     #[test]
@@ -548,6 +749,28 @@ mod tests {
     }
 
     #[test]
+    fn invalid_separator_character() {
+        let err = TwoFiveSix::generate_with_label(Some("user"), ':').unwrap_err();
+        assert_eq!(err, Error::InvalidSeparatorCharacter(':'));
+    }
+
+    #[test]
+    fn label_too_long() {
+        let label = "a".repeat(MAX_LABEL_LENGTH + 1);
+        let err = TwoFiveSix::generate_with_label(Some(&label), '_').unwrap_err();
+        assert_eq!(err, Error::LabelTooLong(MAX_LABEL_LENGTH + 1));
+    }
+
+    #[test]
+    fn validate_label_checks_label_without_generating() {
+        assert_eq!(TwoFiveSix::validate_label("user", '_'), Ok(()));
+        assert_eq!(
+            TwoFiveSix::validate_label("user", ':'),
+            Err(Error::InvalidSeparatorCharacter(':'))
+        );
+    }
+
+    #[test]
     fn decode_is_inverse_of_encode() {
         for _ in 0..10 {
             let id = TwoFiveSix::generate().unwrap();
@@ -590,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_valid_base64_char() {
+    fn valid_base64_char() {
         for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".chars() {
             assert!(is_valid_base64_char(c));
         }
@@ -600,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_alphanumeric() {
+    fn alphanumeric_char() {
         for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".chars() {
             assert!(is_alphanumeric(c));
         }
@@ -649,6 +872,13 @@ mod tests {
 
     generate_id!(PostId, "post", '-');
 
+    fn post_invalid_label_error() -> Error {
+        Error::InvalidLabel {
+            expected_label: "post",
+            expected_separator: '-',
+        }
+    }
+
     #[test]
     fn generated_type_with_hyphen_works() {
         let id = PostId::generate().unwrap();
@@ -667,6 +897,13 @@ mod tests {
     }
 
     #[test]
+    fn generated_type_decode_validates_label() {
+        let id = TwoFiveSix::generate_labeled("user").unwrap();
+        let err = PostId::decode(&id.encode()).unwrap_err();
+        assert_eq!(err, post_invalid_label_error());
+    }
+
+    #[test]
     fn generated_type_label_constant() {
         assert_eq!(PostId::LABEL, "post");
     }
@@ -677,10 +914,73 @@ mod tests {
     }
 
     #[test]
+    fn generated_type_new_validates_label() {
+        let id = PostId::generate().unwrap();
+        assert_eq!(PostId::new(*id.as_bytes()).unwrap(), id);
+
+        let wrong_label = TwoFiveSix::generate_labeled("user").unwrap();
+        let err = PostId::new(*wrong_label.as_bytes()).unwrap_err();
+        assert_eq!(err, post_invalid_label_error());
+    }
+
+    #[test]
+    fn generated_type_conversions_validate_label() {
+        let id = PostId::generate().unwrap();
+        let untyped = id.into_two_five_six();
+        assert_eq!(PostId::from_two_five_six(untyped).unwrap(), id);
+        assert_eq!(PostId::try_from(untyped).unwrap(), id);
+
+        let bytes: [u8; BYTES] = id.into();
+        assert_eq!(PostId::try_from(bytes).unwrap(), id);
+
+        let wrong_label = TwoFiveSix::generate_labeled("user").unwrap();
+        assert_eq!(
+            PostId::from_two_five_six(wrong_label).unwrap_err(),
+            post_invalid_label_error()
+        );
+        assert_eq!(
+            PostId::try_from(wrong_label).unwrap_err(),
+            post_invalid_label_error()
+        );
+    }
+
+    #[test]
+    fn generated_type_next_validates_label() {
+        let suffix_len = ENCODED_LENGTH - "post-".len();
+        let lower = PostId::decode(&format!("post-{}", "A".repeat(suffix_len))).unwrap();
+        let next = lower.next().unwrap();
+        assert!(next.encode().starts_with("post-"));
+
+        let upper_encoded = format!("post-{}8", "_".repeat(suffix_len - 1));
+        let upper = PostId::decode(&upper_encoded).unwrap();
+        assert_eq!(upper.encode(), upper_encoded);
+        let err = upper.next().unwrap_err();
+        assert_eq!(err, post_invalid_label_error());
+    }
+
+    #[test]
     fn error_display() {
         assert_eq!(
             format!("{}", Error::InvalidLabelCharacter('!')),
             "invalid label character: '!'"
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidSeparatorCharacter(':')),
+            "invalid separator character: ':'"
+        );
+        assert_eq!(
+            format!("{}", Error::LabelTooLong(MAX_LABEL_LENGTH + 1)),
+            "label too long: maximum 41, got 42"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                Error::InvalidLabel {
+                    expected_label: "post",
+                    expected_separator: '-'
+                }
+            ),
+            "invalid label: expected \"post\" followed by '-'"
         );
         assert_eq!(
             format!("{}", Error::InvalidLength(4)),
@@ -713,5 +1013,25 @@ mod tests {
         let id_str = "not a valid id";
         let err: Result<TwoFiveSix, _> = id_str.parse();
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn byte_conversions_work() {
+        let bytes = [0x42u8; BYTES];
+        let id = TwoFiveSix::from(bytes);
+        assert_eq!(id.as_ref(), &bytes);
+        assert_eq!(id.into_bytes(), bytes);
+
+        let id = TwoFiveSix::new(bytes);
+        let bytes_again: [u8; BYTES] = id.into();
+        assert_eq!(bytes_again, bytes);
+    }
+
+    #[test]
+    fn try_from_strings_work() {
+        let id = TwoFiveSix::BOTTOM;
+        let encoded = id.encode();
+        assert_eq!(TwoFiveSix::try_from(encoded.as_str()).unwrap(), id);
+        assert_eq!(TwoFiveSix::try_from(encoded).unwrap(), id);
     }
 }
