@@ -20,6 +20,16 @@ pub struct Options {
         "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
     )]
     pub rc_d_path: String,
+    #[arrrg(
+        flag,
+        "Enable container init behavior even when rustrc is not process 1."
+    )]
+    pub container_init: bool,
+    #[arrrg(
+        flag,
+        "Do not create a UNIX control socket; run until a shutdown signal arrives."
+    )]
+    pub no_control_sock: bool,
 }
 
 impl Default for Options {
@@ -28,6 +38,8 @@ impl Default for Options {
             control_sock: "rc.sock".to_string(),
             rc_conf_path: "rc.conf".to_string(),
             rc_d_path: "rc.d".to_string(),
+            container_init: false,
+            no_control_sock: false,
         }
     }
 }
@@ -170,9 +182,13 @@ fn main() {
     }
 
     // Setup Pid1
+    let running_as_pid1 = unsafe { libc::getpid() == 1 };
+    let init_mode = options.container_init || running_as_pid1;
     let pid1_options = Pid1Options {
         rc_conf_path: options.rc_conf_path.clone(),
         rc_d_path: options.rc_d_path.clone(),
+        reap_orphans: init_mode,
+        child_subreaper: init_mode,
     };
     let mut pid1 = Arc::new(Pid1::new(pid1_options).expect("pid1::new should work"));
 
@@ -208,23 +224,35 @@ fn main() {
     });
 
     // Create a new unix sock that's listening.
-    let adapter = UnixSockAdapter::new(Arc::clone(&pid1));
-    let mut server_sock =
-        unix_sock::Server::new(Path::from(options.control_sock.as_str()), adapter)
-            .expect("server should instantiate");
-    let server_context = context.clone();
-    let server = std::thread::spawn(move || {
-        server_sock
-            .serve(&server_context)
-            .expect("serve should not error");
-    });
+    let server = if options.no_control_sock {
+        None
+    } else {
+        let adapter = UnixSockAdapter::new(Arc::clone(&pid1));
+        let mut server_sock =
+            unix_sock::Server::new(Path::from(options.control_sock.as_str()), adapter)
+                .expect("server should instantiate");
+        let server_context = context.clone();
+        Some(std::thread::spawn(move || {
+            server_sock
+                .serve(&server_context)
+                .expect("serve should not error");
+        }))
+    };
 
     // Cleanup
-    server.join().unwrap();
+    if let Some(server) = server {
+        server.join().unwrap();
+    } else {
+        while !context.canceled() {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
     signal_running.store(false, Ordering::Release);
     let _ = unsafe { libc::kill(libc::getpid(), libc::SIGCHLD) };
     signal.join().unwrap();
-    let _ = std::fs::remove_file(options.control_sock);
+    if !options.no_control_sock {
+        let _ = std::fs::remove_file(options.control_sock);
+    }
 
     // NOTE(rescrv):  This is a spin loop because there's no good way to synchronize this simply.
     // It shouldn't spin for more than a few times.
