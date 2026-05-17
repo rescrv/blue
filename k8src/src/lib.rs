@@ -77,6 +77,7 @@ pub enum Error {
     ManifestMissing(Path<'static>),
     BadOptions(String),
     VerificationError(Path<'static>),
+    MissingImage { service: String },
 }
 
 impl From<std::io::Error> for Error {
@@ -281,7 +282,7 @@ resources:
         let mut tracking = vec![];
         for service in rc_conf.list_services()? {
             let Some(image) = rc_conf.lookup_suffix(&service, "IMAGE") else {
-                todo!();
+                return Err(Error::MissingImage { service });
             };
             let extra =
                 HashMap::from_iter([("IMAGE", image.clone()), ("RCVAR_ARGV0", service.clone())]);
