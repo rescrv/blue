@@ -16,4 +16,10 @@ prototk = { workspace = true }
 prototk_derive = { workspace = true }
 
 [dev-dependencies]
+arrrg = { workspace = true }
 proptest = { workspace = true }
+statslicer = { workspace = true }
+
+[[bench]]
+name = "verify"
+harness = false
