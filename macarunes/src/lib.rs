@@ -142,6 +142,11 @@ enum Caveat {
         #[prototk(1, uint64)]
         when: u64,
     },
+    #[prototk(3, message)]
+    NotBefore {
+        #[prototk(1, uint64)]
+        when: u64,
+    },
     #[prototk(15, message)]
     ThirdParty {
         #[prototk(1, string)]
@@ -158,6 +163,7 @@ impl Caveat {
         match self {
             Caveat::ExactString { .. } => true,
             Caveat::Expires { .. } => true,
+            Caveat::NotBefore { .. } => true,
             Caveat::ThirdParty { .. } => false,
         }
     }
@@ -167,6 +173,7 @@ impl Caveat {
         match self {
             Caveat::ExactString { .. } => false,
             Caveat::Expires { .. } => false,
+            Caveat::NotBefore { .. } => false,
             Caveat::ThirdParty { .. } => true,
         }
     }
@@ -186,6 +193,9 @@ impl Debug for Caveat {
             }
             Caveat::Expires { when } => {
                 write!(fmt, "expires: when={when}")?;
+            }
+            Caveat::NotBefore { when } => {
+                write!(fmt, "not-before: when={when}")?;
             }
             Caveat::ThirdParty {
                 location,
@@ -218,6 +228,11 @@ pub enum CaveatRef<'a> {
         /// The exclusive expiration timestamp.
         when: u64,
     },
+    /// A first-party not-before caveat.
+    NotBefore {
+        /// The inclusive lower-bound timestamp.
+        when: u64,
+    },
     /// A third-party discharge requirement.
     ThirdParty {
         /// The untrusted routing hint for finding a discharge mechanism.
@@ -232,6 +247,7 @@ impl<'a> CaveatRef<'a> {
         match caveat {
             Caveat::ExactString { what } => Self::ExactString { what },
             Caveat::Expires { when } => Self::Expires { when: *when },
+            Caveat::NotBefore { when } => Self::NotBefore { when: *when },
             Caveat::ThirdParty {
                 location,
                 identifier,
@@ -708,6 +724,11 @@ impl Macaroon {
         self.add_caveat(Caveat::Expires { when })
     }
 
+    /// Add a caveat that rejects verifier times before `when`.
+    pub fn add_not_before(&mut self, when: u64) -> Result<(), Error> {
+        self.add_caveat(Caveat::NotBefore { when })
+    }
+
     /// Add a third party caveat.  Provide `signature()` to ask the third party to generate the
     /// identifier and secret.
     ///
@@ -808,7 +829,7 @@ impl Macaroon {
 
     fn add_caveat(&mut self, caveat: Caveat) -> Result<(), Error> {
         match &caveat {
-            Caveat::ExactString { .. } | Caveat::Expires { .. } => {
+            Caveat::ExactString { .. } | Caveat::Expires { .. } | Caveat::NotBefore { .. } => {
                 let buf = stack_pack(&caveat).to_vec();
                 let mut signature = self.signature.clone();
                 if !crypto::chained_hmac_1(&mut signature, &buf) {
@@ -1051,7 +1072,7 @@ impl Verifier {
 
         for caveat in &m.caveats {
             let (caveat_ok, success_counter, failure_counter) = match caveat {
-                Caveat::ExactString { .. } | Caveat::Expires { .. } => {
+                Caveat::ExactString { .. } | Caveat::Expires { .. } | Caveat::NotBefore { .. } => {
                     let caveat_ok = self.verify_1st(secret, caveat);
                     (
                         caveat_ok,
@@ -1106,6 +1127,9 @@ impl Verifier {
             }
             Caveat::Expires { when } => {
                 found |= self.now.map(|now| *when > now).unwrap_or(false);
+            }
+            Caveat::NotBefore { when } => {
+                found |= self.now.map(|now| now >= *when).unwrap_or(false);
             }
             Caveat::ThirdParty { .. } => return false,
         }
@@ -1582,6 +1606,7 @@ signature: [redacted]
     fn macaroon_round_trips_through_prototk() {
         let mut expected = root_macaroon();
         expected.add_exact_string("role = admin").unwrap();
+        expected.add_not_before(1_800_000_000).unwrap();
         expected.add_expires(1_900_000_000).unwrap();
         let tps = ThirdPartySecret::new(expected.signature(), NONCE, &SECRET2).unwrap();
         expected
@@ -1600,6 +1625,7 @@ signature: [redacted]
     fn macaroon_to_from_bytes_round_trips() {
         let mut expected = root_macaroon();
         expected.add_exact_string("role = admin").unwrap();
+        expected.add_not_before(1_800_000_000).unwrap();
         expected.add_expires(1_900_000_000).unwrap();
         let tps = ThirdPartySecret::new(expected.signature(), NONCE, &SECRET2).unwrap();
         expected
@@ -1629,6 +1655,7 @@ signature: [redacted]
     fn caveat_refs_expose_public_caveat_fields() {
         let mut macaroon = root_macaroon();
         macaroon.add_exact_string("role = admin").unwrap();
+        macaroon.add_not_before(1_800_000_000).unwrap();
         macaroon.add_expires(1_900_000_000).unwrap();
         let tps = ThirdPartySecret::new(macaroon.signature(), NONCE, &SECRET2).unwrap();
         macaroon
@@ -1641,6 +1668,9 @@ signature: [redacted]
             vec![
                 CaveatRef::ExactString {
                     what: "role = admin",
+                },
+                CaveatRef::NotBefore {
+                    when: 1_800_000_000,
                 },
                 CaveatRef::Expires {
                     when: 1_900_000_000,
@@ -1668,6 +1698,7 @@ signature: [redacted]
                 what: "ip = 127.0.0.1".to_owned(),
             };
             let expires = Caveat::Expires { when: 1693945396 };
+            let not_before = Caveat::NotBefore { when: 1693945396 };
             let third_party = Caveat::ThirdParty {
                 location: AUTH_LOCATION.to_owned(),
                 identifier: AUTH_IDENTIFIER.to_owned(),
@@ -1678,6 +1709,8 @@ signature: [redacted]
             assert!(!exact.is_third_party());
             assert!(expires.is_first_party());
             assert!(!expires.is_third_party());
+            assert!(not_before.is_first_party());
+            assert!(!not_before.is_third_party());
             assert!(!third_party.is_first_party());
             assert!(third_party.is_third_party());
         }
@@ -1697,6 +1730,16 @@ signature: [redacted]
         #[test]
         fn expires_round_trips_through_prototk() {
             let expected = Caveat::Expires { when: u64::MAX };
+            let buf = stack_pack(&expected).to_vec();
+            let mut unpacker = Unpacker::new(&buf);
+            let got: Caveat = unpacker.unpack().unwrap();
+            assert_eq!(expected, got);
+            assert!(unpacker.is_empty());
+        }
+
+        #[test]
+        fn not_before_round_trips_through_prototk() {
+            let expected = Caveat::NotBefore { when: u64::MAX };
             let buf = stack_pack(&expected).to_vec();
             let mut unpacker = Unpacker::new(&buf);
             let got: Caveat = unpacker.unpack().unwrap();
@@ -1790,6 +1833,27 @@ identifier: alice@example.org
 signature: [redacted]
 1 caveat
 expires: when=1693945396
+",
+            )
+        }
+
+        #[test]
+        fn not_before() {
+            let mut macaroon = Macaroon::new(
+                "http://example.org/macaroons".to_owned(),
+                "alice@example.org".to_owned(),
+                SECRET,
+            )
+            .unwrap();
+            macaroon.add_not_before(1693945396).unwrap();
+            expect(
+                macaroon,
+                "
+location: http://example.org/macaroons
+identifier: alice@example.org
+signature: [redacted]
+1 caveat
+not-before: when=1693945396
 ",
             )
         }
@@ -2154,6 +2218,69 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             assert_eq!(
                 Err(Error::ProofInvalid),
                 Verifier::default().verify(&macaroon, &SECRET, &[])
+            );
+        }
+
+        #[test]
+        fn not_before() {
+            const NOW: u64 = 1693945396;
+            let mut macaroon = root_macaroon();
+            macaroon.add_not_before(NOW).unwrap();
+            let mut verifier = Verifier::default();
+            verifier.set_current_time(NOW - 1);
+            assert_eq!(
+                Err(Error::ProofInvalid),
+                verifier.verify(&macaroon, &SECRET, &[])
+            );
+            verifier.set_current_time(NOW);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+            verifier.set_current_time(NOW + 1);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+        }
+
+        #[test]
+        fn not_before_accepts_zero_for_any_set_time() {
+            let mut macaroon = root_macaroon();
+            macaroon.add_not_before(0).unwrap();
+            let mut verifier = Verifier::default();
+            verifier.set_current_time(0);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+            verifier.set_current_time(u64::MAX);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+        }
+
+        #[test]
+        fn not_before_rejects_when_verifier_time_is_not_set() {
+            let mut macaroon = root_macaroon();
+            macaroon.add_not_before(0).unwrap();
+
+            assert_eq!(
+                Err(Error::ProofInvalid),
+                Verifier::default().verify(&macaroon, &SECRET, &[])
+            );
+        }
+
+        #[test]
+        fn not_before_and_expires_define_half_open_window() {
+            const START: u64 = 1693945396;
+            const END: u64 = 1693945400;
+            let mut macaroon = root_macaroon();
+            macaroon.add_not_before(START).unwrap();
+            macaroon.add_expires(END).unwrap();
+            let mut verifier = Verifier::default();
+            verifier.set_current_time(START - 1);
+            assert_eq!(
+                Err(Error::ProofInvalid),
+                verifier.verify(&macaroon, &SECRET, &[])
+            );
+            verifier.set_current_time(START);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+            verifier.set_current_time(END - 1);
+            assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
+            verifier.set_current_time(END);
+            assert_eq!(
+                Err(Error::ProofInvalid),
+                verifier.verify(&macaroon, &SECRET, &[])
             );
         }
 
@@ -2818,6 +2945,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             Expires {
                 when: u64,
             },
+            NotBefore {
+                when: u64,
+            },
             ThirdParty {
                 nonce: Nonce,
                 child: Box<GeneratedNode>,
@@ -2836,6 +2966,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             WrongRootSecret,
             MissingContext,
             Expired,
+            NotYetValid,
             MissingDischarge,
             TamperedRootSignature,
             TamperedDischargeSignature,
@@ -2920,7 +3051,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 for caveat_idx in 0..caveat_count {
                     let can_add_child =
                         depth < MAX_GENERATED_DEPTH && self.node_count < MAX_GENERATED_MACAROONS;
-                    match self.entropy.choice(if can_add_child { 3 } else { 2 }) {
+                    match self.entropy.choice(if can_add_child { 4 } else { 3 }) {
                         0 => caveats.push(GeneratedCaveat::ExactString {
                             what: format!(
                                 "generated-context-{id}-{caveat_idx}-{}",
@@ -2933,6 +3064,12 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                                 + self.entropy.choice(256) as u64
                                 + id as u64
                                 + caveat_idx as u64,
+                        }),
+                        2 => caveats.push(GeneratedCaveat::NotBefore {
+                            when: PROPERTY_NOW
+                                - self.entropy.choice(256) as u64
+                                - id as u64
+                                - caveat_idx as u64,
                         }),
                         _ => {
                             let nonce = self
@@ -3045,6 +3182,23 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                             self.tampered_root_signature_result(built)
                         }
                     }
+                    RejectScenario::NotYetValid => {
+                        if let Some(when) = self.root.first_not_before() {
+                            if when > 0 {
+                                self.verify(
+                                    &built.root,
+                                    &built.root_secret,
+                                    &built.discharges,
+                                    when - 1,
+                                    None,
+                                )
+                            } else {
+                                self.tampered_root_signature_result(built)
+                            }
+                        } else {
+                            self.tampered_root_signature_result(built)
+                        }
+                    }
                     RejectScenario::MissingDischarge => {
                         if built.discharges.is_empty() {
                             self.tampered_root_signature_result(built)
@@ -3114,6 +3268,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                         GeneratedCaveat::Expires { when } => {
                             macaroon.add_expires(*when).unwrap();
                         }
+                        GeneratedCaveat::NotBefore { when } => {
+                            macaroon.add_not_before(*when).unwrap();
+                        }
                         GeneratedCaveat::ThirdParty { nonce, child } => {
                             let secret =
                                 ThirdPartySecret::new(macaroon.signature(), *nonce, &child.secret)
@@ -3145,7 +3302,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                                 verifier.add_context(what.clone());
                             }
                         }
-                        GeneratedCaveat::Expires { .. } => {}
+                        GeneratedCaveat::Expires { .. } | GeneratedCaveat::NotBefore { .. } => {}
                         GeneratedCaveat::ThirdParty { child, .. } => {
                             child.add_contexts(verifier, skip_context);
                         }
@@ -3159,7 +3316,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                         GeneratedCaveat::ExactString { what } => {
                             return Some(what.clone());
                         }
-                        GeneratedCaveat::Expires { .. } => {}
+                        GeneratedCaveat::Expires { .. } | GeneratedCaveat::NotBefore { .. } => {}
                         GeneratedCaveat::ThirdParty { child, .. } => {
                             if let Some(context) = child.first_context() {
                                 return Some(context);
@@ -3174,11 +3331,30 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 for caveat in &self.caveats {
                     match caveat {
                         GeneratedCaveat::ExactString { .. } => {}
+                        GeneratedCaveat::NotBefore { .. } => {}
                         GeneratedCaveat::Expires { when } => {
                             return Some(*when);
                         }
                         GeneratedCaveat::ThirdParty { child, .. } => {
                             if let Some(when) = child.first_expiration() {
+                                return Some(when);
+                            }
+                        }
+                    }
+                }
+                None
+            }
+
+            fn first_not_before(&self) -> Option<u64> {
+                for caveat in &self.caveats {
+                    match caveat {
+                        GeneratedCaveat::ExactString { .. } => {}
+                        GeneratedCaveat::Expires { .. } => {}
+                        GeneratedCaveat::NotBefore { when } => {
+                            return Some(*when);
+                        }
+                        GeneratedCaveat::ThirdParty { child, .. } => {
+                            if let Some(when) = child.first_not_before() {
                                 return Some(when);
                             }
                         }
@@ -3246,6 +3422,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 Just(RejectScenario::WrongRootSecret),
                 Just(RejectScenario::MissingContext),
                 Just(RejectScenario::Expired),
+                Just(RejectScenario::NotYetValid),
                 Just(RejectScenario::MissingDischarge),
                 Just(RejectScenario::TamperedRootSignature),
                 Just(RejectScenario::TamperedDischargeSignature),
