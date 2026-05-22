@@ -132,6 +132,7 @@ serde_yaml = { version = "0.9" }
 serde_json = { version = "1.0" }
 siphasher = { version = "1.0.0" }
 libsodium-sys-stable = { version = "1.24.0" }
+base64 = { version = "0.22" }
 
 [profile.dev]
 panic = "abort"
