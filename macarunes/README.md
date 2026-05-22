@@ -19,9 +19,9 @@ let mut macaroon = Macaroon::new(
     "https://issuer.example",
     "alice@example",
     secret.clone(),
-);
-macaroon.add_exact_string("role = admin");
-macaroon.add_expires(4_102_444_800);
+)?;
+macaroon.add_exact_string("role = admin")?;
+macaroon.add_expires(4_102_444_800)?;
 
 let verifier = Verifier::new()
     .with_context("role = admin")
@@ -80,7 +80,8 @@ The caveat language has three cases:
 
 - Exact-string caveats require a verifier context string with exactly the same
   bytes.
-- Expiration caveats require `expiration > current_time`; equality is expired.
+- Expiration caveats require a verifier current time and `expiration >
+  current_time`; equality is expired.
 - Third-party caveats require a matching discharge macaroon, bound to the root
   macaroon for this request.
 
@@ -104,7 +105,7 @@ secret from a protected storage system.
 ```rust
 use macarunes::{Secret, SIGNATURE_BYTES};
 
-let generated = Secret::random();
+let generated = Secret::random()?;
 assert_eq!(SIGNATURE_BYTES * 2, generated.hexdigest().len());
 
 let configured = Secret::from_bytes([0xab; SIGNATURE_BYTES]);
@@ -112,7 +113,11 @@ assert_eq!(
     "abababababababababababababababababababababababababababababababab",
     configured.hexdigest(),
 );
+# Ok::<_, macarunes::Error>(())
 ```
+
+`hexdigest` returns the raw key material as hex.  Keep it for controlled
+diagnostics and deterministic tests; do not log it for live credentials.
 
 `Secret` makes a best-effort attempt to scrub its internal memory when dropped.
 That does not make logged, cloned, serialized, swapped, or otherwise copied
@@ -135,11 +140,12 @@ let macaroon = Macaroon::new(
     "https://files.example/macaroons",
     "file:alpha",
     root_secret,
-);
+)?;
 
 assert_eq!("https://files.example/macaroons", macaroon.location());
 assert_eq!("file:alpha", macaroon.identifier());
 assert!(!macaroon.has_caveats());
+# Ok::<_, macarunes::Error>(())
 ```
 
 The location is a routing hint.  It is intentionally not protected by the
@@ -166,10 +172,10 @@ tenant, role, or deadline.
 use macarunes::{Error, Macaroon, Secret, Verifier};
 
 let secret = Secret::from_bytes([2; macarunes::SIGNATURE_BYTES]);
-let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone());
-macaroon.add_exact_string("method = GET");
-macaroon.add_exact_string("path = /v1/accounts/alice");
-macaroon.add_expires(1_900_000_000);
+let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone())?;
+macaroon.add_exact_string("method = GET")?;
+macaroon.add_exact_string("path = /v1/accounts/alice")?;
+macaroon.add_expires(1_900_000_000)?;
 
 let accepted = Verifier::new()
     .with_context("method = GET")
@@ -185,6 +191,7 @@ assert_eq!(
     Err(Error::ProofInvalid),
     rejected.verify(&macaroon, &secret, &[]),
 );
+# Ok::<_, macarunes::Error>(())
 ```
 
 Exact-string caveats are not parsed by the library.  Define your own canonical
@@ -214,14 +221,14 @@ Expiration Caveats
 
 `add_expires` takes an unsigned integer timestamp.  The verifier accepts the
 macaroon only when the expiration is strictly greater than the verifier's
-current time.
+current time.  An expiration caveat fails if verifier time has not been set.
 
 ```rust
 use macarunes::{Error, Macaroon, Secret, Verifier};
 
 let secret = Secret::from_bytes([3; macarunes::SIGNATURE_BYTES]);
-let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone());
-macaroon.add_expires(1_700_000_000);
+let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone())?;
+macaroon.add_expires(1_700_000_000)?;
 
 assert_eq!(
     Ok(()),
@@ -235,6 +242,7 @@ assert_eq!(
         .with_current_time(1_700_000_000)
         .verify(&macaroon, &secret, &[]),
 );
+# Ok::<_, macarunes::Error>(())
 ```
 
 What Verification Rejects
@@ -283,6 +291,10 @@ checked.  The identifier may be an opaque handle into the third party's storage.
 That lets the final verifier accept the third-party proof without knowing the
 third party's internal policy, user database, or authentication protocol.
 
+Use `ThirdPartySecret::random` for production third-party caveats.  If a
+protocol has to provide nonce material explicitly, use `Nonce::from_bytes`;
+nonce bytes are public, but they must be unique for a given macaroon signature.
+
 ```rust
 use macarunes::{Macaroon, Secret, ThirdPartySecret, Verifier};
 
@@ -292,22 +304,22 @@ const AUTH_LOCATION: &str = "https://auth.example/discharges";
 let root_secret = Secret::from_bytes([4; macarunes::SIGNATURE_BYTES]);
 let auth_secret = Secret::from_bytes([5; macarunes::SIGNATURE_BYTES]);
 
-let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone());
-let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret);
+let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone())?;
+let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret)?;
 root.add_third_party_caveat(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     third_party_secret,
-);
+)?;
 
 let mut discharge = Macaroon::new(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     auth_secret,
-);
-discharge.add_exact_string("user = alice");
+)?;
+discharge.add_exact_string("user = alice")?;
 
-root.bind_discharge(&mut discharge);
+root.bind_discharge(&mut discharge)?;
 
 let verifier = Verifier::new().with_context("user = alice");
 verifier.verify(&root, &root_secret, &[discharge])?;
@@ -334,6 +346,12 @@ Preparing Requests with Loaders
 `Loader` per location.  The builder loads the root macaroon, recursively follows
 third-party caveats, loads each required discharge macaroon, and binds all
 discharges to the root before returning them.
+
+Loader locations are static trusted code capabilities: `Loader::location`
+returns `&'static str`, and `RequestBuilder` is keyed by those static strings.
+The public locations embedded in macaroons remain untrusted routing hints.  They
+select among discharge mechanisms already registered in code; they do not create
+new mechanisms from macaroon data.
 
 ```rust
 use macarunes::{
@@ -374,24 +392,24 @@ impl Loader for StaticLoader {
 let root_secret = Secret::from_bytes([6; macarunes::SIGNATURE_BYTES]);
 let auth_secret = Secret::from_bytes([7; macarunes::SIGNATURE_BYTES]);
 
-let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone());
-let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret);
+let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone())?;
+let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret)?;
 root.add_third_party_caveat(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     third_party_secret,
-);
+)?;
 
 let mut discharge = Macaroon::new(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     auth_secret,
-);
-discharge.add_exact_string("user = alice");
+)?;
+discharge.add_exact_string("user = alice")?;
 
 let builder = RequestBuilder::new()
-    .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root]))
-    .with_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge]));
+    .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root]))?
+    .with_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge]))?;
 
 let (request_root, request_discharges) =
     builder.prepare_request(ROOT_LOCATION, "file:alpha")?;
@@ -405,7 +423,8 @@ Verifier::new()
 Production loaders usually wrap an RPC client, local cache, database lookup, or
 service-discovery layer.  A loader should return macaroons for exactly one
 location.  `RequestBuilder` rejects a macaroon if the loader returns a different
-location than the one requested.
+location than the one requested, and it rejects duplicate loader registration
+for the same static location.
 
 Selecting Discharges from a Cache
 ---------------------------------
@@ -425,26 +444,26 @@ const AUTH_LOCATION: &str = "https://auth.example/discharges";
 let root_secret = Secret::from_bytes([8; macarunes::SIGNATURE_BYTES]);
 let auth_secret = Secret::from_bytes([9; macarunes::SIGNATURE_BYTES]);
 
-let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone());
-let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret);
+let mut root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret.clone())?;
+let third_party_secret = ThirdPartySecret::random(root.signature(), &auth_secret)?;
 root.add_third_party_caveat(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     third_party_secret,
-);
+)?;
 
 let mut discharge = Macaroon::new(
     AUTH_LOCATION,
     "authz:alice:file:alpha",
     auth_secret,
-);
-root.bind_discharge(&mut discharge);
+)?;
+root.bind_discharge(&mut discharge)?;
 
 let noise = Macaroon::new(
     "https://other.example/discharges",
     "unrelated",
     Secret::from_bytes([10; macarunes::SIGNATURE_BYTES]),
-);
+)?;
 let candidates = vec![noise, discharge];
 let selected = root.covering_set(&candidates)?;
 
@@ -460,29 +479,28 @@ Serialization
 -------------
 
 `Macaroon`, `Secret`, and `ThirdPartySecret` implement the repository's
-`prototk` message traits.  Use `buffertk` to encode and decode them for storage
-or transport.
+`prototk` message traits.  Use `Macaroon::to_bytes` and
+`Macaroon::from_bytes` to encode and decode macaroons for storage or transport.
+`from_bytes` rejects trailing bytes.
 
 ```rust
-use buffertk::{stack_pack, Unpacker};
 use macarunes::{Macaroon, Secret};
 
 let secret = Secret::from_bytes([11; macarunes::SIGNATURE_BYTES]);
-let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret);
-macaroon.add_exact_string("role = admin");
+let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret)?;
+macaroon.add_exact_string("role = admin")?;
 
-let bytes = stack_pack(&macaroon).to_vec();
-let mut unpacker = Unpacker::new(&bytes);
-let decoded: Macaroon = unpacker.unpack().expect("macaroon decodes");
+let bytes = macaroon.to_bytes();
+let decoded = Macaroon::from_bytes(&bytes)?;
 
-assert!(unpacker.is_empty());
 assert_eq!(macaroon, decoded);
+# Ok::<_, macarunes::Error>(())
 ```
 
 The encoded bytes are suitable for structured storage or transport protocols
 that already carry bytes.  If you need to place a macaroon in a cookie, header,
 URL, or email body, wrap the encoded bytes in an ASCII-safe envelope such as
-base64 and decode that envelope before calling `Unpacker`.
+base64 and decode that envelope before calling `Macaroon::from_bytes`.
 
 Verification Checklist
 ----------------------
@@ -520,15 +538,20 @@ The public error type is `macarunes::Error`:
   from the requested loader location.
 - `MissingMacaroon` means `covering_set` could not find a candidate with the
   public location and identifier required by a third-party caveat.
+- `DuplicateLoader` means `RequestBuilder` already has a loader registered for
+  that static location.
+- `InvalidEncoding` means `Macaroon::from_bytes` could not decode exactly one
+  macaroon from the provided bytes.
+- `RandomGenerationFailed` means secure random secret generation failed.
+- `EncryptionFailed` means third-party secret encryption failed.
+- `CryptoOperationFailed` means a required cryptographic operation failed.
 
 Assumptions
 -----------
 
 - We rely upon the type system to provide memory safety.  Secrets are scrubbed
-  after use, but there's no guarantee the linker won't optimize away such
-  code.  Until an end-to-end solution emerges in the Rust compiler, it won't
-  be possible to guarantee secrets don't leak in the presence of memory
-  vulnerability.
+  after use with libsodium's memory clearing API, but that does not make logged,
+  cloned, serialized, swapped, or otherwise copied secret material safe.
 
 - This library relies upon the determinism of the protocol buffers code.  This
   is guaranteed by prototk.
@@ -542,18 +565,22 @@ Assumptions
 About Locations
 ---------------
 
-A location is a hint that is not part of the macaroon's signature.  The library
-does this intentionally as the paper suggests that only keys speak.
+A location is a hint that is not part of the macaroon's signature.  Root
+macaroon locations, discharge macaroon locations, and third-party caveat
+locations are all intentionally unsigned.  The verifier makes authority
+decisions from signed cryptographic material: identifiers, third-party
+identifiers, encrypted verification-key material, and the signature chain.
 
-For that reason, locations should be treated as hints that give a plain-text
-description of how to use the endpoint.  The location in the macaroon is not the
-endpoint for discharge; it is an opaque identifier that the `RequestBuilder`
-will iterate over.
+For that reason, locations should be treated as untrusted routing hints.  They
+can affect request assembly because a client uses them to choose a registered
+loader, but changing a location does not by itself make a proof valid or
+invalid.
 
 For each third party, a `Loader` should be developed that negotiates the
-protocol to get discharge macaroons.  A location that is not known to a client
-cannot be trusted.  Given that we have to trust servers that give us macaroons,
-this is not a compromise or limitation.
+protocol to get discharge macaroons.  Loader locations are static strings
+registered by application code.  A location from untrusted macaroon data only
+selects among those registered loaders; unknown locations fail with
+`MissingLoader`.
 
 Status
 ------

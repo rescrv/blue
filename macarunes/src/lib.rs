@@ -2,11 +2,12 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::c_void;
-use std::fmt::{Debug, Write};
+use std::fmt::Debug;
 
 use biometrics::Counter;
 
-use buffertk::stack_pack;
+use buffertk::{Unpacker, stack_pack};
+use prototk::Error as PrototkError;
 
 use prototk_derive::Message;
 
@@ -14,6 +15,9 @@ use prototk_derive::Message;
 
 /// The number of bytes expected in a macaroon signature.
 pub const SIGNATURE_BYTES: usize = 32;
+
+/// The number of bytes expected in a third-party secretbox nonce.
+pub const NONCE_BYTES: usize = libsodium_sys::crypto_secretbox_xsalsa20poly1305_NONCEBYTES as usize;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -64,6 +68,29 @@ pub enum Error {
         #[prototk(2, string)]
         identifier: String,
     },
+    /// A request builder already has a loader for this location.
+    #[prototk(294918, message)]
+    DuplicateLoader {
+        /// The duplicate static loader location.
+        #[prototk(1, string)]
+        location: String,
+    },
+    /// Encoded macaroon bytes could not be decoded as exactly one macaroon.
+    #[prototk(294919, message)]
+    InvalidEncoding {
+        /// A diagnostic description of the decoding problem.
+        #[prototk(1, string)]
+        what: String,
+    },
+    /// Secure random secret generation failed.
+    #[prototk(294920, message)]
+    RandomGenerationFailed,
+    /// Third-party secret encryption failed.
+    #[prototk(294921, message)]
+    EncryptionFailed,
+    /// A required cryptographic operation failed.
+    #[prototk(294922, message)]
+    CryptoOperationFailed,
 }
 
 impl std::fmt::Display for Error {
@@ -86,6 +113,15 @@ impl std::fmt::Display for Error {
                 fmt,
                 "missing macaroon for location {location:?} and identifier {identifier:?}"
             ),
+            Error::DuplicateLoader { location } => {
+                write!(fmt, "duplicate macaroon loader for {location:?}")
+            }
+            Error::InvalidEncoding { what } => {
+                write!(fmt, "invalid macaroon encoding: {what}")
+            }
+            Error::RandomGenerationFailed => write!(fmt, "secure random generation failed"),
+            Error::EncryptionFailed => write!(fmt, "third-party secret encryption failed"),
+            Error::CryptoOperationFailed => write!(fmt, "cryptographic operation failed"),
         }
     }
 }
@@ -126,6 +162,7 @@ impl Caveat {
         }
     }
 
+    #[cfg(test)]
     pub fn is_third_party(&self) -> bool {
         match self {
             Caveat::ExactString { .. } => false,
@@ -165,20 +202,83 @@ impl Debug for Caveat {
     }
 }
 
+/// A read-only view of one macaroon caveat.
+///
+/// Third-party caveats expose only their public routing hint and identifier.  The encrypted
+/// [ThirdPartySecret] remains private to the macaroon implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaveatRef<'a> {
+    /// A first-party exact-string caveat.
+    ExactString {
+        /// The exact context string required by the caveat.
+        what: &'a str,
+    },
+    /// A first-party expiration caveat.
+    Expires {
+        /// The exclusive expiration timestamp.
+        when: u64,
+    },
+    /// A third-party discharge requirement.
+    ThirdParty {
+        /// The untrusted routing hint for finding a discharge mechanism.
+        location: &'a str,
+        /// The public identifier to present to the discharge mechanism.
+        identifier: &'a str,
+    },
+}
+
+impl<'a> CaveatRef<'a> {
+    fn from_caveat(caveat: &'a Caveat) -> Self {
+        match caveat {
+            Caveat::ExactString { what } => Self::ExactString { what },
+            Caveat::Expires { when } => Self::Expires { when: *when },
+            Caveat::ThirdParty {
+                location,
+                identifier,
+                ..
+            } => Self::ThirdParty {
+                location,
+                identifier,
+            },
+        }
+    }
+}
+
 ////////////////////////////////////////////// crypto //////////////////////////////////////////////
 
 mod crypto {
     use super::*;
+    use std::sync::Once;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    pub const NONCE_BYTES: usize =
-        libsodium_sys::crypto_secretbox_xsalsa20poly1305_NONCEBYTES as usize;
+    static SODIUM_INIT: Once = Once::new();
+    static SODIUM_INIT_OK: AtomicBool = AtomicBool::new(false);
+
     pub const ZERO_BYTES: usize =
         libsodium_sys::crypto_secretbox_xsalsa20poly1305_ZEROBYTES as usize;
     pub const BOX_ZERO_BYTES: usize =
         libsodium_sys::crypto_secretbox_xsalsa20poly1305_BOXZEROBYTES as usize;
 
+    /// Ensure libsodium is initialized before using any of its APIs.
+    pub fn ensure_initialized() -> bool {
+        SODIUM_INIT.call_once(|| {
+            // SAFETY(codex): `sodium_init` has no caller-provided pointers or buffers.  It is designed to
+            // be called before any other libsodium API and may be called more than once; `Once`
+            // keeps that initialization path single-shot for this process.
+            let ret = unsafe { libsodium_sys::sodium_init() };
+            SODIUM_INIT_OK.store(ret >= 0, Ordering::Relaxed);
+        });
+        SODIUM_INIT_OK.load(Ordering::Relaxed)
+    }
+
     /// hmac is not public.  Everything should use a wrapper in this module.
-    fn hmac(key: &Secret, message: &[u8], out: &mut Secret) {
+    fn hmac(key: &Secret, message: &[u8], out: &mut Secret) -> bool {
+        if !ensure_initialized() {
+            return false;
+        }
+        // SAFETY(codex): `out` points at a writable 32-byte `Secret`; `key` points at a readable 32-byte
+        // HMAC key; and `message.as_ptr()` is valid for `message.len()` bytes.  Callers use a
+        // separate `Secret` for output, so the output buffer does not alias the input key.
         unsafe {
             libsodium_sys::crypto_auth_hmacsha256(
                 out.bytes.as_mut_ptr(),
@@ -187,21 +287,38 @@ mod crypto {
                 key.bytes.as_ptr(),
             );
         }
+        true
     }
 
     pub fn explicit_bzero(bytes: &mut [u8]) {
+        let _ = ensure_initialized();
+        // SAFETY(codex): `bytes.as_mut_ptr()` is valid for `bytes.len()` bytes and may be passed to
+        // libsodium's memory clearing routine.  Empty slices still provide a non-null, aligned
+        // pointer that is valid for a zero-length operation.
         unsafe {
             libsodium_sys::sodium_memzero(bytes.as_mut_ptr() as *mut c_void, bytes.len());
         }
     }
 
-    pub fn random_bytes(bytes: &mut [u8]) {
+    pub fn random_bytes(bytes: &mut [u8]) -> bool {
+        if !ensure_initialized() {
+            explicit_bzero(bytes);
+            return false;
+        }
+        // SAFETY(codex): `bytes.as_mut_ptr()` is valid for `bytes.len()` writable bytes.
         unsafe {
             libsodium_sys::randombytes_buf(bytes.as_mut_ptr() as *mut c_void, bytes.len());
         }
+        true
     }
 
     pub fn mem_eq(lhs: &[u8], rhs: &[u8]) -> bool {
+        if !ensure_initialized() {
+            return false;
+        }
+        // SAFETY(codex): Both slice pointers are valid for at least `min(lhs.len(), rhs.len())` readable
+        // bytes.  The length equality check happens separately so that unequal lengths cannot be
+        // accepted after a shared prefix compares equal.
         let compared = unsafe {
             libsodium_sys::sodium_memcmp(
                 lhs.as_ptr() as *mut c_void,
@@ -216,18 +333,25 @@ mod crypto {
         mem_eq(lhs.as_bytes(), rhs.as_bytes())
     }
 
-    pub fn chained_hmac_1(key: &mut Secret, message: &[u8]) {
+    pub fn chained_hmac_1(key: &mut Secret, message: &[u8]) -> bool {
         let orig = Secret { bytes: key.bytes };
-        hmac(&orig, message, key);
-    }
-
-    pub fn chained_hmac_n(key: &mut Secret, messages: &[&[u8]]) {
-        for message in messages {
-            chained_hmac_1(key, message);
+        let ok = hmac(&orig, message, key);
+        if !ok {
+            key.scrub();
         }
+        ok
     }
 
-    pub fn bind_for_request(root: &Macaroon, sig: &mut Secret) {
+    pub fn chained_hmac_n(key: &mut Secret, messages: &[&[u8]]) -> bool {
+        for message in messages {
+            if !chained_hmac_1(key, message) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn bind_for_request(root: &Macaroon, sig: &mut Secret) -> bool {
         chained_hmac_1(sig, &root.signature.bytes)
     }
 
@@ -236,10 +360,20 @@ mod crypto {
         nonce: &[u8; NONCE_BYTES],
         plaintext: &[u8; ZERO_BYTES + SIGNATURE_BYTES],
         ciphertext: &mut [u8; ZERO_BYTES + SIGNATURE_BYTES],
-    ) {
-        for p in &plaintext[0..ZERO_BYTES] {
-            assert_eq!(*p, 0);
+    ) -> bool {
+        if !ensure_initialized() {
+            explicit_bzero(ciphertext);
+            return false;
         }
+        for p in &plaintext[0..ZERO_BYTES] {
+            if *p != 0 {
+                explicit_bzero(ciphertext);
+                return false;
+            }
+        }
+        // SAFETY(codex): `plaintext`, `ciphertext`, `nonce`, and `key` are fixed-size arrays whose sizes
+        // match the legacy secretbox API.  The input and output arrays are distinct, writable/readable
+        // for the declared length, and the required leading zero bytes have been checked above.
         let ret = unsafe {
             libsodium_sys::crypto_secretbox_xsalsa20poly1305(
                 ciphertext.as_mut_ptr(),
@@ -249,7 +383,7 @@ mod crypto {
                 key.as_ptr(),
             )
         };
-        assert!(ret == 0);
+        ret == 0
     }
 
     #[must_use]
@@ -259,9 +393,20 @@ mod crypto {
         ciphertext: &[u8; ZERO_BYTES + SIGNATURE_BYTES],
         plaintext: &mut [u8; ZERO_BYTES + SIGNATURE_BYTES],
     ) -> bool {
-        for c in &ciphertext[0..BOX_ZERO_BYTES] {
-            assert_eq!(*c, 0);
+        if !ensure_initialized() {
+            explicit_bzero(plaintext);
+            return false;
         }
+        for c in &ciphertext[0..BOX_ZERO_BYTES] {
+            if *c != 0 {
+                explicit_bzero(plaintext);
+                return false;
+            }
+        }
+        // SAFETY(codex): `ciphertext`, `plaintext`, `nonce`, and `key` are fixed-size arrays whose sizes
+        // match the legacy secretbox-open API.  The input and output arrays are distinct,
+        // writable/readable for the declared length, and the required leading zero bytes have been
+        // checked above.
         let ret = unsafe {
             libsodium_sys::crypto_secretbox_xsalsa20poly1305_open(
                 plaintext.as_mut_ptr(),
@@ -272,6 +417,42 @@ mod crypto {
             )
         };
         ret == 0
+    }
+}
+
+/////////////////////////////////////////////// Nonce //////////////////////////////////////////////
+
+/// A public nonce for wrapping a [ThirdPartySecret].
+///
+/// A nonce is not secret, but it must be unique for a given macaroon signature.  Prefer
+/// [Nonce::random] for production use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Nonce {
+    bytes: [u8; NONCE_BYTES],
+}
+
+impl Nonce {
+    /// Construct a nonce from raw bytes.
+    ///
+    /// This is primarily useful for deterministic tests and for loading nonce material that was
+    /// generated elsewhere.
+    pub const fn from_bytes(bytes: [u8; NONCE_BYTES]) -> Self {
+        Self { bytes }
+    }
+
+    /// Generate a random nonce using a secure random number generator.
+    pub fn random() -> Result<Self, Error> {
+        let mut bytes = [0u8; NONCE_BYTES];
+        if crypto::random_bytes(&mut bytes) {
+            Ok(Self { bytes })
+        } else {
+            Err(Error::RandomGenerationFailed)
+        }
+    }
+
+    /// Return the raw nonce bytes.
+    pub fn as_bytes(&self) -> &[u8; NONCE_BYTES] {
+        &self.bytes
     }
 }
 
@@ -291,10 +472,16 @@ impl Secret {
     }
 
     /// A textual representation of the secret.
+    ///
+    /// This exposes the underlying key material.  Use it only for controlled diagnostics and tests;
+    /// never log it for live credentials.
     pub fn hexdigest(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut hexdigest = String::with_capacity(2 * SIGNATURE_BYTES);
         for item in &self.bytes {
-            write!(&mut hexdigest, "{:02x}", *item).expect("unable to write to string");
+            let item = *item;
+            hexdigest.push(HEX[(item >> 4) as usize] as char);
+            hexdigest.push(HEX[(item & 0x0f) as usize] as char);
         }
         hexdigest
     }
@@ -305,12 +492,15 @@ impl Secret {
     }
 
     /// Generate a random secret using a secure random number generator.
-    pub fn random() -> Self {
+    pub fn random() -> Result<Self, Error> {
         let mut x = Self {
             bytes: [0u8; SIGNATURE_BYTES],
         };
-        crypto::random_bytes(&mut x.bytes);
-        x
+        if crypto::random_bytes(&mut x.bytes) {
+            Ok(x)
+        } else {
+            Err(Error::RandomGenerationFailed)
+        }
     }
 }
 
@@ -348,41 +538,48 @@ pub struct ThirdPartySecret {
 impl ThirdPartySecret {
     /// Create a new [ThirdPartySecret] with the signature provided by the client and the nonce and
     /// discharge_secret provided by the server.
-    pub fn new(signature: &Secret, nonce: &Secret, discharge_secret: &Secret) -> Self {
-        use crypto::{BOX_ZERO_BYTES, NONCE_BYTES, ZERO_BYTES};
+    pub fn new(signature: &Secret, nonce: Nonce, discharge_secret: &Secret) -> Result<Self, Error> {
+        use crypto::{BOX_ZERO_BYTES, ZERO_BYTES};
         let mut tps = ThirdPartySecret::default();
         let mut nonce_bytes = [0u8; NONCE_BYTES];
-        nonce_bytes.copy_from_slice(&nonce.bytes[0..NONCE_BYTES]);
+        nonce_bytes.copy_from_slice(nonce.as_bytes());
         let mut plaintext = [0u8; ZERO_BYTES + SIGNATURE_BYTES];
         plaintext[ZERO_BYTES..].copy_from_slice(&discharge_secret.bytes);
         let mut ciphertext = [0u8; ZERO_BYTES + SIGNATURE_BYTES];
-        crypto::secretbox_xsalsa20poly1305(
+        let encrypted = crypto::secretbox_xsalsa20poly1305(
             &signature.bytes,
             &nonce_bytes,
             &plaintext,
             &mut ciphertext,
         );
-        tps.nonce[0..NONCE_BYTES].copy_from_slice(&nonce_bytes);
-        tps.nonce[NONCE_BYTES..].copy_from_slice(&[0u8; 8]);
-        tps.box_bytes.copy_from_slice(
-            &ciphertext[BOX_ZERO_BYTES..BOX_ZERO_BYTES + (ZERO_BYTES - BOX_ZERO_BYTES)],
-        );
-        tps.data.copy_from_slice(&ciphertext[ZERO_BYTES..]);
+        if encrypted {
+            tps.nonce[0..NONCE_BYTES].copy_from_slice(&nonce_bytes);
+            tps.nonce[NONCE_BYTES..].copy_from_slice(&[0u8; 8]);
+            tps.box_bytes.copy_from_slice(
+                &ciphertext[BOX_ZERO_BYTES..BOX_ZERO_BYTES + (ZERO_BYTES - BOX_ZERO_BYTES)],
+            );
+            tps.data.copy_from_slice(&ciphertext[ZERO_BYTES..]);
+        }
         crypto::explicit_bzero(&mut nonce_bytes);
         crypto::explicit_bzero(&mut plaintext);
         crypto::explicit_bzero(&mut ciphertext);
-        tps
+        if encrypted {
+            Ok(tps)
+        } else {
+            Err(Error::EncryptionFailed)
+        }
     }
 
     /// Create a new [ThirdPartySecret] with a fresh nonce.
-    pub fn random(signature: &Secret, discharge_secret: &Secret) -> Self {
-        let nonce = Secret::random();
-        Self::new(signature, &nonce, discharge_secret)
+    pub fn random(signature: &Secret, discharge_secret: &Secret) -> Result<Self, Error> {
+        let nonce = Nonce::random()?;
+        Self::new(signature, nonce, discharge_secret)
     }
 
-    /// Scrub the memory locations of the nonce and data.
+    /// Scrub the memory locations of the nonce and ciphertext.
     pub fn scrub(&mut self) {
         crypto::explicit_bzero(&mut self.nonce);
+        crypto::explicit_bzero(&mut self.box_bytes);
         crypto::explicit_bzero(&mut self.data);
     }
 }
@@ -424,15 +621,17 @@ impl Macaroon {
         location: impl Into<String>,
         identifier: impl Into<String>,
         mut secret: Secret,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let identifier = identifier.into();
-        crypto::chained_hmac_1(&mut secret, identifier.as_bytes());
-        Macaroon {
+        if !crypto::chained_hmac_1(&mut secret, identifier.as_bytes()) {
+            return Err(Error::CryptoOperationFailed);
+        }
+        Ok(Macaroon {
             location: location.into(),
             identifier,
             signature: secret,
             caveats: Vec::new(),
-        }
+        })
     }
 
     /// The location of the macaroon.  This will be provided to the loader.  Intentionally not
@@ -452,9 +651,46 @@ impl Macaroon {
         &self.signature
     }
 
+    /// Encode this macaroon to its prototk byte representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        stack_pack(self).to_vec()
+    }
+
+    /// Decode exactly one macaroon from its prototk byte representation.
+    ///
+    /// Trailing bytes are rejected.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut unpacker = Unpacker::new(bytes);
+        let macaroon: Macaroon =
+            unpacker
+                .unpack()
+                .map_err(|error: PrototkError| Error::InvalidEncoding {
+                    what: error.to_string(),
+                })?;
+        let canonical = macaroon.to_bytes();
+        if bytes == canonical {
+            Ok(macaroon)
+        } else if bytes.starts_with(&canonical) && bytes.len() > canonical.len() {
+            Err(Error::InvalidEncoding {
+                what: format!("{} trailing bytes", bytes.len() - canonical.len()),
+            })
+        } else {
+            Err(Error::InvalidEncoding {
+                what: "non-canonical macaroon encoding".to_owned(),
+            })
+        }
+    }
+
     /// The number of caveats attached to the macaroon.
     pub fn caveat_count(&self) -> usize {
         self.caveats.len()
+    }
+
+    /// Iterate over read-only caveat views.
+    pub fn caveats(
+        &self,
+    ) -> impl ExactSizeIterator<Item = CaveatRef<'_>> + DoubleEndedIterator + '_ {
+        self.caveats.iter().map(CaveatRef::from_caveat)
     }
 
     /// Returns true if this macaroon has any caveats.
@@ -463,34 +699,42 @@ impl Macaroon {
     }
 
     /// Add a caveat that must match exactly.
-    pub fn add_exact_string(&mut self, what: impl Into<String>) {
-        self.add_caveat(Caveat::ExactString { what: what.into() });
+    pub fn add_exact_string(&mut self, what: impl Into<String>) -> Result<(), Error> {
+        self.add_caveat(Caveat::ExactString { what: what.into() })
     }
 
     /// Add a caveat that expires the macaroon after when.
-    pub fn add_expires(&mut self, when: u64) {
-        self.add_caveat(Caveat::Expires { when });
+    pub fn add_expires(&mut self, when: u64) -> Result<(), Error> {
+        self.add_caveat(Caveat::Expires { when })
     }
 
     /// Add a third party caveat.  Provide `signature()` to ask the third party to generate the
     /// identifier and secret.
+    ///
+    /// The location is an unsigned routing hint.  Verification depends on the identifier,
+    /// encrypted verification-key material, and signature chain.
     pub fn add_third_party_caveat(
         &mut self,
         location: impl Into<String>,
         identifier: impl Into<String>,
         secret: ThirdPartySecret,
-    ) {
+    ) -> Result<(), Error> {
         self.add_caveat(Caveat::ThirdParty {
             location: location.into(),
             identifier: identifier.into(),
             secret,
-        });
+        })
     }
 
     /// Bind a macaroon to the request to make sure discharge macaroons cannot be used in other
     /// contexts.
-    pub fn bind_discharge(&self, discharge: &mut Macaroon) {
-        crypto::bind_for_request(self, &mut discharge.signature);
+    pub fn bind_discharge(&self, discharge: &mut Macaroon) -> Result<(), Error> {
+        let mut signature = discharge.signature.clone();
+        if !crypto::bind_for_request(self, &mut signature) {
+            return Err(Error::CryptoOperationFailed);
+        }
+        discharge.signature = signature;
+        Ok(())
     }
 
     /// Assemble the transitive discharge cover from `candidates`.
@@ -562,12 +806,16 @@ impl Macaroon {
         }
     }
 
-    fn add_caveat(&mut self, caveat: Caveat) {
+    fn add_caveat(&mut self, caveat: Caveat) -> Result<(), Error> {
         match &caveat {
             Caveat::ExactString { .. } | Caveat::Expires { .. } => {
                 let buf = stack_pack(&caveat).to_vec();
+                let mut signature = self.signature.clone();
+                if !crypto::chained_hmac_1(&mut signature, &buf) {
+                    return Err(Error::CryptoOperationFailed);
+                }
                 self.caveats.push(caveat);
-                crypto::chained_hmac_1(&mut self.signature, &buf);
+                self.signature = signature;
             }
             Caveat::ThirdParty {
                 location: _,
@@ -580,10 +828,15 @@ impl Macaroon {
                     &secret.box_bytes,
                     &secret.data,
                 ];
-                crypto::chained_hmac_n(&mut self.signature, messages);
+                let mut signature = self.signature.clone();
+                if !crypto::chained_hmac_n(&mut signature, messages) {
+                    return Err(Error::CryptoOperationFailed);
+                }
                 self.caveats.push(caveat);
+                self.signature = signature;
             }
         }
+        Ok(())
     }
 }
 
@@ -591,7 +844,7 @@ impl Debug for Macaroon {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         writeln!(fmt, "location: {}", self.location)?;
         writeln!(fmt, "identifier: {}", self.identifier)?;
-        writeln!(fmt, "signature: {}", self.signature.hexdigest())?;
+        writeln!(fmt, "signature: [redacted]")?;
         if self.caveats.len() == 1 {
             writeln!(fmt, "1 caveat")?;
         } else {
@@ -608,7 +861,10 @@ impl Debug for Macaroon {
 
 /// A [Loader] is a client-side way to get macaroons by identifier.  Used by [RequestBuilder].
 pub trait Loader: Debug {
-    /// The location this loader serves.
+    /// The static location this loader serves.
+    ///
+    /// Static loader locations are trusted application code, not authority derived from macaroon
+    /// data.
     fn location(&self) -> &'static str;
     /// Lookup the discharge macaroon with the given identifier.
     ///
@@ -632,16 +888,26 @@ impl RequestBuilder {
         }
     }
 
-    /// Add a loader for macaroons.  Every type of third party should have its own loader that's
-    /// identified by `location()`.
-    pub fn add_loader<L: Loader + 'static>(&mut self, loader: L) {
-        self.loaders.insert(loader.location(), Box::new(loader));
+    /// Add a loader for macaroons.
+    ///
+    /// Every type of third party should have its own loader identified by its static
+    /// [Loader::location].  Duplicate locations are rejected so untrusted macaroon data cannot
+    /// replace code-registered discharge mechanisms.
+    pub fn add_loader<L: Loader + 'static>(&mut self, loader: L) -> Result<(), Error> {
+        let location = loader.location();
+        if self.loaders.contains_key(location) {
+            return Err(Error::DuplicateLoader {
+                location: location.to_owned(),
+            });
+        }
+        self.loaders.insert(location, Box::new(loader));
+        Ok(())
     }
 
     /// Add a loader and return the builder for call chaining.
-    pub fn with_loader<L: Loader + 'static>(mut self, loader: L) -> Self {
-        self.add_loader(loader);
-        self
+    pub fn with_loader<L: Loader + 'static>(mut self, loader: L) -> Result<Self, Error> {
+        self.add_loader(loader)?;
+        Ok(self)
     }
 
     /// Prepare a request with the location and identifier provided.
@@ -660,7 +926,7 @@ impl RequestBuilder {
             self.enqueue_discharges(&macaroon, &mut discharges, &mut queue, &mut enqueued)?;
         }
         for discharge in &mut discharges {
-            root.bind_discharge(discharge);
+            root.bind_discharge(discharge)?;
         }
         Ok((root, discharges))
     }
@@ -719,7 +985,7 @@ impl RequestBuilder {
 /// chosen require very little logic from the server.
 #[derive(Clone, Debug, Default)]
 pub struct Verifier {
-    now: u64,
+    now: Option<u64>,
     contexts: Vec<String>,
 }
 
@@ -743,7 +1009,7 @@ impl Verifier {
 
     /// Set the time to use for the verifier.
     pub fn set_current_time(&mut self, now: u64) {
-        self.now = now;
+        self.now = Some(now);
     }
 
     /// Set the time to use and return the verifier for call chaining.
@@ -778,33 +1044,40 @@ impl Verifier {
         if depth > discharges.len() {
             return Err(Error::Cycle);
         }
-        crypto::chained_hmac_1(secret, m.identifier.as_bytes());
+        if !crypto::chained_hmac_1(secret, m.identifier.as_bytes()) {
+            return Err(Error::ProofInvalid);
+        }
         let mut fail = false;
 
         for caveat in &m.caveats {
-            let old_fail = fail;
-            let counter = if caveat.is_first_party() {
-                fail |= !self.verify_1st(secret, caveat);
-                if !old_fail && fail {
-                    &VERIFIER_FIRST_PARTY_FAILURE
-                } else {
-                    &VERIFIER_FIRST_PARTY_SUCCESS
+            let (caveat_ok, success_counter, failure_counter) = match caveat {
+                Caveat::ExactString { .. } | Caveat::Expires { .. } => {
+                    let caveat_ok = self.verify_1st(secret, caveat);
+                    (
+                        caveat_ok,
+                        &VERIFIER_FIRST_PARTY_SUCCESS,
+                        &VERIFIER_FIRST_PARTY_FAILURE,
+                    )
                 }
-            } else if caveat.is_third_party() {
-                fail |= !self.verify_3rd(secret, caveat, tm, discharges, depth);
-                if !old_fail && fail {
-                    &VERIFIER_THIRD_PARTY_FAILURE
-                } else {
-                    &VERIFIER_THIRD_PARTY_SUCCESS
+                Caveat::ThirdParty { .. } => {
+                    let caveat_ok = self.verify_3rd(secret, caveat, tm, discharges, depth);
+                    (
+                        caveat_ok,
+                        &VERIFIER_THIRD_PARTY_SUCCESS,
+                        &VERIFIER_THIRD_PARTY_FAILURE,
+                    )
                 }
-            } else {
-                panic!("logic error regarding first and third parties");
             };
-            counter.click();
+            if caveat_ok {
+                success_counter.click();
+            } else {
+                failure_counter.click();
+                fail = true;
+            }
         }
 
         if m != tm {
-            crypto::bind_for_request(tm, &mut *secret);
+            fail |= !crypto::bind_for_request(tm, &mut *secret);
         }
 
         fail |= *secret != m.signature;
@@ -817,10 +1090,14 @@ impl Verifier {
     }
 
     fn verify_1st(&self, secret: &mut Secret, caveat: &Caveat) -> bool {
-        assert!(caveat.is_first_party());
+        if !caveat.is_first_party() {
+            return false;
+        }
         let mut found = false;
         let buf = stack_pack(caveat).to_vec();
-        crypto::chained_hmac_1(secret, &buf);
+        if !crypto::chained_hmac_1(secret, &buf) {
+            return false;
+        }
         match caveat {
             Caveat::ExactString { what } => {
                 for context in &self.contexts {
@@ -828,11 +1105,9 @@ impl Verifier {
                 }
             }
             Caveat::Expires { when } => {
-                found |= *when > self.now;
+                found |= self.now.map(|now| *when > now).unwrap_or(false);
             }
-            Caveat::ThirdParty { .. } => {
-                panic!("this should be covered by the above assert");
-            }
+            Caveat::ThirdParty { .. } => return false,
         }
         found
     }
@@ -845,7 +1120,7 @@ impl Verifier {
         discharges: &[Macaroon],
         depth: usize,
     ) -> bool {
-        use crypto::{BOX_ZERO_BYTES, NONCE_BYTES, ZERO_BYTES};
+        use crypto::{BOX_ZERO_BYTES, ZERO_BYTES};
         let mut fail = false;
         let mut found = false;
 
@@ -894,7 +1169,7 @@ impl Verifier {
                 &secret.box_bytes,
                 &secret.data,
             ];
-            crypto::chained_hmac_n(key, messages);
+            fail |= !crypto::chained_hmac_n(key, messages);
         }
         found && !fail
     }
@@ -935,6 +1210,15 @@ mod tests {
     }
 
     #[test]
+    fn crypto_wrappers_initialize_libsodium() {
+        assert!(ensure_initialized());
+
+        let mut random = [0u8; SIGNATURE_BYTES];
+        assert!(random_bytes(&mut random));
+        assert!(mem_eq(&random, &random));
+    }
+
+    #[test]
     fn secretbox_xsalsa20poly1305_known_vector_round_trips() {
         use super::crypto::*;
 
@@ -957,7 +1241,12 @@ mod tests {
         let mut plaintext = known_plaintext;
         let mut ciphertext = [0u8; ZERO_BYTES + SIGNATURE_BYTES];
         // encrypt
-        secretbox_xsalsa20poly1305(&key, &nonce, &plaintext, &mut ciphertext);
+        assert!(secretbox_xsalsa20poly1305(
+            &key,
+            &nonce,
+            &plaintext,
+            &mut ciphertext
+        ));
         assert_eq!(known_ciphertext, ciphertext);
         // decrypt
         let success = secretbox_xsalsa20poly1305_open(&key, &nonce, &ciphertext, &mut plaintext);
@@ -968,37 +1257,46 @@ mod tests {
     #[test]
     fn chained_hmac_n_uses_every_message() {
         let mut baseline = SECRET;
-        chained_hmac_n(&mut baseline, &[b"identifier", b"nonce", b"box", b"data"]);
+        assert!(chained_hmac_n(
+            &mut baseline,
+            &[b"identifier", b"nonce", b"box", b"data"]
+        ));
 
         let mut first_changed = SECRET;
-        chained_hmac_n(
+        assert!(chained_hmac_n(
             &mut first_changed,
             &[b"other-identifier", b"nonce", b"box", b"data"],
-        );
+        ));
         let mut middle_changed = SECRET;
-        chained_hmac_n(
+        assert!(chained_hmac_n(
             &mut middle_changed,
             &[b"identifier", b"other-nonce", b"box", b"data"],
-        );
+        ));
         let mut last_changed = SECRET;
-        chained_hmac_n(
+        assert!(chained_hmac_n(
             &mut last_changed,
             &[b"identifier", b"nonce", b"box", b"other-data"],
-        );
+        ));
 
-        assert_ne!(baseline.hexdigest(), first_changed.hexdigest());
-        assert_ne!(baseline.hexdigest(), middle_changed.hexdigest());
-        assert_ne!(baseline.hexdigest(), last_changed.hexdigest());
+        assert_ne!(baseline.bytes, first_changed.bytes);
+        assert_ne!(baseline.bytes, middle_changed.bytes);
+        assert_ne!(baseline.bytes, last_changed.bytes);
     }
 
     #[test]
     fn chained_hmac_n_preserves_message_order() {
         let mut ordered = SECRET;
-        chained_hmac_n(&mut ordered, &[b"identifier", b"nonce", b"box", b"data"]);
+        assert!(chained_hmac_n(
+            &mut ordered,
+            &[b"identifier", b"nonce", b"box", b"data"]
+        ));
         let mut reordered = SECRET;
-        chained_hmac_n(&mut reordered, &[b"data", b"box", b"nonce", b"identifier"]);
+        assert!(chained_hmac_n(
+            &mut reordered,
+            &[b"data", b"box", b"nonce", b"identifier"]
+        ));
 
-        assert_ne!(ordered.hexdigest(), reordered.hexdigest());
+        assert_ne!(ordered.bytes, reordered.bytes);
     }
 
     #[test]
@@ -1032,6 +1330,32 @@ mod tests {
             }
             .to_string()
         );
+        assert_eq!(
+            "duplicate macaroon loader for \"http://example.net/auth\"",
+            Error::DuplicateLoader {
+                location: AUTH_LOCATION.to_owned(),
+            }
+            .to_string()
+        );
+        assert_eq!(
+            "invalid macaroon encoding: 1 trailing bytes",
+            Error::InvalidEncoding {
+                what: "1 trailing bytes".to_owned(),
+            }
+            .to_string()
+        );
+        assert_eq!(
+            "secure random generation failed",
+            Error::RandomGenerationFailed.to_string()
+        );
+        assert_eq!(
+            "third-party secret encryption failed",
+            Error::EncryptionFailed.to_string()
+        );
+        assert_eq!(
+            "cryptographic operation failed",
+            Error::CryptoOperationFailed.to_string()
+        );
     }
 
     #[test]
@@ -1051,6 +1375,15 @@ mod tests {
                 location: AUTH_LOCATION.to_owned(),
                 identifier: AUTH_IDENTIFIER.to_owned(),
             },
+            Error::DuplicateLoader {
+                location: AUTH_LOCATION.to_owned(),
+            },
+            Error::InvalidEncoding {
+                what: "1 trailing bytes".to_owned(),
+            },
+            Error::RandomGenerationFailed,
+            Error::EncryptionFailed,
+            Error::CryptoOperationFailed,
         ];
 
         for expected in cases {
@@ -1086,20 +1419,15 @@ mod tests {
         ],
     };
 
-    const NONCE: Secret = Secret {
-        bytes: [
-            77, 7, 89, 54, 102, 186, 68, 35, 238, 87, 239, 15, 145, 99, 66, 233, 155, 109, 210,
-            222, 10, 201, 135, 142, 182, 179, 56, 220, 150, 57, 139, 168,
-        ],
-    };
+    const NONCE: Nonce = Nonce::from_bytes([
+        77, 7, 89, 54, 102, 186, 68, 35, 238, 87, 239, 15, 145, 99, 66, 233, 155, 109, 210, 222,
+        10, 201, 135, 142,
+    ]);
 
-    const NONCE2: Secret = Secret {
-        bytes: [
-            0x4d, 0xd8, 0x47, 0x17, 0xfe, 0x0c, 0x95, 0x31, 0xc1, 0x49, 0x3f, 0x9e, 0xd0, 0x39,
-            0x49, 0x8e, 0xb7, 0x92, 0x9d, 0xf5, 0xc8, 0x97, 0xc4, 0x37, 0x72, 0x1d, 0xf3, 0x84,
-            0x5c, 0xd9, 0x24, 0xb6,
-        ],
-    };
+    const NONCE2: Nonce = Nonce::from_bytes([
+        0x4d, 0xd8, 0x47, 0x17, 0xfe, 0x0c, 0x95, 0x31, 0xc1, 0x49, 0x3f, 0x9e, 0xd0, 0x39, 0x49,
+        0x8e, 0xb7, 0x92, 0x9d, 0xf5, 0xc8, 0x97, 0xc4, 0x37,
+    ]);
 
     const ROOT_LOCATION: &str = "http://example.org/macaroons";
     const ROOT_IDENTIFIER: &str = "alice@example.org";
@@ -1114,13 +1442,15 @@ mod tests {
     }
 
     fn root_macaroon() -> Macaroon {
-        Macaroon::new(ROOT_LOCATION.to_owned(), ROOT_IDENTIFIER.to_owned(), SECRET)
+        Macaroon::new(ROOT_LOCATION.to_owned(), ROOT_IDENTIFIER.to_owned(), SECRET).unwrap()
     }
 
     fn root_with_third_party_caveat() -> Macaroon {
         let mut macaroon = root_macaroon();
-        let tps = ThirdPartySecret::new(macaroon.signature(), &NONCE, &SECRET2);
-        macaroon.add_third_party_caveat(AUTH_LOCATION.to_owned(), AUTH_IDENTIFIER.to_owned(), tps);
+        let tps = ThirdPartySecret::new(macaroon.signature(), NONCE, &SECRET2).unwrap();
+        macaroon
+            .add_third_party_caveat(AUTH_LOCATION.to_owned(), AUTH_IDENTIFIER.to_owned(), tps)
+            .unwrap();
         macaroon
     }
 
@@ -1130,6 +1460,7 @@ mod tests {
             AUTH_IDENTIFIER.to_owned(),
             SECRET2,
         )
+        .unwrap()
     }
 
     #[test]
@@ -1140,7 +1471,7 @@ mod tests {
             "
 location: 
 identifier: 
-signature: 0000000000000000000000000000000000000000000000000000000000000000
+signature: [redacted]
 0 caveats
 ",
         )
@@ -1152,7 +1483,8 @@ signature: 0000000000000000000000000000000000000000000000000000000000000000
             "http://example.org/macaroons".to_owned(),
             "alice@example.org".to_owned(),
             SECRET,
-        );
+        )
+        .unwrap();
         assert_eq!(
             Macaroon {
                 location: ROOT_LOCATION.to_owned(),
@@ -1173,22 +1505,31 @@ signature: 0000000000000000000000000000000000000000000000000000000000000000
             "
 location: http://example.org/macaroons
 identifier: alice@example.org
-signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
+signature: [redacted]
 0 caveats
 ",
         )
     }
 
     #[test]
+    fn macaroon_debug_redacts_signature() {
+        let macaroon = root_with_third_party_caveat();
+        let debug = format!("{macaroon:?}");
+
+        assert!(debug.contains("signature: [redacted]"));
+        assert!(!debug.contains(&macaroon.signature.hexdigest()));
+    }
+
+    #[test]
     fn ergonomic_constructors_accept_borrowed_strings() {
-        let mut macaroon = Macaroon::new(ROOT_LOCATION, ROOT_IDENTIFIER, SECRET);
+        let mut macaroon = Macaroon::new(ROOT_LOCATION, ROOT_IDENTIFIER, SECRET).unwrap();
 
         assert_eq!(ROOT_LOCATION, macaroon.location());
         assert_eq!(ROOT_IDENTIFIER, macaroon.identifier());
         assert_eq!(0, macaroon.caveat_count());
         assert!(!macaroon.has_caveats());
 
-        macaroon.add_exact_string("ip = 127.0.0.1");
+        macaroon.add_exact_string("ip = 127.0.0.1").unwrap();
 
         assert_eq!(1, macaroon.caveat_count());
         assert!(macaroon.has_caveats());
@@ -1223,12 +1564,29 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
     }
 
     #[test]
+    fn nonce_from_bytes_preserves_nonce_material() {
+        let nonce = Nonce::from_bytes([
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+        ]);
+
+        assert_eq!(
+            &[
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23,
+            ],
+            nonce.as_bytes()
+        );
+    }
+
+    #[test]
     fn macaroon_round_trips_through_prototk() {
         let mut expected = root_macaroon();
-        expected.add_exact_string("role = admin");
-        expected.add_expires(1_900_000_000);
-        let tps = ThirdPartySecret::new(expected.signature(), &NONCE, &SECRET2);
-        expected.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps);
+        expected.add_exact_string("role = admin").unwrap();
+        expected.add_expires(1_900_000_000).unwrap();
+        let tps = ThirdPartySecret::new(expected.signature(), NONCE, &SECRET2).unwrap();
+        expected
+            .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps)
+            .unwrap();
 
         let buf = stack_pack(&expected).to_vec();
         let mut unpacker = Unpacker::new(&buf);
@@ -1236,6 +1594,64 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
 
         assert_eq!(expected, got);
         assert!(unpacker.is_empty());
+    }
+
+    #[test]
+    fn macaroon_to_from_bytes_round_trips() {
+        let mut expected = root_macaroon();
+        expected.add_exact_string("role = admin").unwrap();
+        expected.add_expires(1_900_000_000).unwrap();
+        let tps = ThirdPartySecret::new(expected.signature(), NONCE, &SECRET2).unwrap();
+        expected
+            .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps)
+            .unwrap();
+
+        assert_eq!(
+            Ok(expected.clone()),
+            Macaroon::from_bytes(&expected.to_bytes())
+        );
+    }
+
+    #[test]
+    fn macaroon_from_bytes_rejects_trailing_bytes() {
+        let mut bytes = root_macaroon().to_bytes();
+        bytes.push(0);
+
+        assert_eq!(
+            Err(Error::InvalidEncoding {
+                what: "1 trailing bytes".to_owned(),
+            }),
+            Macaroon::from_bytes(&bytes)
+        );
+    }
+
+    #[test]
+    fn caveat_refs_expose_public_caveat_fields() {
+        let mut macaroon = root_macaroon();
+        macaroon.add_exact_string("role = admin").unwrap();
+        macaroon.add_expires(1_900_000_000).unwrap();
+        let tps = ThirdPartySecret::new(macaroon.signature(), NONCE, &SECRET2).unwrap();
+        macaroon
+            .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps)
+            .unwrap();
+
+        let caveats: Vec<_> = macaroon.caveats().collect();
+
+        assert_eq!(
+            vec![
+                CaveatRef::ExactString {
+                    what: "role = admin",
+                },
+                CaveatRef::Expires {
+                    when: 1_900_000_000,
+                },
+                CaveatRef::ThirdParty {
+                    location: AUTH_LOCATION,
+                    identifier: AUTH_IDENTIFIER,
+                },
+            ],
+            caveats
+        );
     }
 
     mod caveats {
@@ -1255,7 +1671,7 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
             let third_party = Caveat::ThirdParty {
                 location: AUTH_LOCATION.to_owned(),
                 identifier: AUTH_IDENTIFIER.to_owned(),
-                secret: ThirdPartySecret::new(&root_macaroon().signature, &NONCE, &SECRET2),
+                secret: ThirdPartySecret::new(&root_macaroon().signature, NONCE, &SECRET2).unwrap(),
             };
 
             assert!(exact.is_first_party());
@@ -1293,7 +1709,7 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
             let expected = Caveat::ThirdParty {
                 location: AUTH_LOCATION.to_owned(),
                 identifier: AUTH_IDENTIFIER.to_owned(),
-                secret: ThirdPartySecret::new(&root_macaroon().signature, &NONCE, &SECRET2),
+                secret: ThirdPartySecret::new(&root_macaroon().signature, NONCE, &SECRET2).unwrap(),
             };
             let buf = stack_pack(&expected).to_vec();
             let mut unpacker = Unpacker::new(&buf);
@@ -1308,8 +1724,11 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
                 "http://example.org/macaroons".to_owned(),
                 "alice@example.org".to_owned(),
                 SECRET,
-            );
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            )
+            .unwrap();
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             assert_eq!(
                 Macaroon {
                     location: ROOT_LOCATION.to_owned(),
@@ -1332,7 +1751,7 @@ signature: df8d9f90d5f1a6a3c6aa897001ec26a65d09692153eb408547be5fb38ac9085b
                 "
 location: http://example.org/macaroons
 identifier: alice@example.org
-signature: 6c85bc5fc9158431cf2e6fce5fc9a07f859e866e6ac8bdceed3b342b34f2fd86
+signature: [redacted]
 1 caveat
 exact-string: what=\"ip = 127.0.0.1\"
 ",
@@ -1345,8 +1764,9 @@ exact-string: what=\"ip = 127.0.0.1\"
                 "http://example.org/macaroons".to_owned(),
                 "alice@example.org".to_owned(),
                 SECRET,
-            );
-            macaroon.add_expires(1693945396);
+            )
+            .unwrap();
+            macaroon.add_expires(1693945396).unwrap();
             assert_eq!(
                 Macaroon {
                     location: ROOT_LOCATION.to_owned(),
@@ -1367,7 +1787,7 @@ exact-string: what=\"ip = 127.0.0.1\"
                 "
 location: http://example.org/macaroons
 identifier: alice@example.org
-signature: 46ba0d6677fdf7be67167f279eb41a3471f7b899e7cf5542ff9bbdd0bbed2f02
+signature: [redacted]
 1 caveat
 expires: when=1693945396
 ",
@@ -1380,13 +1800,16 @@ expires: when=1693945396
                 "http://example.org/macaroons".to_owned(),
                 "alice@example.org".to_owned(),
                 SECRET,
-            );
-            let tps = ThirdPartySecret::new(&macaroon.signature, &NONCE, &SECRET2);
-            macaroon.add_third_party_caveat(
-                "http://example.net/auth".to_owned(),
-                "bob@example.net".to_owned(),
-                tps,
-            );
+            )
+            .unwrap();
+            let tps = ThirdPartySecret::new(&macaroon.signature, NONCE, &SECRET2).unwrap();
+            macaroon
+                .add_third_party_caveat(
+                    "http://example.net/auth".to_owned(),
+                    "bob@example.net".to_owned(),
+                    tps,
+                )
+                .unwrap();
             assert_eq!(
                 Macaroon {
                     location: ROOT_LOCATION.to_owned(),
@@ -1401,7 +1824,8 @@ expires: when=1693945396
                     caveats: vec![Caveat::ThirdParty {
                         location: AUTH_LOCATION.to_owned(),
                         identifier: AUTH_IDENTIFIER.to_owned(),
-                        secret: ThirdPartySecret::new(&root_macaroon().signature, &NONCE, &SECRET2),
+                        secret: ThirdPartySecret::new(&root_macaroon().signature, NONCE, &SECRET2,)
+                            .unwrap(),
                     }],
                 },
                 macaroon
@@ -1411,7 +1835,7 @@ expires: when=1693945396
                 "
 location: http://example.org/macaroons
 identifier: alice@example.org
-signature: 5b352e0a04497d1287c2ddd64db66761a4e86774cc145bcf63639cb81343266c
+signature: [redacted]
 1 caveat
 third-party: location=http://example.net/auth identifier=bob@example.net
 ",
@@ -1421,10 +1845,12 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn third_party_random_generates_a_usable_secret() {
             let mut macaroon = root_macaroon();
-            let tps = ThirdPartySecret::random(macaroon.signature(), &SECRET2);
-            macaroon.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps);
+            let tps = ThirdPartySecret::random(macaroon.signature(), &SECRET2).unwrap();
+            macaroon
+                .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, tps)
+                .unwrap();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::default();
             assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[discharge]));
         }
@@ -1465,9 +1891,10 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 "http://noise.example.invalid",
                 "noise@example.invalid",
                 SECRET,
-            );
+            )
+            .unwrap();
             let mut discharge = discharge_macaroon();
-            root.bind_discharge(&mut discharge);
+            root.bind_discharge(&mut discharge).unwrap();
             let candidates = vec![noise, discharge];
 
             let cover = root.covering_set_refs(&candidates).unwrap();
@@ -1479,10 +1906,13 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn duplicate_public_identities_select_first_candidate() {
             let root = root_with_third_party_caveat();
-            let mut first_candidate = Macaroon::new(AUTH_LOCATION, AUTH_IDENTIFIER, SECRET3);
-            first_candidate.add_exact_string("candidate = first");
+            let mut first_candidate =
+                Macaroon::new(AUTH_LOCATION, AUTH_IDENTIFIER, SECRET3).unwrap();
+            first_candidate
+                .add_exact_string("candidate = first")
+                .unwrap();
             let mut second_candidate = discharge_macaroon();
-            root.bind_discharge(&mut second_candidate);
+            root.bind_discharge(&mut second_candidate).unwrap();
             let candidates = vec![first_candidate.clone(), second_candidate];
 
             assert_eq!(Ok(vec![first_candidate]), root.covering_set(&candidates));
@@ -1491,12 +1921,14 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn duplicate_third_party_caveats_share_one_discharge() {
             let mut root = root_macaroon();
-            let first_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
-            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret);
-            let second_secret = ThirdPartySecret::new(root.signature(), &NONCE2, &SECRET2);
-            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, second_secret);
+            let first_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
+            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret)
+                .unwrap();
+            let second_secret = ThirdPartySecret::new(root.signature(), NONCE2, &SECRET2).unwrap();
+            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, second_secret)
+                .unwrap();
             let mut discharge = discharge_macaroon();
-            root.bind_discharge(&mut discharge);
+            root.bind_discharge(&mut discharge).unwrap();
             let candidates = vec![discharge.clone()];
 
             assert_eq!(Ok(vec![discharge]), root.covering_set(&candidates));
@@ -1505,28 +1937,28 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn nested_discharges_are_selected_from_many_candidates() {
             let mut root = root_macaroon();
-            let root_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
-            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, root_secret);
+            let root_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
+            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, root_secret)
+                .unwrap();
             let mut first_discharge = discharge_macaroon();
             let nested_secret =
-                ThirdPartySecret::new(first_discharge.signature(), &NONCE2, &SECRET3);
-            first_discharge.add_third_party_caveat(
-                NESTED_AUTH_LOCATION,
-                NESTED_AUTH_IDENTIFIER,
-                nested_secret,
-            );
+                ThirdPartySecret::new(first_discharge.signature(), NONCE2, &SECRET3).unwrap();
+            first_discharge
+                .add_third_party_caveat(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, nested_secret)
+                .unwrap();
             let second_discharge =
-                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3);
+                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3).unwrap();
 
             let mut expected_first = first_discharge;
             let mut expected_second = second_discharge;
-            root.bind_discharge(&mut expected_first);
-            root.bind_discharge(&mut expected_second);
+            root.bind_discharge(&mut expected_first).unwrap();
+            root.bind_discharge(&mut expected_second).unwrap();
             let noise = Macaroon::new(
                 "http://noise.example.invalid",
                 "noise@example.invalid",
                 SECRET,
-            );
+            )
+            .unwrap();
             let candidates = vec![
                 noise.clone(),
                 expected_second.clone(),
@@ -1549,16 +1981,15 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn nested_missing_discharge_reports_nested_identity() {
             let mut root = root_macaroon();
-            let root_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
-            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, root_secret);
+            let root_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
+            root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, root_secret)
+                .unwrap();
             let mut first_discharge = discharge_macaroon();
             let nested_secret =
-                ThirdPartySecret::new(first_discharge.signature(), &NONCE2, &SECRET3);
-            first_discharge.add_third_party_caveat(
-                NESTED_AUTH_LOCATION,
-                NESTED_AUTH_IDENTIFIER,
-                nested_secret,
-            );
+                ThirdPartySecret::new(first_discharge.signature(), NONCE2, &SECRET3).unwrap();
+            first_discharge
+                .add_third_party_caveat(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, nested_secret)
+                .unwrap();
 
             assert_eq!(
                 Err(Error::MissingMacaroon {
@@ -1579,8 +2010,11 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 "http://example.org/macaroons".to_owned(),
                 "alice@example.org".to_owned(),
                 SECRET,
-            );
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            )
+            .unwrap();
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             let mut verifier = Verifier::default();
             verifier.add_context("ip = 127.0.0.1".to_owned());
             assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
@@ -1589,8 +2023,8 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn fluent_context_and_time_setup() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("ip = 127.0.0.1");
-            macaroon.add_expires(1693945396);
+            macaroon.add_exact_string("ip = 127.0.0.1").unwrap();
+            macaroon.add_expires(1693945396).unwrap();
             let verifier = Verifier::new()
                 .with_context("ip = 127.0.0.1")
                 .with_current_time(1693945395);
@@ -1600,7 +2034,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn exact_string_rejects_missing_context() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             let verifier = Verifier::default();
             assert_eq!(
                 Err(Error::ProofInvalid),
@@ -1611,7 +2047,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn exact_string_rejects_non_exact_context() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             let mut verifier = Verifier::default();
             verifier.add_context("ip = 127.0.0.1 ".to_owned());
             assert_eq!(
@@ -1623,7 +2061,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn exact_string_accepts_matching_context_among_others() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             let mut verifier = Verifier::default();
             verifier.add_context("role = admin".to_owned());
             verifier.add_context("ip = 127.0.0.1".to_owned());
@@ -1634,8 +2074,8 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn caveat_order_is_signed() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("method = GET");
-            macaroon.add_exact_string("path = /v1/files");
+            macaroon.add_exact_string("method = GET").unwrap();
+            macaroon.add_exact_string("path = /v1/files").unwrap();
             let verifier = Verifier::new()
                 .with_context("method = GET")
                 .with_context("path = /v1/files");
@@ -1653,7 +2093,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn exact_string_rejects_tampered_caveat() {
             let mut macaroon = root_macaroon();
-            macaroon.add_exact_string("ip = 127.0.0.1".to_owned());
+            macaroon
+                .add_exact_string("ip = 127.0.0.1".to_owned())
+                .unwrap();
             macaroon.caveats[0] = Caveat::ExactString {
                 what: "ip = 127.0.0.2".to_owned(),
             };
@@ -1672,8 +2114,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 "http://example.org/macaroons".to_owned(),
                 "alice@example.org".to_owned(),
                 SECRET,
-            );
-            macaroon.add_expires(NOW);
+            )
+            .unwrap();
+            macaroon.add_expires(NOW).unwrap();
             let mut verifier = Verifier::default();
             verifier.set_current_time(NOW);
             assert_eq!(
@@ -1692,7 +2135,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn expires_accepts_u64_max_until_time_reaches_it() {
             let mut macaroon = root_macaroon();
-            macaroon.add_expires(u64::MAX);
+            macaroon.add_expires(u64::MAX).unwrap();
             let mut verifier = Verifier::default();
             verifier.set_current_time(u64::MAX - 1);
             assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[]));
@@ -1700,6 +2143,17 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             assert_eq!(
                 Err(Error::ProofInvalid),
                 verifier.verify(&macaroon, &SECRET, &[])
+            );
+        }
+
+        #[test]
+        fn expires_rejects_when_verifier_time_is_not_set() {
+            let mut macaroon = root_macaroon();
+            macaroon.add_expires(u64::MAX).unwrap();
+
+            assert_eq!(
+                Err(Error::ProofInvalid),
+                Verifier::default().verify(&macaroon, &SECRET, &[])
             );
         }
 
@@ -1724,14 +2178,16 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 ],
                 &macaroon.signature.bytes
             );
-            let tps = ThirdPartySecret::new(&macaroon.signature, &NONCE, &SECRET2);
-            macaroon.add_third_party_caveat(
-                "http://example.net/auth".to_owned(),
-                "bob@example.net".to_owned(),
-                tps,
-            );
+            let tps = ThirdPartySecret::new(&macaroon.signature, NONCE, &SECRET2).unwrap();
+            macaroon
+                .add_third_party_caveat(
+                    "http://example.net/auth".to_owned(),
+                    "bob@example.net".to_owned(),
+                    tps,
+                )
+                .unwrap();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::default();
             assert_eq!(
                 Err(Error::ProofInvalid),
@@ -1754,8 +2210,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn third_party_rejects_wrong_discharge_identifier() {
             let macaroon = root_with_third_party_caveat();
-            let mut discharge = Macaroon::new(AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET2);
-            macaroon.bind_discharge(&mut discharge);
+            let mut discharge =
+                Macaroon::new(AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET2).unwrap();
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::default();
 
             assert_eq!(
@@ -1771,8 +2228,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 AUTH_LOCATION.to_owned(),
                 AUTH_IDENTIFIER.to_owned(),
                 SECRET3,
-            );
-            macaroon.bind_discharge(&mut discharge);
+            )
+            .unwrap();
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::default();
             assert_eq!(
                 Err(Error::ProofInvalid),
@@ -1784,7 +2242,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_rejects_tampered_secret_nonce_tail() {
             let mut macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             if let Caveat::ThirdParty { secret, .. } = &mut macaroon.caveats[0] {
                 secret.nonce[NONCE_BYTES] ^= 0xff;
             }
@@ -1799,7 +2257,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_rejects_tampered_secret_box_bytes() {
             let mut macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             if let Caveat::ThirdParty { secret, .. } = &mut macaroon.caveats[0] {
                 secret.box_bytes[0] ^= 0xff;
             }
@@ -1814,7 +2272,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_rejects_tampered_secret_data() {
             let mut macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             if let Caveat::ThirdParty { secret, .. } = &mut macaroon.caveats[0] {
                 secret.data[0] ^= 0xff;
             }
@@ -1828,16 +2286,22 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn third_party_bound_to_one_root_rejects_other_root() {
             let mut first_root = root_macaroon();
-            let first_secret = ThirdPartySecret::new(first_root.signature(), &NONCE, &SECRET2);
-            first_root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret);
+            let first_secret =
+                ThirdPartySecret::new(first_root.signature(), NONCE, &SECRET2).unwrap();
+            first_root
+                .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret)
+                .unwrap();
 
             let mut second_root = root_macaroon();
-            second_root.add_exact_string("method = GET");
-            let second_secret = ThirdPartySecret::new(second_root.signature(), &NONCE2, &SECRET2);
-            second_root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, second_secret);
+            second_root.add_exact_string("method = GET").unwrap();
+            let second_secret =
+                ThirdPartySecret::new(second_root.signature(), NONCE2, &SECRET2).unwrap();
+            second_root
+                .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, second_secret)
+                .unwrap();
 
             let mut discharge = discharge_macaroon();
-            first_root.bind_discharge(&mut discharge);
+            first_root.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::new().with_context("method = GET");
 
             assert_eq!(
@@ -1854,7 +2318,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_caveat_location_hint_is_not_signed() {
             let mut macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             if let Caveat::ThirdParty { location, .. } = &mut macaroon.caveats[0] {
                 *location = "http://mirror.example.net/auth".to_owned();
             }
@@ -1869,7 +2333,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_discharge_location_hint_is_not_signed() {
             let macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             discharge.location = "http://mirror.example.net/auth".to_owned();
 
             assert_eq!(
@@ -1882,10 +2346,10 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_ignores_unrelated_discharges() {
             let macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            macaroon.bind_discharge(&mut discharge);
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let mut unrelated =
-                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3);
-            unrelated.add_exact_string("group = admin");
+                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3).unwrap();
+            unrelated.add_exact_string("group = admin").unwrap();
 
             assert_eq!(
                 Ok(()),
@@ -1896,19 +2360,21 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn third_party_accepts_multiple_discharges_in_any_order() {
             let mut macaroon = root_macaroon();
-            let first_secret = ThirdPartySecret::new(macaroon.signature(), &NONCE, &SECRET2);
-            macaroon.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret);
-            let second_secret = ThirdPartySecret::new(macaroon.signature(), &NONCE2, &SECRET3);
-            macaroon.add_third_party_caveat(
-                NESTED_AUTH_LOCATION,
-                NESTED_AUTH_IDENTIFIER,
-                second_secret,
-            );
+            let first_secret =
+                ThirdPartySecret::new(macaroon.signature(), NONCE, &SECRET2).unwrap();
+            macaroon
+                .add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret)
+                .unwrap();
+            let second_secret =
+                ThirdPartySecret::new(macaroon.signature(), NONCE2, &SECRET3).unwrap();
+            macaroon
+                .add_third_party_caveat(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, second_secret)
+                .unwrap();
             let mut first_discharge = discharge_macaroon();
             let mut second_discharge =
-                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3);
-            macaroon.bind_discharge(&mut first_discharge);
-            macaroon.bind_discharge(&mut second_discharge);
+                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3).unwrap();
+            macaroon.bind_discharge(&mut first_discharge).unwrap();
+            macaroon.bind_discharge(&mut second_discharge).unwrap();
             let verifier = Verifier::default();
 
             assert_eq!(
@@ -1929,8 +2395,10 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_accepts_discharge_with_satisfied_first_party_caveat() {
             let macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            discharge.add_exact_string("group = admin".to_owned());
-            macaroon.bind_discharge(&mut discharge);
+            discharge
+                .add_exact_string("group = admin".to_owned())
+                .unwrap();
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let mut verifier = Verifier::default();
             verifier.add_context("group = admin".to_owned());
             assert_eq!(Ok(()), verifier.verify(&macaroon, &SECRET, &[discharge]));
@@ -1940,8 +2408,8 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_rejects_tampered_discharge_caveat() {
             let macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            discharge.add_exact_string("group = admin");
-            macaroon.bind_discharge(&mut discharge);
+            discharge.add_exact_string("group = admin").unwrap();
+            macaroon.bind_discharge(&mut discharge).unwrap();
             discharge.caveats[0] = Caveat::ExactString {
                 what: "group = owner".to_owned(),
             };
@@ -1957,8 +2425,10 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn third_party_rejects_discharge_with_unsatisfied_first_party_caveat() {
             let macaroon = root_with_third_party_caveat();
             let mut discharge = discharge_macaroon();
-            discharge.add_exact_string("group = admin".to_owned());
-            macaroon.bind_discharge(&mut discharge);
+            discharge
+                .add_exact_string("group = admin".to_owned())
+                .unwrap();
+            macaroon.bind_discharge(&mut discharge).unwrap();
             let verifier = Verifier::default();
             assert_eq!(
                 Err(Error::ProofInvalid),
@@ -2004,7 +2474,9 @@ third-party: location=http://example.net/auth identifier=bob@example.net
 
         fn request_builder_with_root(root: Macaroon) -> RequestBuilder {
             let mut builder = RequestBuilder::new();
-            builder.add_loader(StaticLoader::new(ROOT_LOCATION, vec![root]));
+            builder
+                .add_loader(StaticLoader::new(ROOT_LOCATION, vec![root]))
+                .unwrap();
             builder
         }
 
@@ -2025,7 +2497,8 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 "http://wrong.example.org/macaroons".to_owned(),
                 ROOT_IDENTIFIER.to_owned(),
                 SECRET,
-            );
+            )
+            .unwrap();
             let builder = request_builder_with_root(wrong_location);
             assert_eq!(
                 Err(Error::LocationMismatch {
@@ -2050,10 +2523,26 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn fluent_loader_setup() {
             let root = root_macaroon();
             let builder = RequestBuilder::new()
-                .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root.clone()]));
+                .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root.clone()]))
+                .unwrap();
             assert_eq!(
                 Ok((root, Vec::new())),
                 builder.prepare_request(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+        }
+
+        #[test]
+        fn duplicate_loader_registration_is_rejected() {
+            let mut builder = RequestBuilder::new();
+            assert_eq!(
+                Ok(()),
+                builder.add_loader(StaticLoader::new(ROOT_LOCATION, vec![root_macaroon()]))
+            );
+            assert_eq!(
+                Err(Error::DuplicateLoader {
+                    location: ROOT_LOCATION.to_owned(),
+                }),
+                builder.add_loader(StaticLoader::new(ROOT_LOCATION, Vec::new()))
             );
         }
 
@@ -2071,10 +2560,51 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         }
 
         #[test]
+        fn third_party_location_hint_tampering_changes_request_assembly() {
+            let mut root = root_with_third_party_caveat();
+            if let Caveat::ThirdParty { location, .. } = &mut root.caveats[0] {
+                *location = NESTED_AUTH_LOCATION.to_owned();
+            }
+            let discharge = Macaroon::new(NESTED_AUTH_LOCATION, AUTH_IDENTIFIER, SECRET2).unwrap();
+
+            let mut builder = request_builder_with_root(root.clone());
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]))
+                .unwrap();
+            assert_eq!(
+                Err(Error::MissingLoader {
+                    what: NESTED_AUTH_LOCATION.to_owned(),
+                }),
+                builder.prepare_request(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+
+            let mut builder = request_builder_with_root(root.clone());
+            builder
+                .add_loader(StaticLoader::new(
+                    NESTED_AUTH_LOCATION,
+                    vec![discharge.clone()],
+                ))
+                .unwrap();
+            let mut expected_discharge = discharge;
+            root.bind_discharge(&mut expected_discharge).unwrap();
+
+            assert_eq!(
+                Ok((root.clone(), vec![expected_discharge.clone()])),
+                builder.prepare_request(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+            assert_eq!(
+                Ok(()),
+                Verifier::default().verify(&root, &SECRET, &[expected_discharge])
+            );
+        }
+
+        #[test]
         fn discharge_lookup_error_is_returned() {
             let root = root_with_third_party_caveat();
             let mut builder = request_builder_with_root(root);
-            builder.add_loader(StaticLoader::new(AUTH_LOCATION, Vec::new()));
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, Vec::new()))
+                .unwrap();
 
             assert_eq!(
                 Err(Error::MissingLoader {
@@ -2088,9 +2618,11 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         fn rejects_discharge_loader_location_mismatch() {
             let root = root_with_third_party_caveat();
             let wrong_location = "http://wrong.example.net/auth";
-            let wrong_discharge = Macaroon::new(wrong_location, AUTH_IDENTIFIER, SECRET2);
+            let wrong_discharge = Macaroon::new(wrong_location, AUTH_IDENTIFIER, SECRET2).unwrap();
             let mut builder = request_builder_with_root(root);
-            builder.add_loader(StaticLoader::new(AUTH_LOCATION, vec![wrong_discharge]));
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![wrong_discharge]))
+                .unwrap();
 
             assert_eq!(
                 Err(Error::LocationMismatch {
@@ -2106,9 +2638,11 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             let root = root_with_third_party_caveat();
             let discharge = discharge_macaroon();
             let mut builder = request_builder_with_root(root.clone());
-            builder.add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]));
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]))
+                .unwrap();
             let mut expected_discharge = discharge;
-            root.bind_discharge(&mut expected_discharge);
+            root.bind_discharge(&mut expected_discharge).unwrap();
             assert_eq!(
                 Ok((root.clone(), vec![expected_discharge.clone()])),
                 builder.prepare_request(ROOT_LOCATION, ROOT_IDENTIFIER)
@@ -2123,40 +2657,48 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn nested_third_party_caveats_are_loaded_and_bound() {
             let mut root = root_macaroon();
-            let root_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
+            let root_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
             root.add_third_party_caveat(
                 AUTH_LOCATION.to_owned(),
                 AUTH_IDENTIFIER.to_owned(),
                 root_secret,
-            );
+            )
+            .unwrap();
             let mut first_discharge = discharge_macaroon();
             let nested_secret =
-                ThirdPartySecret::new(first_discharge.signature(), &NONCE2, &SECRET3);
-            first_discharge.add_third_party_caveat(
-                NESTED_AUTH_LOCATION.to_owned(),
-                NESTED_AUTH_IDENTIFIER.to_owned(),
-                nested_secret,
-            );
+                ThirdPartySecret::new(first_discharge.signature(), NONCE2, &SECRET3).unwrap();
+            first_discharge
+                .add_third_party_caveat(
+                    NESTED_AUTH_LOCATION.to_owned(),
+                    NESTED_AUTH_IDENTIFIER.to_owned(),
+                    nested_secret,
+                )
+                .unwrap();
             let second_discharge = Macaroon::new(
                 NESTED_AUTH_LOCATION.to_owned(),
                 NESTED_AUTH_IDENTIFIER.to_owned(),
                 SECRET3,
-            );
+            )
+            .unwrap();
 
             let mut builder = request_builder_with_root(root.clone());
-            builder.add_loader(StaticLoader::new(
-                AUTH_LOCATION,
-                vec![first_discharge.clone()],
-            ));
-            builder.add_loader(StaticLoader::new(
-                NESTED_AUTH_LOCATION,
-                vec![second_discharge.clone()],
-            ));
+            builder
+                .add_loader(StaticLoader::new(
+                    AUTH_LOCATION,
+                    vec![first_discharge.clone()],
+                ))
+                .unwrap();
+            builder
+                .add_loader(StaticLoader::new(
+                    NESTED_AUTH_LOCATION,
+                    vec![second_discharge.clone()],
+                ))
+                .unwrap();
 
             let mut expected_first = first_discharge;
             let mut expected_second = second_discharge;
-            root.bind_discharge(&mut expected_first);
-            root.bind_discharge(&mut expected_second);
+            root.bind_discharge(&mut expected_first).unwrap();
+            root.bind_discharge(&mut expected_second).unwrap();
             let expected_discharges = vec![expected_first, expected_second];
 
             assert_eq!(
@@ -2173,23 +2715,28 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn nested_third_party_missing_loader_is_reported() {
             let mut root = root_macaroon();
-            let root_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
+            let root_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
             root.add_third_party_caveat(
                 AUTH_LOCATION.to_owned(),
                 AUTH_IDENTIFIER.to_owned(),
                 root_secret,
-            );
+            )
+            .unwrap();
             let mut first_discharge = discharge_macaroon();
             let nested_secret =
-                ThirdPartySecret::new(first_discharge.signature(), &NONCE2, &SECRET3);
-            first_discharge.add_third_party_caveat(
-                NESTED_AUTH_LOCATION.to_owned(),
-                NESTED_AUTH_IDENTIFIER.to_owned(),
-                nested_secret,
-            );
+                ThirdPartySecret::new(first_discharge.signature(), NONCE2, &SECRET3).unwrap();
+            first_discharge
+                .add_third_party_caveat(
+                    NESTED_AUTH_LOCATION.to_owned(),
+                    NESTED_AUTH_IDENTIFIER.to_owned(),
+                    nested_secret,
+                )
+                .unwrap();
 
             let mut builder = request_builder_with_root(root);
-            builder.add_loader(StaticLoader::new(AUTH_LOCATION, vec![first_discharge]));
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![first_discharge]))
+                .unwrap();
 
             assert_eq!(
                 Err(Error::MissingLoader {
@@ -2202,24 +2749,28 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         #[test]
         fn duplicate_third_party_caveats_share_one_bound_discharge() {
             let mut root = root_macaroon();
-            let first_secret = ThirdPartySecret::new(root.signature(), &NONCE, &SECRET2);
+            let first_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
             root.add_third_party_caveat(
                 AUTH_LOCATION.to_owned(),
                 AUTH_IDENTIFIER.to_owned(),
                 first_secret,
-            );
-            let second_secret = ThirdPartySecret::new(root.signature(), &NONCE2, &SECRET2);
+            )
+            .unwrap();
+            let second_secret = ThirdPartySecret::new(root.signature(), NONCE2, &SECRET2).unwrap();
             root.add_third_party_caveat(
                 AUTH_LOCATION.to_owned(),
                 AUTH_IDENTIFIER.to_owned(),
                 second_secret,
-            );
+            )
+            .unwrap();
             let discharge = discharge_macaroon();
             let mut builder = request_builder_with_root(root.clone());
-            builder.add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]));
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]))
+                .unwrap();
 
             let mut expected_discharge = discharge;
-            root.bind_discharge(&mut expected_discharge);
+            root.bind_discharge(&mut expected_discharge).unwrap();
             let expected_discharges = vec![expected_discharge];
 
             assert_eq!(
@@ -2268,7 +2819,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 when: u64,
             },
             ThirdParty {
-                nonce: Secret,
+                nonce: Nonce,
                 child: Box<GeneratedNode>,
             },
         }
@@ -2328,6 +2879,13 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 }
                 Secret { bytes }
             }
+
+            fn nonce(&mut self, label: u8, id: usize) -> Nonce {
+                let secret = self.secret(label, id);
+                let mut bytes = [0u8; NONCE_BYTES];
+                bytes.copy_from_slice(&secret.bytes[0..NONCE_BYTES]);
+                Nonce::from_bytes(bytes)
+            }
         }
 
         struct GeneratedState {
@@ -2379,7 +2937,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                         _ => {
                             let nonce = self
                                 .entropy
-                                .secret(0x5a, id * MAX_GENERATED_CAVEATS + caveat_idx);
+                                .nonce(0x5a, id * MAX_GENERATED_CAVEATS + caveat_idx);
                             let child = Box::new(self.node(depth + 1));
                             caveats.push(GeneratedCaveat::ThirdParty { nonce, child });
                         }
@@ -2410,7 +2968,7 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             fn build(&self) -> BuiltGeneratedProof {
                 let (root, mut discharges) = self.root.build();
                 for discharge in &mut discharges {
-                    root.bind_discharge(discharge);
+                    root.bind_discharge(discharge).unwrap();
                 }
                 BuiltGeneratedProof {
                     root,
@@ -2545,24 +3103,28 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                     self.location.clone(),
                     self.identifier.clone(),
                     self.secret.clone(),
-                );
+                )
+                .unwrap();
                 let mut discharges = Vec::new();
                 for caveat in &self.caveats {
                     match caveat {
                         GeneratedCaveat::ExactString { what } => {
-                            macaroon.add_exact_string(what.clone());
+                            macaroon.add_exact_string(what.clone()).unwrap();
                         }
                         GeneratedCaveat::Expires { when } => {
-                            macaroon.add_expires(*when);
+                            macaroon.add_expires(*when).unwrap();
                         }
                         GeneratedCaveat::ThirdParty { nonce, child } => {
                             let secret =
-                                ThirdPartySecret::new(macaroon.signature(), nonce, &child.secret);
-                            macaroon.add_third_party_caveat(
-                                child.location.clone(),
-                                child.identifier.clone(),
-                                secret,
-                            );
+                                ThirdPartySecret::new(macaroon.signature(), *nonce, &child.secret)
+                                    .unwrap();
+                            macaroon
+                                .add_third_party_caveat(
+                                    child.location.clone(),
+                                    child.identifier.clone(),
+                                    secret,
+                                )
+                                .unwrap();
                             let (child_macaroon, child_discharges) = child.build();
                             discharges.push(child_macaroon);
                             discharges.extend(child_discharges);
@@ -2647,8 +3209,11 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 format!("noise-location-{index}"),
                 format!("noise-identifier-{index}"),
                 Secret::from_bytes(bytes),
-            );
-            macaroon.add_exact_string(format!("noise-context-{index}"));
+            )
+            .unwrap();
+            macaroon
+                .add_exact_string(format!("noise-context-{index}"))
+                .unwrap();
             macaroon
         }
 
@@ -2746,6 +3311,33 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                         None,
                     )
                 );
+            }
+
+            #[test]
+            fn generated_proofs_verify_independent_of_discharge_order(
+                entropy in prop::collection::vec(any::<u8>(), 1..=512),
+            ) {
+                let proof = GeneratedProof::from_entropy(entropy);
+                let mut built = proof.build();
+                built.discharges.reverse();
+
+                prop_assert_eq!(
+                    Ok(()),
+                    proof.verify_built(&built)
+                );
+            }
+
+            #[test]
+            fn arbitrary_bytes_decode_only_as_canonical_macaroons(
+                bytes in prop::collection::vec(any::<u8>(), 0..=512),
+            ) {
+                if let Ok(macaroon) = Macaroon::from_bytes(&bytes) {
+                    prop_assert_eq!(bytes, macaroon.to_bytes());
+                    prop_assert_eq!(
+                        Ok(macaroon.clone()),
+                        Macaroon::from_bytes(&macaroon.to_bytes())
+                    );
+                }
             }
         }
     }
