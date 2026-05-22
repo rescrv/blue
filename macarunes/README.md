@@ -20,11 +20,11 @@ let mut macaroon = Macaroon::new(
     "alice@example",
     secret.clone(),
 )?;
-macaroon.add_exact_string("role = admin")?;
+macaroon.add_fact("role", "admin")?;
 macaroon.add_expires(4_102_444_800)?;
 
 let verifier = Verifier::new()
-    .with_context("role = admin")
+    .with_fact("role", "admin")
     .with_current_time(1_700_000_000);
 
 verifier.verify(&macaroon, &secret, &[])?;
@@ -73,8 +73,10 @@ issued.
   macaroons supplied for third-party caveats.
 - `ThirdPartySecret` lets one service require proof from another service
   without revealing the discharge service's root secret.
-- `RequestBuilder` and `Loader` assemble the root macaroon plus the transitive
-  set of discharge macaroons a client should send with a request.
+- `PreparedRequest` carries a root macaroon plus the bound discharge macaroons
+  a client should send with a request.
+- `RequestBuilder`, `AsyncRequestBuilder`, and loaders assemble prepared
+  requests from root and discharge locations.
 
 The caveat language has four cases:
 
@@ -97,29 +99,48 @@ Use the crate from this workspace or add it as a normal Rust dependency:
 macarunes = "0.11"
 ```
 
+Enable the optional `base64` feature if you want the `to_base64` and
+`from_base64` convenience helpers:
+
+```toml
+[dependencies]
+macarunes = { version = "0.11", features = ["base64"] }
+```
+
 Secrets
 -------
 
-Use `Secret::random` when minting real credentials.  Use `Secret::from_bytes`
-when loading configured key material, writing deterministic tests, or decoding a
-secret from a protected storage system.
+Use `Secret::random` when minting real credentials.  Use `Secret::from_base64`,
+`Secret::from_hex`, or `Secret::try_from_slice` when loading configured key
+material from a protected storage system.  Use `Secret::from_bytes` for
+deterministic tests and lower-level integrations.  The Base64 helpers require
+the `base64` feature.
 
 ```rust
-use macarunes::{Secret, SIGNATURE_BYTES};
+# #[cfg(feature = "base64")]
+# fn run() -> Result<(), macarunes::Error> {
+use macarunes::Secret;
 
 let generated = Secret::random()?;
-assert_eq!(SIGNATURE_BYTES * 2, generated.hexdigest().len());
+assert_eq!(43, generated.to_base64().len());
 
-let configured = Secret::from_bytes([0xab; SIGNATURE_BYTES]);
+let configured = Secret::from_base64(
+    "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+)?;
 assert_eq!(
     "abababababababababababababababababababababababababababababababab",
     configured.hexdigest(),
 );
+# Ok(())
+# }
+# #[cfg(feature = "base64")]
+# run()?;
 # Ok::<_, macarunes::Error>(())
 ```
 
-`hexdigest` returns the raw key material as hex.  Keep it for controlled
-diagnostics and deterministic tests; do not log it for live credentials.
+`to_base64` and `hexdigest` return raw key material.  Keep them for controlled
+configuration, diagnostics, and deterministic tests; do not log them for live
+credentials.  `Debug` for `Secret` is intentionally redacted.
 
 `Secret` makes a best-effort attempt to scrub its internal memory when dropped.
 That does not make logged, cloned, serialized, swapped, or otherwise copied
@@ -175,19 +196,19 @@ use macarunes::{Error, Macaroon, Secret, Verifier};
 
 let secret = Secret::from_bytes([2; macarunes::SIGNATURE_BYTES]);
 let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone())?;
-macaroon.add_exact_string("method = GET")?;
-macaroon.add_exact_string("path = /v1/accounts/alice")?;
+macaroon.add_fact("method", "GET")?;
+macaroon.add_fact("path", "/v1/accounts/alice")?;
 macaroon.add_expires(1_900_000_000)?;
 
 let accepted = Verifier::new()
-    .with_context("method = GET")
-    .with_context("path = /v1/accounts/alice")
+    .with_fact("method", "GET")
+    .with_fact("path", "/v1/accounts/alice")
     .with_current_time(1_800_000_000);
 assert_eq!(Ok(()), accepted.verify(&macaroon, &secret, &[]));
 
 let rejected = Verifier::new()
-    .with_context("method = POST")
-    .with_context("path = /v1/accounts/alice")
+    .with_fact("method", "POST")
+    .with_fact("path", "/v1/accounts/alice")
     .with_current_time(1_800_000_000);
 assert_eq!(
     Err(Error::ProofInvalid),
@@ -198,7 +219,9 @@ assert_eq!(
 
 Exact-string caveats are not parsed by the library.  Define your own canonical
 format, normalize request facts before adding them to the verifier, and keep
-those strings stable across services.
+those strings stable across services.  For the common `name = value` shape, use
+`add_fact` and `with_fact`; the fact name must be `&'static str` so application
+code controls the fact vocabulary.
 
 Verifier Design
 ---------------
@@ -213,8 +236,8 @@ an unknown or false fact will not.
 This keeps authorization policy decoupled from enforcement.  You can mint a new
 macaroon with a narrower policy without changing the verifier, provided the
 verifier already knows how to state the relevant request facts.  This crate does
-not expose libmacaroons-style general callback caveats.  Use exact strings for
-canonical request facts, and use `add_not_before` and `add_expires` for
+not expose libmacaroons-style general callback caveats.  Use exact strings or
+`add_fact` for canonical request facts, and use `add_not_before` and `add_expires` for
 verifier-time bounds.  If you need a richer predicate, evaluate it in your
 application and add the resulting canonical fact to the verifier context; or,
 use third-party caveats.
@@ -225,6 +248,10 @@ Expiration Caveats
 `add_expires` takes an unsigned integer timestamp.  The verifier accepts the
 macaroon only when the expiration is strictly greater than the verifier's
 current time.  An expiration caveat fails if verifier time has not been set.
+Use `add_expires_at` when you already have a `SystemTime`, and use `add_ttl`
+when issuing a macaroon relative to the current system time.  `add_ttl_from`
+does the same calculation from an explicit `SystemTime`, which is useful for
+tests and request-scoped clocks.
 
 ```rust
 use macarunes::{Error, Macaroon, Secret, Verifier};
@@ -248,6 +275,38 @@ assert_eq!(
 # Ok::<_, macarunes::Error>(())
 ```
 
+Calling `add_ttl` or `add_ttl_from` appends a new expiration caveat.  It does
+not remove or rewrite earlier caveats.  Verification requires every expiration
+caveat to hold, so the effective expiration is the minimum of all expiration
+caveats.
+
+```rust
+use std::time::{Duration, UNIX_EPOCH};
+use macarunes::{Error, Macaroon, Secret, Verifier};
+
+let secret = Secret::from_bytes([13; macarunes::SIGNATURE_BYTES]);
+let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone())?;
+macaroon.add_expires(200)?;
+macaroon.add_ttl_from(
+    UNIX_EPOCH + Duration::from_secs(100),
+    Duration::from_secs(50),
+)?;
+
+assert_eq!(
+    Ok(()),
+    Verifier::new()
+        .with_current_time(149)
+        .verify(&macaroon, &secret, &[]),
+);
+assert_eq!(
+    Err(Error::ProofInvalid),
+    Verifier::new()
+        .with_current_time(150)
+        .verify(&macaroon, &secret, &[]),
+);
+# Ok::<_, macarunes::Error>(())
+```
+
 Not-Before Caveats
 ------------------
 
@@ -257,7 +316,9 @@ timestamp.  Equality is valid.  A not-before caveat fails if verifier time has
 not been set.
 
 This is the intrinsic caveat to use when an issued credential should place an
-inclusive lower bound on the verification time.
+inclusive lower bound on the verification time.  Use `add_not_before_at` to add
+the caveat from a `SystemTime`, and use `Verifier::with_current_system_time` or
+`Verifier::with_system_time_now` when building a verifier from system time.
 
 ```rust
 use macarunes::{Error, Macaroon, Secret, Verifier};
@@ -297,7 +358,10 @@ What Verification Rejects
 The verifier deliberately collapses most proof failures into
 `Error::ProofInvalid`.  For authorization decisions, treat `ProofInvalid` as
 "not authorized" rather than trying to distinguish wrong secrets, missing
-contexts, expired caveats, tampering, or missing discharges.
+contexts, expired caveats, tampering, or missing discharges.  For controlled
+diagnostics, log the `Debug` output of the macaroon and verifier together:
+`Macaroon` shows public location, identifier, and caveats while redacting the
+signature, and `Verifier` shows the request context and verifier time.
 
 Third-Party Caveats
 -------------------
@@ -365,8 +429,10 @@ verifier.verify(&root, &root_secret, &[discharge])?;
 Binding matters.  A discharge macaroon must be bound to the root macaroon before
 verification so that a discharge created for one request cannot be replayed with
 another root macaroon.  If you assemble discharges manually, call
-`root.bind_discharge(&mut discharge)` for every discharge.  If you use
-`RequestBuilder`, it performs this binding for you.
+`root.bind_discharge(&mut discharge)` for one mutable discharge,
+`root.bind_discharge_owned(discharge)` when you want to consume and return a
+bound discharge, or `root.bind_discharges(&mut discharges)` for a whole slice.
+If you use `RequestBuilder`, it performs this binding for you.
 
 The upstream libmacaroons guide also describes a public-key variant in which the
 third-party identifier can carry encrypted caveat material instead of requiring a
@@ -391,39 +457,11 @@ new mechanisms from macaroon data.
 
 ```rust
 use macarunes::{
-    Error, Loader, Macaroon, RequestBuilder, Secret, ThirdPartySecret, Verifier,
+    Macaroon, RequestBuilder, Secret, StaticLoader, ThirdPartySecret, Verifier,
 };
 
 const ROOT_LOCATION: &str = "https://files.example/macaroons";
 const AUTH_LOCATION: &str = "https://auth.example/discharges";
-
-#[derive(Debug)]
-struct StaticLoader {
-    location: &'static str,
-    macaroons: Vec<Macaroon>,
-}
-
-impl StaticLoader {
-    fn new(location: &'static str, macaroons: Vec<Macaroon>) -> Self {
-        Self { location, macaroons }
-    }
-}
-
-impl Loader for StaticLoader {
-    fn location(&self) -> &'static str {
-        self.location
-    }
-
-    fn lookup(&self, identifier: &str) -> Result<Macaroon, Error> {
-        self.macaroons
-            .iter()
-            .find(|macaroon| macaroon.identifier() == identifier)
-            .cloned()
-            .ok_or_else(|| Error::MissingLoader {
-                what: format!("{}/{}", self.location, identifier),
-            })
-    }
-}
 
 let root_secret = Secret::from_bytes([6; macarunes::SIGNATURE_BYTES]);
 let auth_secret = Secret::from_bytes([7; macarunes::SIGNATURE_BYTES]);
@@ -447,12 +485,11 @@ let builder = RequestBuilder::new()
     .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root]))?
     .with_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge]))?;
 
-let (request_root, request_discharges) =
-    builder.prepare_request(ROOT_LOCATION, "file:alpha")?;
+let request = builder.prepare(ROOT_LOCATION, "file:alpha")?;
 
 Verifier::new()
     .with_context("user = alice")
-    .verify(&request_root, &root_secret, &request_discharges)?;
+    .verify_request(&request, &root_secret)?;
 # Ok::<_, macarunes::Error>(())
 ```
 
@@ -461,6 +498,38 @@ service-discovery layer.  A loader should return macaroons for exactly one
 location.  `RequestBuilder` rejects a macaroon if the loader returns a different
 location than the one requested, and it rejects duplicate loader registration
 for the same static location.
+
+The crate provides small loader affordances for common cases:
+
+- `StaticLoader` scans a vector and is convenient for examples and tests.
+- `MapLoader` stores macaroons by identifier and checks locations on insert.
+- `FnLoader` and `RequestBuilder::with_lookup` adapt a closure into a loader.
+
+`RequestBuilder::prepare` returns a `PreparedRequest` with named `root` and
+`discharges` fields.  `prepare_request` remains available when you want the old
+`(Macaroon, Vec<Macaroon>)` shape.
+
+Use `AsyncRequestBuilder` with `AsyncLoader` when a loader naturally performs
+RPC, database, or cache work asynchronously.  `StaticLoader`, `MapLoader`, and
+`FnLoader` also work with `AsyncRequestBuilder`; for native async closures, use
+`AsyncFnLoader` or `AsyncRequestBuilder::with_lookup`.
+
+```rust
+use macarunes::{AsyncRequestBuilder, Macaroon, Secret, StaticLoader};
+
+const ROOT_LOCATION: &str = "https://files.example/macaroons";
+
+# async fn example() -> Result<(), macarunes::Error> {
+let root_secret = Secret::from_bytes([14; macarunes::SIGNATURE_BYTES]);
+let root = Macaroon::new(ROOT_LOCATION, "file:alpha", root_secret)?;
+let builder = AsyncRequestBuilder::new()
+    .with_loader(StaticLoader::new(ROOT_LOCATION, vec![root]))?;
+
+let request = builder.prepare(ROOT_LOCATION, "file:alpha").await?;
+assert_eq!("file:alpha", request.root.identifier());
+# Ok(())
+# }
+```
 
 Selecting Discharges from a Cache
 ---------------------------------
@@ -514,10 +583,10 @@ instead of cloned macaroons.
 Serialization
 -------------
 
-`Macaroon`, `Secret`, and `ThirdPartySecret` implement the repository's
-`prototk` message traits.  Use `Macaroon::to_bytes` and
-`Macaroon::from_bytes` to encode and decode macaroons for storage or transport.
-`from_bytes` rejects trailing bytes.
+`Macaroon`, `PreparedRequest`, `Secret`, and `ThirdPartySecret` implement the
+repository's `prototk` message traits.  Use `Macaroon::to_bytes` and
+`Macaroon::from_bytes` to encode and decode macaroons for structured storage or
+transport.  `from_bytes` rejects trailing bytes.
 
 ```rust
 use macarunes::{Macaroon, Secret};
@@ -533,10 +602,32 @@ assert_eq!(macaroon, decoded);
 # Ok::<_, macarunes::Error>(())
 ```
 
-The encoded bytes are suitable for structured storage or transport protocols
-that already carry bytes.  If you need to place a macaroon in a cookie, header,
-URL, or email body, wrap the encoded bytes in an ASCII-safe envelope such as
-base64 and decode that envelope before calling `Macaroon::from_bytes`.
+Use `to_base64` and `from_base64` for cookies, headers, URLs, email bodies, or
+configuration systems that need ASCII text.  The encoding is URL-safe Base64
+without padding; decoders accept padded URL-safe or standard Base64 input.
+These helpers require the `base64` feature.
+
+```rust
+# #[cfg(feature = "base64")]
+# fn run() -> Result<(), macarunes::Error> {
+use macarunes::{Macaroon, PreparedRequest, Secret};
+
+let secret = Secret::from_bytes([15; macarunes::SIGNATURE_BYTES]);
+let macaroon = Macaroon::new("https://issuer.example", "alice", secret)?;
+
+let encoded = macaroon.to_base64();
+let decoded = Macaroon::from_base64(&encoded)?;
+assert_eq!(macaroon, decoded);
+
+let request = PreparedRequest::new(macaroon, Vec::new());
+let encoded_request = request.to_base64();
+assert_eq!(request, PreparedRequest::from_base64(&encoded_request)?);
+# Ok(())
+# }
+# #[cfg(feature = "base64")]
+# run()?;
+# Ok::<_, macarunes::Error>(())
+```
 
 Verification Checklist
 ----------------------
@@ -545,18 +636,21 @@ On the service that verifies a request:
 
 1. Recover or derive the root secret for the root macaroon identifier.
 2. Build a `Verifier`.
-3. Add every exact-string context that should be true for this request.
+3. Add every exact-string context or typed fact that should be true for this
+   request.
 4. Set the verifier time before checking expiration or not-before caveats.
 5. Pass the root macaroon, root secret, and all bound discharges to
-   `Verifier::verify`.
+   `Verifier::verify`, or pass a `PreparedRequest` to `Verifier::verify_request`.
 6. Treat every `Error::ProofInvalid` as authentication failure.
 
 On the client that prepares a request:
 
 1. Start with the root macaroon the target service gave you.
 2. Fetch every required discharge macaroon, including nested discharges.
-3. Bind every discharge to the root macaroon, or use `RequestBuilder`.
-4. Send the root macaroon and the bound discharge list together.
+3. Bind every discharge to the root macaroon, or use `RequestBuilder` /
+   `AsyncRequestBuilder`.
+4. Send the root macaroon and the bound discharge list together, often as a
+   serialized `PreparedRequest`.
 
 Errors
 ------
@@ -576,11 +670,18 @@ The public error type is `macarunes::Error`:
   public location and identifier required by a third-party caveat.
 - `DuplicateLoader` means `RequestBuilder` already has a loader registered for
   that static location.
-- `InvalidEncoding` means `Macaroon::from_bytes` could not decode exactly one
-  macaroon from the provided bytes.
+- `InvalidEncoding` means `Macaroon::from_bytes` or
+  `PreparedRequest::from_bytes` could not decode exactly one value from the
+  provided bytes.
 - `RandomGenerationFailed` means secure random secret generation failed.
 - `EncryptionFailed` means third-party secret encryption failed.
 - `CryptoOperationFailed` means a required cryptographic operation failed.
+- `InvalidBase64` means a Base64 envelope could not be decoded.
+- `InvalidHex` means a hex-encoded secret could not be decoded.
+- `InvalidSecretLength` means configured secret material was not exactly
+  `SIGNATURE_BYTES` bytes.
+- `InvalidTime` means a `SystemTime` could not be represented as a macarunes
+  timestamp.
 
 Assumptions
 -----------

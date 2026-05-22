@@ -2,7 +2,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::c_void;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::future::Future;
+use std::pin::Pin;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use biometrics::Counter;
 
@@ -91,6 +94,37 @@ pub enum Error {
     /// A required cryptographic operation failed.
     #[prototk(294922, message)]
     CryptoOperationFailed,
+    /// Base64 text could not be decoded.
+    #[prototk(294923, message)]
+    InvalidBase64 {
+        /// A diagnostic description of the decoding problem.
+        #[prototk(1, string)]
+        what: String,
+    },
+    /// Hex text could not be decoded.
+    #[prototk(294924, message)]
+    InvalidHex {
+        /// A diagnostic description of the decoding problem.
+        #[prototk(1, string)]
+        what: String,
+    },
+    /// Secret material had the wrong length.
+    #[prototk(294925, message)]
+    InvalidSecretLength {
+        /// The required number of bytes.
+        #[prototk(1, uint64)]
+        expected: u64,
+        /// The number of bytes provided.
+        #[prototk(2, uint64)]
+        actual: u64,
+    },
+    /// A system time could not be converted to the macarunes timestamp format.
+    #[prototk(294926, message)]
+    InvalidTime {
+        /// A diagnostic description of the conversion problem.
+        #[prototk(1, string)]
+        what: String,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -122,6 +156,13 @@ impl std::fmt::Display for Error {
             Error::RandomGenerationFailed => write!(fmt, "secure random generation failed"),
             Error::EncryptionFailed => write!(fmt, "third-party secret encryption failed"),
             Error::CryptoOperationFailed => write!(fmt, "cryptographic operation failed"),
+            Error::InvalidBase64 { what } => write!(fmt, "invalid base64: {what}"),
+            Error::InvalidHex { what } => write!(fmt, "invalid hex: {what}"),
+            Error::InvalidSecretLength { expected, actual } => write!(
+                fmt,
+                "invalid secret length: expected {expected} bytes, got {actual}"
+            ),
+            Error::InvalidTime { what } => write!(fmt, "invalid time: {what}"),
         }
     }
 }
@@ -436,6 +477,73 @@ mod crypto {
     }
 }
 
+////////////////////////////////////////////// base64 //////////////////////////////////////////////
+
+#[cfg(feature = "base64")]
+mod base64_support {
+    use super::Error;
+    use ::base64::Engine;
+    use ::base64::engine::DecodePaddingMode;
+    use ::base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
+
+    const BASE64_CONFIG: GeneralPurposeConfig = GeneralPurposeConfig::new()
+        .with_encode_padding(false)
+        .with_decode_padding_mode(DecodePaddingMode::Indifferent);
+    const BASE64_STANDARD: GeneralPurpose =
+        GeneralPurpose::new(&::base64::alphabet::STANDARD, BASE64_CONFIG);
+    const BASE64_URL_SAFE: GeneralPurpose =
+        GeneralPurpose::new(&::base64::alphabet::URL_SAFE, BASE64_CONFIG);
+
+    pub fn encode(bytes: &[u8]) -> String {
+        BASE64_URL_SAFE.encode(bytes)
+    }
+
+    pub fn decode(encoded: &str) -> Result<Vec<u8>, Error> {
+        let engine = if encoded
+            .as_bytes()
+            .iter()
+            .any(|byte| matches!(byte, b'+' | b'/'))
+        {
+            &BASE64_STANDARD
+        } else {
+            &BASE64_URL_SAFE
+        };
+        engine.decode(encoded).map_err(invalid_base64)
+    }
+
+    fn invalid_base64(error: ::base64::DecodeError) -> Error {
+        let what = match error {
+            ::base64::DecodeError::InvalidByte(offset, _) => {
+                format!("invalid character at byte {offset}")
+            }
+            ::base64::DecodeError::InvalidLength(_) => {
+                "base64 length leaves one dangling sextet".to_owned()
+            }
+            ::base64::DecodeError::InvalidLastSymbol(_, _) => {
+                "non-zero trailing base64 bits".to_owned()
+            }
+            ::base64::DecodeError::InvalidPadding => "invalid padding".to_owned(),
+        };
+        Error::InvalidBase64 { what }
+    }
+}
+
+/////////////////////////////////////////////// time ///////////////////////////////////////////////
+
+fn system_time_to_unix_seconds(when: SystemTime) -> Result<u64, Error> {
+    when.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| Error::InvalidTime {
+            what: "system time is before the Unix epoch".to_owned(),
+        })
+}
+
+fn system_time_after_ttl(now: SystemTime, ttl: Duration) -> Result<SystemTime, Error> {
+    now.checked_add(ttl).ok_or_else(|| Error::InvalidTime {
+        what: "time plus ttl overflows SystemTime".to_owned(),
+    })
+}
+
 /////////////////////////////////////////////// Nonce //////////////////////////////////////////////
 
 /// A public nonce for wrapping a [ThirdPartySecret].
@@ -487,6 +595,76 @@ impl Secret {
         Self { bytes }
     }
 
+    /// Construct a [Secret] from a byte slice of exactly [SIGNATURE_BYTES] bytes.
+    pub fn try_from_slice(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != SIGNATURE_BYTES {
+            return Err(Error::InvalidSecretLength {
+                expected: SIGNATURE_BYTES as u64,
+                actual: bytes.len() as u64,
+            });
+        }
+        let mut secret = [0u8; SIGNATURE_BYTES];
+        secret.copy_from_slice(bytes);
+        Ok(Self::from_bytes(secret))
+    }
+
+    /// Construct a [Secret] from lower-case or upper-case hexadecimal text.
+    pub fn from_hex(hex: &str) -> Result<Self, Error> {
+        fn hex_value(byte: u8) -> Option<u8> {
+            match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                b'A'..=b'F' => Some(byte - b'A' + 10),
+                _ => None,
+            }
+        }
+
+        if hex.len() != SIGNATURE_BYTES * 2 {
+            return Err(Error::InvalidHex {
+                what: format!(
+                    "expected {} hex characters, got {}",
+                    SIGNATURE_BYTES * 2,
+                    hex.len()
+                ),
+            });
+        }
+
+        let mut bytes = [0u8; SIGNATURE_BYTES];
+        for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+            let high = hex_value(pair[0]).ok_or_else(|| Error::InvalidHex {
+                what: format!("invalid character at byte {}", index * 2),
+            })?;
+            let low = hex_value(pair[1]).ok_or_else(|| Error::InvalidHex {
+                what: format!("invalid character at byte {}", index * 2 + 1),
+            })?;
+            bytes[index] = (high << 4) | low;
+        }
+        Ok(Self::from_bytes(bytes))
+    }
+
+    /// Construct a [Secret] from lower-case or upper-case hexadecimal text.
+    pub fn from_hexdigest(hex: &str) -> Result<Self, Error> {
+        Self::from_hex(hex)
+    }
+
+    /// Construct a [Secret] from URL-safe or standard Base64 text.
+    ///
+    /// Padding is accepted but not required.  Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn from_base64(encoded: &str) -> Result<Self, Error> {
+        let bytes = base64_support::decode(encoded)?;
+        Self::try_from_slice(&bytes)
+    }
+
+    /// Encode this [Secret] as URL-safe Base64 without padding.
+    ///
+    /// This exposes the underlying key material.  Use it only for controlled configuration and
+    /// tests; never log it for live credentials.  Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn to_base64(&self) -> String {
+        base64_support::encode(&self.bytes)
+    }
+
     /// A textual representation of the secret.
     ///
     /// This exposes the underlying key material.  Use it only for controlled diagnostics and tests;
@@ -523,6 +701,20 @@ impl Secret {
 impl Drop for Secret {
     fn drop(&mut self) {
         self.scrub();
+    }
+}
+
+impl Debug for Secret {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.write_str("Secret([redacted])")
+    }
+}
+
+impl TryFrom<&[u8]> for Secret {
+    type Error = Error;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_from_slice(bytes)
     }
 }
 
@@ -672,6 +864,14 @@ impl Macaroon {
         stack_pack(self).to_vec()
     }
 
+    /// Encode this macaroon as URL-safe Base64 without padding.
+    ///
+    /// Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn to_base64(&self) -> String {
+        base64_support::encode(&self.to_bytes())
+    }
+
     /// Decode exactly one macaroon from its prototk byte representation.
     ///
     /// Trailing bytes are rejected.
@@ -697,6 +897,15 @@ impl Macaroon {
         }
     }
 
+    /// Decode exactly one macaroon from URL-safe or standard Base64 text.
+    ///
+    /// Padding is accepted but not required.  Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn from_base64(encoded: &str) -> Result<Self, Error> {
+        let bytes = base64_support::decode(encoded)?;
+        Self::from_bytes(&bytes)
+    }
+
     /// The number of caveats attached to the macaroon.
     pub fn caveat_count(&self) -> usize {
         self.caveats.len()
@@ -719,14 +928,48 @@ impl Macaroon {
         self.add_caveat(Caveat::ExactString { what: what.into() })
     }
 
+    /// Add a canonical exact-string fact caveat.
+    ///
+    /// The fact name is static so application code controls the vocabulary.  The caveat string is
+    /// formatted as `"{name} = {value}"`.
+    pub fn add_fact(&mut self, name: &'static str, value: impl Display) -> Result<(), Error> {
+        self.add_exact_string(format!("{name} = {value}"))
+    }
+
     /// Add a caveat that expires the macaroon after when.
     pub fn add_expires(&mut self, when: u64) -> Result<(), Error> {
         self.add_caveat(Caveat::Expires { when })
     }
 
+    /// Add an expiration caveat from a [SystemTime].
+    pub fn add_expires_at(&mut self, when: SystemTime) -> Result<(), Error> {
+        self.add_expires(system_time_to_unix_seconds(when)?)
+    }
+
     /// Add a caveat that rejects verifier times before `when`.
     pub fn add_not_before(&mut self, when: u64) -> Result<(), Error> {
         self.add_caveat(Caveat::NotBefore { when })
+    }
+
+    /// Add a not-before caveat from a [SystemTime].
+    pub fn add_not_before_at(&mut self, when: SystemTime) -> Result<(), Error> {
+        self.add_not_before(system_time_to_unix_seconds(when)?)
+    }
+
+    /// Add a fresh expiration caveat for `ttl` after the current system time.
+    ///
+    /// This appends a new caveat.  It does not replace earlier expiration caveats, so the effective
+    /// expiration remains the minimum of all expiration caveats.
+    pub fn add_ttl(&mut self, ttl: Duration) -> Result<(), Error> {
+        self.add_ttl_from(SystemTime::now(), ttl)
+    }
+
+    /// Add a fresh expiration caveat for `ttl` after `now`.
+    ///
+    /// This is useful for deterministic tests and for applications that already captured request
+    /// time.
+    pub fn add_ttl_from(&mut self, now: SystemTime, ttl: Duration) -> Result<(), Error> {
+        self.add_expires_at(system_time_after_ttl(now, ttl)?)
     }
 
     /// Add a third party caveat.  Provide `signature()` to ask the third party to generate the
@@ -756,6 +999,33 @@ impl Macaroon {
         }
         discharge.signature = signature;
         Ok(())
+    }
+
+    /// Bind and return a single discharge macaroon.
+    ///
+    /// This is the owned-value form of [Macaroon::bind_discharge].
+    pub fn bind_discharge_owned(&self, mut discharge: Macaroon) -> Result<Macaroon, Error> {
+        self.bind_discharge(&mut discharge)?;
+        Ok(discharge)
+    }
+
+    /// Bind every discharge macaroon in place.
+    pub fn bind_discharges(&self, discharges: &mut [Macaroon]) -> Result<(), Error> {
+        for discharge in discharges {
+            self.bind_discharge(discharge)?;
+        }
+        Ok(())
+    }
+
+    /// Bind owned discharge macaroons and return them as a vector.
+    pub fn bind_discharges_owned<I>(&self, discharges: I) -> Result<Vec<Macaroon>, Error>
+    where
+        I: IntoIterator<Item = Macaroon>,
+    {
+        discharges
+            .into_iter()
+            .map(|discharge| self.bind_discharge_owned(discharge))
+            .collect()
     }
 
     /// Assemble the transitive discharge cover from `candidates`.
@@ -878,6 +1148,88 @@ impl Debug for Macaroon {
     }
 }
 
+////////////////////////////////////////// PreparedRequest /////////////////////////////////////////
+
+/// A root macaroon and the discharge macaroons that should accompany it.
+#[derive(Clone, Debug, Default, Message, Eq, PartialEq)]
+pub struct PreparedRequest {
+    /// The root macaroon for the request.
+    #[prototk(1, message)]
+    pub root: Macaroon,
+    /// The bound discharge macaroons required by the root.
+    #[prototk(2, message)]
+    pub discharges: Vec<Macaroon>,
+}
+
+impl PreparedRequest {
+    /// Construct a prepared request from a root and bound discharges.
+    pub fn new(root: Macaroon, discharges: Vec<Macaroon>) -> Self {
+        Self { root, discharges }
+    }
+
+    /// Borrow the root macaroon.
+    pub fn root(&self) -> &Macaroon {
+        &self.root
+    }
+
+    /// Borrow the bound discharge macaroons.
+    pub fn discharges(&self) -> &[Macaroon] {
+        &self.discharges
+    }
+
+    /// Split this prepared request into its root and discharge parts.
+    pub fn into_parts(self) -> (Macaroon, Vec<Macaroon>) {
+        (self.root, self.discharges)
+    }
+
+    /// Encode this prepared request to its prototk byte representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        stack_pack(self).to_vec()
+    }
+
+    /// Encode this prepared request as URL-safe Base64 without padding.
+    ///
+    /// Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn to_base64(&self) -> String {
+        base64_support::encode(&self.to_bytes())
+    }
+
+    /// Decode exactly one prepared request from its prototk byte representation.
+    ///
+    /// Trailing bytes are rejected.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let mut unpacker = Unpacker::new(bytes);
+        let request: PreparedRequest =
+            unpacker
+                .unpack()
+                .map_err(|error: PrototkError| Error::InvalidEncoding {
+                    what: error.to_string(),
+                })?;
+        let canonical = request.to_bytes();
+        if bytes == canonical {
+            Ok(request)
+        } else if bytes.starts_with(&canonical) && bytes.len() > canonical.len() {
+            Err(Error::InvalidEncoding {
+                what: format!("{} trailing bytes", bytes.len() - canonical.len()),
+            })
+        } else {
+            Err(Error::InvalidEncoding {
+                what: "non-canonical prepared request encoding".to_owned(),
+            })
+        }
+    }
+
+    /// Decode exactly one prepared request from URL-safe or standard Base64 text.
+    ///
+    /// Padding is accepted but not required.  Requires the `base64` feature.
+    #[cfg(feature = "base64")]
+    pub fn from_base64(encoded: &str) -> Result<Self, Error> {
+        let bytes = base64_support::decode(encoded)?;
+        Self::from_bytes(&bytes)
+    }
+}
+
 ////////////////////////////////////////////// Loader //////////////////////////////////////////////
 
 /// A [Loader] is a client-side way to get macaroons by identifier.  Used by [RequestBuilder].
@@ -891,6 +1243,208 @@ pub trait Loader: Debug {
     ///
     /// Assumes the caller will verify the macaroon's location against `self.location()`.
     fn lookup(&self, identifier: &str) -> Result<Macaroon, Error>;
+}
+
+/// A simple loader backed by a vector of macaroons.
+#[derive(Clone, Debug)]
+pub struct StaticLoader {
+    location: &'static str,
+    macaroons: Vec<Macaroon>,
+}
+
+impl StaticLoader {
+    /// Construct a static loader for one location.
+    pub fn new(location: &'static str, macaroons: Vec<Macaroon>) -> Self {
+        Self {
+            location,
+            macaroons,
+        }
+    }
+}
+
+impl Loader for StaticLoader {
+    fn location(&self) -> &'static str {
+        self.location
+    }
+
+    fn lookup(&self, identifier: &str) -> Result<Macaroon, Error> {
+        self.macaroons
+            .iter()
+            .find(|macaroon| crypto::str_eq(macaroon.identifier(), identifier))
+            .cloned()
+            .ok_or_else(|| Error::MissingLoader {
+                what: format!("{}/{}", self.location, identifier),
+            })
+    }
+}
+
+/// A simple loader backed by a hash map keyed by macaroon identifier.
+#[derive(Clone, Debug)]
+pub struct MapLoader {
+    location: &'static str,
+    macaroons: HashMap<String, Macaroon>,
+}
+
+impl MapLoader {
+    /// Construct an empty map loader for one location.
+    pub fn new(location: &'static str) -> Self {
+        Self {
+            location,
+            macaroons: HashMap::new(),
+        }
+    }
+
+    /// Construct a map loader from macaroons for one location.
+    pub fn from_macaroons<I>(location: &'static str, macaroons: I) -> Result<Self, Error>
+    where
+        I: IntoIterator<Item = Macaroon>,
+    {
+        let mut loader = Self::new(location);
+        for macaroon in macaroons {
+            loader.insert(macaroon)?;
+        }
+        Ok(loader)
+    }
+
+    /// Insert a macaroon into this loader.
+    pub fn insert(&mut self, macaroon: Macaroon) -> Result<(), Error> {
+        if !crypto::str_eq(macaroon.location(), self.location) {
+            return Err(Error::LocationMismatch {
+                expected: self.location.to_owned(),
+                actual: macaroon.location().to_owned(),
+            });
+        }
+        self.macaroons
+            .insert(macaroon.identifier().to_owned(), macaroon);
+        Ok(())
+    }
+}
+
+impl Loader for MapLoader {
+    fn location(&self) -> &'static str {
+        self.location
+    }
+
+    fn lookup(&self, identifier: &str) -> Result<Macaroon, Error> {
+        self.macaroons
+            .get(identifier)
+            .cloned()
+            .ok_or_else(|| Error::MissingLoader {
+                what: format!("{}/{}", self.location, identifier),
+            })
+    }
+}
+
+/// A loader backed by a closure.
+pub struct FnLoader<F> {
+    location: &'static str,
+    lookup: F,
+}
+
+impl<F> FnLoader<F> {
+    /// Construct a closure-backed loader for one location.
+    pub fn new(location: &'static str, lookup: F) -> Self {
+        Self { location, lookup }
+    }
+}
+
+impl<F> Debug for FnLoader<F> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.debug_struct("FnLoader")
+            .field("location", &self.location)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F> Loader for FnLoader<F>
+where
+    F: Fn(&str) -> Result<Macaroon, Error>,
+{
+    fn location(&self) -> &'static str {
+        self.location
+    }
+
+    fn lookup(&self, identifier: &str) -> Result<Macaroon, Error> {
+        (self.lookup)(identifier)
+    }
+}
+
+/// A boxed macaroon lookup future returned by [AsyncLoader].
+pub type BoxMacaroonFuture<'a> = Pin<Box<dyn Future<Output = Result<Macaroon, Error>> + 'a>>;
+
+/// An asynchronous client-side way to get macaroons by identifier.
+pub trait AsyncLoader: Debug {
+    /// The static location this loader serves.
+    fn location(&self) -> &'static str;
+    /// Lookup the discharge macaroon with the given identifier.
+    fn lookup<'a>(&'a self, identifier: &'a str) -> BoxMacaroonFuture<'a>;
+}
+
+impl AsyncLoader for StaticLoader {
+    fn location(&self) -> &'static str {
+        Loader::location(self)
+    }
+
+    fn lookup<'a>(&'a self, identifier: &'a str) -> BoxMacaroonFuture<'a> {
+        Box::pin(std::future::ready(Loader::lookup(self, identifier)))
+    }
+}
+
+impl AsyncLoader for MapLoader {
+    fn location(&self) -> &'static str {
+        Loader::location(self)
+    }
+
+    fn lookup<'a>(&'a self, identifier: &'a str) -> BoxMacaroonFuture<'a> {
+        Box::pin(std::future::ready(Loader::lookup(self, identifier)))
+    }
+}
+
+impl<F> AsyncLoader for FnLoader<F>
+where
+    F: Fn(&str) -> Result<Macaroon, Error>,
+{
+    fn location(&self) -> &'static str {
+        Loader::location(self)
+    }
+
+    fn lookup<'a>(&'a self, identifier: &'a str) -> BoxMacaroonFuture<'a> {
+        Box::pin(std::future::ready(Loader::lookup(self, identifier)))
+    }
+}
+
+/// An asynchronous loader backed by a closure returning a boxed future.
+pub struct AsyncFnLoader<F> {
+    location: &'static str,
+    lookup: F,
+}
+
+impl<F> AsyncFnLoader<F> {
+    /// Construct an async closure-backed loader for one location.
+    pub fn new(location: &'static str, lookup: F) -> Self {
+        Self { location, lookup }
+    }
+}
+
+impl<F> Debug for AsyncFnLoader<F> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.debug_struct("AsyncFnLoader")
+            .field("location", &self.location)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F> AsyncLoader for AsyncFnLoader<F>
+where
+    F: for<'a> Fn(&'a str) -> BoxMacaroonFuture<'a>,
+{
+    fn location(&self) -> &'static str {
+        self.location
+    }
+
+    fn lookup<'a>(&'a self, identifier: &'a str) -> BoxMacaroonFuture<'a> {
+        (self.lookup)(identifier)
+    }
 }
 
 ////////////////////////////////////////// RequestBuilder //////////////////////////////////////////
@@ -931,12 +1485,25 @@ impl RequestBuilder {
         Ok(self)
     }
 
+    /// Add a closure-backed loader for macaroons.
+    pub fn add_lookup<F>(&mut self, location: &'static str, lookup: F) -> Result<(), Error>
+    where
+        F: Fn(&str) -> Result<Macaroon, Error> + 'static,
+    {
+        self.add_loader(FnLoader::new(location, lookup))
+    }
+
+    /// Add a closure-backed loader and return the builder for call chaining.
+    pub fn with_lookup<F>(mut self, location: &'static str, lookup: F) -> Result<Self, Error>
+    where
+        F: Fn(&str) -> Result<Macaroon, Error> + 'static,
+    {
+        self.add_lookup(location, lookup)?;
+        Ok(self)
+    }
+
     /// Prepare a request with the location and identifier provided.
-    pub fn prepare_request(
-        &self,
-        location: &str,
-        identifier: &str,
-    ) -> Result<(Macaroon, Vec<Macaroon>), Error> {
+    pub fn prepare(&self, location: &str, identifier: &str) -> Result<PreparedRequest, Error> {
         let root = self.lookup_macaroon(location, identifier)?;
         let mut discharges = Vec::new();
         let mut queue = VecDeque::new();
@@ -949,7 +1516,17 @@ impl RequestBuilder {
         for discharge in &mut discharges {
             root.bind_discharge(discharge)?;
         }
-        Ok((root, discharges))
+        Ok(PreparedRequest::new(root, discharges))
+    }
+
+    /// Prepare a request and return its root and discharges as separate values.
+    pub fn prepare_request(
+        &self,
+        location: &str,
+        identifier: &str,
+    ) -> Result<(Macaroon, Vec<Macaroon>), Error> {
+        self.prepare(location, identifier)
+            .map(PreparedRequest::into_parts)
     }
 
     fn get_loader_for(&self, location: &str) -> Result<&dyn Loader, Error> {
@@ -1000,6 +1577,137 @@ impl RequestBuilder {
     }
 }
 
+/////////////////////////////////////// AsyncRequestBuilder ////////////////////////////////////////
+
+/// [AsyncRequestBuilder] handles request assembly using asynchronous loaders.
+#[derive(Debug, Default)]
+pub struct AsyncRequestBuilder {
+    loaders: HashMap<&'static str, Box<dyn AsyncLoader>>,
+}
+
+impl AsyncRequestBuilder {
+    /// Create a new async request builder.
+    pub fn new() -> Self {
+        Self {
+            loaders: HashMap::new(),
+        }
+    }
+
+    /// Add an async loader for macaroons.
+    pub fn add_loader<L: AsyncLoader + 'static>(&mut self, loader: L) -> Result<(), Error> {
+        let location = loader.location();
+        if self.loaders.contains_key(location) {
+            return Err(Error::DuplicateLoader {
+                location: location.to_owned(),
+            });
+        }
+        self.loaders.insert(location, Box::new(loader));
+        Ok(())
+    }
+
+    /// Add an async loader and return the builder for call chaining.
+    pub fn with_loader<L: AsyncLoader + 'static>(mut self, loader: L) -> Result<Self, Error> {
+        self.add_loader(loader)?;
+        Ok(self)
+    }
+
+    /// Add an async closure-backed loader for macaroons.
+    pub fn add_lookup<F>(&mut self, location: &'static str, lookup: F) -> Result<(), Error>
+    where
+        F: for<'a> Fn(&'a str) -> BoxMacaroonFuture<'a> + 'static,
+    {
+        self.add_loader(AsyncFnLoader::new(location, lookup))
+    }
+
+    /// Add an async closure-backed loader and return the builder for call chaining.
+    pub fn with_lookup<F>(mut self, location: &'static str, lookup: F) -> Result<Self, Error>
+    where
+        F: for<'a> Fn(&'a str) -> BoxMacaroonFuture<'a> + 'static,
+    {
+        self.add_lookup(location, lookup)?;
+        Ok(self)
+    }
+
+    /// Prepare a request with the location and identifier provided.
+    pub async fn prepare(
+        &self,
+        location: &str,
+        identifier: &str,
+    ) -> Result<PreparedRequest, Error> {
+        let root = self.lookup_macaroon(location, identifier).await?;
+        let mut discharges = Vec::new();
+        let mut queue = VecDeque::new();
+        let mut enqueued = HashSet::new();
+        self.enqueue_discharges(&root, &mut discharges, &mut queue, &mut enqueued)
+            .await?;
+        while let Some(index) = queue.pop_front() {
+            let macaroon = discharges[index].clone();
+            self.enqueue_discharges(&macaroon, &mut discharges, &mut queue, &mut enqueued)
+                .await?;
+        }
+        root.bind_discharges(&mut discharges)?;
+        Ok(PreparedRequest::new(root, discharges))
+    }
+
+    /// Prepare a request and return its root and discharges as separate values.
+    pub async fn prepare_request(
+        &self,
+        location: &str,
+        identifier: &str,
+    ) -> Result<(Macaroon, Vec<Macaroon>), Error> {
+        self.prepare(location, identifier)
+            .await
+            .map(PreparedRequest::into_parts)
+    }
+
+    fn get_loader_for(&self, location: &str) -> Result<&dyn AsyncLoader, Error> {
+        if let Some(loader) = self.loaders.get(location) {
+            Ok(loader.as_ref())
+        } else {
+            Err(Error::MissingLoader {
+                what: location.to_owned(),
+            })
+        }
+    }
+
+    async fn lookup_macaroon(&self, location: &str, identifier: &str) -> Result<Macaroon, Error> {
+        let macaroon = self.get_loader_for(location)?.lookup(identifier).await?;
+        if crypto::str_eq(macaroon.location(), location) {
+            Ok(macaroon)
+        } else {
+            Err(Error::LocationMismatch {
+                expected: location.to_owned(),
+                actual: macaroon.location().to_owned(),
+            })
+        }
+    }
+
+    async fn enqueue_discharges(
+        &self,
+        macaroon: &Macaroon,
+        discharges: &mut Vec<Macaroon>,
+        queue: &mut VecDeque<usize>,
+        enqueued: &mut HashSet<(String, String)>,
+    ) -> Result<(), Error> {
+        for caveat in macaroon.caveats.iter() {
+            if let Caveat::ThirdParty {
+                location,
+                identifier,
+                secret: _,
+            } = caveat
+            {
+                let key = (location.clone(), identifier.clone());
+                if enqueued.insert(key) {
+                    let discharge = self.lookup_macaroon(location, identifier).await?;
+                    queue.push_back(discharges.len());
+                    discharges.push(discharge);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 ///////////////////////////////////////////// Verifier /////////////////////////////////////////////
 
 /// [Verifier] implements the servers-side portion of macaroons.  Note that the caveats we've
@@ -1022,9 +1730,23 @@ impl Verifier {
         self.contexts.push(context.into());
     }
 
+    /// Add a canonical exact-string fact to the verifier context.
+    ///
+    /// The fact name is static so application code controls the vocabulary.  The context string is
+    /// formatted as `"{name} = {value}"`.
+    pub fn add_fact(&mut self, name: &'static str, value: impl Display) {
+        self.add_context(format!("{name} = {value}"));
+    }
+
     /// Add `context` and return the verifier for call chaining.
     pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.add_context(context);
+        self
+    }
+
+    /// Add a canonical exact-string fact and return the verifier for call chaining.
+    pub fn with_fact(mut self, name: &'static str, value: impl Display) -> Self {
+        self.add_fact(name, value);
         self
     }
 
@@ -1033,10 +1755,33 @@ impl Verifier {
         self.now = Some(now);
     }
 
+    /// Set the time to use for the verifier from a [SystemTime].
+    pub fn set_current_system_time(&mut self, now: SystemTime) -> Result<(), Error> {
+        self.set_current_time(system_time_to_unix_seconds(now)?);
+        Ok(())
+    }
+
+    /// Set the time to use for the verifier from the current system time.
+    pub fn set_system_time_now(&mut self) -> Result<(), Error> {
+        self.set_current_system_time(SystemTime::now())
+    }
+
     /// Set the time to use and return the verifier for call chaining.
     pub fn with_current_time(mut self, now: u64) -> Self {
         self.set_current_time(now);
         self
+    }
+
+    /// Set the time to use from a [SystemTime] and return the verifier for call chaining.
+    pub fn with_current_system_time(mut self, now: SystemTime) -> Result<Self, Error> {
+        self.set_current_system_time(now)?;
+        Ok(self)
+    }
+
+    /// Set the time to use from the current system time and return the verifier for call chaining.
+    pub fn with_system_time_now(mut self) -> Result<Self, Error> {
+        self.set_system_time_now()?;
+        Ok(self)
     }
 
     /// Verify a macaroon.  Resistant to timing attacks, but quadratic as a result.
@@ -1048,6 +1793,11 @@ impl Verifier {
     ) -> Result<(), Error> {
         let mut key = key.clone();
         self.verify_inner(root, &mut key, root, discharges, 0)
+    }
+
+    /// Verify a prepared request.
+    pub fn verify_request(&self, request: &PreparedRequest, key: &Secret) -> Result<(), Error> {
+        self.verify(&request.root, key, &request.discharges)
     }
 
     // NOTE(rescrv):  This function is quadratic in nature.  For each discharge we will consider
@@ -1242,6 +1992,41 @@ mod tests {
         assert!(mem_eq(&random, &random));
     }
 
+    #[cfg(feature = "base64")]
+    #[test]
+    fn base64_helpers_use_url_safe_unpadded_encoding() {
+        assert_eq!("", base64_support::encode(b""));
+        assert_eq!("AA", base64_support::encode(&[0]));
+        assert_eq!("AAA", base64_support::encode(&[0, 0]));
+        assert_eq!("AAAA", base64_support::encode(&[0, 0, 0]));
+        assert_eq!("__8", base64_support::encode(&[0xff, 0xff]));
+
+        assert_eq!(Ok(Vec::<u8>::new()), base64_support::decode(""));
+        assert_eq!(Ok(vec![0]), base64_support::decode("AA"));
+        assert_eq!(Ok(vec![0]), base64_support::decode("AA=="));
+        assert_eq!(Ok(vec![0, 0]), base64_support::decode("AAA"));
+        assert_eq!(Ok(vec![0, 0]), base64_support::decode("AAA="));
+        assert_eq!(Ok(vec![0xff, 0xff]), base64_support::decode("__8"));
+        assert_eq!(Ok(vec![0xff, 0xff]), base64_support::decode("//8="));
+    }
+
+    #[cfg(feature = "base64")]
+    #[test]
+    fn base64_helpers_reject_non_canonical_tail_bits() {
+        assert_eq!(
+            Err(Error::InvalidBase64 {
+                what: "non-zero trailing base64 bits".to_owned(),
+            }),
+            base64_support::decode("AB")
+        );
+        assert_eq!(
+            Err(Error::InvalidBase64 {
+                what: "base64 length leaves one dangling sextet".to_owned(),
+            }),
+            base64_support::decode("A")
+        );
+    }
+
     #[test]
     fn secretbox_xsalsa20poly1305_known_vector_round_trips() {
         use super::crypto::*;
@@ -1380,6 +2165,35 @@ mod tests {
             "cryptographic operation failed",
             Error::CryptoOperationFailed.to_string()
         );
+        assert_eq!(
+            "invalid base64: bad alphabet",
+            Error::InvalidBase64 {
+                what: "bad alphabet".to_owned(),
+            }
+            .to_string()
+        );
+        assert_eq!(
+            "invalid hex: bad alphabet",
+            Error::InvalidHex {
+                what: "bad alphabet".to_owned(),
+            }
+            .to_string()
+        );
+        assert_eq!(
+            "invalid secret length: expected 32 bytes, got 31",
+            Error::InvalidSecretLength {
+                expected: SIGNATURE_BYTES as u64,
+                actual: 31,
+            }
+            .to_string()
+        );
+        assert_eq!(
+            "invalid time: before epoch",
+            Error::InvalidTime {
+                what: "before epoch".to_owned(),
+            }
+            .to_string()
+        );
     }
 
     #[test]
@@ -1408,6 +2222,19 @@ mod tests {
             Error::RandomGenerationFailed,
             Error::EncryptionFailed,
             Error::CryptoOperationFailed,
+            Error::InvalidBase64 {
+                what: "bad alphabet".to_owned(),
+            },
+            Error::InvalidHex {
+                what: "bad alphabet".to_owned(),
+            },
+            Error::InvalidSecretLength {
+                expected: SIGNATURE_BYTES as u64,
+                actual: 31,
+            },
+            Error::InvalidTime {
+                what: "before epoch".to_owned(),
+            },
         ];
 
         for expected in cases {
@@ -1545,6 +2372,14 @@ signature: [redacted]
     }
 
     #[test]
+    fn secret_debug_redacts_key_material() {
+        let debug = format!("{SECRET:?}");
+
+        assert_eq!("Secret([redacted])", debug);
+        assert!(!debug.contains(&SECRET.hexdigest()));
+    }
+
+    #[test]
     fn ergonomic_constructors_accept_borrowed_strings() {
         let mut macaroon = Macaroon::new(ROOT_LOCATION, ROOT_IDENTIFIER, SECRET).unwrap();
 
@@ -1584,6 +2419,77 @@ signature: [redacted]
         assert_eq!(
             "abababababababababababababababababababababababababababababababab",
             secret.hexdigest()
+        );
+    }
+
+    #[test]
+    fn secret_from_hex_and_slice_support_configured_secrets() {
+        let expected = Secret::from_bytes([0xab; SIGNATURE_BYTES]);
+        assert_eq!(
+            Ok(expected.clone()),
+            Secret::from_hex("abababababababababababababababababababababababababababababababab")
+        );
+        assert_eq!(
+            Ok(expected.clone()),
+            Secret::from_hexdigest(
+                "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+            )
+        );
+        assert_eq!(
+            Ok(expected.clone()),
+            Secret::try_from(&[0xab; SIGNATURE_BYTES][..])
+        );
+    }
+
+    #[cfg(feature = "base64")]
+    #[test]
+    fn secret_from_base64_supports_configured_secrets() {
+        let expected = Secret::from_bytes([0xab; SIGNATURE_BYTES]);
+        assert_eq!(
+            Ok(expected.clone()),
+            Secret::from_base64("q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s")
+        );
+        assert_eq!(
+            Ok(expected.clone()),
+            Secret::from_base64("q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=")
+        );
+        assert_eq!(
+            "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s",
+            expected.to_base64()
+        );
+    }
+
+    #[test]
+    fn secret_decoders_reject_invalid_input() {
+        assert_eq!(
+            Err(Error::InvalidSecretLength {
+                expected: SIGNATURE_BYTES as u64,
+                actual: 31,
+            }),
+            Secret::try_from_slice(&[0; SIGNATURE_BYTES - 1])
+        );
+        assert_eq!(
+            Err(Error::InvalidHex {
+                what: "expected 64 hex characters, got 2".to_owned(),
+            }),
+            Secret::from_hex("ab")
+        );
+        assert_eq!(
+            Err(Error::InvalidHex {
+                what: "invalid character at byte 63".to_owned(),
+            }),
+            Secret::from_hex("abababababababababababababababababababababababababababababababag")
+        );
+    }
+
+    #[cfg(feature = "base64")]
+    #[test]
+    fn secret_base64_decoder_rejects_invalid_input() {
+        assert_eq!(
+            Err(Error::InvalidBase64 {
+                what: "invalid character at byte 0".to_owned(),
+            }),
+            Secret::from_base64("!")
         );
     }
 
@@ -1638,6 +2544,20 @@ signature: [redacted]
         );
     }
 
+    #[cfg(feature = "base64")]
+    #[test]
+    fn macaroon_to_from_base64_round_trips() {
+        let mut expected = root_macaroon();
+        expected.add_exact_string("role = admin").unwrap();
+        expected.add_not_before(1_800_000_000).unwrap();
+        expected.add_expires(1_900_000_000).unwrap();
+        let encoded = expected.to_base64();
+
+        assert!(encoded.is_ascii());
+        assert!(!encoded.contains('='));
+        assert_eq!(Ok(expected), Macaroon::from_base64(&encoded));
+    }
+
     #[test]
     fn macaroon_from_bytes_rejects_trailing_bytes() {
         let mut bytes = root_macaroon().to_bytes();
@@ -1648,6 +2568,48 @@ signature: [redacted]
                 what: "1 trailing bytes".to_owned(),
             }),
             Macaroon::from_bytes(&bytes)
+        );
+    }
+
+    #[test]
+    fn prepared_request_to_from_bytes_round_trips() {
+        let root = root_with_third_party_caveat();
+        let discharge = root.bind_discharge_owned(discharge_macaroon()).unwrap();
+        let expected = PreparedRequest {
+            root,
+            discharges: vec![discharge],
+        };
+        let bytes = expected.to_bytes();
+
+        assert_eq!(Ok(expected), PreparedRequest::from_bytes(&bytes));
+    }
+
+    #[cfg(feature = "base64")]
+    #[test]
+    fn prepared_request_to_from_base64_round_trips() {
+        let root = root_with_third_party_caveat();
+        let discharge = root.bind_discharge_owned(discharge_macaroon()).unwrap();
+        let expected = PreparedRequest {
+            root,
+            discharges: vec![discharge],
+        };
+        let encoded = expected.to_base64();
+
+        assert!(encoded.is_ascii());
+        assert!(!encoded.contains('='));
+        assert_eq!(Ok(expected), PreparedRequest::from_base64(&encoded));
+    }
+
+    #[test]
+    fn prepared_request_from_bytes_rejects_trailing_bytes() {
+        let mut bytes = PreparedRequest::new(root_macaroon(), Vec::new()).to_bytes();
+        bytes.push(0);
+
+        assert_eq!(
+            Err(Error::InvalidEncoding {
+                what: "1 trailing bytes".to_owned(),
+            }),
+            PreparedRequest::from_bytes(&bytes)
         );
     }
 
@@ -1681,6 +2643,163 @@ signature: [redacted]
                 },
             ],
             caveats
+        );
+    }
+
+    #[test]
+    fn fact_helpers_use_canonical_exact_string_contexts() {
+        let mut macaroon = root_macaroon();
+        macaroon.add_fact("account", 3735928559u64).unwrap();
+        macaroon.add_fact("method", "GET").unwrap();
+
+        let accepted = Verifier::new()
+            .with_fact("method", "GET")
+            .with_fact("account", 3735928559u64);
+        let rejected = Verifier::new()
+            .with_fact("method", "POST")
+            .with_fact("account", 3735928559u64);
+
+        assert_eq!(Ok(()), accepted.verify(&macaroon, &SECRET, &[]));
+        assert_eq!(
+            Err(Error::ProofInvalid),
+            rejected.verify(&macaroon, &SECRET, &[])
+        );
+        assert_eq!(
+            vec![
+                CaveatRef::ExactString {
+                    what: "account = 3735928559",
+                },
+                CaveatRef::ExactString {
+                    what: "method = GET"
+                },
+            ],
+            macaroon.caveats().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn system_time_helpers_add_timestamp_caveats() {
+        let mut macaroon = root_macaroon();
+        macaroon
+            .add_not_before_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000))
+            .unwrap();
+        macaroon
+            .add_expires_at(UNIX_EPOCH + Duration::from_secs(1_700_000_010))
+            .unwrap();
+
+        assert_eq!(
+            vec![
+                CaveatRef::NotBefore {
+                    when: 1_700_000_000,
+                },
+                CaveatRef::Expires {
+                    when: 1_700_000_010,
+                },
+            ],
+            macaroon.caveats().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            Ok(()),
+            Verifier::new()
+                .with_current_system_time(UNIX_EPOCH + Duration::from_secs(1_700_000_000))
+                .unwrap()
+                .verify(&macaroon, &SECRET, &[])
+        );
+    }
+
+    #[test]
+    fn ttl_adds_new_expiration_that_tightens_existing_expiration() {
+        let mut macaroon = root_macaroon();
+        macaroon.add_expires(200).unwrap();
+        macaroon
+            .add_ttl_from(
+                UNIX_EPOCH + Duration::from_secs(100),
+                Duration::from_secs(50),
+            )
+            .unwrap();
+
+        assert_eq!(
+            vec![
+                CaveatRef::Expires { when: 200 },
+                CaveatRef::Expires { when: 150 },
+            ],
+            macaroon.caveats().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            Ok(()),
+            Verifier::new()
+                .with_current_time(149)
+                .verify(&macaroon, &SECRET, &[])
+        );
+        assert_eq!(
+            Err(Error::ProofInvalid),
+            Verifier::new()
+                .with_current_time(150)
+                .verify(&macaroon, &SECRET, &[])
+        );
+        assert_eq!(
+            Err(Error::ProofInvalid),
+            Verifier::new()
+                .with_current_time(199)
+                .verify(&macaroon, &SECRET, &[])
+        );
+    }
+
+    #[test]
+    fn time_helpers_reject_times_before_epoch() {
+        let mut macaroon = root_macaroon();
+        assert_eq!(
+            Err(Error::InvalidTime {
+                what: "system time is before the Unix epoch".to_owned(),
+            }),
+            macaroon.add_expires_at(UNIX_EPOCH - Duration::from_secs(1))
+        );
+        let mut verifier = Verifier::new();
+        assert_eq!(
+            Err(Error::InvalidTime {
+                what: "system time is before the Unix epoch".to_owned(),
+            }),
+            verifier.set_current_system_time(UNIX_EPOCH - Duration::from_secs(1))
+        );
+    }
+
+    #[test]
+    fn binding_affordances_bind_owned_values_and_slices() {
+        let mut root = root_macaroon();
+        let first_secret = ThirdPartySecret::new(root.signature(), NONCE, &SECRET2).unwrap();
+        root.add_third_party_caveat(AUTH_LOCATION, AUTH_IDENTIFIER, first_secret)
+            .unwrap();
+        let second_secret = ThirdPartySecret::new(root.signature(), NONCE2, &SECRET3).unwrap();
+        root.add_third_party_caveat(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, second_secret)
+            .unwrap();
+
+        let first = root.bind_discharge_owned(discharge_macaroon()).unwrap();
+        let mut discharges = vec![
+            discharge_macaroon(),
+            Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3).unwrap(),
+        ];
+        root.bind_discharges(&mut discharges).unwrap();
+        let owned = root
+            .bind_discharges_owned(vec![
+                discharge_macaroon(),
+                Macaroon::new(NESTED_AUTH_LOCATION, NESTED_AUTH_IDENTIFIER, SECRET3).unwrap(),
+            ])
+            .unwrap();
+
+        assert_eq!(first, discharges[0]);
+        assert_eq!(discharges, owned);
+        assert_eq!(Ok(()), Verifier::new().verify(&root, &SECRET, &owned));
+    }
+
+    #[test]
+    fn verifier_debug_shows_context_for_proof_failures() {
+        let verifier = Verifier::new()
+            .with_fact("method", "GET")
+            .with_current_time(1_700_000_000);
+
+        assert_eq!(
+            r#"Verifier { now: Some(1700000000), contexts: ["method = GET"] }"#,
+            format!("{verifier:?}")
         );
     }
 
@@ -2659,6 +3778,62 @@ third-party: location=http://example.net/auth identifier=bob@example.net
         }
 
         #[test]
+        fn public_static_loader_setup() {
+            let root = root_macaroon();
+            let builder = RequestBuilder::new()
+                .with_loader(crate::StaticLoader::new(ROOT_LOCATION, vec![root.clone()]))
+                .unwrap();
+
+            assert_eq!(
+                Ok(PreparedRequest {
+                    root,
+                    discharges: Vec::new(),
+                }),
+                builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+        }
+
+        #[test]
+        fn public_map_loader_setup() {
+            let root = root_macaroon();
+            let loader =
+                crate::MapLoader::from_macaroons(ROOT_LOCATION, vec![root.clone()]).unwrap();
+            let builder = RequestBuilder::new().with_loader(loader).unwrap();
+
+            assert_eq!(
+                Ok(PreparedRequest {
+                    root,
+                    discharges: Vec::new(),
+                }),
+                builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+        }
+
+        #[test]
+        fn closure_loader_setup() {
+            let root = root_macaroon();
+            let builder = RequestBuilder::new()
+                .with_lookup(ROOT_LOCATION, move |identifier| {
+                    if identifier == ROOT_IDENTIFIER {
+                        Ok(root.clone())
+                    } else {
+                        Err(Error::MissingLoader {
+                            what: format!("{ROOT_LOCATION}/{identifier}"),
+                        })
+                    }
+                })
+                .unwrap();
+
+            assert_eq!(
+                Ok(PreparedRequest {
+                    root: root_macaroon(),
+                    discharges: Vec::new(),
+                }),
+                builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER)
+            );
+        }
+
+        #[test]
         fn duplicate_loader_registration_is_rejected() {
             let mut builder = RequestBuilder::new();
             assert_eq!(
@@ -2779,6 +3954,29 @@ third-party: location=http://example.net/auth identifier=bob@example.net
                 Ok(()),
                 verifier.verify(&root, &SECRET, &[expected_discharge])
             );
+        }
+
+        #[test]
+        fn prepared_request_verifies_bound_discharges() {
+            let root = root_with_third_party_caveat();
+            let discharge = discharge_macaroon();
+            let mut builder = request_builder_with_root(root.clone());
+            builder
+                .add_loader(StaticLoader::new(AUTH_LOCATION, vec![discharge.clone()]))
+                .unwrap();
+            let mut expected_discharge = discharge;
+            root.bind_discharge(&mut expected_discharge).unwrap();
+
+            let request = builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER).unwrap();
+
+            assert_eq!(
+                PreparedRequest {
+                    root: root.clone(),
+                    discharges: vec![expected_discharge],
+                },
+                request
+            );
+            assert_eq!(Ok(()), Verifier::new().verify_request(&request, &SECRET));
         }
 
         #[test]
@@ -2908,6 +4106,88 @@ third-party: location=http://example.net/auth identifier=bob@example.net
             assert_eq!(
                 Ok(()),
                 verifier.verify(&root, &SECRET, &expected_discharges)
+            );
+        }
+    }
+
+    mod async_request_builder {
+        use super::*;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+        fn block_on<F: Future>(future: F) -> F::Output {
+            fn raw_waker() -> RawWaker {
+                fn clone(_: *const ()) -> RawWaker {
+                    raw_waker()
+                }
+                fn wake(_: *const ()) {}
+                fn wake_by_ref(_: *const ()) {}
+                fn drop(_: *const ()) {}
+                static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+                RawWaker::new(std::ptr::null(), &VTABLE)
+            }
+
+            // SAFETY(codex): The dummy waker never dereferences its data pointer and is sufficient
+            // for polling the immediately-ready futures used by these tests.
+            let waker = unsafe { Waker::from_raw(raw_waker()) };
+            let mut context = Context::from_waker(&waker);
+            let mut future = std::pin::pin!(future);
+            loop {
+                match Future::poll(future.as_mut(), &mut context) {
+                    Poll::Ready(output) => return output,
+                    Poll::Pending => std::thread::yield_now(),
+                }
+            }
+        }
+
+        #[test]
+        fn async_request_builder_loads_and_binds_static_loaders() {
+            let root = root_with_third_party_caveat();
+            let discharge = discharge_macaroon();
+            let builder = AsyncRequestBuilder::new()
+                .with_loader(crate::StaticLoader::new(ROOT_LOCATION, vec![root.clone()]))
+                .unwrap()
+                .with_loader(crate::StaticLoader::new(
+                    AUTH_LOCATION,
+                    vec![discharge.clone()],
+                ))
+                .unwrap();
+            let mut expected_discharge = discharge;
+            root.bind_discharge(&mut expected_discharge).unwrap();
+
+            let request = block_on(builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER)).unwrap();
+
+            assert_eq!(
+                PreparedRequest {
+                    root: root.clone(),
+                    discharges: vec![expected_discharge],
+                },
+                request
+            );
+            assert_eq!(Ok(()), Verifier::new().verify_request(&request, &SECRET));
+        }
+
+        #[test]
+        fn async_closure_loader_setup() {
+            let root = root_macaroon();
+            let builder = AsyncRequestBuilder::new()
+                .with_lookup(ROOT_LOCATION, move |identifier| -> BoxMacaroonFuture<'_> {
+                    let result = if identifier == ROOT_IDENTIFIER {
+                        Ok(root.clone())
+                    } else {
+                        Err(Error::MissingLoader {
+                            what: format!("{ROOT_LOCATION}/{identifier}"),
+                        })
+                    };
+                    Box::pin(std::future::ready(result))
+                })
+                .unwrap();
+
+            assert_eq!(
+                Ok(PreparedRequest {
+                    root: root_macaroon(),
+                    discharges: Vec::new(),
+                }),
+                block_on(builder.prepare(ROOT_LOCATION, ROOT_IDENTIFIER))
             );
         }
     }
