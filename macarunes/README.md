@@ -76,12 +76,14 @@ issued.
 - `RequestBuilder` and `Loader` assemble the root macaroon plus the transitive
   set of discharge macaroons a client should send with a request.
 
-The caveat language has three cases:
+The caveat language has four cases:
 
 - Exact-string caveats require a verifier context string with exactly the same
   bytes.
 - Expiration caveats require a verifier current time and `expiration >
   current_time`; equality is expired.
+- Not-before caveats require a verifier current time and `current_time >=
+  not_before`; equality is valid.
 - Third-party caveats require a matching discharge macaroon, bound to the root
   macaroon for this request.
 
@@ -212,9 +214,10 @@ This keeps authorization policy decoupled from enforcement.  You can mint a new
 macaroon with a narrower policy without changing the verifier, provided the
 verifier already knows how to state the relevant request facts.  This crate does
 not expose libmacaroons-style general callback caveats.  Use exact strings for
-canonical request facts and `add_expires` for the built-in time predicate.  If
-you need a richer predicate, evaluate it in your application and add the
-resulting canonical fact to the verifier context; or, use third-party caveats.
+canonical request facts, and use `add_not_before` and `add_expires` for
+verifier-time bounds.  If you need a richer predicate, evaluate it in your
+application and add the resulting canonical fact to the verifier context; or,
+use third-party caveats.
 
 Expiration Caveats
 ------------------
@@ -238,6 +241,39 @@ assert_eq!(
 );
 assert_eq!(
     Err(Error::ProofInvalid),
+    Verifier::new()
+        .with_current_time(1_700_000_000)
+        .verify(&macaroon, &secret, &[]),
+);
+# Ok::<_, macarunes::Error>(())
+```
+
+Not-Before Caveats
+------------------
+
+`add_not_before` takes an unsigned integer timestamp.  The verifier accepts the
+macaroon only when the verifier's current time is greater than or equal to that
+timestamp.  Equality is valid.  A not-before caveat fails if verifier time has
+not been set.
+
+This is the intrinsic caveat to use when an issued credential should place an
+inclusive lower bound on the verification time.
+
+```rust
+use macarunes::{Error, Macaroon, Secret, Verifier};
+
+let secret = Secret::from_bytes([12; macarunes::SIGNATURE_BYTES]);
+let mut macaroon = Macaroon::new("https://issuer.example", "alice", secret.clone())?;
+macaroon.add_not_before(1_700_000_000)?;
+
+assert_eq!(
+    Err(Error::ProofInvalid),
+    Verifier::new()
+        .with_current_time(1_699_999_999)
+        .verify(&macaroon, &secret, &[]),
+);
+assert_eq!(
+    Ok(()),
     Verifier::new()
         .with_current_time(1_700_000_000)
         .verify(&macaroon, &secret, &[]),
@@ -510,7 +546,7 @@ On the service that verifies a request:
 1. Recover or derive the root secret for the root macaroon identifier.
 2. Build a `Verifier`.
 3. Add every exact-string context that should be true for this request.
-4. Set the verifier time before checking expiration caveats.
+4. Set the verifier time before checking expiration or not-before caveats.
 5. Pass the root macaroon, root secret, and all bound discharges to
    `Verifier::verify`.
 6. Treat every `Error::ProofInvalid` as authentication failure.
@@ -528,8 +564,8 @@ Errors
 The public error type is `macarunes::Error`:
 
 - `ProofInvalid` means the proof failed: wrong secret, missing context, expired
-  caveat, missing discharge, unbound discharge, tampering, or any other
-  verification failure.
+  or not-yet-valid caveat, missing discharge, unbound discharge, tampering, or
+  any other verification failure.
 - `Cycle` means verification detected recursive discharge structure deeper than
   the supplied discharge set.
 - `MissingLoader` means `RequestBuilder` has no loader for a location, or a
@@ -558,9 +594,11 @@ Assumptions
 
 - Intentionally restrictive language compared to the Python implementation.
   The only cases you need in the core library are to make exact comparisons
-  (which are born out as format strings), to set an expiration, or to use
-  a third-party caveat that enforces some arbitrary predicate before the
-  discharge macaroon is granted.
+  (which are born out as format strings), to set verifier-time bounds, or to
+  use a third-party caveat that enforces some arbitrary predicate before the
+  discharge macaroon is granted.  Verifier time is the first-party intrinsic
+  that cannot collapse onto stringified exact caveats because the verifier must
+  compare the environment's current time against a signed bound.
 
 About Locations
 ---------------
