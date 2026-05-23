@@ -124,6 +124,45 @@ svc_PORT="1234"
     assert_eq!(error_string_field(&err, "key"), Some("IMAGE".to_string()));
 }
 
+#[test]
+fn pets_files_are_copied() {
+    let case = TempCase::new();
+    case.write_rc_conf("");
+    let pets = case.root.join("pets");
+    std::fs::create_dir_all(&pets).expect("pets directory should be writable");
+    std::fs::write(
+        pets.join("kustomization.yaml"),
+        "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - postgresql.yaml\n",
+    )
+    .expect("pet kustomization should be writable");
+    std::fs::write(pets.join("postgresql.yaml"), "kind: Namespace\n")
+        .expect("pet should be writable");
+    let output = case.root.join("manifests");
+    let options = RegenerateOptions {
+        root: Some(case.root.as_str().to_string()),
+        output: Some(output.as_str().to_string()),
+        verify: false,
+        overwrite: false,
+        dry_run: false,
+        diff: false,
+    };
+    regenerate(options).expect("regenerate should copy pets");
+    assert!(
+        output.join("pets/postgresql.yaml").exists().unwrap(),
+        "pet manifest should be copied"
+    );
+    assert!(
+        output.join("pets/kustomization.yaml").exists().unwrap(),
+        "pet kustomization should be copied"
+    );
+    assert!(
+        std::fs::read_to_string(output.join("kustomization.yaml"))
+            .expect("root kustomization should be readable")
+            .contains("  - pets"),
+        "root kustomization should reference pets"
+    );
+}
+
 test_case!(case0, 0);
 test_case!(case1, 1);
 test_case!(case2, 2);

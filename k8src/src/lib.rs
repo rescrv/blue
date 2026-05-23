@@ -781,13 +781,6 @@ data:
                             .with_message("non-UTF8 pet path encountered during copy")
                             .with_string_field(FIELD_RC_CONF_PATH, rc_conf_chain)
                     })?;
-                    if path_exists(
-                        PHASE_RC_CONF_SEARCH,
-                        &pet.join(K8SIGNORE),
-                        "checking pet .k8srcignore",
-                    )? {
-                        continue;
-                    }
                     if pet.is_dir().map_err(|err| {
                         wrap_io_error(
                             PHASE_RC_CONF_SEARCH,
@@ -797,6 +790,13 @@ data:
                             "is_dir",
                         )
                     })? {
+                        if path_exists(
+                            PHASE_RC_CONF_SEARCH,
+                            &pet.join(K8SIGNORE),
+                            "checking pet .k8srcignore",
+                        )? {
+                            continue;
+                        }
                         copied |= copy_pets_from_dir(
                             options,
                             root,
