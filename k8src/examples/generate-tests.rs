@@ -10,17 +10,17 @@ const VARIABLES: &[(&str, &str)] = &[
 
 const FILES: &[(&str, &str)] = &[
     (
-        "templates/service.yaml.template",
+        "service.yaml.template",
         "source: this is the generic template
 salutation: ${SALUTATION:-<UNSET>}",
     ),
     (
-        "templates/rc.d/foo1.yaml.template",
+        "rc.d/foo1.yaml.template",
         "source: this is foo1 template
 salutation: ${SALUTATION:-<UNSET>}",
     ),
     (
-        "templates/rc.d/bar7.yaml.template",
+        "rc.d/bar7.yaml.template",
         "source: this is bar7 template
 salutation: ${SALUTATION:-<UNSET>}",
     ),

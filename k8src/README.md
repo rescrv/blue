@@ -1,10 +1,56 @@
 k8src
 =====
 
-k8src is the kubernetes rc scripting language.  The high level goal is to implement [Fragmented
-Services](https://github.com/rescrv/memcached-rustrc) on top of kubernetes.
+k8src is the kubernetes rc scripting language.  It combines `rc.conf` style
+configuration with YAML templates to generate Kubernetes manifests.
 
-I'd like to transform this:
+The common layout is:
+
+```text
+/rc.conf
+/service.yaml.template
+/rc.d/<service>.yaml.template
+/pets/...
+```
+
+`service.yaml.template` is the default template for enabled services.  A file in
+`rc.d/` with the service name overrides the default template for that service and
+for aliases that resolve to it.  `pets/` is copied through to the generated
+manifests unchanged.
+
+Quick Start
+-----------
+
+Create a minimal project:
+
+```console
+$ k8src init
+$ k8src regenerate --dry-run
+$ k8src regenerate --overwrite
+```
+
+Print the built-in service template:
+
+```console
+$ k8src template service.yaml.template
+```
+
+Inspect what k8src will do:
+
+```console
+$ k8src explain-template memcached
+$ k8src explain-vars memcached
+$ k8src regenerate --diff
+```
+
+How it Works
+------------
+
+At its core, k8src is a shell-like substitution library for YAML.  Given an
+`rc.conf`, it substitutes values according to the cascading rules of rc into the
+YAML.
+
+For example, this `rc.conf` enables a memcached service:
 
 ```text
 NAMESPACE="memcached"
@@ -16,43 +62,11 @@ memcached_PORT=11211
 
 memcached_two_INHERIT="YES"
 memcached_two_ALIASES="memcached"
+memcached_two_ENABLED="YES"
 memcached_two_PORT="22122"
-
-VALUES_METRO="//metros.conf"
-VALUES_CUSTOMER="//customers.conf"
-
-FILTER_METRO_CUSTOMER="//metros-customers.conf"
-
-METRO_CUSTOMER_memcached_AUTOGEN="YES"
-METRO_CUSTOMER_memcached_ENABLED="YES"
-METRO_CUSTOMER_memcached_ALIASES="memcached"
-METRO_CUSTOMER_memcached_INHERIT="YES"
-METRO_CUSTOMER_memcached_HOST="${CUSTOMER}.${METRO}.memcached.example.org"
-
-# Perhaps this is a legacy setup from before the fragmenting.
-Jfk_PlanetExpress_memcached_HOST="planetexpress.example.org"
-Jfk_PlanetExpress_memcached_PORT="4242"
 ```
 
-to a set of kubernetes manifests that deploy one memcached host per customer.  For SaaS apps that are partitioned by
-customer, this pattern enables easy turn-up and turn-down of customer-oriented services.  That's what I wanted.
-
-Features:
-
-- Flexible generation of YAML ensures that every template is customizable.
-- Dynamic interfaces for configuration allow containers to declare which environment variables influence their behavior.
-  k8src will automatically populate these variables from rc.conf.
-- Service aliasing allows one set of configs and one image to be built to serve multiple deployments.
-- Fragmented services allow deployment of one instance of the application per customer or per (customer X metro) and get
-  isolation between components.
-
-How it Works
-------------
-
-At its core, k8src is simply a shell-like substitution library for YAML.  Given an `rc.conf`, it will substitute all
-values according to the cascading rules of rc into the YAML.
-
-For example, here's a simple template for the `memcached` service above:
+A matching `service.yaml.template` can use those values:
 
 ```yaml
 apiVersion: apps/v1
@@ -63,7 +77,7 @@ metadata:
   labels:
     app: ${SERVICE}
 spec:
-  replicas: ${REPLICAS:?}
+  replicas: ${REPLICAS:-1}
   selector:
     matchLabels:
       app: ${SERVICE}
@@ -95,85 +109,85 @@ spec:
     app: ${SERVICE}
 ```
 
-This will "do the right thing" and substitutes the variables above.  There's just a few things to call out:
-- The syntax matches that of FreeBSD's `/bin/sh` parameter expansion for `${FOO:-expand if not set}` `${FOO:?ERROR
-  message}` and `${FOO:+expand if set}`.
-- If a takes the form `${FOO:?}`, it's not an error, but an optional value.  Optional values will be omitted in a
-  cascading fashion (up to an empty container).
+The syntax matches FreeBSD `/bin/sh` parameter expansion for
+`${FOO:-expand if not set}`, `${FOO:?ERROR message}`, and
+`${FOO:+expand if set}`.  `${FOO:?}` marks a value optional; optional values are
+omitted in a cascading fashion.
 
-Input Format
-------------
+Template Selection
+------------------
+
+For each enabled service, k8src searches from the deepest overlay back to the
+root:
 
 ```text
-/rc.conf
-/metros.conf
-/customers.conf
-/metros-customers.conf
-/templates
-/templates/service.yaml.template
-/templates/rc.d
-/templates/rc.d/memcached.yaml.template
-/pets/...
+<overlay>/rc.d/<service>.yaml.template
+<root>/rc.d/<service>.yaml.template
+<overlay>/service.yaml.template
+<root>/service.yaml.template
+built-in default template
 ```
 
-This is one top level declaration, similar to a k8s kustomize variant.  This one rc.conf will be used to generate a
-manifest.  For anything that aliases to `memcached`, whether directly or transitively, the memcached.yaml.template will
-be used to generate a single file matching the template in the output hierarchy.
+Alias fallback is transitive.  If `frontend` aliases `app`, k8src first looks for
+`rc.d/frontend.yaml.template`, then for `rc.d/app.yaml.template`, then for the
+default template.
 
 Output Format
 -------------
 
-The example inputs above yield the following output:
+Generated output goes under `manifests/`:
 
 ```text
-/kustomization.yaml
-/herd
-/herd/Jfk_PlanetExpress_memcached.yaml
-/herd/Jfk_TyrellCorp_memcached.yaml
-/herd/kustomization.yaml
-/herd/memcached_two.yaml
-/herd/memcached.yaml
-/herd/Sac_Acme_memcached.yaml
-/herd/Sfo_ApertureScience_memcached.yaml
-/herd/Sjc_CyberDyne_memcached.yaml
-/pets/...
+/manifests/kustomization.yaml
+/manifests/herd
+/manifests/herd/kustomization.yaml
+/manifests/herd/memcached.yaml
+/manifests/herd/memcached_two.yaml
+/manifests/pets/...
 ```
 
-Notice that we get one output file for each valid (metro, customer) combination.  k8src puts all services that come from
-rc.conf aliases in the herd directory.  The pets directory should be valid customize and will be copied verbatim.
+Services from `rc.conf` are generated under `herd/`.  Files under `pets/` should
+already be valid kustomize input and are copied verbatim.
 
 Overlays
 --------
 
-Imagine we had the following directory structure:
+Overlays are nested directories with their own `rc.conf`.  For example:
 
 ```text
 /rc.conf
-/templates/rc.d/Sjc_CyberDyne_memcached.yaml.template
+/service.yaml.template
+/rc.d/Sjc_CyberDyne_memcached.yaml.template
+/pets/...
 /env1/rc.conf
-/env1/templates/service.yaml.template
+/env1/service.yaml.template
+/env1/rc.d/memcached.yaml.template
+/env1/pets/...
 /env2/rc.conf
 ```
 
-In this case, k8src will generate manifests for terminal rc.conf files.  It will automatically infer the `rc_conf_path`
-`rc.conf:env1/rc.conf`, where later values mask earlier values.  Thus env1 could be mostly the same as the base, but
-with one or two added lines.  k8src will not generate manifests for overlays in parent directories of rc.conf files.
-The templates will be resolved starting with the deepest directory first.  The (Sjc, CyberDyne) service will be
-specialized in env1 and env2, and the service.yaml.template provided in env1 will apply as the default for env1 only.
+k8src generates manifests for terminal `rc.conf` files.  It infers an
+`rc_conf_path` such as `rc.conf:env1/rc.conf`, where later values mask earlier
+values.  Each overlay may override `env/rc.conf`,
+`env/service.yaml.template`, `env/rc.d/<service>.yaml.template`, and
+`env/pets/...`.
 
 Running k8src
 -------------
 
 ```console
+$ k8src help
 $ k8src regenerate --help
 ```
 
 Status
 ------
 
-Active development.  I plan to build tooling for rolling out rc.conf changes and then mark it as maintenance track.
+Active development.  I plan to build tooling for rolling out `rc.conf` changes
+and then mark it as maintenance track.
 
 Documentation
 -------------
 
-The latest documentation is always available at [docs.rs](https://docs.rs/k8src/latest/k8src/).
+The latest documentation is always available at
+[docs.rs](https://docs.rs/k8src/latest/k8src/).
