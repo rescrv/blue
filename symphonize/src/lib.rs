@@ -225,6 +225,8 @@ impl Symphonize {
             root: Some(self.root.as_str().to_string()),
             overwrite: false,
             verify: false,
+            dry_run: false,
+            diff: false,
         };
         std::fs::create_dir_all(&target_dir)?;
         drop(
