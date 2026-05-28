@@ -105,10 +105,10 @@ fn report_error(command: &str, err: &k8src::Error) {
         "stdout",
         "stderr",
     ] {
-        if let Some(value) = error_string_field(err, field) {
-            if !value.is_empty() {
-                eprintln!("  {field}: {value}");
-            }
+        if let Some(value) = error_string_field(err, field)
+            && !value.is_empty()
+        {
+            eprintln!("  {field}: {value}");
         }
     }
 }
