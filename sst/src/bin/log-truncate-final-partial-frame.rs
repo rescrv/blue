@@ -33,17 +33,14 @@ fn main() {
                         "not truncating: required offset={offset}, specified offset={truncate_to}"
                     );
                     std::process::exit(2);
-                // SAFETY(rescrv):  libc call with valid pointer and try_into with check above.
-                } else if unsafe {
-                    libc::truncate(
-                        args[0].as_ptr() as *const libc::c_char,
-                        offset.try_into().unwrap(),
-                    )
-                } < 0
-                {
-                    let err = std::io::Error::last_os_error();
-                    eprintln!("truncate failed: {err:?}");
-                    std::process::exit(3);
+                } else {
+                    let path = std::ffi::CString::new(args[0].as_bytes()).unwrap();
+                    // SAFETY(rescrv):  path is NUL-terminated and try_into has check above.
+                    if unsafe { libc::truncate(path.as_ptr(), offset.try_into().unwrap()) } < 0 {
+                        let err = std::io::Error::last_os_error();
+                        eprintln!("truncate failed: {err:?}");
+                        std::process::exit(3);
+                    }
                 }
             } else {
                 eprintln!("not truncating: specify --truncate-to {offset} to truncate");
