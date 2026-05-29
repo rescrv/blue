@@ -35,7 +35,10 @@ fn main() {
                     std::process::exit(2);
                 // SAFETY(rescrv):  libc call with valid pointer and try_into with check above.
                 } else if unsafe {
-                    libc::truncate(args[0].as_ptr() as *const i8, offset.try_into().unwrap())
+                    libc::truncate(
+                        args[0].as_ptr() as *const libc::c_char,
+                        offset.try_into().unwrap(),
+                    )
                 } < 0
                 {
                     let err = std::io::Error::last_os_error();
