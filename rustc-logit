@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+
+import datetime
+import json
+import os
+import sys
+
+
+def timestamp():
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def candidate_roots():
+    seen = set()
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    if script_dir not in seen:
+        seen.add(script_dir)
+        yield script_dir
+    for key in ("PWD", "CARGO_MANIFEST_DIR"):
+        value = os.environ.get(key)
+        if value:
+            path = os.path.abspath(value)
+            if path not in seen:
+                seen.add(path)
+                yield path
+    cwd = os.getcwd()
+    if cwd not in seen:
+        seen.add(cwd)
+        yield cwd
+
+
+def parents(path):
+    path = os.path.abspath(path)
+    while True:
+        yield path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+
+
+def find_workspace_root():
+    for root in candidate_roots():
+        for path in parents(root):
+            if os.path.exists(os.path.join(path, "Cargo.lock")) and os.path.exists(
+                os.path.join(path, "Cargo.toml")
+            ):
+                return path
+    return os.path.dirname(os.path.realpath(__file__))
+
+
+def log_path():
+    path = os.environ.get("RUSTC_LOGIT_LOG")
+    if path:
+        return os.path.abspath(path)
+    return os.path.join(find_workspace_root(), ".build.log")
+
+
+def append_log():
+    entry = {
+        "timestamp": timestamp(),
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "cwd": os.getcwd(),
+        "argv": sys.argv,
+        "command": sys.argv[1:],
+        "env": dict(sorted(os.environ.items())),
+    }
+    line = (json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
+    path = log_path()
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+        os.write(fd, line)
+    finally:
+        os.close(fd)
+
+
+def main():
+    append_log()
+    if len(sys.argv) < 2:
+        print("rustc-logit: expected rustc command as argv[1]", file=sys.stderr)
+        return 127
+    os.execvp(sys.argv[1], sys.argv[1:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

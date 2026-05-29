@@ -1,0 +1,14 @@
+#!/bin/dash
+
+set -eu
+
+export GIT_INDEX_FILE="$(mktemp)"
+trap 'rm -f "$GIT_INDEX_FILE"' EXIT
+
+git read-tree HEAD
+git add -A
+tree="$(git write-tree)"
+uuid=$(python3 -c 'import uuid; print(uuid.uuid7())')
+sha=$(git commit-tree "$tree" -p HEAD \
+    -m "build $uuid @ $(git rev-parse --short HEAD)")
+git update-ref "refs/builds/$uuid" "$sha"

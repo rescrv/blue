@@ -8,3 +8,4 @@
 /.symphonize/
 /.ci.packages
 /.claude
+/.build.log
