@@ -18,19 +18,19 @@ const PUBLISH_SCRIPT: &str = "publish.sh";
 const USAGE: &str = "usage: publish [--prepare]";
 
 #[derive(Debug, Deserialize)]
-struct CratesIoVersionResponse {
-    version: CratesIoVersion,
+struct CratesIoCrateResponse {
+    #[serde(rename = "crate")]
+    krate: CratesIoCrate,
 }
 
 #[derive(Debug, Deserialize)]
-struct CratesIoVersion {
-    num: String,
+struct CratesIoCrate {
+    max_version: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Action {
     Publish,
-    Print,
     Stay,
 }
 
@@ -92,41 +92,41 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
 
     for member in candidate_order() {
         let package = package(&member);
-        let crates_exists = published_on_crates_io(&client, &package.name, &package.version)?;
-        let tag_exists = tag_exists(&package.name, &package.version)?;
-        let has_changed = if tag_exists && crates_exists {
-            has_changed_since_tag(&package.name, &package.version, &package.member)?
-        } else {
-            false
+        let published_version = latest_published_version(&client, &package.name)?;
+        let (published_tag_exists, has_changed) = match &published_version {
+            Some(version) => {
+                let tag_exists = tag_exists(&package.name, version)?;
+                let has_changed = if tag_exists {
+                    has_changed_since_tag(&package.name, version, &package.member)?
+                } else {
+                    true
+                };
+                (tag_exists, has_changed)
+            }
+            None => (false, true),
         };
 
-        match classify(tag_exists, crates_exists, has_changed) {
+        match classify(
+            published_version.is_some(),
+            published_tag_exists,
+            has_changed,
+        ) {
             Action::Stay => {
+                let published_version = published_version
+                    .as_ref()
+                    .expect("stay requires a published version");
                 println!(
-                    "{} {}: tag exists, crates.io version exists, no changes; staying",
-                    package.name, package.version
+                    "{} {}: no changes since crates.io version {}; staying",
+                    package.name, package.version, published_version
                 );
-            }
-            Action::Print => {
-                if tag_exists {
-                    println!(
-                        "{} {}: git tag exists but crates.io version is missing; inspect manually",
-                        package.name, package.version
-                    );
-                } else {
-                    println!(
-                        "{} {}: crates.io version exists without a matching tag; inspect manually",
-                        package.name, package.version
-                    );
-                }
             }
             Action::Publish => {
                 let Some(publish) = prepare_publish(
                     &package.name,
                     &package.version,
                     &package.member,
-                    crates_exists,
-                    tag_exists,
+                    published_version.as_ref(),
+                    published_tag_exists,
                     &branch_name,
                     &mut branch_created,
                 )?
@@ -146,40 +146,35 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
     commit_version_bumps(&branch_name)?;
     write_publish_script(&planned_publishes)?;
     println!(
-        "wrote {} with {} tag commands followed by {} cargo publish commands",
+        "wrote {} with {} cargo publish commands followed by matching git tag commands",
         PUBLISH_SCRIPT,
-        planned_publishes.len(),
         planned_publishes.len()
     );
     Ok(())
 }
 
-fn classify(tag_exists: bool, crates_exists: bool, has_changed: bool) -> Action {
-    match (tag_exists, crates_exists, has_changed) {
+fn classify(has_published_version: bool, published_tag_exists: bool, has_changed: bool) -> Action {
+    match (has_published_version, published_tag_exists, has_changed) {
+        (false, _, _) => Action::Publish,
+        (true, false, _) => Action::Publish,
         (true, true, true) => Action::Publish,
         (true, true, false) => Action::Stay,
-        (false, true, _) => Action::Print,
-        (false, false, _) => Action::Publish,
-        (true, false, _) => Action::Print,
     }
 }
 
-fn published_on_crates_io(
+fn latest_published_version(
     client: &Client,
     crate_name: &str,
-    version: &Version,
-) -> Result<bool, Box<dyn Error>> {
-    let url = format!("https://crates.io/api/v1/crates/{crate_name}/{version}");
+) -> Result<Option<Version>, Box<dyn Error>> {
+    let url = format!("https://crates.io/api/v1/crates/{crate_name}");
     let response = client.get(url).send()?;
     match response.status() {
         StatusCode::OK => {
-            let response: CratesIoVersionResponse = response.json()?;
-            Ok(response.version.num == version.to_string())
+            let response: CratesIoCrateResponse = response.json()?;
+            Ok(Some(response.krate.max_version.parse()?))
         }
-        StatusCode::NOT_FOUND => Ok(false),
-        status => {
-            Err(format!("crates.io lookup failed for {crate_name} {version}: {status}").into())
-        }
+        StatusCode::NOT_FOUND => Ok(None),
+        status => Err(format!("crates.io lookup failed for {crate_name}: {status}").into()),
     }
 }
 
@@ -213,22 +208,29 @@ fn prepare_publish(
     crate_name: &str,
     current_version: &Version,
     member: &str,
-    current_version_exists_on_crates_io: bool,
-    current_tag_exists: bool,
+    published_version: Option<&Version>,
+    published_tag_exists: bool,
     branch_name: &str,
     branch_created: &mut bool,
 ) -> Result<Option<PublishCommand>, Box<dyn Error>> {
     println!();
     println!("publishing candidate: {crate_name} {current_version}");
-    if current_tag_exists {
-        println!(
-            "review delta with: git diff refs/tags/{crate_name}@{current_version} -- {member}"
-        );
-    } else {
-        println!("review history with: git log --stat -- {member}");
+    match published_version {
+        Some(version) if published_tag_exists => {
+            println!("review delta with: git diff refs/tags/{crate_name}@{version} -- {member}");
+        }
+        Some(version) => {
+            println!(
+                "crates.io is at {crate_name} {version}, but refs/tags/{crate_name}@{version} is missing; bump required"
+            );
+        }
+        None => {
+            println!("no crates.io version found; current version may be published");
+            println!("review history with: git log --stat -- {member}");
+        }
     }
 
-    let allow_current_version = !current_version_exists_on_crates_io && !current_tag_exists;
+    let allow_current_version = current_version_is_publishable(published_version, current_version);
     let new_version = loop {
         let new_version =
             match prompt_for_version(crate_name, current_version, allow_current_version)? {
@@ -239,8 +241,25 @@ fn prepare_publish(
                     return Ok(None);
                 }
             };
+        if let Some(published_version) = published_version {
+            if &new_version <= published_version {
+                println!(
+                    "{crate_name} {new_version} is not newer than crates.io version {published_version}"
+                );
+                continue;
+            }
+        }
+        if &new_version < current_version {
+            println!("{crate_name} {new_version} is older than current version {current_version}");
+            continue;
+        }
         if tag_exists(crate_name, &new_version)? {
-            println!("{crate_name} {new_version} already has a git tag");
+            println!(
+                "{crate_name} {new_version} already has a git tag; publish.sh will leave the tag in place"
+            );
+        }
+        if &new_version == current_version && !allow_current_version {
+            println!("{crate_name} {new_version} must be bumped before publishing");
             continue;
         }
         break new_version;
@@ -270,7 +289,7 @@ fn prepare_publish(
         );
     }
 
-    println!("buffered: git tag {crate_name}@{new_version} HEAD && cargo publish -p {crate_name}");
+    println!("buffered: cargo publish -p {crate_name} && tag {crate_name}@{new_version}");
     Ok(Some(PublishCommand {
         crate_name: crate_name.to_string(),
         version: new_version,
@@ -305,19 +324,28 @@ fn write_publish_script(planned_publishes: &[PublishCommand]) -> Result<(), Box<
 
 fn render_publish_script(planned_publishes: &[PublishCommand]) -> String {
     let mut script = String::from("#!/usr/bin/env bash\nset -euo pipefail\n\n");
-    script.push_str("# Tag the release commit for every crate before publishing.\n");
+    script.push_str(
+        "tag_release() {\n    local tag=\"$1\"\n    local head\n    head=$(git rev-parse HEAD)\n    if git rev-parse --verify --quiet \"refs/tags/${tag}\" >/dev/null; then\n        local tagged\n        tagged=$(git rev-parse \"refs/tags/${tag}^{commit}\")\n        if [[ \"${tagged}\" != \"${head}\" ]]; then\n            echo \"tag ${tag} already exists at ${tagged}, not ${head}\" >&2\n            exit 1\n        fi\n        echo \"tag ${tag} already exists at HEAD\"\n    else\n        git tag \"${tag}\" HEAD\n    fi\n}\n\n",
+    );
+    script.push_str("# Publish in topological order and tag after each successful publish.\n");
     for publish in planned_publishes {
+        script.push_str(&format!("cargo publish -p {}\n", publish.crate_name));
         script.push_str(&format!(
-            "git tag {}@{} HEAD\n",
+            "tag_release {}@{}\n",
             publish.crate_name, publish.version
         ));
     }
-    script.push('\n');
-    script.push_str("# Publish in topological order after all tags are in place.\n");
-    for publish in planned_publishes {
-        script.push_str(&format!("cargo publish -p {}\n", publish.crate_name));
-    }
     script
+}
+
+fn current_version_is_publishable(
+    published_version: Option<&Version>,
+    current_version: &Version,
+) -> bool {
+    match published_version {
+        Some(published_version) => current_version > published_version,
+        None => true,
+    }
 }
 
 fn prompt_for_version(
@@ -406,8 +434,8 @@ mod tests {
     use semver::Version;
 
     use super::{
-        Action, Mode, PublishCommand, VersionSelection, classify, parse_mode,
-        parse_version_selection, render_publish_script,
+        Action, Mode, PublishCommand, VersionSelection, classify, current_version_is_publishable,
+        parse_mode, parse_version_selection, render_publish_script,
     };
 
     #[test]
@@ -429,32 +457,27 @@ mod tests {
     }
 
     #[test]
-    fn truth_table_exists_exists_changed() {
+    fn changed_since_published_tag_is_published() {
         assert_eq!(classify(true, true, true), Action::Publish);
     }
 
     #[test]
-    fn truth_table_exists_exists_unchanged() {
+    fn unchanged_since_published_tag_stays() {
         assert_eq!(classify(true, true, false), Action::Stay);
     }
 
     #[test]
-    fn truth_table_missing_tag_existing_crate() {
-        assert_eq!(classify(false, true, false), Action::Print);
+    fn missing_tag_for_published_version_is_published() {
+        assert_eq!(classify(true, false, false), Action::Publish);
     }
 
     #[test]
-    fn truth_table_missing_tag_missing_crate() {
+    fn missing_crates_io_version_is_published() {
         assert_eq!(classify(false, false, false), Action::Publish);
     }
 
     #[test]
-    fn unexpected_tag_without_crate_prints() {
-        assert_eq!(classify(true, false, false), Action::Print);
-    }
-
-    #[test]
-    fn render_script_tags_before_publish() {
+    fn render_script_publishes_before_tagging_each_crate() {
         let planned = vec![
             PublishCommand {
                 crate_name: "handled".to_string(),
@@ -467,9 +490,25 @@ mod tests {
         ];
         let script = render_publish_script(&planned);
         assert!(
-            script.contains("git tag handled@0.6.0 HEAD\ngit tag lsmtk@0.15.0 HEAD\n\n# Publish")
+            script.contains("cargo publish -p handled\ntag_release handled@0.6.0\ncargo publish -p lsmtk\ntag_release lsmtk@0.15.0\n")
         );
-        assert!(script.contains("cargo publish -p handled\ncargo publish -p lsmtk\n"));
+        assert!(script.contains("git tag \"${tag}\" HEAD"));
+    }
+
+    #[test]
+    fn current_version_is_publishable_if_newer_than_crates_io() {
+        assert!(current_version_is_publishable(
+            Some(&Version::parse("0.1.0").unwrap()),
+            &Version::parse("0.2.0").unwrap()
+        ));
+        assert!(!current_version_is_publishable(
+            Some(&Version::parse("0.2.0").unwrap()),
+            &Version::parse("0.2.0").unwrap()
+        ));
+        assert!(current_version_is_publishable(
+            None,
+            &Version::parse("0.1.0").unwrap()
+        ));
     }
 
     #[test]
