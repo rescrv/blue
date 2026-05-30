@@ -1,6 +1,6 @@
 [package]
 name = "zerror_derive"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "zerror_derive derives common helpers for Z crates"

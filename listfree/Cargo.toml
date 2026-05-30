@@ -1,6 +1,6 @@
 [package]
 name = "listfree"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "listfree provides a lockfree prepend-only list"

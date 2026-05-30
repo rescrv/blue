@@ -1,6 +1,6 @@
 [package]
 name = "tiny_lfu"
-version = "0.13.0"
+version = "0.15.0"
 edition = { workspace = true }
 description = "tiny_lfu provides a cache admission control policy."
 license = "Apache-2.0"

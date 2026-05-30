@@ -1,6 +1,6 @@
 [package]
 name = "zerror"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "zerror provides an error interface for context-aware error-reporting."

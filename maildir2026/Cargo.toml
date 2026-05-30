@@ -1,6 +1,6 @@
 [package]
 name = "maildir2026"
-version = "0.1.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "maildir2026 provides a small Maildir-style file handoff protocol."

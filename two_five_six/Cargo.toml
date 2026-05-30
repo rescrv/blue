@@ -1,6 +1,6 @@
 [package]
 name = "two_five_six"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "Two-five-six provides high-entropy, human-friendly identifiers."

@@ -1,6 +1,6 @@
 [package]
 name = "caternary"
-version = "0.2.0"
+version = "0.5.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "Caternary is a stack-based language and runtime."

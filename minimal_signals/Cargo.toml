@@ -1,6 +1,6 @@
 [package]
 name = "minimal_signals"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "minimal_signals provides a small API for working with Unix signals."

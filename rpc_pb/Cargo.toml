@@ -1,6 +1,6 @@
 [package]
 name = "rpc_pb"
-version = "0.15.0"
+version = "0.19.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "rpc_pb provides prototk definitions for an RPC layer."

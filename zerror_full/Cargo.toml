@@ -1,6 +1,6 @@
 [package]
 name = "zerror_full"
-version = "0.8.0"
+version = "0.11.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "zerror_full provides a macro for implementing helpful errors"

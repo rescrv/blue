@@ -1,6 +1,6 @@
 [package]
 name = "rc_conf_demo_crate"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "rc_conf_demo_crate provides an example crate for _SPEC testing"

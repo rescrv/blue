@@ -1,6 +1,6 @@
 [package]
 name = "sst"
-version = "0.19.0"
+version = "0.24.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "SST provides a sorted string table abstraction."

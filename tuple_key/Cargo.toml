@@ -1,6 +1,6 @@
 [package]
 name = "tuple_key"
-version = "0.14.0"
+version = "0.17.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "A serialization format for lexicographically sorted tuples."
