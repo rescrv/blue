@@ -1,24 +1,5 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 
-set -e
-set -x
+set -euo pipefail
 
-PACKAGE=$1
-shift
-
-FROM_VER=$1
-shift
-
-FROM_SHORT_VER=$1
-shift
-
-TO_VER=$1
-shift
-
-TO_SHORT_VER=$1
-shift
-
-sed -i -e 's|version = "'$FROM_VER'"|version = "'$TO_VER'"|g' $PACKAGE/Cargo.toml
-sed -i -e 's|'$PACKAGE' = { path = "'$PACKAGE'", version = "'$FROM_VER'" }|'$PACKAGE' = { path = "'$PACKAGE'", version = "'$TO_VER'" }|g' Cargo.toml
-cargo check --all-targets
-rm -f Cargo.toml-e $PACKAGE/Cargo.toml-e
+exec cargo run -p ci --bin update-version -- "$@"

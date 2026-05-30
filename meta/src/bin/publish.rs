@@ -12,7 +12,7 @@ use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
 
-use ci::{candidate_order, package, short_version};
+use ci::{candidate_order, package};
 
 const PUBLISH_SCRIPT: &str = "publish.sh";
 const USAGE: &str = "usage: publish [--prepare]";
@@ -252,12 +252,17 @@ fn prepare_publish(
     }
 
     if &new_version != current_version {
-        run(Command::new("./update-version").args([
+        let new_version = new_version.to_string();
+        run(Command::new("cargo").args([
+            "run",
+            "-p",
+            "ci",
+            "--bin",
+            "update-version",
+            "--",
+            "bump",
             crate_name,
-            &current_version.to_string(),
-            &short_version(current_version),
-            &new_version.to_string(),
-            &short_version(&new_version),
+            &new_version,
         ]))?;
     } else {
         println!(

@@ -53,6 +53,7 @@ members = [
     "texttale",
     "tiny_lfu",
     "tuple_key",
+    "tuple_key2",
     "tuple_key_derive",
     "tuple_routing",
     "two_five_six",
@@ -62,7 +63,7 @@ members = [
     "zerror",
     "zerror_derive",
     "zerror_core",
-    "zerror_full", "tuple_key2",
+    "zerror_full",
 ]
 
 [workspace.package]
