@@ -1,6 +1,6 @@
 [package]
 name = "analogize"
-version = "0.8.0"
+version = "0.12.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "analogize is a log analyzer"

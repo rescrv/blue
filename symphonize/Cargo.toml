@@ -1,6 +1,6 @@
 [package]
 name = "symphonize"
-version = "0.16.0"
+version = "0.21.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "symphonize is a tool for running integration tests across services"

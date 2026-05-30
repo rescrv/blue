@@ -1,6 +1,6 @@
 [package]
 name = "skipfree"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "skipfree provides a lockfree skiplist"

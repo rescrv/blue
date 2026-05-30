@@ -1,6 +1,6 @@
 [package]
 name = "buffertk"
-version = "0.14.0"
+version = "0.16.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "Buffertk provides tooling for serializing and deserializing data."

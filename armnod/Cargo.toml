@@ -1,6 +1,6 @@
 [package]
 name = "armnod"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "Armnod provides a random string generator."

@@ -1,6 +1,6 @@
 [package]
 name = "stdioredirect"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
 description = "stdioredirect provides a tool to wrap another command and redirect its outut."
