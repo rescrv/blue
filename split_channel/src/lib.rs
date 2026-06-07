@@ -71,6 +71,7 @@ pub fn register_biometrics(collector: &mut Collector) {
     collector.register_counter(&SEND_WANT_WRITE);
     collector.register_counter(&RECV_WANT_READ);
     collector.register_counter(&RECV_WANT_WRITE);
+    collector.register_counter(&SEND_SHRINK_BUF);
     polling::register_biometrics(collector);
 }
 

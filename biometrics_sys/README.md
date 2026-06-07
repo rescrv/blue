@@ -1,7 +1,7 @@
 biometrics_sys
 ==============
 
-biometrics_sys provide the rusage of a process in the form of biometrics.
+biometrics_sys provides the rusage of a process in the form of biometrics.
 
 Status
 ------

@@ -384,29 +384,26 @@ fn rewrite_member_manifest(
             return Ok(None);
         }
 
-        if section == "package" {
-            if let Some(version) = new_version {
-                if let Some(replacement) =
-                    rewrite_package_version_line(line, &package.version, version)?
-                {
-                    version_updated = true;
-                    return Ok(Some(replacement));
-                }
-            }
+        if section == "package"
+            && let Some(version) = new_version
+            && let Some(replacement) =
+                rewrite_package_version_line(line, &package.version, version)?
+        {
+            version_updated = true;
+            return Ok(Some(replacement));
         }
 
-        if is_dependency_section(&section) {
-            if let Some(local_names) = local_names {
-                if let Some(replacement) = normalize_dependency_line(line, local_names)? {
-                    edits.push(NormalizationEdit {
-                        path: package.manifest_path.clone(),
-                        line: line_number,
-                        old: line.to_string(),
-                        new: replacement.clone(),
-                    });
-                    return Ok(Some(replacement));
-                }
-            }
+        if is_dependency_section(&section)
+            && let Some(local_names) = local_names
+            && let Some(replacement) = normalize_dependency_line(line, local_names)?
+        {
+            edits.push(NormalizationEdit {
+                path: package.manifest_path.clone(),
+                line: line_number,
+                old: line.to_string(),
+                new: replacement.clone(),
+            });
+            return Ok(Some(replacement));
         }
 
         Ok(None)

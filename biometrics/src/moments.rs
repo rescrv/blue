@@ -6,9 +6,9 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 /// kurtosis (m4).  When a distribution goes long tailed, skewness and kurtosis blow up, so the
 /// hope is that this type will be good for monitoring general "no bad tail" insights.
 ///
-/// The type itelf is algebraic.  Take two readings separated by time and subtract them to get
+/// The type itself is algebraic.  Take two readings separated by time and subtract them to get
 /// perfectly recorded moments for the interval between the points.
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Moments {
     /// The number of observations.
     pub n: u64,
@@ -78,6 +78,12 @@ impl Moments {
     /// Add two [Moments] together to get the equivalent of one that had the same set of values
     /// pushed.
     pub fn add(lhs: &Self, rhs: &Self) -> Self {
+        if lhs.n == 0 {
+            return *rhs;
+        }
+        if rhs.n == 0 {
+            return *lhs;
+        }
         let delta: f64 = rhs.m1 - lhs.m1;
         let delta2: f64 = delta * delta;
         let delta3: f64 = delta * delta2;
@@ -106,11 +112,29 @@ impl Moments {
         }
     }
 
-    /// Compute lhs - rhs.
+    /// Compute `lhs - rhs`.
+    ///
+    /// This operation treats `rhs` as an earlier cumulative reading and `lhs` as a later
+    /// cumulative reading.  The result is the moments for the observations that occurred between
+    /// the two readings.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rhs` contains more observations than `lhs`.
     pub fn sub(lhs: &Self, rhs: &Self) -> Self {
+        assert!(
+            lhs.n >= rhs.n,
+            "cannot subtract a moments reading with more observations"
+        );
+        if rhs.n == 0 {
+            return *lhs;
+        }
+        if lhs.n == rhs.n {
+            return Self::new();
+        }
         let lhs_n: f64 = lhs.n as f64;
         let rhs_n: f64 = rhs.n as f64;
-        let n: f64 = (rhs.n - lhs.n) as f64;
+        let n: f64 = (lhs.n - rhs.n) as f64;
         let m1: f64 = (lhs_n * lhs.m1 - rhs_n * rhs.m1) / n;
         let delta: f64 = rhs.m1 - m1;
         let delta2: f64 = delta * delta;
@@ -170,15 +194,116 @@ impl SubAssign<Moments> for Moments {
 mod tests {
     use super::*;
 
+    const EPSILON: f64 = 1e-10;
+
+    fn moments_from(values: &[f64]) -> Moments {
+        let mut moments = Moments::new();
+        for value in values {
+            moments.push(*value);
+        }
+        moments
+    }
+
+    fn assert_close(expected: f64, actual: f64) {
+        if expected.is_nan() {
+            assert!(actual.is_nan(), "expected NaN, got {actual}");
+        } else {
+            assert!(
+                (expected - actual).abs() <= EPSILON,
+                "expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    fn assert_moments_approx(expected: Moments, actual: Moments) {
+        assert_eq!(expected.n, actual.n);
+        assert_close(expected.m1, actual.m1);
+        assert_close(expected.m2, actual.m2);
+        assert_close(expected.m3, actual.m3);
+        assert_close(expected.m4, actual.m4);
+    }
+
     #[test]
     fn moments_may_be_static() {
         static MOMENTS: Moments = Moments::new();
-        println!(
-            "MOMENTS = {} {} {} {}",
-            MOMENTS.n(),
-            MOMENTS.mean(),
-            MOMENTS.skewness(),
-            MOMENTS.kurtosis()
+        assert_eq!(Moments::new(), MOMENTS);
+    }
+
+    #[test]
+    fn empty_moments_are_zero() {
+        assert_eq!(
+            Moments {
+                n: 0,
+                m1: 0.0,
+                m2: 0.0,
+                m3: 0.0,
+                m4: 0.0,
+            },
+            Moments::new()
         );
+    }
+
+    #[test]
+    fn one_observation_has_undefined_sample_statistics() {
+        let moments = moments_from(&[42.0]);
+        assert_eq!(
+            Moments {
+                n: 1,
+                m1: 42.0,
+                m2: 0.0,
+                m3: 0.0,
+                m4: 0.0,
+            },
+            moments
+        );
+        assert!(moments.variance().is_nan());
+        assert!(moments.skewness().is_nan());
+        assert!(moments.kurtosis().is_nan());
+    }
+
+    #[test]
+    fn add_empty_is_identity() {
+        let populated = moments_from(&[1.0, 3.0, 5.0]);
+
+        assert_eq!(populated, Moments::add(&Moments::new(), &populated));
+        assert_eq!(populated, Moments::add(&populated, &Moments::new()));
+        assert_eq!(
+            Moments::new(),
+            Moments::add(&Moments::new(), &Moments::new())
+        );
+    }
+
+    #[test]
+    fn add_matches_incremental_push() {
+        let lhs = moments_from(&[1.0, 2.0, 3.0]);
+        let rhs = moments_from(&[10.0, 20.0]);
+        let expected = moments_from(&[1.0, 2.0, 3.0, 10.0, 20.0]);
+
+        assert_moments_approx(expected, Moments::add(&lhs, &rhs));
+    }
+
+    #[test]
+    fn sub_extracts_interval_between_readings() {
+        let earlier = moments_from(&[1.0, 2.0, 3.0]);
+        let interval = moments_from(&[5.0, 8.0, 13.0]);
+        let later = Moments::add(&earlier, &interval);
+
+        assert_moments_approx(interval, Moments::sub(&later, &earlier));
+    }
+
+    #[test]
+    fn sub_with_no_new_observations_is_empty() {
+        let reading = moments_from(&[1.0, 2.0, 3.0]);
+
+        assert_eq!(Moments::new(), Moments::sub(&reading, &reading));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot subtract a moments reading with more observations")]
+    fn sub_panics_when_rhs_has_more_observations() {
+        let earlier = moments_from(&[1.0, 2.0, 3.0]);
+        let later = moments_from(&[1.0]);
+
+        let _ = Moments::sub(&later, &earlier);
     }
 }

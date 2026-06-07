@@ -29,6 +29,13 @@ static VERIFIER_FIRST_PARTY_SUCCESS: Counter = Counter::new("macaroons.verifier.
 static VERIFIER_THIRD_PARTY_FAILURE: Counter = Counter::new("macaroons.verifier.3rd_party_failure");
 static VERIFIER_THIRD_PARTY_SUCCESS: Counter = Counter::new("macaroons.verifier.3rd_party_success");
 
+pub fn register_biometrics(collector: &biometrics::Collector) {
+    collector.register_counter(&VERIFIER_FIRST_PARTY_FAILURE);
+    collector.register_counter(&VERIFIER_FIRST_PARTY_SUCCESS);
+    collector.register_counter(&VERIFIER_THIRD_PARTY_FAILURE);
+    collector.register_counter(&VERIFIER_THIRD_PARTY_SUCCESS);
+}
+
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// The error cases macarunes can encounter.

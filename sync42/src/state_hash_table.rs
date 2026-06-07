@@ -104,6 +104,7 @@ static ARBITRARY_KEY: Counter = Counter::new("sync42.state_hash_table.arbitrary_
 
 /// Register the biometrics for state hash table.
 pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&NEW_STATE_HASH_TABLE);
     collector.register_counter(&ENTRY_INSERTED);
     collector.register_counter(&ENTRY_REMOVED);
     collector.register_counter(&ARBITRARY_KEY);

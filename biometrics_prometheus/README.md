@@ -7,7 +7,13 @@ biometrics_prometheus provides a Prometheus emitter for biometrics.  It is a cra
 The emitter takes a prefix and appends "<epoch_millis>.prom" to the prefix to determine where to write next.  For
 example, the following will write a path like, `tmp.foo.1726547192.prom`:
 
-```rust
+```rust,no_run
+use std::time::Duration;
+
+use biometrics::{Counter, Emitter as _};
+use biometrics_prometheus::{Emitter, Options};
+use utf8path::Path;
+
 let mut emitter = Emitter::new(Options {
     segment_size: 1024,
     flush_interval: Duration::from_secs(1),
@@ -18,7 +24,7 @@ drop(emitter);
 ```
 
 The file is opened using `create_new` to guarantee it won't overwrite an existing file.  The file is locked before any
-data is written.  Consequently, a reader that uses `flock` after opening the file will be able to read the file only
+data is written.  Consequently, a reader that acquires a lock after opening the file will be able to read the file only
 after all data has been written to the file.  The included `Reader` does exactly that.
 
 There's a pitfall to using `Reader`, however.  If the reader is opened before the writer finishes writing, the reader
@@ -39,6 +45,19 @@ Scope
 -----
 
 The crate is intended to be used as a Prometheus emitter for biometrics.
+
+The `with-system-metrics` binary wraps a command and emits child process
+`biometrics_sys` counters to the default metrics file path.
+Usage:
+
+```text
+with-system-metrics [--poll-in-seconds <seconds>] <command> [args...]
+```
+
+`--poll-in-seconds` controls the interval (in whole seconds) used to
+sample and emit child resource usage while the wrapped command is running.
+When the wrapped command exits, one final sample is emitted immediately.
+It defaults to `1`.
 
 Warts
 -----
