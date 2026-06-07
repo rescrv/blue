@@ -505,7 +505,7 @@ foo 0 42
         static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
         // SAFETY(rescrv):  Mutex poisoning.
         let _guard = MUTEX.lock().unwrap();
-        if Path::from("tmp.dots.99.prom").exists() {
+        if Path::from("tmp.dots.99.prom").exists().unwrap() {
             remove_file("tmp.dots.99.prom").unwrap();
         }
         let mut emitter = Emitter::new(Options {

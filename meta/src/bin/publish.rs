@@ -241,13 +241,13 @@ fn prepare_publish(
                     return Ok(None);
                 }
             };
-        if let Some(published_version) = published_version {
-            if &new_version <= published_version {
-                println!(
-                    "{crate_name} {new_version} is not newer than crates.io version {published_version}"
-                );
-                continue;
-            }
+        if let Some(published_version) = published_version
+            && &new_version <= published_version
+        {
+            println!(
+                "{crate_name} {new_version} is not newer than crates.io version {published_version}"
+            );
+            continue;
         }
         if &new_version < current_version {
             println!("{crate_name} {new_version} is older than current version {current_version}");

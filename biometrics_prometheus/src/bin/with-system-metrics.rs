@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use arrrg::CommandLine;
 use biometrics_prometheus::{Emitter, Options};
 use biometrics_sys::BiometricsSys;
-use libc;
 
 const USAGE: &str = "USAGE: with-system-metrics [--poll-in-seconds=<seconds>] <command> [args...]";
 const DEFAULT_POLL_SECONDS: u64 = 1;
@@ -41,10 +40,7 @@ fn main() {
     }
     let interval = Duration::from_secs(poll_in_seconds);
     let (stop_tx, stop_rx) = mpsc::channel();
-    let monitor = thread::spawn({
-        let interval = interval;
-        move || monitor_child_rusage(stop_rx, interval)
-    });
+    let monitor = thread::spawn(move || monitor_child_rusage(stop_rx, interval));
     let status = match child.wait() {
         Ok(status) => status,
         Err(err) => {

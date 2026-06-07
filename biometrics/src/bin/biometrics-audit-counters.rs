@@ -330,24 +330,25 @@ impl<'ast> Visit<'ast> for CounterVisitor<'_> {
     }
 
     fn visit_item_static(&mut self, item: &'ast ItemStatic) {
-        if self.function_depth == 0 {
-            if let Some(label) = counter_new_label(&item.expr) {
-                self.audit.counters.push(CounterDefinition {
-                    ident: item.ident.to_string(),
-                    label,
-                    package_path: self.package_path.to_path_buf(),
-                    file: self.file.to_path_buf(),
-                    line: item.ident.span().start().line,
-                });
-            }
+        if self.function_depth == 0
+            && let Some(label) = counter_new_label(&item.expr)
+        {
+            self.audit.counters.push(CounterDefinition {
+                ident: item.ident.to_string(),
+                label,
+                package_path: self.package_path.to_path_buf(),
+                file: self.file.to_path_buf(),
+                line: item.ident.span().start().line,
+            });
         }
     }
 
     fn visit_expr_method_call(&mut self, method_call: &'ast ExprMethodCall) {
-        if method_call.method == "register_counter" && method_call.args.len() == 1 {
-            if let Some(ident) = registered_counter_ident(&method_call.args[0]) {
-                self.audit.registered.insert(ident);
-            }
+        if method_call.method == "register_counter"
+            && method_call.args.len() == 1
+            && let Some(ident) = registered_counter_ident(&method_call.args[0])
+        {
+            self.audit.registered.insert(ident);
         }
         visit::visit_expr_method_call(self, method_call);
     }
