@@ -175,14 +175,18 @@ mod tests {
         sys.emit(&mut emitter, 42);
 
         assert_eq!(9, emitter.readings.len());
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, _, now)| *label == "biometrics.sys.utime" && *now == 42));
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, _, _)| *label == "biometrics.sys.errors"));
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, _, now)| *label == "biometrics.sys.utime" && *now == 42)
+        );
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, _, _)| *label == "biometrics.sys.errors")
+        );
     }
 
     #[test]
@@ -216,21 +220,29 @@ mod tests {
         sys.emit_with_rusage(&mut emitter, 99, usage);
 
         assert_eq!(9, emitter.readings.len());
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, value, _)| *label == "biometrics.sys.utime" && *value == 1_500_000));
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, value, _)| *label == "biometrics.sys.stime" && *value == 2_250_000));
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, value, _)| *label == "biometrics.sys.minflt" && *value == 3));
-        assert!(emitter
-            .readings
-            .iter()
-            .any(|(label, value, _)| *label == "biometrics.sys.nivcsw" && *value == 17));
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, value, _)| *label == "biometrics.sys.utime" && *value == 1_500_000)
+        );
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, value, _)| *label == "biometrics.sys.stime" && *value == 2_250_000)
+        );
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, value, _)| *label == "biometrics.sys.minflt" && *value == 3)
+        );
+        assert!(
+            emitter
+                .readings
+                .iter()
+                .any(|(label, value, _)| *label == "biometrics.sys.nivcsw" && *value == 17)
+        );
     }
 }
