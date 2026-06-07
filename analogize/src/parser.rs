@@ -12,9 +12,9 @@ use nom::{
     sequence::{delimited, terminated, tuple},
 };
 
-use zerror_core::ErrorCore;
+use handled::SError;
 
-use crate::{Error, Query};
+use crate::{Query, invalid_number_literal};
 
 ////////////////////////////////////////// error handling //////////////////////////////////////////
 
@@ -190,7 +190,7 @@ fn bool_literal(input: &str) -> ParseResult<'_, Query> {
 
 ////////////////////////////////////////// number literal //////////////////////////////////////////
 
-fn number_to_typed(input: &str) -> Result<Query, Error> {
+fn number_to_typed(input: &str) -> Result<Query, SError> {
     if let Ok(x) = str::parse::<i64>(input) {
         Ok(Query::I64(x))
     } else if let Ok(x) = str::parse::<u64>(input) {
@@ -198,10 +198,7 @@ fn number_to_typed(input: &str) -> Result<Query, Error> {
     } else if let Ok(x) = str::parse::<f64>(input) {
         Ok(Query::F64(x))
     } else {
-        Err(Error::InvalidNumberLiteral {
-            core: ErrorCore::default(),
-            as_str: input.to_string(),
-        })
+        Err(invalid_number_literal(input))
     }
 }
 

@@ -19,9 +19,7 @@ use buffertk::{Packable, Unpackable, stack_pack};
 
 use utilz::stopwatch::Stopwatch;
 
-use zerror_core::ErrorCore;
-
-use rpc_pb::{Error, Frame};
+use rpc_pb::{Frame, SError};
 
 mod polling;
 
@@ -95,13 +93,13 @@ enum WorkDone {
     #[default]
     ReadRequisiteAmount,
     EncounteredEagain,
-    Error(Error),
+    Error(SError),
 }
 
 /////////////////////////////////////////// ProcessEvents //////////////////////////////////////////
 
 pub trait ProcessEvents {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error>;
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, SError>;
 }
 
 //////////////////////////////////////////// RecvChannel ///////////////////////////////////////////
@@ -114,7 +112,7 @@ pub struct RecvChannel {
 }
 
 impl RecvChannel {
-    pub fn recv(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn recv(&mut self) -> Result<Vec<u8>, SError> {
         loop {
             let mut events = POLLIN;
             if let Some(buf) = self.process_events(&mut events)? {
@@ -165,10 +163,7 @@ impl RecvChannel {
                     _ => {
                         RECV_ERROR_LATENCY.add(sw.since());
                         RECV_ERRORS.click();
-                        let err = Error::TransportFailure {
-                            core: ErrorCore::default(),
-                            what: err.to_string(),
-                        };
+                        let err = rpc_pb::transport_failure(err.to_string());
                         return WorkDone::Error(err);
                     }
                 },
@@ -178,7 +173,7 @@ impl RecvChannel {
 }
 
 impl ProcessEvents for RecvChannel {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error> {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, SError> {
         if self.recv_idx == 0 {
             match self.work_recv(1, events) {
                 WorkDone::ReadRequisiteAmount => {}
@@ -221,10 +216,7 @@ impl ProcessEvents for RecvChannel {
         let buf = Vec::<u8>::from(&self.recv_buf[start..limit]);
         if crc32c::crc32c(&buf) != frame.crc32c {
             RECV_ERRORS.click();
-            return Err(Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: "crc32c failed".to_string(),
-            });
+            return Err(rpc_pb::transport_failure("crc32c failed"));
         }
         self.recv_buf.rotate_left(limit);
         self.recv_buf.shrink_to(self.recv_buf.len() - limit);
@@ -250,14 +242,14 @@ pub struct SendChannel {
 }
 
 impl SendChannel {
-    pub fn send(&mut self, body: &[u8]) -> Result<(), Error> {
+    pub fn send(&mut self, body: &[u8]) -> Result<(), SError> {
         // send piggy backs on enqueues counters
         self.enqueue(body)?;
         self.blocking_drain()?;
         Ok(())
     }
 
-    pub fn enqueue(&mut self, body: &[u8]) -> Result<(), Error> {
+    pub fn enqueue(&mut self, body: &[u8]) -> Result<(), SError> {
         let frame = Frame {
             size: body.len() as u64,
             crc32c: crc32c::crc32c(body),
@@ -271,7 +263,7 @@ impl SendChannel {
     }
 
     // Flush until either the flushing would block or the buffer is entirely flushed.
-    pub fn flush(&mut self, events: &mut u32) -> Result<(), Error> {
+    pub fn flush(&mut self, events: &mut u32) -> Result<(), SError> {
         while self.send_idx < self.send_buf.len() {
             let buf = &self.send_buf[self.send_idx..];
             let sw = Stopwatch::default();
@@ -296,10 +288,7 @@ impl SendChannel {
                         }
                         _ => {
                             SEND_ERRORS.click();
-                            return Err(Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            });
+                            return Err(rpc_pb::transport_failure(err.to_string()));
                         }
                     }
                 }
@@ -311,7 +300,7 @@ impl SendChannel {
         Ok(())
     }
 
-    pub fn blocking_drain(&mut self) -> Result<(), Error> {
+    pub fn blocking_drain(&mut self) -> Result<(), SError> {
         'draining: while self.send_idx < self.send_buf.len() {
             let mut events = POLLOUT;
             self.process_events(&mut events)?;
@@ -346,7 +335,7 @@ impl SendChannel {
 }
 
 impl ProcessEvents for SendChannel {
-    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, Error> {
+    fn process_events(&mut self, events: &mut u32) -> Result<Option<Vec<u8>>, SError> {
         self.flush(events)?;
         Ok(None)
     }
@@ -360,7 +349,7 @@ pub struct Listener {
 }
 
 impl Iterator for Listener {
-    type Item = Result<(RecvChannel, SendChannel), Error>;
+    type Item = Result<(RecvChannel, SendChannel), SError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let (stream, addr) = match self.listener.accept() {
@@ -374,10 +363,7 @@ impl Iterator for Listener {
         let stream = match self.acceptor.accept(stream) {
             Ok(stream) => stream,
             Err(err) => {
-                return Some(Err(Error::TransportFailure {
-                    core: ErrorCore::default(),
-                    what: err.to_string(),
-                }));
+                return Some(Err(rpc_pb::transport_failure(err.to_string())));
             }
         };
         let (recv_chan, send_chan) = from_stream(stream).expect("channel from stream");
@@ -417,13 +403,11 @@ pub struct SplitChannelOptions {
 }
 
 impl SplitChannelOptions {
-    pub fn connect(&self) -> Result<(RecvChannel, SendChannel), Error> {
+    pub fn connect(&self) -> Result<(RecvChannel, SendChannel), SError> {
         CONNECT.click();
-        let mut builder =
-            SslConnector::builder(SslMethod::tls()).map_err(|err| Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: format!("could not build connector builder: {err}"),
-            })?;
+        let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|err| {
+            rpc_pb::transport_failure(format!("could not build connector builder: {err}"))
+        })?;
         if let Some(ca_file) = &self.ca_file {
             builder.set_ca_file(ca_file).expect("set_ca_file");
         }
@@ -445,17 +429,13 @@ impl SplitChannelOptions {
         }
         let connector = builder.build();
         let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
-        let stream =
-            connector
-                .connect(&self.host, stream)
-                .map_err(|err| Error::TransportFailure {
-                    core: ErrorCore::default(),
-                    what: format!("{err}"),
-                })?;
+        let stream = connector
+            .connect(&self.host, stream)
+            .map_err(|err| rpc_pb::transport_failure(format!("{err}")))?;
         from_stream(stream)
     }
 
-    pub fn bind_to(&self) -> Result<Listener, Error> {
+    pub fn bind_to(&self) -> Result<Listener, SError> {
         // Create the SSL acceptor state.
         let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         if let Some(ca_file) = &self.ca_file {
@@ -486,7 +466,7 @@ impl SplitChannelOptions {
 
 //////////////////////////////////////////// from_stream ///////////////////////////////////////////
 
-pub fn from_stream(stream: SslStream<TcpStream>) -> Result<(RecvChannel, SendChannel), Error> {
+pub fn from_stream(stream: SslStream<TcpStream>) -> Result<(RecvChannel, SendChannel), SError> {
     FROM_STREAM.click();
     stream.get_ref().set_nonblocking(true)?;
     stream.get_ref().set_nodelay(true)?;

@@ -1,6 +1,6 @@
 use arrrg::CommandLine;
 
-use lsmtk::{IoToZ, LsmTree, LsmtkOptions};
+use lsmtk::{LsmTree, LsmtkOptions};
 
 fn main() {
     let (options, free) = LsmtkOptions::from_command_line("USAGE: lsmtk-init [OPTIONS]");
@@ -8,5 +8,5 @@ fn main() {
         eprintln!("expected no positional arguments");
         std::process::exit(1);
     }
-    LsmTree::open(options).as_z().pretty_unwrap();
+    LsmTree::open(options).unwrap_or_else(|err| panic!("{err}"));
 }

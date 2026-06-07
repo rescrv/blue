@@ -8,14 +8,11 @@ use std::path::{Path, PathBuf};
 
 use biometrics::{Collector, Counter};
 
-use prototk_derive::Message;
-
 use tatl::{HeyListen, Stationary};
 
 use utilz::lockfile::Lockfile;
 
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
+use handled::{SError, SExpr};
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -85,107 +82,89 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&LOCK_NOT_OBTAINED_MONITOR);
 }
 
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
+/////////////////////////////////////////////// Errors /////////////////////////////////////////////
 
-/// Error for the manifest.
-#[derive(Clone, Message, zerror_derive::Z)]
-pub enum Error {
-    /// The default error.  Should never be constructed, but necessary for protobuf support.
-    #[prototk(376832, message)]
-    Success {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// A std::io::Error or similar was encountered.  The error gets converted to string for
-    /// protobuf reasons.
-    #[prototk(376833, message)]
-    SystemError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A textual representation of the wrapped error.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// The manifest is corrupt.  See `what` for how.
-    #[prototk(376834, message)]
-    Corruption {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// What we observed that indicates corruption.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Newlines are disallowed in manifest strings.
-    #[prototk(376835, message)]
-    NewlineDisallowed {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A description of what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// The manifest exists and fail_if_found was specified.
-    #[prototk(376836, message)]
-    ManifestExists {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The relevant path.
-        #[prototk(2, string)]
-        path: PathBuf,
-    },
-    /// The manifest does not exist and fail_if_not_found was specified.
-    #[prototk(376837, message)]
-    ManifestNotExist {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The relevant path.
-        #[prototk(2, string)]
-        path: PathBuf,
-    },
-    /// A concurrent process has the manifest open and fail_if_locked was specified.
-    #[prototk(376838, message)]
-    LockNotObtained {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The relevant path.
-        #[prototk(2, string)]
-        path: PathBuf,
-    },
+const PHASE: &str = "mani";
+
+/// A system error was encountered.
+pub const CODE_SYSTEM_ERROR: &str = "system-error";
+/// The manifest is corrupt.
+pub const CODE_CORRUPTION: &str = "corruption";
+/// A manifest string contains a disallowed newline.
+pub const CODE_NEWLINE_DISALLOWED: &str = "newline-disallowed";
+/// The manifest exists and `fail_if_exists` was specified.
+pub const CODE_MANIFEST_EXISTS: &str = "manifest-exists";
+/// The manifest does not exist and `fail_if_not_exist` was specified.
+pub const CODE_MANIFEST_NOT_EXIST: &str = "manifest-not-exist";
+/// The manifest lock could not be obtained.
+pub const CODE_LOCK_NOT_OBTAINED: &str = "lock-not-obtained";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success {
-            core: ErrorCore::default(),
-        }
+fn system_error(what: impl AsRef<str>) -> SError {
+    error(CODE_SYSTEM_ERROR)
+        .with_message("manifest system error")
+        .with_string_field("what", what.as_ref())
+}
+
+fn corruption(what: impl AsRef<str>) -> SError {
+    error(CODE_CORRUPTION)
+        .with_message("manifest corruption")
+        .with_string_field("what", what.as_ref())
+}
+
+fn newline_disallowed(what: impl AsRef<str>) -> SError {
+    error(CODE_NEWLINE_DISALLOWED)
+        .with_message("manifest string contains newline")
+        .with_string_field("what", what.as_ref())
+}
+
+fn manifest_exists(path: impl AsRef<Path>) -> SError {
+    error(CODE_MANIFEST_EXISTS)
+        .with_message("manifest exists")
+        .with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+}
+
+fn manifest_not_exist(path: impl AsRef<Path>) -> SError {
+    error(CODE_MANIFEST_NOT_EXIST)
+        .with_message("manifest does not exist")
+        .with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+}
+
+fn lock_not_obtained(path: impl AsRef<Path>) -> SError {
+    error(CODE_LOCK_NOT_OBTAINED)
+        .with_message("manifest lock could not be obtained")
+        .with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+}
+
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-iotoz! {Error}
-
-impl From<std::io::Error> for Error {
-    fn from(what: std::io::Error) -> Error {
-        Error::SystemError {
-            core: ErrorCore::default(),
-            what: what.to_string(),
-        }
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
-impl From<std::str::Utf8Error> for Error {
-    fn from(what: std::str::Utf8Error) -> Error {
-        Error::Corruption {
-            core: ErrorCore::default(),
-            what: "utf8 error:".to_owned() + &what.to_string(),
-        }
-    }
+pub fn is_manifest_exists(err: &SError) -> bool {
+    error_code(err) == Some(CODE_MANIFEST_EXISTS)
+}
+
+pub fn is_manifest_not_exist(err: &SError) -> bool {
+    error_code(err) == Some(CODE_MANIFEST_NOT_EXIST)
 }
 
 ////////////////////////////////////////// ManifestOptions /////////////////////////////////////////
@@ -241,38 +220,35 @@ pub struct Manifest {
     strs: BTreeSet<String>,
     info: BTreeMap<char, String>,
     last_rollover: u64,
-    poison: Option<Error>,
+    poison: Option<SError>,
 }
 
 impl Manifest {
     /// Open a new manifest.
-    pub fn open<P: AsRef<Path>>(options: ManifestOptions, root: P) -> Result<Self, Error> {
+    pub fn open<P: AsRef<Path>>(options: ManifestOptions, root: P) -> Result<Self, SError> {
         let root = root.as_ref().to_path_buf();
         if root.is_dir() && options.fail_if_exists {
-            return Err(Error::ManifestExists {
-                core: ErrorCore::default(),
-                path: root,
-            });
+            return Err(manifest_exists(root));
         }
         if !root.is_dir() && options.fail_if_not_exist {
-            return Err(Error::ManifestNotExist {
-                core: ErrorCore::default(),
-                path: root,
-            });
+            return Err(manifest_not_exist(root));
         } else if !root.is_dir() {
-            create_dir(&root)
-                .as_z()
-                .with_info("root", root.to_string_lossy())?;
+            create_dir(&root).map_err(|err| {
+                system_error(err.to_string())
+                    .with_string_field("root", root.to_string_lossy().as_ref())
+            })?;
         }
         // Deal with the lockfile first.
         let lockfile = if options.fail_if_locked {
-            Lockfile::lock(LOCKFILE(&root))
-                .as_z()
-                .with_info("root", root.to_string_lossy())?
+            Lockfile::lock(LOCKFILE(&root)).map_err(|err| {
+                system_error(err.to_string())
+                    .with_string_field("root", root.to_string_lossy().as_ref())
+            })?
         } else {
-            Lockfile::wait(LOCKFILE(&root))
-                .as_z()
-                .with_info("root", root.to_string_lossy())?
+            Lockfile::wait(LOCKFILE(&root)).map_err(|err| {
+                system_error(err.to_string())
+                    .with_string_field("root", root.to_string_lossy().as_ref())
+            })?
         };
         match lockfile {
             Some(_lockfile) => {
@@ -296,11 +272,7 @@ impl Manifest {
             }
             None => {
                 LOCK_NOT_OBTAINED.click();
-                let err = Error::LockNotObtained {
-                    core: ErrorCore::default(),
-                    path: LOCKFILE(root),
-                };
-                Err(err)
+                Err(lock_not_obtained(LOCKFILE(root)))
             }
         }
     }
@@ -323,12 +295,12 @@ impl Manifest {
     }
 
     /// Apply an edit to the log.
-    pub fn apply(&mut self, edit: Edit) -> Result<(), Error> {
+    pub fn apply(&mut self, edit: Edit) -> Result<(), SError> {
         self._apply(&MANIFEST(&self.root), edit, true)
     }
 
     /// Rollover the log.
-    pub fn rollover(&mut self) -> Result<(), Error> {
+    pub fn rollover(&mut self) -> Result<(), SError> {
         let edit = Self::to_edit(&self.strs, &self.info);
         let next_id = self.last_rollover;
         self.last_rollover += 1;
@@ -347,7 +319,7 @@ impl Manifest {
     pub fn verify<P: AsRef<Path>>(
         _options: ManifestOptions,
         root: P,
-    ) -> impl Iterator<Item = Error> {
+    ) -> impl Iterator<Item = SError> {
         let mut errs = Vec::new();
         let mut ids = Vec::new();
         let rd = match read_dir(&root) {
@@ -392,10 +364,7 @@ impl Manifest {
             let edit = Self::to_edit(&strs, &info);
             if let Some((prev_id, prev_edit)) = prev {
                 if prev_id + 1 != id {
-                    errs.push(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("MANIFEST has gaps at {id}"),
-                    });
+                    errs.push(corruption(format!("MANIFEST has gaps at {id}")));
                 } else {
                     let first = match Self::read_first_edit(&path) {
                         Ok(first) => first,
@@ -409,12 +378,9 @@ impl Manifest {
                         }
                     };
                     if Some(prev_edit) != first {
-                        errs.push(Error::Corruption {
-                            core: ErrorCore::default(),
-                            what: format!(
-                                "MANIFEST rollover to {id} does not match rollup of {prev_id}"
-                            ),
-                        });
+                        errs.push(corruption(format!(
+                            "MANIFEST rollover to {id} does not match rollup of {prev_id}"
+                        )));
                     } else {
                         println!("{} rolled over properly", path.to_string_lossy());
                     }
@@ -450,7 +416,7 @@ impl Manifest {
         edit
     }
 
-    fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), Error> {
+    fn _apply(&mut self, output: &PathBuf, edit: Edit, allow_rollover: bool) -> Result<(), SError> {
         let was_empty = self.strs.is_empty();
         let mut edit_str = String::new();
         Self::apply_edit(&edit, &mut self.strs, &mut self.info);
@@ -483,9 +449,9 @@ impl Manifest {
         Ok(())
     }
 
-    fn poison<T, E>(&mut self, res: Result<T, E>) -> Result<T, Error>
+    fn poison<T, E>(&mut self, res: Result<T, E>) -> Result<T, SError>
     where
-        Error: From<E>,
+        SError: From<E>,
     {
         match res {
             Ok(t) => Ok(t),
@@ -500,7 +466,7 @@ impl Manifest {
 
     fn read_mani<P: AsRef<Path>>(
         path: P,
-    ) -> Result<(BTreeSet<String>, BTreeMap<char, String>), Error> {
+    ) -> Result<(BTreeSet<String>, BTreeMap<char, String>), SError> {
         let mut strs = BTreeSet::new();
         let mut info = BTreeMap::new();
         let iter = ManifestIterator::open(path)?;
@@ -511,7 +477,7 @@ impl Manifest {
         Ok((strs, info))
     }
 
-    fn read_first_edit<P: AsRef<Path>>(path: P) -> Result<Option<Edit>, Error> {
+    fn read_first_edit<P: AsRef<Path>>(path: P) -> Result<Option<Edit>, SError> {
         let mut iter = ManifestIterator::open(path)?;
         match iter.next() {
             Some(Ok(edit)) => Ok(Some(edit)),
@@ -520,7 +486,7 @@ impl Manifest {
         }
     }
 
-    fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, Error> {
+    fn next_manifest_identifier<P: AsRef<Path>>(root: P) -> Result<u64, SError> {
         let mut max_next_id = 0;
         for dir in read_dir(root.as_ref())? {
             let dir = dir?;
@@ -545,7 +511,7 @@ pub struct Edit {
 
 impl Edit {
     /// Add the specified string to the edit.
-    pub fn add(&mut self, s: &str) -> Result<(), Error> {
+    pub fn add(&mut self, s: &str) -> Result<(), SError> {
         let s = Self::check_str(s)?;
         self.add_strs.insert(s);
         Ok(())
@@ -557,7 +523,7 @@ impl Edit {
     }
 
     /// Remove the specified string from the edit.
-    pub fn rm(&mut self, s: &str) -> Result<(), Error> {
+    pub fn rm(&mut self, s: &str) -> Result<(), SError> {
         let s = Self::check_str(s)?;
         self.rm_strs.insert(s);
         Ok(())
@@ -569,7 +535,7 @@ impl Edit {
     }
 
     /// Set the info field `c` to `s`.
-    pub fn info(&mut self, c: char, s: &str) -> Result<(), Error> {
+    pub fn info(&mut self, c: char, s: &str) -> Result<(), SError> {
         Self::check_str(&c.to_string())?;
         let s = Self::check_str(s)?;
         self.info.insert(c, s);
@@ -581,12 +547,11 @@ impl Edit {
         self.info.get(&c)
     }
 
-    fn check_str(s: &str) -> Result<String, Error> {
+    fn check_str(s: &str) -> Result<String, SError> {
         if s.chars().any(|c| c == '\n') {
-            Err(Error::NewlineDisallowed {
-                core: ErrorCore::default(),
-                what: "added strings must not contain newlines".to_owned(),
-            })
+            Err(newline_disallowed(
+                "added strings must not contain newlines",
+            ))
         } else {
             Ok(s.to_owned())
         }
@@ -601,17 +566,14 @@ impl Edit {
 /// the previous manifest.
 pub struct ManifestIterator {
     file: Option<BufReader<File>>,
-    poison: Option<Error>,
+    poison: Option<SError>,
 }
 
 impl ManifestIterator {
     /// Open the iterator to read `path`.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, SError> {
         if path.as_ref().is_dir() {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "MANIFEST file is a directory".to_owned(),
-            });
+            return Err(corruption("MANIFEST file is a directory"));
         }
         if !path.as_ref().is_file() {
             return Ok(Self {
@@ -623,7 +585,7 @@ impl ManifestIterator {
         Ok(Self { file, poison: None })
     }
 
-    fn poison<E: Into<Error>>(&mut self, err: E) -> Option<Result<Edit, Error>> {
+    fn poison<E: Into<SError>>(&mut self, err: E) -> Option<Result<Edit, SError>> {
         let err = err.into();
         self.poison = Some(err.clone());
         self.file = None;
@@ -632,7 +594,7 @@ impl ManifestIterator {
 }
 
 impl Iterator for ManifestIterator {
-    type Item = Result<Edit, Error>;
+    type Item = Result<Edit, SError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let file = match &mut self.file {
@@ -650,10 +612,7 @@ impl Iterator for ManifestIterator {
                 }
             };
             if !line.is_ascii() {
-                return Some(Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("line {idx} is not ascii"),
-                }));
+                return Some(Err(corruption(format!("line {idx} is not ascii"))));
             }
             if line == TX_SEPARATOR {
                 return Some(Ok(edit));
@@ -661,17 +620,13 @@ impl Iterator for ManifestIterator {
                 let crc32c_expected = match u32::from_str_radix(&line[..8], 16) {
                     Ok(crc32c_expected) => crc32c_expected,
                     Err(err) => {
-                        return self.poison(Error::Corruption {
-                            core: ErrorCore::default(),
-                            what: format!("crc32c is not hex on line {idx}: {err}"),
-                        });
+                        return self.poison(corruption(format!(
+                            "crc32c is not hex on line {idx}: {err}"
+                        )));
                     }
                 };
                 if crc32c::crc32c(&line.as_bytes()[8..]) != crc32c_expected {
-                    return self.poison(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("crc32c failure on line {idx}"),
-                    });
+                    return self.poison(corruption(format!("crc32c failure on line {idx}")));
                 }
                 let action = line.as_bytes()[8] as char;
                 if action == '+' {
@@ -683,18 +638,12 @@ impl Iterator for ManifestIterator {
                         return self.poison(err);
                     }
                 } else if action == '\n' {
-                    return self.poison(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: "operation \\n is not supported".to_owned(),
-                    });
+                    return self.poison(corruption("operation \\n is not supported"));
                 } else if let Err(err) = edit.info(action, &line[9..]) {
                     return self.poison(err);
                 }
             } else {
-                return self.poison(Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: format!("unhandled case on line {idx}"),
-                });
+                return self.poison(corruption(format!("unhandled case on line {idx}")));
             }
         }
         self.file = None;
@@ -752,10 +701,11 @@ mod tests {
             fail_if_not_exist: true,
             ..Default::default()
         };
-        if let Err(Error::ManifestNotExist { .. }) = Manifest::open(opts, root) {
-        } else {
-            panic!("bad case");
-        }
+        let err = match Manifest::open(opts, root) {
+            Ok(_) => panic!("expected manifest-not-exist error"),
+            Err(err) => err,
+        };
+        assert!(is_manifest_not_exist(&err));
     }
 
     #[test]
@@ -764,10 +714,11 @@ mod tests {
         let mut opts = ManifestOptions::default();
         let mut _mani = Manifest::open(opts.clone(), &root);
         opts.fail_if_exists = true;
-        if let Err(Error::ManifestExists { .. }) = Manifest::open(opts, &root) {
-        } else {
-            panic!("bad case");
-        }
+        let err = match Manifest::open(opts, &root) {
+            Ok(_) => panic!("expected manifest-exists error"),
+            Err(err) => err,
+        };
+        assert!(is_manifest_exists(&err));
     }
 
     #[test]

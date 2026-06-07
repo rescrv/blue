@@ -6,12 +6,12 @@ use rustyline::{Config, Editor, Result};
 
 use arrrg::CommandLine;
 
-use analogize::{Analogize, AnalogizeOptions, Error, Query};
+use analogize::{Analogize, AnalogizeOptions, Query};
 
 fn parse_query(line: &str) -> Option<Query> {
     match Query::parse(line) {
         Ok(query) => Some(query),
-        Err(Error::Parsing { core: _, what }) => {
+        Err(err) if let Some(what) = analogize::parsing_message(&err) => {
             eprintln!("{what}");
             None
         }

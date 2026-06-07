@@ -14,11 +14,10 @@ use nom::{
 };
 
 use prototk::FieldNumber;
-use zerror_core::ErrorCore;
 
 use crate::{
-    DataType, Direction, Error, Field, FieldDefinition, Identifier, Join, Key, KeyDataType,
-    KeyLiteral, Map, Object, Query, QueryFilter, Table, TableSet,
+    DataType, Direction, Field, FieldDefinition, Identifier, Join, Key, KeyDataType, KeyLiteral,
+    Map, Object, Query, QueryFilter, SError, Table, TableSet, invalid_number_literal,
 };
 
 ////////////////////////////////////////// error handling //////////////////////////////////////////
@@ -517,7 +516,7 @@ pub fn string_literal(input: &str) -> ParseResult<'_, KeyLiteral> {
     )(input)
 }
 
-fn number_to_typed(input: &str) -> Result<KeyLiteral, Error> {
+fn number_to_typed(input: &str) -> Result<KeyLiteral, SError> {
     if let Ok(x) = str::parse::<i32>(input) {
         Ok(KeyLiteral::sfixed32 { value: x })
     } else if let Ok(x) = str::parse::<u32>(input) {
@@ -527,10 +526,7 @@ fn number_to_typed(input: &str) -> Result<KeyLiteral, Error> {
     } else if let Ok(x) = str::parse::<u64>(input) {
         Ok(KeyLiteral::fixed64 { value: x })
     } else {
-        Err(Error::InvalidNumberLiteral {
-            core: ErrorCore::default(),
-            as_str: input.to_string(),
-        })
+        Err(invalid_number_literal(input))
     }
 }
 

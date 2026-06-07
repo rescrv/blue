@@ -7,7 +7,6 @@ use indicio::{
     stdio::StdioEmitter,
     {ALWAYS, INFO},
 };
-use rpc_pb::IoToZ;
 
 #[derive(Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 struct Options {
@@ -45,9 +44,8 @@ fn main() {
         tuple_routing::ServiceDiscoveryServer::bind(sd),
     );
     // server
-    let (server, cancel) = Server::new(options.ssl, options.server, services)
-        .as_z()
-        .pretty_unwrap();
+    let (server, cancel) =
+        Server::new(options.ssl, options.server, services).unwrap_or_else(|err| panic!("{err}"));
     let _ = std::thread::spawn(move || {
         loop {
             let signal_set = minimal_signals::SignalSet::new().fill();
@@ -58,7 +56,7 @@ fn main() {
         }
         cancel();
     });
-    server.serve().as_z().pretty_unwrap();
+    server.serve().unwrap_or_else(|err| panic!("{err}"));
     // log goodbye
     clue!(busyrpc_service_discovery::COLLECTOR, ALWAYS, {
         goodbye: std::env::args().collect::<Vec<_>>(),

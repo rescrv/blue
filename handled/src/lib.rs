@@ -2,6 +2,10 @@
 
 use std::fmt::Debug;
 
+use buffertk::{Packable, Unpackable, Unpacker, stack_pack};
+use prototk::field_types::{message as proto_message, string as proto_string};
+use prototk::{FieldPackHelper, FieldUnpackHelper, Message, Tag};
+
 /// A symbolic expression: the fundamental data structure for representing structured data.
 ///
 /// S-expressions provide a uniform representation for both code and data, enabling
@@ -23,7 +27,7 @@ use std::fmt::Debug;
 /// ]);
 /// assert_eq!(call.to_string(), "(add 1 2)");
 /// ```
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum SExpr {
     /// An atomic value: a symbol, number, string, or other indivisible token.
     Atom(String),
@@ -223,7 +227,7 @@ impl<'a> Parser<'a> {
 
 pub type SResult<T> = Result<T, SError>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SError {
     detail: SExpr,
 }
@@ -245,8 +249,8 @@ impl SError {
     }
 
     /// Adds a human-readable message to the error.
-    pub fn with_message(self, message: &str) -> Self {
-        self.with_field("message", string_literal(message))
+    pub fn with_message(self, value: &str) -> Self {
+        self.with_field("message", string_literal(value))
     }
 
     /// Adds an arbitrary field with an atomic value.
@@ -257,6 +261,11 @@ impl SError {
     /// Adds an arbitrary field with a string literal value.
     pub fn with_string_field(self, name: &str, value: &str) -> Self {
         self.with_field(name, string_literal(value))
+    }
+
+    /// Adds an arbitrary field with a debug-formatted value.
+    pub fn with_debug_field<T: Debug>(self, name: &str, value: T) -> Self {
+        self.with_string_field(name, &format!("{value:?}"))
     }
 
     /// Adds an arbitrary field expressed as an `SExpr`.
@@ -291,6 +300,91 @@ impl From<SExpr> for SError {
         SError { detail }
     }
 }
+
+impl From<buffertk::Error> for SError {
+    fn from(err: buffertk::Error) -> Self {
+        SError::new("buffertk")
+            .with_code("serialization-error")
+            .with_message("buffertk serialization error")
+            .with_string_field("cause", &err.to_string())
+    }
+}
+
+impl From<prototk::Error> for SError {
+    fn from(err: prototk::Error) -> Self {
+        SError::new("prototk")
+            .with_code("serialization-error")
+            .with_message("prototk serialization error")
+            .with_string_field("cause", &err.to_string())
+    }
+}
+
+impl From<std::io::Error> for SError {
+    fn from(err: std::io::Error) -> Self {
+        SError::new("io")
+            .with_code("io-error")
+            .with_message("I/O error")
+            .with_atom_field("kind", format!("{:?}", err.kind()))
+            .with_string_field("cause", &err.to_string())
+    }
+}
+
+impl Default for SError {
+    fn default() -> Self {
+        SError::new("handled")
+            .with_code("success")
+            .with_message("default SError value")
+    }
+}
+
+impl Packable for SError {
+    fn pack_sz(&self) -> usize {
+        stack_pack(proto_string(&self.to_string())).pack_sz()
+    }
+
+    fn pack(&self, buf: &mut [u8]) {
+        stack_pack(proto_string(&self.to_string())).into_slice(buf);
+    }
+}
+
+impl<'a> Unpackable<'a> for SError {
+    type Error = prototk::Error;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let mut up = Unpacker::new(buf);
+        let serialized: proto_string<'a> = up.unpack()?;
+        let err = parse(serialized.0).map_err(|_| prototk::Error::StringEncoding)?;
+        Ok((SError::from(err), up.remain()))
+    }
+}
+
+impl FieldPackHelper<'_, proto_message<SError>> for SError {
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        stack_pack(tag)
+            .pack(stack_pack(self).length_prefixed())
+            .pack_sz()
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        stack_pack(tag)
+            .pack(stack_pack(self).length_prefixed())
+            .into_slice(out);
+    }
+}
+
+impl FieldUnpackHelper<'_, proto_message<SError>> for SError {
+    fn merge_field(&mut self, proto: proto_message<SError>) {
+        *self = proto.unwrap_message();
+    }
+}
+
+impl From<proto_message<SError>> for SError {
+    fn from(proto: proto_message<SError>) -> Self {
+        proto.unwrap_message()
+    }
+}
+
+impl Message<'_> for SError {}
 
 fn field(name: &str, value: SExpr) -> SExpr {
     SExpr::List(vec![SExpr::Atom(name.to_string()), value])

@@ -9,7 +9,7 @@ use arrrg_derive::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
 
 use rpc_pb::Client;
-use rpc_pb::{Context, IoToZ};
+use rpc_pb::Context;
 
 use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
 
@@ -35,8 +35,7 @@ fn worker(client: Arc<dyn Client>, counter: Arc<AtomicU64>, rpcs: u64) {
         let context = Context::default();
         client
             .call(&context, "__builtins__", "nop", &[])
-            .as_z()
-            .pretty_unwrap()
+            .unwrap_or_else(|err| panic!("{err}"))
             .unwrap();
     }
 }

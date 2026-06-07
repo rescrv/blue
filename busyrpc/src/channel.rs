@@ -7,8 +7,6 @@ use biometrics::{Collector, Counter, Moments};
 
 use buffertk::{Packable, stack_pack, v64};
 
-use zerror_core::ErrorCore;
-
 use super::buffers::{RecvBuffer, SendBuffer};
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -51,7 +49,7 @@ impl Channel {
     pub fn new(
         stream: SslStream<TcpStream>,
         mut send_buf_sz: usize,
-    ) -> Result<Self, rpc_pb::Error> {
+    ) -> Result<Self, rpc_pb::SError> {
         NEW_CHANNEL.click();
         if send_buf_sz < 64 {
             send_buf_sz = 64;
@@ -69,7 +67,7 @@ impl Channel {
     /// Send on this channel, buffering the message in userspace if the socket would block.
     ///
     /// This will resize the userspace buffer to hold the full message.
-    pub fn send(&mut self, msg: &[u8]) -> Result<(), rpc_pb::Error> {
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), rpc_pb::SError> {
         SEND.click();
         assert!(msg.len() <= rpc_pb::MAX_REQUEST_SIZE);
         assert!(msg.len() <= rpc_pb::MAX_RESPONSE_SIZE);
@@ -87,7 +85,7 @@ impl Channel {
     ///
     /// Used for heartbeats.
     #[allow(dead_code)]
-    pub fn try_send(&mut self, msg: &[u8]) -> Result<bool, rpc_pb::Error> {
+    pub fn try_send(&mut self, msg: &[u8]) -> Result<bool, rpc_pb::SError> {
         assert!(msg.len() <= rpc_pb::MAX_REQUEST_SIZE);
         assert!(msg.len() <= rpc_pb::MAX_RESPONSE_SIZE);
         let frame = rpc_pb::Frame::from_buffer(msg);
@@ -111,7 +109,7 @@ impl Channel {
     /// Do work to flush the send buffer until the kernel reports that it cannot flush more.
     ///
     /// Returns true if the kernel would block, false if the send_buffer is empty.
-    pub fn do_send_work(&mut self) -> Result<bool, rpc_pb::Error> {
+    pub fn do_send_work(&mut self) -> Result<bool, rpc_pb::SError> {
         DO_SEND_WORK.click();
         loop {
             if self.send_buf.bytes().is_empty() {
@@ -126,10 +124,7 @@ impl Channel {
                         return Ok(true);
                     }
                     _ => {
-                        return Err(rpc_pb::Error::TransportFailure {
-                            core: ErrorCore::default(),
-                            what: err.to_string(),
-                        });
+                        return Err(rpc_pb::transport_failure(err.to_string()));
                     }
                 },
             };
@@ -137,10 +132,7 @@ impl Channel {
             if amt != 0 {
                 self.send_buf.consume(amt);
             } else {
-                return Err(rpc_pb::Error::TransportFailure {
-                    core: ErrorCore::default(),
-                    what: "socket closed".to_string(),
-                });
+                return Err(rpc_pb::transport_failure("socket closed"));
             }
         }
     }
@@ -148,16 +140,13 @@ impl Channel {
     /// Try to receive a message from the channel.
     ///
     /// Returns true if reads were processed to the point of blocking.
-    pub fn do_recv_work<F: FnMut(Vec<u8>)>(&mut self, mut f: F) -> Result<bool, rpc_pb::Error> {
+    pub fn do_recv_work<F: FnMut(Vec<u8>)>(&mut self, mut f: F) -> Result<bool, rpc_pb::SError> {
         DO_RECV_WORK.click();
         let mut local_buffer = [0u8; 4096];
         loop {
             match self.stream.ssl_read(&mut local_buffer) {
                 Ok(0) => {
-                    return Err(rpc_pb::Error::TransportFailure {
-                        core: ErrorCore::default(),
-                        what: "socket closed".to_string(),
-                    });
+                    return Err(rpc_pb::transport_failure("socket closed"));
                 }
                 Ok(sz) => {
                     READ_SIZE.add(sz as f64);
@@ -171,10 +160,7 @@ impl Channel {
                             WANT_RECV.click();
                             Ok(true)
                         }
-                        _ => Err(rpc_pb::Error::TransportFailure {
-                            core: ErrorCore::default(),
-                            what: err.to_string(),
-                        }),
+                        _ => Err(rpc_pb::transport_failure(err.to_string())),
                     };
                 }
             };

@@ -3,13 +3,12 @@ use std::fs::create_dir;
 use std::path::{Path, PathBuf};
 
 use biometrics::Collector;
+pub use handled::{SError, SExpr, extract_string};
 use mani::ManifestOptions;
 use setsum::Setsum;
 use sst::SstOptions;
 use sst::gc::GarbageCollectionPolicy;
 use sst::log::LogOptions;
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
 
 mod kvs;
 mod reference_counter;
@@ -123,15 +122,20 @@ fn parse_log_file<P: AsRef<Path>>(path: P) -> Option<u64> {
     }
 }
 
-fn ensure_dir(path: PathBuf, commentary: &str) -> Result<(), Error> {
+fn ensure_dir(path: PathBuf, commentary: &str) -> Result<(), SError> {
     if !path.is_dir() {
-        Ok(create_dir(&path).as_z().with_info(commentary, path)?)
+        create_dir(&path).map_err(|err| {
+            system_error(err)
+                .with_string_field("path", path.to_string_lossy().as_ref())
+                .with_string_field("directory", commentary)
+        })?;
+        Ok(())
     } else {
         Ok(())
     }
 }
 
-fn make_all_dirs<P: AsRef<Path>>(root: P) -> Result<(), Error> {
+fn make_all_dirs<P: AsRef<Path>>(root: P) -> Result<(), SError> {
     ensure_dir(VERIFY_ROOT(&root), "verify")?;
     ensure_dir(SST_ROOT(&root), "sst")?;
     ensure_dir(COMPACTION_ROOT(&root), "compaction")?;
@@ -143,127 +147,94 @@ fn make_all_dirs<P: AsRef<Path>>(root: P) -> Result<(), Error> {
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, zerror_derive::Z)]
-pub enum Error {
-    Success {
-        core: ErrorCore,
-    },
-    KeyTooLarge {
-        core: ErrorCore,
-        length: usize,
-        limit: usize,
-    },
-    ValueTooLarge {
-        core: ErrorCore,
-        length: usize,
-        limit: usize,
-    },
-    SortOrder {
-        core: ErrorCore,
-        last_key: Vec<u8>,
-        last_timestamp: u64,
-        new_key: Vec<u8>,
-        new_timestamp: u64,
-    },
-    TableFull {
-        core: ErrorCore,
-        size: usize,
-        limit: usize,
-    },
-    BlockTooSmall {
-        core: ErrorCore,
-        length: usize,
-        required: usize,
-    },
-    UnpackError {
-        core: ErrorCore,
-        error: prototk::Error,
-        context: String,
-    },
-    Crc32cFailure {
-        core: ErrorCore,
-        start: u64,
-        limit: u64,
-        crc32c: u32,
-    },
-    Corruption {
-        core: ErrorCore,
-        context: String,
-    },
-    LogicError {
-        core: ErrorCore,
-        context: String,
-    },
-    SystemError {
-        core: ErrorCore,
-        what: String,
-    },
-    TooManyOpenFiles {
-        core: ErrorCore,
-        limit: usize,
-    },
-    EmptyBatch {
-        core: ErrorCore,
-    },
-    DuplicateSst {
-        core: ErrorCore,
-        what: String,
-    },
-    SstNotFound {
-        core: ErrorCore,
-        setsum: String,
-    },
-    PathError {
-        core: ErrorCore,
-        path: PathBuf,
-        what: String,
-    },
-    ManifestError {
-        core: ErrorCore,
-        what: mani::Error,
-    },
-    ConcurrentCompaction {
-        core: ErrorCore,
-        setsum: String,
-    },
-    Backoff {
-        core: ErrorCore,
-        path: String,
-    },
-    Sst {
-        core: ErrorCore,
-        what: sst::Error,
-    },
+const PHASE: &str = "lsmtk";
+
+/// A system error was encountered.
+pub const CODE_SYSTEM_ERROR: &str = "system-error";
+/// Persistent LSM state is corrupt.
+pub const CODE_CORRUPTION: &str = "corruption";
+/// An internal invariant was violated.
+pub const CODE_LOGIC_ERROR: &str = "logic-error";
+/// An SST already exists where a new SST would be linked.
+pub const CODE_DUPLICATE_SST: &str = "duplicate-sst";
+/// Verification should back off and retry later.
+pub const CODE_BACKOFF: &str = "backoff";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl From<std::io::Error> for Error {
-    fn from(what: std::io::Error) -> Error {
-        Error::SystemError {
-            core: ErrorCore::default(),
-            what: what.to_string(),
-        }
+fn system_error(err: std::io::Error) -> SError {
+    error(CODE_SYSTEM_ERROR)
+        .with_message("lsmtk system error")
+        .with_string_field("kind", &format!("{:?}", err.kind()))
+        .with_string_field("cause", &err.to_string())
+}
+
+fn corruption(context: impl AsRef<str>) -> SError {
+    error(CODE_CORRUPTION)
+        .with_message("lsmtk corruption")
+        .with_string_field("context", context.as_ref())
+}
+
+fn logic_error(context: impl AsRef<str>) -> SError {
+    error(CODE_LOGIC_ERROR)
+        .with_message("lsmtk logic error")
+        .with_string_field("context", context.as_ref())
+}
+
+fn duplicate_sst(what: impl AsRef<str>) -> SError {
+    error(CODE_DUPLICATE_SST)
+        .with_message("duplicate SST")
+        .with_string_field("what", what.as_ref())
+}
+
+fn backoff(path: impl AsRef<str>) -> SError {
+    error(CODE_BACKOFF)
+        .with_message("verification backoff")
+        .with_string_field("path", path.as_ref())
+}
+
+pub(crate) trait ResultSErrorExt<T> {
+    fn with_debug_field<V: Debug>(self, name: &str, value: V) -> Result<T, SError>;
+}
+
+impl<T, E> ResultSErrorExt<T> for Result<T, E>
+where
+    E: Into<SError>,
+{
+    fn with_debug_field<V: Debug>(self, name: &str, value: V) -> Result<T, SError> {
+        self.map_err(|err| err.into().with_debug_field(name, value))
     }
 }
 
-impl From<mani::Error> for Error {
-    fn from(what: mani::Error) -> Error {
-        Error::ManifestError {
-            core: ErrorCore::default(),
-            what,
-        }
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-impl From<sst::Error> for Error {
-    fn from(what: sst::Error) -> Error {
-        Error::Sst {
-            core: ErrorCore::default(),
-            what,
-        }
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
-iotoz! {Error}
+pub fn backoff_path(err: &SError) -> Option<String> {
+    if error_code(err) == Some(CODE_BACKOFF) {
+        error_field(err, "path").map(extract_string)
+    } else {
+        None
+    }
+}
 
 ////////////////////////////////////////// LsmtkOptions //////////////////////////////////////////
 
@@ -419,16 +390,16 @@ mod test_util {
                 let _mutex = test_util::SST_FOR_TEST_MUTEX.lock().unwrap();
                 let tmp = PathBuf::from("sst.tmp");
                 if tmp.exists() {
-                    std::fs::remove_file(&tmp).as_z().pretty_unwrap();
+                    std::fs::remove_file(&tmp).unwrap_or_else(|err| panic!("{err}"));
                 }
-                std::fs::create_dir_all(&$output_dir).as_z().pretty_unwrap();
+                std::fs::create_dir_all(&$output_dir).unwrap_or_else(|err| panic!("{err}"));
                 let options = sst::SstOptions::default();
-                let mut sst_builder = sst::SstBuilder::new(options, &tmp).as_z().pretty_unwrap();
-                $(sst_builder.put($key.as_bytes(), 1, $val.as_bytes()).as_z().pretty_unwrap();)*
-                let sst = sst_builder.seal().as_z().pretty_unwrap();
+                let mut sst_builder = sst::SstBuilder::new(options, &tmp).unwrap_or_else(|err| panic!("{err}"));
+                $(sst_builder.put($key.as_bytes(), 1, $val.as_bytes()).unwrap_or_else(|err| panic!("{err}"));)*
+                let sst = sst_builder.seal().unwrap_or_else(|err| panic!("{err}"));
                 let setsum = sst.fast_setsum();
                 let output = PathBuf::from(&$output_dir).join(format!("{}.sst", setsum.hexdigest()));
-                std::fs::rename(&tmp, &output).as_z().pretty_unwrap();
+                std::fs::rename(&tmp, &output).unwrap_or_else(|err| panic!("{err}"));
                 output
             }
         };
@@ -438,17 +409,17 @@ mod test_util {
     macro_rules! sst_check {
         ($test_root:expr; $relative_path:literal: $($key:literal => $val:literal,)*) => {
             let sst_path = PathBuf::from($test_root).join($relative_path);
-            let sst = sst::Sst::<sst::file_manager::FileHandle>::new(SstOptions::default(), sst_path).as_z().pretty_unwrap();
+            let sst = sst::Sst::<sst::file_manager::FileHandle>::new(SstOptions::default(), sst_path).unwrap_or_else(|err| panic!("{err}"));
             let mut cursor = sst.cursor();
-            cursor.seek_to_first().as_z().pretty_unwrap();
+            cursor.seek_to_first().unwrap_or_else(|err| panic!("{err}"));
             $(
-                cursor.next().as_z().pretty_unwrap();
+                cursor.next().unwrap_or_else(|err| panic!("{err}"));
                 let kvr = cursor.key_value().expect("key-value pair should not be none");
                 assert_eq!($key.as_bytes(), kvr.key);
                 let value: &[u8] = $val.as_bytes();
                 assert_eq!(Some(value), kvr.value);
             )*
-            cursor.next().as_z().pretty_unwrap();
+            cursor.next().unwrap_or_else(|err| panic!("{err}"));
             assert_eq!(None, cursor.key_value());
         };
     }
@@ -460,15 +431,15 @@ mod test_util {
                 let _mutex = test_util::SST_FOR_TEST_MUTEX.lock().unwrap();
                 let tmp = PathBuf::from("log.tmp");
                 if tmp.exists() {
-                    std::fs::remove_file(&tmp).as_z().pretty_unwrap();
+                    std::fs::remove_file(&tmp).unwrap_or_else(|err| panic!("{err}"));
                 }
                 let output_file = PathBuf::from($test_root).join($relative_path);
-                std::fs::create_dir_all(&output_file.parent().map(PathBuf::from).unwrap_or(PathBuf::from("."))).as_z().pretty_unwrap();
+                std::fs::create_dir_all(&output_file.parent().map(PathBuf::from).unwrap_or(PathBuf::from("."))).unwrap_or_else(|err| panic!("{err}"));
                 let options = sst::LogOptions::default();
-                let mut log_builder = sst::LogBuilder::new(options, &tmp).as_z().pretty_unwrap();
-                $(log_builder.put($key.as_bytes(), 1, $val.as_bytes()).as_z().pretty_unwrap();)*
-                let setsum = log_builder.seal().as_z().pretty_unwrap().0;
-                std::fs::rename(&tmp, &output_file).as_z().pretty_unwrap();
+                let mut log_builder = sst::LogBuilder::new(options, &tmp).unwrap_or_else(|err| panic!("{err}"));
+                $(log_builder.put($key.as_bytes(), 1, $val.as_bytes()).unwrap_or_else(|err| panic!("{err}"));)*
+                let setsum = log_builder.seal().unwrap_or_else(|err| panic!("{err}")).0;
+                std::fs::rename(&tmp, &output_file).unwrap_or_else(|err| panic!("{err}"));
                 setsum
             }
         };
@@ -478,14 +449,14 @@ mod test_util {
     macro_rules! log_check {
         ($test_root:expr; $relative_path:literal: $($key:literal => $val:literal,)*) => {
             let log_path = PathBuf::from($test_root).join($relative_path);
-            let mut log = sst::LogIterator::new(sst::LogOptions::default(), log_path).as_z().pretty_unwrap();
+            let mut log = sst::LogIterator::new(sst::LogOptions::default(), log_path).unwrap_or_else(|err| panic!("{err}"));
             $(
-                let kvr = log.next().as_z().pretty_unwrap().expect("next should not be None");
+                let kvr = log.next().unwrap_or_else(|err| panic!("{err}")).expect("next should not be None");
                 assert_eq!($key.as_bytes(), kvr.key);
                 let value: &[u8] = $val.as_bytes();
                 assert_eq!(Some(value), kvr.value);
             )*
-            assert_eq!(None, log.next().as_z().pretty_unwrap());
+            assert_eq!(None, log.next().unwrap_or_else(|err| panic!("{err}")));
         };
     }
 }
@@ -554,7 +525,7 @@ mod tests {
             "key2" => "value2",
             "key1" => "value1",
         };
-        KeyValueStore::open(options).as_z().pretty_unwrap();
+        KeyValueStore::open(options).unwrap_or_else(|err| panic!("{err}"));
         sst_check! {
             &root; "sst/fb93e8e143482d6eef570088782f6bee22e519dc17a4ef56347a65d5fddf7b6a.sst":
             "key1" => "value1",

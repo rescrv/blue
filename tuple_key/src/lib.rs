@@ -6,10 +6,9 @@ use std::fmt::Debug;
 use buffertk::{Packable, v64};
 
 use buffertk::Unpackable;
+pub use handled::SError;
 use prototk::{FieldNumber, WireType};
 use prototk_derive::Message;
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
 
 mod combine7;
 mod iter7;
@@ -18,89 +17,58 @@ mod ordered;
 use combine7::Combine7BitChunks;
 use iter7::Iterate7BitChunks;
 
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
+/////////////////////////////////////////////// Errors /////////////////////////////////////////////
 
-#[derive(Clone, Message, zerror_derive::Z)]
-pub enum Error {
-    #[prototk(311296, message)]
-    Success {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    #[prototk(311297, message)]
-    CouldNotExtend {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, uint32)]
-        field_number: u32,
-    },
-    #[prototk(311298, message)]
-    UnpackError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        err: prototk::Error,
-    },
-    #[prototk(311299, message)]
-    NotValidUtf8 {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    #[prototk(311300, message)]
-    InvalidTag {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    #[prototk(311301, message)]
-    SchemaIncompatibility {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(311301, message)]
-    Corruption {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
+const PHASE: &str = "tuple-key";
+
+/// A field could not be extended into a typed tuple key.
+pub const CODE_COULD_NOT_EXTEND: &str = "could-not-extend";
+/// A serialized tuple key component could not be unpacked.
+pub const CODE_UNPACK_ERROR: &str = "unpack-error";
+/// Tuple key data was not valid UTF-8.
+pub const CODE_NOT_VALID_UTF8: &str = "not-valid-utf8";
+/// Tuple key data contained an invalid tag.
+pub const CODE_INVALID_TAG: &str = "invalid-tag";
+/// A tuple key does not match its schema.
+pub const CODE_SCHEMA_INCOMPATIBILITY: &str = "schema-incompatibility";
+/// Tuple key data is corrupt.
+pub const CODE_CORRUPTION: &str = "corruption";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Error {
-    pub fn schema_incompatibility(s: impl Into<String>) -> Self {
-        Self::SchemaIncompatibility {
-            core: ErrorCore::default(),
-            what: s.into(),
-        }
-    }
+pub fn could_not_extend(field_number: u32) -> SError {
+    error(CODE_COULD_NOT_EXTEND)
+        .with_message("could not extend tuple key")
+        .with_atom_field("field_number", field_number)
 }
 
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success {
-            core: ErrorCore::default(),
-        }
-    }
+pub fn unpack_error(err: impl std::fmt::Debug) -> SError {
+    error(CODE_UNPACK_ERROR)
+        .with_message("failed to unpack tuple key data")
+        .with_debug_field("cause", err)
 }
 
-impl From<buffertk::Error> for Error {
-    fn from(err: buffertk::Error) -> Self {
-        let err: prototk::Error = err.into();
-        Self::from(err)
-    }
+pub fn not_valid_utf8() -> SError {
+    error(CODE_NOT_VALID_UTF8).with_message("tuple key data is not valid UTF-8")
 }
 
-impl From<prototk::Error> for Error {
-    fn from(err: prototk::Error) -> Self {
-        Self::UnpackError {
-            core: ErrorCore::default(),
-            err,
-        }
-    }
+pub fn invalid_tag() -> SError {
+    error(CODE_INVALID_TAG).with_message("tuple key tag is invalid")
 }
 
-iotoz! {Error}
+pub fn schema_incompatibility(s: impl AsRef<str>) -> SError {
+    error(CODE_SCHEMA_INCOMPATIBILITY)
+        .with_message("tuple key does not match schema")
+        .with_string_field("what", s.as_ref())
+}
+
+pub fn corruption(s: impl AsRef<str>) -> SError {
+    error(CODE_CORRUPTION)
+        .with_message("tuple key data is corrupt")
+        .with_string_field("what", s.as_ref())
+}
 
 //////////////////////////////////////////// KeyDataType ///////////////////////////////////////////
 
@@ -639,21 +607,21 @@ impl<T: Debug> Schema<T> {
         self.children.get(&f)
     }
 
-    pub fn is_terminal(&self, tk: &TupleKey) -> Result<bool, Error> {
+    pub fn is_terminal(&self, tk: &TupleKey) -> Result<bool, SError> {
         Ok(self.schema_for_key(tk)?.children.is_empty())
     }
 
-    pub fn lookup(&self, tk: &TupleKey) -> Result<&T, Error> {
+    pub fn lookup(&self, tk: &TupleKey) -> Result<&T, SError> {
         Ok(&self.schema_for_key(tk)?.node)
     }
 
-    pub fn schema_for_key<'a>(&'a self, tk: &TupleKey) -> Result<&'a Schema<T>, Error> {
+    pub fn schema_for_key<'a>(&'a self, tk: &TupleKey) -> Result<&'a Schema<T>, SError> {
         let mut tkp = TupleKeyParser::new(tk);
         let mut args = vec![];
         self.schema_for_key_recurse(&mut tkp, 0, &mut args)
     }
 
-    pub fn args_for_key(&self, tk: &TupleKey) -> Result<Vec<String>, Error> {
+    pub fn args_for_key(&self, tk: &TupleKey) -> Result<Vec<String>, SError> {
         let mut tkp = TupleKeyParser::new(tk);
         let mut args = vec![];
         self.schema_for_key_recurse(&mut tkp, 0, &mut args)?;
@@ -665,10 +633,10 @@ impl<T: Debug> Schema<T> {
         tkp: &mut TupleKeyParser,
         index: usize,
         args: &mut Vec<String>,
-    ) -> Result<&'a Schema<T>, Error> {
-        if let Some((f, k, d)) = tkp.peek_next().map_err(Error::schema_incompatibility)? {
+    ) -> Result<&'a Schema<T>, SError> {
+        if let Some((f, k, d)) = tkp.peek_next().map_err(schema_incompatibility)? {
             let Some(name) = self.names.iter().find(|(_, v)| **v == f) else {
-                return Err(Error::schema_incompatibility(format!(
+                return Err(schema_incompatibility(format!(
                     "unknown field {f} at index {index}"
                 )));
             };
@@ -676,43 +644,42 @@ impl<T: Debug> Schema<T> {
             if let Some(recurse) = self.children.get(&f) {
                 match k {
                     KeyDataType::unit => {
-                        tkp.parse_next(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                        tkp.parse_next(f, d).map_err(schema_incompatibility)?;
                     }
                     KeyDataType::fixed32 => {
                         let v: u32 = tkp
                             .parse_next_with_key(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                            .map_err(schema_incompatibility)?;
                         args.push(v.to_string());
                     }
                     KeyDataType::sfixed32 => {
                         let v: i32 = tkp
                             .parse_next_with_key(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                            .map_err(schema_incompatibility)?;
                         args.push(v.to_string());
                     }
                     KeyDataType::fixed64 => {
                         let v: u64 = tkp
                             .parse_next_with_key(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                            .map_err(schema_incompatibility)?;
                         args.push(v.to_string());
                     }
                     KeyDataType::sfixed64 => {
                         let v: i64 = tkp
                             .parse_next_with_key(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                            .map_err(schema_incompatibility)?;
                         args.push(v.to_string());
                     }
                     KeyDataType::string => {
                         let v: String = tkp
                             .parse_next_with_key(f, d)
-                            .map_err(Error::schema_incompatibility)?;
+                            .map_err(schema_incompatibility)?;
                         args.push(v.to_string());
                     }
                 };
                 recurse.schema_for_key_recurse(tkp, index + 1, args)
             } else {
-                Err(Error::schema_incompatibility(format!(
+                Err(schema_incompatibility(format!(
                     "unknown field {f} at index {index}"
                 )))
             }

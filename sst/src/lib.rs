@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 
 use biometrics::Counter;
 use buffertk::{Packable, Unpacker, stack_pack};
-use handled::{SError, SExpr};
+pub use handled::SError;
+use handled::SExpr;
 use tatl::{HeyListen, Stationary};
 
 pub mod block;
@@ -203,7 +204,7 @@ pub const MAX_KEY: &[u8] = &[0xffu8; 11];
 pub const TABLE_FULL_SIZE: usize = (1usize << 30) - (1usize << 26); /* 1GiB - 64MiB */
 
 /// Check that the key is of valid length, or return a descriptive error.
-pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
+pub fn check_key_len(key: &[u8]) -> Result<(), SError> {
     if key.len() > MAX_KEY_LEN {
         KEY_TOO_LARGE.click();
         Err(key_too_large(key.len(), MAX_KEY_LEN))
@@ -213,7 +214,7 @@ pub fn check_key_len(key: &[u8]) -> Result<(), Error> {
 }
 
 /// Check that the value is of valid length, or return a descriptive error.
-pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
+pub fn check_value_len(value: &[u8]) -> Result<(), SError> {
     if value.len() > MAX_VALUE_LEN {
         VALUE_TOO_LARGE.click();
         Err(value_too_large(value.len(), MAX_VALUE_LEN))
@@ -223,7 +224,7 @@ pub fn check_value_len(value: &[u8]) -> Result<(), Error> {
 }
 
 /// Check that the table size is allowable, or return a descriptive error.
-pub fn check_table_size(size: usize) -> Result<(), Error> {
+pub fn check_table_size(size: usize) -> Result<(), SError> {
     if size >= TABLE_FULL_SIZE {
         TABLE_FULL.click();
         Err(table_full(size, TABLE_FULL_SIZE))
@@ -233,9 +234,6 @@ pub fn check_table_size(size: usize) -> Result<(), Error> {
 }
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
-
-////////////////////////////////////////// Error Classes ///////////////////////////////////////////
-pub type Error = SError;
 
 const PHASE: &str = "sst";
 
@@ -345,15 +343,15 @@ const FIELD_CONTEXT: &str = "context";
 const FIELD_RESOURCE: &str = "resource";
 const FIELD_CURRENT: &str = "current";
 
-fn error(code: &str) -> Error {
+fn error(code: &str) -> SError {
     SError::new(PHASE).with_code(code)
 }
 
-fn error_with_message(code: &str, message: impl AsRef<str>) -> Error {
+fn error_with_message(code: &str, message: impl AsRef<str>) -> SError {
     error(code).with_message(message.as_ref())
 }
 
-pub fn error_field<'a>(err: &'a Error, name: &str) -> Option<&'a SExpr> {
+pub fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
     match err.detail() {
         SExpr::List(fields) => fields.iter().find_map(|field| match field {
             SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
@@ -366,37 +364,37 @@ pub fn error_field<'a>(err: &'a Error, name: &str) -> Option<&'a SExpr> {
     }
 }
 
-pub fn error_code(err: &Error) -> Option<&str> {
+pub fn error_code(err: &SError) -> Option<&str> {
     match error_field(err, "code") {
         Some(SExpr::Atom(code)) => Some(code.as_str()),
         _ => None,
     }
 }
 
-pub fn error_with_path(err: Error, path: impl AsRef<str>) -> Error {
+pub fn error_with_path(err: SError, path: impl AsRef<str>) -> SError {
     err.with_string_field(FIELD_PATH, path.as_ref())
 }
 
-pub fn is_table_full(err: &Error) -> bool {
+pub fn is_table_full(err: &SError) -> bool {
     error_code(err) == Some(CODE_TABLE_FULL)
 }
 
-pub fn is_empty_batch(err: &Error) -> bool {
+pub fn is_empty_batch(err: &SError) -> bool {
     error_code(err) == Some(CODE_EMPTY_BATCH)
 }
 
-fn system_error(err: std::io::Error) -> Error {
+fn system_error(err: std::io::Error) -> SError {
     let message = err.to_string();
     error(CODE_SYSTEM_ERROR)
         .with_atom_field(FIELD_KIND, format!("{:?}", err.kind()))
         .with_message(&message)
 }
 
-fn system_error_with_path(err: std::io::Error, path: impl AsRef<str>) -> Error {
+fn system_error_with_path(err: std::io::Error, path: impl AsRef<str>) -> SError {
     system_error(err).with_string_field(FIELD_PATH, path.as_ref())
 }
 
-fn system_error_with_context(err: std::io::Error, context: impl AsRef<str>) -> Error {
+fn system_error_with_context(err: std::io::Error, context: impl AsRef<str>) -> SError {
     system_error(err).with_string_field(FIELD_CONTEXT, context.as_ref())
 }
 
@@ -404,28 +402,28 @@ fn system_error_with_path_and_context(
     err: std::io::Error,
     path: impl AsRef<str>,
     context: impl AsRef<str>,
-) -> Error {
+) -> SError {
     system_error_with_path(err, path).with_string_field(FIELD_CONTEXT, context.as_ref())
 }
 
-fn io_result<T>(result: std::io::Result<T>) -> Result<T, Error> {
+fn io_result<T>(result: std::io::Result<T>) -> Result<T, SError> {
     result.map_err(system_error)
 }
 
 fn io_result_with_context<T>(
     result: std::io::Result<T>,
     context: impl AsRef<str>,
-) -> Result<T, Error> {
+) -> Result<T, SError> {
     result.map_err(|err| system_error_with_context(err, context.as_ref()))
 }
 
-fn key_too_large(length: usize, limit: usize) -> Error {
+fn key_too_large(length: usize, limit: usize) -> SError {
     error(CODE_KEY_TOO_LARGE)
         .with_atom_field(FIELD_LENGTH, length)
         .with_atom_field(FIELD_LIMIT, limit)
 }
 
-fn value_too_large(length: usize, limit: usize) -> Error {
+fn value_too_large(length: usize, limit: usize) -> SError {
     error(CODE_VALUE_TOO_LARGE)
         .with_atom_field(FIELD_LENGTH, length)
         .with_atom_field(FIELD_LIMIT, limit)
@@ -436,7 +434,7 @@ fn sort_order(
     last_timestamp: u64,
     new_key: Vec<u8>,
     new_timestamp: u64,
-) -> Error {
+) -> SError {
     error(CODE_SORT_ORDER)
         .with_atom_field(FIELD_LAST_KEY, format!("{last_key:?}"))
         .with_atom_field(FIELD_LAST_TIMESTAMP, last_timestamp)
@@ -444,37 +442,37 @@ fn sort_order(
         .with_atom_field(FIELD_NEW_TIMESTAMP, new_timestamp)
 }
 
-fn table_full(size: usize, limit: usize) -> Error {
+fn table_full(size: usize, limit: usize) -> SError {
     error(CODE_TABLE_FULL)
         .with_atom_field(FIELD_SIZE, size)
         .with_atom_field(FIELD_LIMIT, limit)
 }
 
-fn block_too_small(length: usize, required: usize) -> Error {
+fn block_too_small(length: usize, required: usize) -> SError {
     error(CODE_BLOCK_TOO_SMALL)
         .with_atom_field(FIELD_LENGTH, length)
         .with_atom_field(FIELD_REQUIRED, required)
 }
 
-fn empty_batch() -> Error {
+fn empty_batch() -> SError {
     EMPTY_BATCH.click();
     error(CODE_EMPTY_BATCH)
 }
 
-fn crc32c_failure(start: u64, limit: u64, crc32c: u32) -> Error {
+fn crc32c_failure(start: u64, limit: u64, crc32c: u32) -> SError {
     error(CODE_CRC32C_FAILURE)
         .with_atom_field(FIELD_START, start)
         .with_atom_field(FIELD_END, limit)
         .with_atom_field(FIELD_CRC32C, crc32c)
 }
 
-fn corruption_file_too_small(file_size: u64, minimum_size: u64) -> Error {
+fn corruption_file_too_small(file_size: u64, minimum_size: u64) -> SError {
     error(CODE_CORRUPTION_FILE_TOO_SMALL)
         .with_atom_field(FIELD_FILE_SIZE, file_size)
         .with_atom_field(FIELD_LIMIT, minimum_size)
 }
 
-fn corruption_final_block_offset_too_large(final_block_offset: u64, file_size: u64) -> Error {
+fn corruption_final_block_offset_too_large(final_block_offset: u64, file_size: u64) -> SError {
     error(CODE_CORRUPTION_FINAL_BLOCK_OFFSET_TOO_LARGE)
         .with_atom_field(FIELD_FINAL_BLOCK_OFFSET, final_block_offset)
         .with_atom_field(FIELD_FILE_SIZE, file_size)
@@ -483,7 +481,7 @@ fn corruption_final_block_offset_too_large(final_block_offset: u64, file_size: u
 fn corruption_index_block_runs_past_filter_block(
     index_block_limit: u64,
     filter_block_start: u64,
-) -> Error {
+) -> SError {
     error(CODE_CORRUPTION_INDEX_BLOCK_RUNS_PAST_FILTER_BLOCK)
         .with_atom_field(FIELD_INDEX_BLOCK_LIMIT, index_block_limit)
         .with_atom_field(FIELD_FILTER_BLOCK_START, filter_block_start)
@@ -492,190 +490,190 @@ fn corruption_index_block_runs_past_filter_block(
 fn corruption_filter_block_runs_past_final_block(
     filter_block_limit: u64,
     final_block_offset: u64,
-) -> Error {
+) -> SError {
     error(CODE_CORRUPTION_FILTER_BLOCK_RUNS_PAST_FINAL_BLOCK)
         .with_atom_field(FIELD_FILTER_BLOCK_LIMIT, filter_block_limit)
         .with_atom_field(FIELD_FINAL_BLOCK_OFFSET, final_block_offset)
 }
 
-fn corruption_block_metadata_start_gte_limit(start: u64, limit: u64) -> Error {
+fn corruption_block_metadata_start_gte_limit(start: u64, limit: u64) -> SError {
     error(CODE_CORRUPTION_BLOCK_METADATA_START_GTE_LIMIT)
         .with_atom_field(FIELD_BLOCK_METADATA_START, start)
         .with_atom_field(FIELD_LIMIT, limit)
 }
 
-fn corruption_meta_block_null_value() -> Error {
+fn corruption_meta_block_null_value() -> SError {
     error(CODE_CORRUPTION_META_BLOCK_NULL_VALUE)
 }
 
-fn corruption_tried_loading_filter_block_as_plain() -> Error {
+fn corruption_tried_loading_filter_block_as_plain() -> SError {
     error(CODE_CORRUPTION_TRIED_LOADING_FILTER_BLOCK_AS_PLAIN)
 }
 
-fn corruption_tried_loading_final_block_as_plain() -> Error {
+fn corruption_tried_loading_final_block_as_plain() -> SError {
     error(CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_PLAIN)
 }
 
-fn corruption_tried_loading_plain_block_as_filter() -> Error {
+fn corruption_tried_loading_plain_block_as_filter() -> SError {
     error(CODE_CORRUPTION_TRIED_LOADING_PLAIN_BLOCK_AS_FILTER)
 }
 
-fn corruption_tried_loading_final_block_as_filter() -> Error {
+fn corruption_tried_loading_final_block_as_filter() -> SError {
     error(CODE_CORRUPTION_TRIED_LOADING_FINAL_BLOCK_AS_FILTER)
 }
 
-fn corruption_bad_filter_block(what: impl AsRef<str>) -> Error {
+fn corruption_bad_filter_block(what: impl AsRef<str>) -> SError {
     error(CODE_CORRUPTION_BAD_FILTER_BLOCK).with_string_field(FIELD_WHAT, what.as_ref())
 }
 
-fn corruption_block_with_zero_restarts() -> Error {
+fn corruption_block_with_zero_restarts() -> SError {
     error(CODE_CORRUPTION_BLOCK_WITH_ZERO_RESTARTS)
 }
 
-fn corruption_restart_point_no_key_value_pair(restart_point: usize) -> Error {
+fn corruption_restart_point_no_key_value_pair(restart_point: usize) -> SError {
     error(CODE_CORRUPTION_RESTART_POINT_NO_KEY_VALUE_PAIR)
         .with_atom_field(FIELD_RESTART_POINT, restart_point)
 }
 
-fn corruption_binary_search_left_ne_right(left: usize, right: usize) -> Error {
+fn corruption_binary_search_left_ne_right(left: usize, right: usize) -> SError {
     error(CODE_CORRUPTION_BINARY_SEARCH_LEFT_NE_RIGHT)
         .with_atom_field(FIELD_LEFT, left)
         .with_atom_field(FIELD_RIGHT, right)
 }
 
-fn corruption_offset_exceeds_restarts_boundary(offset: usize, restarts_boundary: usize) -> Error {
+fn corruption_offset_exceeds_restarts_boundary(offset: usize, restarts_boundary: usize) -> SError {
     error(CODE_CORRUPTION_OFFSET_EXCEEDS_RESTARTS_BOUNDARY)
         .with_atom_field(FIELD_OFFSET, offset)
         .with_atom_field(FIELD_RESTARTS_BOUNDARY, restarts_boundary)
 }
 
-fn corruption_shared_not_zero() -> Error {
+fn corruption_shared_not_zero() -> SError {
     error(CODE_CORRUPTION_SHARED_NOT_ZERO)
 }
 
-fn corruption_invalid_discriminant(discriminant: u32, offset: u64) -> Error {
+fn corruption_invalid_discriminant(discriminant: u32, offset: u64) -> SError {
     error(CODE_CORRUPTION_INVALID_DISCRIMINANT)
         .with_atom_field(FIELD_DISCRIMINANT, discriminant)
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn corruption_crc_checksum_failed(expected: u32, computed: u32, offset: u64) -> Error {
+fn corruption_crc_checksum_failed(expected: u32, computed: u32, offset: u64) -> SError {
     error(CODE_CORRUPTION_CRC_CHECKSUM_FAILED)
         .with_atom_field(FIELD_EXPECTED, expected)
         .with_atom_field(FIELD_COMPUTED, computed)
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn corruption_header_size_exceeds_max(header_size: usize, offset: u64) -> Error {
+fn corruption_header_size_exceeds_max(header_size: usize, offset: u64) -> SError {
     error(CODE_CORRUPTION_HEADER_SIZE_EXCEEDS_MAX)
         .with_atom_field(FIELD_HEADER_SIZE, header_size)
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn corruption_entry_size_exceeds_max(size: u64, offset: u64) -> Error {
+fn corruption_entry_size_exceeds_max(size: u64, offset: u64) -> SError {
     error(CODE_CORRUPTION_ENTRY_SIZE_EXCEEDS_MAX)
         .with_atom_field(FIELD_SIZE, size)
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn corruption_true_up_exceeds_header_max(offset: u64, trued_up: u64) -> Error {
+fn corruption_true_up_exceeds_header_max(offset: u64, trued_up: u64) -> SError {
     error(CODE_CORRUPTION_TRUE_UP_EXCEEDS_HEADER_MAX)
         .with_atom_field(FIELD_OFFSET, offset)
         .with_atom_field(FIELD_TRUE_UP, trued_up)
 }
 
-fn corruption_truncation_no_second_header(offset: u64) -> Error {
+fn corruption_truncation_no_second_header(offset: u64) -> SError {
     error(CODE_CORRUPTION_TRUNCATION_NO_SECOND_HEADER).with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn corruption_log_poisoned() -> Error {
+fn corruption_log_poisoned() -> SError {
     error(CODE_CORRUPTION_LOG_POISONED)
 }
 
-fn corruption_fsync_failed() -> Error {
+fn corruption_fsync_failed() -> SError {
     error(CODE_CORRUPTION_FSYNC_FAILED)
 }
 
-fn unpack_final_block_offset(error: prototk::Error) -> Error {
+fn unpack_final_block_offset(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_FINAL_BLOCK_OFFSET, error.to_string())
 }
 
-fn unpack_final_block(error: prototk::Error) -> Error {
+fn unpack_final_block(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_FINAL_BLOCK, error.to_string())
 }
 
-fn unpack_table_entry(error: prototk::Error) -> Error {
+fn unpack_table_entry(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_TABLE_ENTRY, error.to_string())
 }
 
-fn unpack_block_metadata(error: prototk::Error) -> Error {
+fn unpack_block_metadata(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_BLOCK_METADATA, error.to_string())
 }
 
-fn unpack_key_value_pair(error: prototk::Error, offset: usize) -> Error {
+fn unpack_key_value_pair(error: prototk::Error, offset: usize) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_KEY_VALUE_PAIR, error.to_string())
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn unpack_block_restarts(error: prototk::Error) -> Error {
+fn unpack_block_restarts(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_BLOCK_RESTARTS, error.to_string())
 }
 
-fn unpack_key_value_entry_prototk(error: prototk::Error) -> Error {
+fn unpack_key_value_entry_prototk(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_KEY_VALUE_ENTRY, error.to_string())
 }
 
-fn unpack_log_header(error: prototk::Error) -> Error {
+fn unpack_log_header(error: prototk::Error) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_LOG_HEADER, error.to_string())
 }
 
-fn logic_error_start_new_block_when_some() -> Error {
+fn logic_error_start_new_block_when_some() -> SError {
     error(CODE_LOGIC_ERROR_START_NEW_BLOCK_WHEN_SOME)
 }
 
-fn logic_error_flush_block_when_none() -> Error {
+fn logic_error_flush_block_when_none() -> SError {
     error(CODE_LOGIC_ERROR_FLUSH_BLOCK_WHEN_NONE)
 }
 
-fn logic_error_restart_idx_exceeds_num_restarts(restart_idx: usize, num_restarts: usize) -> Error {
+fn logic_error_restart_idx_exceeds_num_restarts(restart_idx: usize, num_restarts: usize) -> SError {
     error(CODE_LOGIC_ERROR_RESTART_IDX_EXCEEDS_NUM_RESTARTS)
         .with_atom_field(FIELD_RESTART_IDX, restart_idx)
         .with_atom_field(FIELD_NUM_RESTARTS, num_restarts)
 }
 
-fn logic_error_tried_taking_negative_restart_idx() -> Error {
+fn logic_error_tried_taking_negative_restart_idx() -> SError {
     error(CODE_LOGIC_ERROR_TRIED_TAKING_NEGATIVE_RESTART_IDX)
 }
 
-fn logic_error_next_not_positioned() -> Error {
+fn logic_error_next_not_positioned() -> SError {
     error(CODE_LOGIC_ERROR_NEXT_NOT_POSITIONED)
 }
 
-fn logic_error_prev_not_positioned() -> Error {
+fn logic_error_prev_not_positioned() -> SError {
     error(CODE_LOGIC_ERROR_PREV_NOT_POSITIONED)
 }
 
-fn logic_error_file_descriptor_negative(fd: i32) -> Error {
+fn logic_error_file_descriptor_negative(fd: i32) -> SError {
     error(CODE_LOGIC_ERROR_FILE_DESCRIPTOR_NEGATIVE).with_atom_field(FIELD_FD, fd)
 }
 
-fn logic_error_file_manager_broken_pointer(fd: usize) -> Error {
+fn logic_error_file_manager_broken_pointer(fd: usize) -> SError {
     error(CODE_LOGIC_ERROR_FILE_MANAGER_BROKEN_POINTER).with_atom_field(FIELD_FD, fd)
 }
 
-fn logic_error_buf_writer_into_inner_failed() -> Error {
+fn logic_error_buf_writer_into_inner_failed() -> SError {
     error(CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED)
 }
 
-fn too_many_open_files(limit: usize, current: usize) -> Error {
+fn too_many_open_files(limit: usize, current: usize) -> SError {
     error(CODE_TOO_MANY_OPEN_FILES)
         .with_string_field(FIELD_RESOURCE, "open_files")
         .with_atom_field(FIELD_LIMIT, limit)
@@ -1008,20 +1006,20 @@ impl<'a> From<&'a KeyValuePair> for KeyValueRef<'a> {
 /// A Cursor allows for iterating through data.
 pub trait Cursor {
     /// Seek past the first valid key-value pair to a beginning-of-stream sentinel.
-    fn seek_to_first(&mut self) -> Result<(), Error>;
+    fn seek_to_first(&mut self) -> Result<(), SError>;
 
     /// Seek past the last valid key-value pair to an end-of-stream sentinel.
-    fn seek_to_last(&mut self) -> Result<(), Error>;
+    fn seek_to_last(&mut self) -> Result<(), SError>;
 
     /// Seek to this key.  After a call to seek, the values of [key] and [value] should return the
     /// sought-to key or the key that's lexicographically next after key.
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error>;
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError>;
 
     /// Advance the cursor forward to the lexicographically-previous key.
-    fn prev(&mut self) -> Result<(), Error>;
+    fn prev(&mut self) -> Result<(), SError>;
 
     /// Advance the cursor forward to the lexicographically-next key.
-    fn next(&mut self) -> Result<(), Error>;
+    fn next(&mut self) -> Result<(), SError>;
 
     /// The key where this cursor is positioned, or None if the cursor is positioned at the bounds.
     fn key(&self) -> Option<KeyRef<'_>>;
@@ -1046,23 +1044,23 @@ pub trait Cursor {
 }
 
 impl Cursor for () {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         Ok(())
     }
 
-    fn seek(&mut self, _: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, _: &[u8]) -> Result<(), SError> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         Ok(())
     }
 
@@ -1076,23 +1074,23 @@ impl Cursor for () {
 }
 
 impl Cursor for Box<dyn Cursor> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.as_mut().seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.as_mut().seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         self.as_mut().seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         self.as_mut().prev()
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         self.as_mut().next()
     }
 
@@ -1188,12 +1186,12 @@ pub trait Builder {
     fn approximate_size(&self) -> usize;
 
     /// Put a key into the builder.
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error>;
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError>;
     /// Put a tombstone into the builder.
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error>;
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError>;
 
     /// Seal the builder to stop further writes and return the Sealed type.
-    fn seal(self) -> Result<Self::Sealed, Error>;
+    fn seal(self) -> Result<Self::Sealed, SError>;
 }
 
 ///////////////////////////////////////////// SstEntry /////////////////////////////////////////////
@@ -1247,7 +1245,7 @@ struct BlockMetadata {
 const BLOCK_METADATA_MAX_SZ: usize = 27;
 
 impl BlockMetadata {
-    fn sanity_check(&self) -> Result<(), Error> {
+    fn sanity_check(&self) -> Result<(), SError> {
         if self.start >= self.limit {
             CORRUPTION.click();
             return Err(corruption_block_metadata_start_gte_limit(
@@ -1397,7 +1395,7 @@ pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
 
 impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     /// Open the provided path using options.
-    pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Sst<FileHandle>, Error> {
+    pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Sst<FileHandle>, SError> {
         // TODO(rescrv): Use utf8path to avoid lossy path conversions.
         let handle = open_without_manager(path.as_ref())
             .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))?;
@@ -1406,7 +1404,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 
     /// Create an Sst from a file handle.
-    pub fn from_file_handle(mut handle: W) -> Result<Self, Error> {
+    pub fn from_file_handle(mut handle: W) -> Result<Self, SError> {
         SST_OPEN.click();
         // Read and parse the final block's offset
         let file_size = io_result(handle.seek(SeekFrom::End(0)))?;
@@ -1477,7 +1475,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 
     /// Get the Sst's metadata.  This will involve reading the first and last keys from disk.
-    pub fn metadata(&self) -> Result<SstMetadata, Error> {
+    pub fn metadata(&self) -> Result<SstMetadata, SError> {
         SST_METADATA.click();
         let mut cursor = self.cursor();
         // First key.
@@ -1513,7 +1511,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 
     /// Inspect the sst by printing its internal structure.
-    pub fn inspect(&self) -> Result<(), Error> {
+    pub fn inspect(&self) -> Result<(), SError> {
         let mut meta_cursor = self.index_block.cursor();
         meta_cursor.seek_to_first()?;
         meta_cursor.next()?;
@@ -1540,7 +1538,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         Ok(())
     }
 
-    fn load_block(file: &W, block_metadata: &BlockMetadata) -> Result<Block, Error> {
+    fn load_block(file: &W, block_metadata: &BlockMetadata) -> Result<Block, SError> {
         SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -1569,7 +1567,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         }
     }
 
-    fn load_filter_block(file: &W, block_metadata: &BlockMetadata) -> Result<Filter, Error> {
+    fn load_filter_block(file: &W, block_metadata: &BlockMetadata) -> Result<Filter, SError> {
         SST_LOAD_FILTER.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
@@ -1605,7 +1603,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         *is_tombstone = false;
         if !self.filter.check(key) {
             SST_BLOOM_NEGATIVE.click();
@@ -1640,7 +1638,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<SstCursor<W>>>, Error> {
+    ) -> Result<BoundsCursor<PruningCursor<SstCursor<W>>>, SError> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -1806,7 +1804,7 @@ pub struct SstBuilder {
 
 impl SstBuilder {
     /// Create a new SstBuilder.
-    pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, SError> {
         BUILDER_NEW.click();
         let block_options = options.block.clone();
         let write_buffer_size = options.write_buffer_size;
@@ -1839,7 +1837,7 @@ impl SstBuilder {
         })
     }
 
-    fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         BUILDER_COMPARE_KEY.click();
         if KeyRef::new(&self.last_key, self.last_timestamp).cmp(&KeyRef::new(key, timestamp))
             != Ordering::Less
@@ -1869,7 +1867,7 @@ impl SstBuilder {
         }
     }
 
-    fn start_new_block(&mut self) -> Result<(), Error> {
+    fn start_new_block(&mut self) -> Result<(), SError> {
         BUILDER_START_NEW_BLOCK.click();
         if self.block_builder.is_some() {
             LOGIC_ERROR.click();
@@ -1880,7 +1878,7 @@ impl SstBuilder {
         Ok(())
     }
 
-    fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn flush_block(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         BUILDER_FLUSH_BLOCK.click();
         if self.block_builder.is_none() {
             LOGIC_ERROR.click();
@@ -1914,7 +1912,7 @@ impl SstBuilder {
             .put(&dividing_key, dividing_timestamp, &value)
     }
 
-    fn get_block(&mut self, key: &[u8], timestamp: u64) -> Result<&mut BlockBuilder, Error> {
+    fn get_block(&mut self, key: &[u8], timestamp: u64) -> Result<&mut BlockBuilder, SError> {
         if self.block_builder.is_none() {
             self.start_new_block()?;
         } else {
@@ -1944,7 +1942,7 @@ impl Builder for SstBuilder {
         sum
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         BUILDER_PUT.click();
         check_key_len(key)?;
         check_value_len(value)?;
@@ -1958,7 +1956,7 @@ impl Builder for SstBuilder {
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         BUILDER_DEL.click();
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
@@ -1971,7 +1969,7 @@ impl Builder for SstBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<Sst, Error> {
+    fn seal(self) -> Result<Sst, SError> {
         BUILDER_SEAL.click();
         let mut builder = self;
         // Flush the block we have.
@@ -1979,7 +1977,7 @@ impl Builder for SstBuilder {
             let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
             builder.flush_block(&key, timestamp)?;
         }
-        fn flush_block(builder: &mut SstBuilder, entry: SstEntry) -> Result<BlockMetadata, Error> {
+        fn flush_block(builder: &mut SstBuilder, entry: SstEntry) -> Result<BlockMetadata, SError> {
             let start = builder.bytes_written as u64;
             let crc32c = entry.crc32c();
             let pa = stack_pack(entry);
@@ -2055,7 +2053,7 @@ impl SstMultiBuilder {
     }
 
     /// Provide a hint that this would be a good spot to split to create a new sst.
-    pub fn split_hint(&mut self) -> Result<(), Error> {
+    pub fn split_hint(&mut self) -> Result<(), SError> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.minimum_file_size {
@@ -2066,7 +2064,7 @@ impl SstMultiBuilder {
         Ok(())
     }
 
-    fn get_builder(&mut self) -> Result<&mut SstBuilder, Error> {
+    fn get_builder(&mut self) -> Result<&mut SstBuilder, SError> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.target_file_size {
@@ -2096,15 +2094,15 @@ impl Builder for SstMultiBuilder {
         }
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         self.get_builder()?.put(key, timestamp, value)
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         self.get_builder()?.del(key, timestamp)
     }
 
-    fn seal(mut self) -> Result<Vec<PathBuf>, Error> {
+    fn seal(mut self) -> Result<Vec<PathBuf>, SError> {
         let builder = match self.builder.take() {
             Some(b) => b,
             None => {
@@ -2139,7 +2137,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
         }
     }
 
-    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_prev(&mut self) -> Result<Option<BlockMetadata>, SError> {
         SST_CURSOR_META_PREV.click();
         self.meta_cursor.prev()?;
         let kvr = match self.meta_cursor.key_value() {
@@ -2152,7 +2150,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
         SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
-    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_next(&mut self) -> Result<Option<BlockMetadata>, SError> {
         SST_CURSOR_META_NEXT.click();
         self.meta_cursor.next()?;
         let kvr = match self.meta_cursor.key_value() {
@@ -2165,7 +2163,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
         SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
-    fn meta_value(&mut self) -> Result<Option<BlockMetadata>, Error> {
+    fn meta_value(&mut self) -> Result<Option<BlockMetadata>, SError> {
         let kvr = match self.meta_cursor.key_value() {
             Some(kvr) => kvr,
             None => {
@@ -2175,7 +2173,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
         SstCursor::<W>::metadata_from_kvr(kvr)
     }
 
-    fn metadata_from_kvr(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, Error> {
+    fn metadata_from_kvr(kvr: KeyValueRef) -> Result<Option<BlockMetadata>, SError> {
         let value = match kvr.value {
             Some(v) => v,
             None => {
@@ -2190,21 +2188,21 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
 }
 
 impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         SST_CURSOR_SEEK_TO_FIRST.click();
         self.meta_cursor.seek_to_first()?;
         self.block_cursor = None;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         SST_CURSOR_SEEK_TO_LAST.click();
         self.meta_cursor.seek_to_last()?;
         self.block_cursor = None;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         SST_CURSOR_SEEK.click();
         self.meta_cursor.seek(key)?;
         let metadata = match self.meta_value()? {
@@ -2233,7 +2231,7 @@ impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         SST_CURSOR_PREV.click();
         if self.block_cursor.is_none() {
             let metadata = match self.meta_prev()? {
@@ -2259,7 +2257,7 @@ impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
         }
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         SST_CURSOR_NEXT.click();
         if self.block_cursor.is_none() {
             let metadata = match self.meta_next()? {

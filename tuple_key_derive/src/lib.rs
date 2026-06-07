@@ -47,7 +47,7 @@ pub fn derive_typed_tuple_key(input: proc_macro::TokenStream) -> proc_macro::Tok
     // Generate the whole implementation.
     let expanded = quote! {
         impl #impl_generics TryFrom<::tuple_key::TupleKey> for #ty_name #ty_generics #where_clause {
-            type Error = ::tuple_key::Error;
+            type Error = ::tuple_key::SError;
 
             fn try_from(tk: ::tuple_key::TupleKey) -> Result<Self, Self::Error> {
                 #try_from_snippet
@@ -84,10 +84,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
                 match tkp.parse_next(::prototk::FieldNumber::must(#num), #dir) {
                     Ok(x) => x,
                     Err(e) => {
-                        return Err(::tuple_key::Error::CouldNotExtend {
-                            core: ::zerror_core::ErrorCore::default(),
-                            field_number: #num,
-                        });
+                        return Err(::tuple_key::could_not_extend(#num).with_string_field("cause", e));
                     }
                 }
                 let #field_name = ();
@@ -98,10 +95,7 @@ fn generate_try_from(ty_name: &syn::Ident, fields: &[syn::Field]) -> TokenStream
                 let #field_name = match tkp.parse_next_with_key(::prototk::FieldNumber::must(#num), #dir) {
                     Ok(x) => x,
                     Err(e) => {
-                        return Err(::tuple_key::Error::CouldNotExtend {
-                            core: ::zerror_core::ErrorCore::default(),
-                            field_number: #num,
-                        });
+                        return Err(::tuple_key::could_not_extend(#num).with_string_field("cause", e));
                     }
                 };
             }

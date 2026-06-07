@@ -1,10 +1,9 @@
 use prototk_derive::Message;
 
+use handled::SError;
 use one_two_eight::{generate_id, generate_id_prototk};
 
 use rpc_pb::service;
-
-use zerror_core::ErrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -19,73 +18,6 @@ generate_id_prototk!(PaxosID);
 
 generate_id!(ReplicaID, "replica:");
 generate_id_prototk!(ReplicaID);
-
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
-
-#[derive(Message, zerror_derive::Z)]
-pub enum Error {
-    #[prototk(573440, message)]
-    Success {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    #[prototk(573441, message)]
-    SerializationError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        what: prototk::Error,
-    },
-    #[prototk(573441, message)]
-    RpcError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        what: rpc_pb::Error,
-    },
-    #[prototk(573441, message)]
-    IoError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-}
-
-impl Default for Error {
-    fn default() -> Self {
-        Self::Success {
-            core: ErrorCore::default(),
-        }
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(what: std::io::Error) -> Self {
-        Self::IoError {
-            core: ErrorCore::default(),
-            what: what.to_string(),
-        }
-    }
-}
-
-impl From<prototk::Error> for Error {
-    fn from(what: prototk::Error) -> Self {
-        Self::SerializationError {
-            core: ErrorCore::default(),
-            what,
-        }
-    }
-}
-
-impl From<rpc_pb::Error> for Error {
-    fn from(what: rpc_pb::Error) -> Self {
-        Self::RpcError {
-            core: ErrorCore::default(),
-            what,
-        }
-    }
-}
 
 ////////////////////////////////////////////// Ballot //////////////////////////////////////////////
 
@@ -284,7 +216,7 @@ service! {
     name = AcceptorService;
     server = AcceptorServer;
     client = AcceptorClient;
-    error = Error;
+    error = SError;
 
     rpc phase1(Phase1A) -> Phase1B;
     rpc phase2(Phase2A) -> Phase2B;
@@ -348,7 +280,7 @@ service! {
     name = ProposerService;
     server = ProposerServer;
     client = ProposerClient;
-    error = Error;
+    error = SError;
 
     rpc gen_nonces(GenNoncesRequest) -> GenNoncesResponse;
     rpc issue_command(IssueCommandRequest) -> IssueCommandResponse;

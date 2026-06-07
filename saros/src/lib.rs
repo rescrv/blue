@@ -8,11 +8,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use biometrics::Counter;
+pub use handled::SError;
 use one_two_eight::generate_id;
 use tag_index::Tags;
 use tatl::{HeyListen, Stationary};
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
 
 pub mod coding;
 pub mod delta_array;
@@ -43,209 +42,92 @@ pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&TIME_TRAVEL_MONITOR);
 }
 
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
+/////////////////////////////////////////////// Errors /////////////////////////////////////////////
 
-/// Error captures the ways Saros can fail.
-#[derive(Clone, prototk_derive::Message, zerror_derive::Z)]
-pub enum Error {
-    /// A successful operation.
-    #[prototk(1, message)]
-    Success {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// A system error was encountered (usually std::io::Error).
-    #[prototk(2, message)]
-    SystemError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// There's a query that takes a lookback nested within a query that takes a lookback.
-    #[prototk(3, message)]
-    NestedLookback {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// There's a parameter that's doesn't obey the even-divisor rule.
-    #[prototk(4, message)]
-    NonMultipleParameter {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// The lookback is more than the range that can be represented via a Time type.
-    #[prototk(5, message)]
-    LookbackTooLarge {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// There was an error converting time.
-    #[prototk(6, message)]
-    TimeError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// There's an error in the decoding of time series.
-    #[prototk(7, message)]
-    CodingError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// There's an error in the decoding of time series.
-    #[prototk(8, message)]
-    ArithmeticError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// There's an error in the text-representation of time series.
-    #[prototk(9, message)]
-    TextError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// RPC error.
-    #[prototk(10, message)]
-    PrototkError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        what: prototk::Error,
-    },
-    /// RPC error.
-    #[prototk(11, message)]
-    RpcPbError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        what: rpc_pb::Error,
-    },
-    /// Parse error.
-    #[prototk(12, message)]
-    ParseError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Internally-enforced invariants were not upheld.
-    #[prototk(15, message)]
-    InternalError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
+const PHASE: &str = "saros";
+
+/// A system error was encountered.
+pub const CODE_SYSTEM_ERROR: &str = "system-error";
+/// A query attempted lookback over lookback.
+pub const CODE_NESTED_LOOKBACK: &str = "nested-lookback";
+/// A query parameter does not obey the even-divisor rule.
+pub const CODE_NON_MULTIPLE_PARAMETER: &str = "non-multiple-parameter";
+/// A lookback exceeds the representable time range.
+pub const CODE_LOOKBACK_TOO_LARGE: &str = "lookback-too-large";
+/// Time conversion failed.
+pub const CODE_TIME_ERROR: &str = "time-error";
+/// Time series coding failed.
+pub const CODE_CODING_ERROR: &str = "coding-error";
+/// Arithmetic failed.
+pub const CODE_ARITHMETIC_ERROR: &str = "arithmetic-error";
+/// Text parsing or formatting failed.
+pub const CODE_TEXT_ERROR: &str = "text-error";
+/// Parsing failed.
+pub const CODE_PARSE_ERROR: &str = "parse-error";
+/// An internal invariant was violated.
+pub const CODE_INTERNAL_ERROR: &str = "internal-error";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-iotoz! {Error}
-
-impl Error {
-    pub fn arithmetic<S: AsRef<str>>(s: S) -> Self {
-        Self::ArithmeticError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
-
-    pub fn coding<S: AsRef<str>>(s: S) -> Self {
-        Self::CodingError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
-
-    pub fn internal<S: AsRef<str>>(s: S) -> Self {
-        Self::InternalError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
-
-    pub fn success() -> Self {
-        Self::Success {
-            core: ErrorCore::default(),
-        }
-    }
-
-    pub fn system<S: AsRef<str>>(s: S) -> Self {
-        Self::SystemError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
-
-    pub fn text<S: AsRef<str>>(s: S) -> Self {
-        Self::TextError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
-
-    pub fn time<S: AsRef<str>>(s: S) -> Self {
-        Self::TimeError {
-            core: ErrorCore::default(),
-            what: s.as_ref().to_string(),
-        }
-    }
+pub fn arithmetic_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_ARITHMETIC_ERROR)
+        .with_message("Saros arithmetic error")
+        .with_string_field("what", s.as_ref())
 }
 
-impl Default for Error {
-    fn default() -> Self {
-        Self::success()
-    }
+pub fn coding_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_CODING_ERROR)
+        .with_message("Saros coding error")
+        .with_string_field("what", s.as_ref())
 }
 
-impl From<std::io::Error> for Error {
-    fn from(what: std::io::Error) -> Error {
-        Error::SystemError {
-            core: ErrorCore::default(),
-            what: format!("{what:?}"),
-        }
-    }
+pub fn internal_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_INTERNAL_ERROR)
+        .with_message("Saros internal error")
+        .with_string_field("what", s.as_ref())
 }
 
-impl From<chrono::RoundingError> for Error {
-    fn from(what: chrono::RoundingError) -> Error {
-        Error::TimeError {
-            core: ErrorCore::default(),
-            what: format!("{what:?}"),
-        }
-    }
+pub fn nested_lookback() -> SError {
+    error(CODE_NESTED_LOOKBACK).with_message("nested lookback is not supported")
 }
 
-impl From<prototk::Error> for Error {
-    fn from(what: prototk::Error) -> Error {
-        Error::PrototkError {
-            core: ErrorCore::default(),
-            what,
-        }
-    }
+pub fn non_multiple_parameter() -> SError {
+    error(CODE_NON_MULTIPLE_PARAMETER).with_message("parameter is not an even divisor")
 }
 
-impl From<rpc_pb::Error> for Error {
-    fn from(what: rpc_pb::Error) -> Error {
-        Error::RpcPbError {
-            core: ErrorCore::default(),
-            what,
-        }
-    }
+pub fn lookback_too_large() -> SError {
+    error(CODE_LOOKBACK_TOO_LARGE).with_message("lookback is too large")
 }
 
-impl From<support_nom::ParseError> for Error {
-    fn from(what: support_nom::ParseError) -> Error {
-        Error::ParseError {
-            core: ErrorCore::default(),
-            what: what.string,
-        }
+pub fn system_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_SYSTEM_ERROR)
+        .with_message("Saros system error")
+        .with_string_field("what", s.as_ref())
+}
+
+pub fn text_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_TEXT_ERROR)
+        .with_message("Saros text error")
+        .with_string_field("what", s.as_ref())
+}
+
+pub fn time_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_TIME_ERROR)
+        .with_message("Saros time error")
+        .with_string_field("what", s.as_ref())
+}
+
+pub fn parse_error<S: AsRef<str>>(s: S) -> SError {
+    error(CODE_PARSE_ERROR)
+        .with_message("Saros parse error")
+        .with_string_field("what", s.as_ref())
+}
+
+impl From<support_nom::ParseError> for SError {
+    fn from(what: support_nom::ParseError) -> SError {
+        parse_error(what.string)
     }
 }
 
@@ -334,15 +216,15 @@ impl Time {
         (*self / step).try_into().expect("steps should fit a usize")
     }
 
-    fn delta(prev: &Self, point: &Self) -> Result<Self, Error> {
+    fn delta(prev: &Self, point: &Self) -> Result<Self, SError> {
         if point.0 < 0 {
-            return Err(Error::time(
+            return Err(time_error(
                 "visited time before the epoch; time travel's not allowed",
             ));
         }
         if let Some(delta) = point.0.checked_sub(prev.0) {
             if delta < 0 {
-                return Err(Error::time(format!(
+                return Err(time_error(format!(
                     "went backwards in time from {} to {}",
                     prev.to_rfc3339(),
                     point.to_rfc3339(),
@@ -350,56 +232,56 @@ impl Time {
             }
             Ok(Time(delta))
         } else {
-            Err(Error::arithmetic(format!(
+            Err(arithmetic_error(format!(
                 "subtraction underflowed: {point:?} - {prev:?}"
             )))
         }
     }
 
-    fn delta_delta(delta1: &Self, prev: &Self, point: &Self) -> Result<Self, Error> {
+    fn delta_delta(delta1: &Self, prev: &Self, point: &Self) -> Result<Self, SError> {
         let delta2 = Self::delta(prev, point)?;
         if let Some(delta) = delta2.0.checked_sub(delta1.0) {
             Ok(Time(delta))
         } else {
-            Err(Error::arithmetic(format!(
+            Err(arithmetic_error(format!(
                 "subtraction underflowed: {point:?} - {prev:?}"
             )))
         }
     }
 
-    fn undelta(prev: &Self, delta: &Self) -> Result<Self, Error> {
+    fn undelta(prev: &Self, delta: &Self) -> Result<Self, SError> {
         if let Some(time) = prev.0.checked_add(delta.0) {
             if Time(time) < *prev {
-                return Err(Error::time(
+                return Err(time_error(
                     "visits time before the epoch; time travel's not allowed",
                 ));
             }
             Ok(Time(time))
         } else {
-            Err(Error::arithmetic(format!(
+            Err(arithmetic_error(format!(
                 "addition overflowed: {prev:?} + {delta:?}"
             )))
         }
     }
 
-    fn undelta_undelta(prev_prev: &Self, prev: &Self, delta: &Self) -> Result<Self, Error> {
+    fn undelta_undelta(prev_prev: &Self, prev: &Self, delta: &Self) -> Result<Self, SError> {
         let Some(value) = delta.0.checked_add(prev.0) else {
-            return Err(Error::arithmetic(format!(
+            return Err(arithmetic_error(format!(
                 "addition overflowed: {delta:?} + {prev:?}"
             )));
         };
         let Some(value) = value.checked_add(prev.0) else {
-            return Err(Error::arithmetic(format!(
+            return Err(arithmetic_error(format!(
                 "addition overflowed: {value:?} + {prev:?}"
             )));
         };
         let Some(value) = value.checked_sub(prev_prev.0) else {
-            return Err(Error::arithmetic(format!(
+            return Err(arithmetic_error(format!(
                 "subtraction underflowed: {value:?} - {prev_prev:?}"
             )));
         };
         if Time(value) < *prev {
-            return Err(Error::time(
+            return Err(time_error(
                 "visits time before the epoch; time travel's not allowed",
             ));
         }
@@ -567,35 +449,35 @@ impl Point {
         }
     }
 
-    fn delta(prev: &Self, point: &Self) -> Result<Self, Error> {
+    fn delta(prev: &Self, point: &Self) -> Result<Self, SError> {
         Ok(*point - *prev)
     }
 
-    fn delta_delta(delta1: &Self, prev: &Self, point: &Self) -> Result<Self, Error> {
+    fn delta_delta(delta1: &Self, prev: &Self, point: &Self) -> Result<Self, SError> {
         let delta2 = Self::delta(prev, point)?;
         Ok(delta2 - *delta1)
     }
 
-    fn encode(value: &Self, encoded: &mut delta_array::DeltaEncoder) -> Result<(), Error> {
+    fn encode(value: &Self, encoded: &mut delta_array::DeltaEncoder) -> Result<(), SError> {
         // TODO(rescrv):  Actually encode something compact.
         let value = value.0.to_bits();
         encoded.push(value)
     }
 
-    fn undelta(prev: &Self, delta: &Self) -> Result<Self, Error> {
+    fn undelta(prev: &Self, delta: &Self) -> Result<Self, SError> {
         Ok(*prev + *delta)
     }
 
-    fn undelta_undelta(prev_prev: &Self, prev: &Self, delta: &Self) -> Result<Self, Error> {
+    fn undelta_undelta(prev_prev: &Self, prev: &Self, delta: &Self) -> Result<Self, SError> {
         let value = *delta + *prev;
         let value = value + *prev;
         Ok(value - *prev_prev)
     }
 
-    fn decode(decoded: &mut delta_array::DeltaDecoder) -> Result<Self, Error> {
+    fn decode(decoded: &mut delta_array::DeltaDecoder) -> Result<Self, SError> {
         let value = decoded
             .next()
-            .ok_or_else(|| Error::coding("no next value"))??;
+            .ok_or_else(|| coding_error("no next value"))??;
         Ok(Self(f64::from_bits(value)))
     }
 }
@@ -707,11 +589,9 @@ impl Series {
         window: Window,
         step: Time,
         encoded: &EncodedSeries,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         if !window.can_be_divided_by(step) {
-            return Err(Error::NonMultipleParameter {
-                core: ErrorCore::default(),
-            });
+            return Err(non_multiple_parameter());
         }
         let mut threshold = window.start;
         let mut points = vec![Point(encoded.initial)];
@@ -764,7 +644,7 @@ impl SeriesEncoder {
         self.encoded.as_ref().len()
     }
 
-    pub fn push(&mut self, time: Time, point: Point) -> Result<(), Error> {
+    pub fn push(&mut self, time: Time, point: Point) -> Result<(), SError> {
         let time = Self::double_delta(
             &mut self.prev_delta_t,
             &mut self.prev_point_t,
@@ -787,9 +667,9 @@ impl SeriesEncoder {
         prev_delta: &mut Option<T>,
         prev_point: &mut Option<T>,
         current: T,
-        delta: impl Fn(&T, &T) -> Result<T, Error>,
-        delta_delta: impl Fn(&T, &T, &T) -> Result<T, Error>,
-    ) -> Result<T, Error> {
+        delta: impl Fn(&T, &T) -> Result<T, SError>,
+        delta_delta: impl Fn(&T, &T, &T) -> Result<T, SError>,
+    ) -> Result<T, SError> {
         let ret = if let Some(prev_point) = (*prev_point).as_ref() {
             let this_delta = delta(prev_point, &current)?;
             let value = if let Some(prev_delta) = (*prev_delta).as_ref() {
@@ -829,9 +709,9 @@ impl SeriesDecoder<'_> {
         prev_prev: &mut Option<T>,
         prev: &mut Option<T>,
         current: T,
-        undelta: impl Fn(&T, &T) -> Result<T, Error>,
-        undelta_undelta: impl Fn(&T, &T, &T) -> Result<T, Error>,
-    ) -> Result<T, Error> {
+        undelta: impl Fn(&T, &T) -> Result<T, SError>,
+        undelta_undelta: impl Fn(&T, &T, &T) -> Result<T, SError>,
+    ) -> Result<T, SError> {
         if let Some(p) = (*prev).as_ref() {
             let current = if let Some(pp) = (*prev_prev).as_ref() {
                 undelta_undelta(pp, p, &current)?
@@ -868,7 +748,7 @@ impl<'a> From<&'a [u8]> for SeriesDecoder<'a> {
 }
 
 impl Iterator for SeriesDecoder<'_> {
-    type Item = Result<(Time, Point), Error>;
+    type Item = Result<(Time, Point), SError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(time) = self.decoded.next() {
@@ -993,7 +873,7 @@ rpc_pb::service! {
     name = BiometricsStore;
     server = BiometricsStoreServer;
     client = BiometricsStoreClient;
-    error = Error;
+    error = SError;
 
     rpc fetch_counters(FetchCountersRequest) -> FetchCountersResponse;
     rpc fetch_gauges(FetchGaugesRequest) -> FetchGaugesResponse;
@@ -1007,7 +887,7 @@ impl BiometricsStore for () {
         &self,
         _: &rpc_pb::Context,
         _: FetchCountersRequest,
-    ) -> Result<FetchCountersResponse, Error> {
+    ) -> Result<FetchCountersResponse, SError> {
         Ok(FetchCountersResponse::default())
     }
 
@@ -1015,7 +895,7 @@ impl BiometricsStore for () {
         &self,
         _: &rpc_pb::Context,
         _: FetchGaugesRequest,
-    ) -> Result<FetchGaugesResponse, Error> {
+    ) -> Result<FetchGaugesResponse, SError> {
         Ok(FetchGaugesResponse::default())
     }
 
@@ -1023,7 +903,7 @@ impl BiometricsStore for () {
         &self,
         _: &rpc_pb::Context,
         _: FetchHistogramsRequest,
-    ) -> Result<FetchHistogramsResponse, Error> {
+    ) -> Result<FetchHistogramsResponse, SError> {
         Ok(FetchHistogramsResponse::default())
     }
 }
@@ -1044,7 +924,7 @@ impl<S: BiometricsStore> QueryEngine<S> {
         ctx: &rpc_pb::Context,
         query: &str,
         params: query::QueryParams,
-    ) -> Result<Vec<Series>, Error> {
+    ) -> Result<Vec<Series>, SError> {
         let query = querylang::parse(query)?;
         (*query)(ctx, &self.biometrics, &params)
     }
@@ -1213,7 +1093,7 @@ mod tests {
                 expected.push((time, Point(point as f64)));
             }
             let decoder: SeriesDecoder = SeriesDecoder::from(encoder.as_ref());
-            let returned: Vec<Result<(Time, Point), Error>> = decoder.into_iter().collect();
+            let returned: Vec<Result<(Time, Point), SError>> = decoder.into_iter().collect();
             assert_eq!(expected.len(), returned.len());
             for (idx, (e, r)) in std::iter::zip(expected.into_iter(), returned.into_iter()).enumerate() {
                 let r = r.unwrap();

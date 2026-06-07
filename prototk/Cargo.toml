@@ -10,4 +10,3 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 buffertk = { workspace = true }
 prototk_derive = { workspace = true }
-zerror = { workspace = true }

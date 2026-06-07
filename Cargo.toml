@@ -60,10 +60,6 @@ members = [
     "unix_sock",
     "utf8path",
     "utilz",
-    "zerror",
-    "zerror_derive",
-    "zerror_core",
-    "zerror_full",
 ]
 
 [workspace.package]
@@ -108,9 +104,6 @@ tuple_routing = { path = "tuple_routing", version = "0.14.0" }
 unix_sock = { path = "unix_sock", version = "0.11.0" }
 utf8path = { path = "utf8path", version = "0.11.0" }
 utilz = { path = "utilz", version = "0.9.0" }
-zerror = { path = "zerror", version = "0.10.0" }
-zerror_core = { path = "zerror_core", version = "0.17.0" }
-zerror_derive = { path = "zerror_derive", version = "0.9.0" }
 
 crc32c = { version = "0.6" }
 syn = { version = "1.0" }

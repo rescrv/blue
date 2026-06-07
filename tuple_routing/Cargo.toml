@@ -12,6 +12,7 @@ nom = { workspace = true }
 
 buffertk = { workspace = true }
 busyrpc = { workspace = true }
+handled = { workspace = true }
 indicio = { workspace = true }
 one_two_eight = { workspace = true }
 prototk = { workspace = true }
@@ -20,9 +21,6 @@ rpc_pb = { workspace = true }
 sync42 = { workspace = true }
 tuple_key = { workspace = true }
 utf8path = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
-zerror_derive = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

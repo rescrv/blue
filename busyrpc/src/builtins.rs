@@ -13,7 +13,7 @@ rpc_pb::service! {
     name = Builtin;
     server = BuiltinServer;
     client = BuiltinClient;
-    error = rpc_pb::Error;
+    error = rpc_pb::SError;
 
     rpc nop(Empty) -> Empty;
 }
@@ -30,7 +30,7 @@ impl BuiltinService {
 }
 
 impl Builtin for BuiltinService {
-    fn nop(&self, _: &rpc_pb::Context, _: Empty) -> Result<Empty, rpc_pb::Error> {
+    fn nop(&self, _: &rpc_pb::Context, _: Empty) -> Result<Empty, rpc_pb::SError> {
         Ok(Empty {})
     }
 }

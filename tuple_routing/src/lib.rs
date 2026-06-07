@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use handled::SError;
 use prototk::FieldNumber;
 use rpc_pb::{Host, HostID};
 use tuple_key::{Direction, TupleKey};
@@ -183,7 +184,7 @@ rpc_pb::service! {
     name = ServiceDiscovery;
     server = ServiceDiscoveryServer;
     client = ServiceDiscoveryClient;
-    error = rpc_pb::Error;
+    error = SError;
 
     rpc register(RegisterRequest) -> RegisterResponse;
     rpc unregister(UnregisterRequest) -> UnregisterResponse;
@@ -198,15 +199,15 @@ pub fn register<'a>(
     routing: impl AsRef<str>,
     service_key: TupleKey,
     host: Host,
-    mut error_handling: impl FnMut(rpc_pb::Error) + Send + 'static,
-) -> Result<impl FnOnce(), rpc_pb::Error> {
+    mut error_handling: impl FnMut(SError) + Send + 'static,
+) -> Result<impl FnOnce(), SError> {
     let routing_conf = std::fs::read_to_string(routing_conf_path.into().as_str())?;
-    let routing_conf = routing_conf.parse::<RoutingConf>().map_err(|err| {
-        rpc_pb::Error::resolve_failure(format!("routing conf doesn't parse: {err}"))
-    })?;
+    let routing_conf = routing_conf
+        .parse::<RoutingConf>()
+        .map_err(|err| rpc_pb::resolve_failure(format!("routing conf doesn't parse: {err}")))?;
     let routing_keys = routing_conf
         .keys(routing.as_ref())
-        .map_err(|err| rpc_pb::Error::resolve_failure(format!("routing key error: {err}")))?;
+        .map_err(|err| rpc_pb::resolve_failure(format!("routing key error: {err}")))?;
     let background = sync42::background::BackgroundThread::spawn(move |done| {
         let sd = ServiceDiscoveryClient::new(client);
         let ctx = rpc_pb::Context::default();
@@ -254,7 +255,7 @@ struct SimpleResolver {
 }
 
 impl rpc_pb::Resolver for SimpleResolver {
-    fn resolve(&mut self) -> Result<Host, rpc_pb::Error> {
+    fn resolve(&mut self) -> Result<Host, SError> {
         let ctx = rpc_pb::Context::default();
         let sd = ServiceDiscoveryClient::new(Arc::clone(&self.client));
         let service_key = vec![];
@@ -267,7 +268,7 @@ impl rpc_pb::Resolver for SimpleResolver {
         if let Some(host) = resp.hosts.pop() {
             Ok(host)
         } else {
-            Err(rpc_pb::Error::resolve_failure("no hosts available"))
+            Err(rpc_pb::resolve_failure("no hosts available"))
         }
     }
 }
@@ -276,16 +277,16 @@ pub fn simple_resolver<'a>(
     client: Arc<dyn rpc_pb::Client + Send + Sync>,
     routing_conf_path: impl Into<Path<'a>>,
     routing: impl AsRef<str>,
-) -> Result<impl rpc_pb::Resolver, rpc_pb::Error> {
+) -> Result<impl rpc_pb::Resolver, SError> {
     let routing_conf = std::fs::read_to_string(routing_conf_path.into().as_str())?;
-    let routing_conf = routing_conf.parse::<RoutingConf>().map_err(|err| {
-        rpc_pb::Error::resolve_failure(format!("routing conf doesn't parse: {err}"))
-    })?;
+    let routing_conf = routing_conf
+        .parse::<RoutingConf>()
+        .map_err(|err| rpc_pb::resolve_failure(format!("routing conf doesn't parse: {err}")))?;
     let mut routing_keys = routing_conf
         .keys(routing.as_ref())
-        .map_err(|err| rpc_pb::Error::resolve_failure(format!("routing key error: {err}")))?;
+        .map_err(|err| rpc_pb::resolve_failure(format!("routing key error: {err}")))?;
     if routing_keys.len() != 1 {
-        return Err(rpc_pb::Error::resolve_failure(format!(
+        return Err(rpc_pb::resolve_failure(format!(
             "expected exactly one routing key; got: {}",
             routing_keys.len()
         )));

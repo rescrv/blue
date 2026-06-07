@@ -4,7 +4,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::fs::{File, Metadata, OpenOptions, metadata, read_dir, rename};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -17,6 +17,7 @@ use std::time::Duration;
 use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 
 use buffertk::Unpackable;
+use handled::{SError, SExpr, extract_string};
 use indicio::protobuf::ClueVector;
 use indicio::{Clue, Value};
 use mani::{Edit, Manifest, ManifestOptions};
@@ -25,116 +26,139 @@ use scrunch::bit_vector::BitVector as BitVectorTrait;
 use scrunch::bit_vector::sparse::BitVector;
 use scrunch::builder::Builder;
 use scrunch::{CompressedDocument, Document, RecordOffset};
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
 
 mod parser;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(zerror_derive::Z)]
-pub enum Error {
-    Success {
-        core: ErrorCore,
-    },
-    System {
-        core: ErrorCore,
-        kind: ErrorKind,
-        what: String,
-    },
-    DirectoryNotFound {
-        core: ErrorCore,
-        what: String,
-    },
-    DirectoryAlreadyExists {
-        core: ErrorCore,
-        what: String,
-    },
-    Manifest {
-        core: ErrorCore,
-        what: mani::Error,
-    },
-    InvalidNumberLiteral {
-        core: ErrorCore,
-        as_str: String,
-    },
-    Parsing {
-        core: ErrorCore,
-        what: String,
-    },
-    InvalidSymbolTable {
-        core: ErrorCore,
-        line: String,
-    },
-    InvalidPath {
-        core: ErrorCore,
-        what: String,
-    },
-    InvalidTimestamp {
-        core: ErrorCore,
-        what: i64,
-    },
-    Scrunch {
-        core: ErrorCore,
-        what: scrunch::Error,
-    },
-    Indicio {
-        core: ErrorCore,
-        what: prototk::Error,
-    },
-    EmptyClueFile {
-        core: ErrorCore,
-    },
-    FileTooLarge {
-        core: ErrorCore,
-    },
+const PHASE: &str = "analogize";
+
+/// A system error was encountered while managing analogize files.
+pub const CODE_SYSTEM: &str = "system";
+/// A required directory does not exist.
+pub const CODE_DIRECTORY_NOT_FOUND: &str = "directory-not-found";
+/// A directory already exists when creation expected it not to.
+pub const CODE_DIRECTORY_ALREADY_EXISTS: &str = "directory-already-exists";
+/// A numeric literal could not be parsed as a supported value.
+pub const CODE_INVALID_NUMBER_LITERAL: &str = "invalid-number-literal";
+/// A user query failed to parse.
+pub const CODE_PARSING: &str = "parsing";
+/// The symbol table contains malformed data.
+pub const CODE_INVALID_SYMBOL_TABLE: &str = "invalid-symbol-table";
+/// A filesystem path could not be represented safely.
+pub const CODE_INVALID_PATH: &str = "invalid-path";
+/// A timestamp value was outside the supported range.
+pub const CODE_INVALID_TIMESTAMP: &str = "invalid-timestamp";
+/// Scrunch rejected or could not parse an analogize document.
+pub const CODE_SCRUNCH: &str = "scrunch";
+/// Protobuf data from indicio could not be decoded.
+pub const CODE_INDICIO: &str = "indicio";
+/// A clue file contains no clues.
+pub const CODE_EMPTY_CLUE_FILE: &str = "empty-clue-file";
+/// A file is too large to map on this platform.
+pub const CODE_FILE_TOO_LARGE: &str = "file-too-large";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-iotoz! {Error}
+fn system_error(err: std::io::Error) -> SError {
+    error(CODE_SYSTEM)
+        .with_message("analogize system error")
+        .with_string_field("kind", &format!("{:?}", err.kind()))
+        .with_string_field("cause", &err.to_string())
+}
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Self::System {
-            core: ErrorCore::default(),
-            kind: err.kind(),
-            what: err.to_string(),
-        }
+fn directory_not_found(path: impl AsRef<Path>) -> SError {
+    error(CODE_DIRECTORY_NOT_FOUND)
+        .with_message("directory not found")
+        .with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+}
+
+#[allow(dead_code)]
+fn directory_already_exists(path: impl AsRef<Path>) -> SError {
+    error(CODE_DIRECTORY_ALREADY_EXISTS)
+        .with_message("directory already exists")
+        .with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+}
+
+fn invalid_number_literal(as_str: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_NUMBER_LITERAL)
+        .with_message("invalid number literal")
+        .with_string_field("as_str", as_str.as_ref())
+}
+
+fn parsing_error(err: parser::ParseError) -> SError {
+    error(CODE_PARSING)
+        .with_message("query parse error")
+        .with_string_field("what", err.what())
+}
+
+fn invalid_symbol_table(line: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_SYMBOL_TABLE)
+        .with_message("invalid symbol table line")
+        .with_string_field("line", line.as_ref())
+}
+
+fn invalid_path(what: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_PATH)
+        .with_message("invalid path")
+        .with_string_field("what", what.as_ref())
+}
+
+fn invalid_timestamp(what: i64) -> SError {
+    error(CODE_INVALID_TIMESTAMP)
+        .with_message("invalid timestamp")
+        .with_atom_field("what", what)
+}
+
+fn scrunch_error(err: scrunch::Error) -> SError {
+    error(CODE_SCRUNCH)
+        .with_message("scrunch error")
+        .with_debug_field("cause", err)
+}
+
+fn indicio_error(err: prototk::Error) -> SError {
+    error(CODE_INDICIO)
+        .with_message("indicio protobuf error")
+        .with_string_field("cause", &err.to_string())
+}
+
+fn empty_clue_file() -> SError {
+    error(CODE_EMPTY_CLUE_FILE).with_message("empty clue file")
+}
+
+fn file_too_large(size: u64) -> SError {
+    error(CODE_FILE_TOO_LARGE)
+        .with_message("file too large")
+        .with_atom_field("size", size)
+}
+
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-impl From<mani::Error> for Error {
-    fn from(err: mani::Error) -> Self {
-        Self::Manifest {
-            core: ErrorCore::default(),
-            what: err,
-        }
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
-impl From<scrunch::Error> for Error {
-    fn from(err: scrunch::Error) -> Self {
-        Self::Scrunch {
-            core: ErrorCore::default(),
-            what: err,
-        }
-    }
-}
-
-impl From<prototk::Error> for Error {
-    fn from(err: prototk::Error) -> Self {
-        Self::Indicio {
-            core: ErrorCore::default(),
-            what: err,
-        }
-    }
-}
-
-impl From<parser::ParseError> for Error {
-    fn from(err: parser::ParseError) -> Self {
-        Self::Parsing {
-            core: ErrorCore::default(),
-            what: err.what().to_string(),
-        }
+pub fn parsing_message(err: &SError) -> Option<String> {
+    if error_code(err) == Some(CODE_PARSING) {
+        error_field(err, "what").map(extract_string)
+    } else {
+        None
     }
 }
 
@@ -147,17 +171,17 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, SError> {
         if !path.as_ref().exists() {
             return Ok(Self::default());
         }
-        let file = File::open(path.as_ref())
-            .as_z()
-            .with_info("path", path.as_ref().to_string_lossy())?;
+        let file = File::open(path.as_ref()).map_err(|err| {
+            system_error(err).with_string_field("path", path.as_ref().to_string_lossy().as_ref())
+        })?;
         Self::from_reader(file)
     }
 
-    pub fn from_reader<R: Read>(reader: R) -> Result<Self, Error> {
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self, SError> {
         let reader = BufReader::new(reader);
         let mut syms = SymbolTable::default();
         for line in reader.lines() {
@@ -166,23 +190,17 @@ impl SymbolTable {
             let mut pieces: Vec<&str> = line.rsplitn(2, ' ').collect();
             pieces.reverse();
             if pieces.len() != 2 {
-                return Err(Error::InvalidSymbolTable {
-                    core: ErrorCore::default(),
-                    line: line.to_string(),
-                });
+                return Err(invalid_symbol_table(line));
             }
             let mangled = pieces[0].to_string();
-            let symbol = u32::from_str(pieces[1]).map_err(|_| Error::InvalidNumberLiteral {
-                core: ErrorCore::default(),
-                as_str: pieces[1].to_string(),
-            })?;
+            let symbol = u32::from_str(pieces[1]).map_err(|_| invalid_number_literal(pieces[1]))?;
             syms.symbols.insert(mangled, symbol);
             syms.next_symbol = std::cmp::max(syms.next_symbol, symbol + 2);
         }
         Ok(syms)
     }
 
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), SError> {
         let mut output = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -628,21 +646,16 @@ impl Default for SymbolTable {
 fn group_by_second(
     mut watermark: DateTime<Utc>,
     clues: Vec<Clue>,
-) -> Result<Vec<(DateTime<Utc>, Vec<Clue>)>, Error> {
+) -> Result<Vec<(DateTime<Utc>, Vec<Clue>)>, SError> {
     if clues.is_empty() {
-        return Err(Error::EmptyClueFile {
-            core: ErrorCore::default(),
-        });
+        return Err(empty_clue_file());
     }
     let one_second = TimeDelta::try_seconds(1).expect("one second should always construct");
     watermark = watermark.duration_trunc(one_second).unwrap();
     let mut results = vec![];
     for clue in clues {
         let Some(ts) = DateTime::from_timestamp_millis(clue.timestamp as i64 / 1_000) else {
-            return Err(Error::InvalidTimestamp {
-                core: ErrorCore::default(),
-                what: clue.timestamp as i64,
-            });
+            return Err(invalid_timestamp(clue.timestamp as i64));
         };
         while watermark <= ts {
             results.push((watermark, vec![]));
@@ -659,7 +672,7 @@ fn convert_clues_to_analogize_inner(
     sym_table: &mut SymbolTable,
     start_time: DateTime<Utc>,
     clues: Vec<Clue>,
-) -> Result<(Vec<u32>, Vec<usize>, Vec<usize>), Error> {
+) -> Result<(Vec<u32>, Vec<usize>, Vec<usize>), SError> {
     let mut text = vec![];
     let mut record_boundaries = vec![];
     let mut second_boundaries = vec![];
@@ -669,9 +682,7 @@ fn convert_clues_to_analogize_inner(
         sym_table.append_dummy_record(&mut text);
     }
     if clues.is_empty() {
-        return Err(Error::EmptyClueFile {
-            core: ErrorCore::default(),
-        });
+        return Err(empty_clue_file());
     }
     for (_, clues) in group_by_second(start_time, clues)? {
         if clues.is_empty() {
@@ -695,13 +706,13 @@ pub fn convert_clues_to_analogize<P: AsRef<Path>>(
     start_time: DateTime<Utc>,
     clues: Vec<Clue>,
     analogize: P,
-) -> Result<(), Error> {
+) -> Result<(), SError> {
     let (text, record_boundaries, second_boundaries) =
         convert_clues_to_analogize_inner(sym_table, start_time, clues)?;
     let mut buf = Vec::new();
     let mut builder = Builder::new(&mut buf);
     let mut sub = builder.sub(FieldNumber::must(1));
-    CompressedDocument::construct(text, record_boundaries, &mut sub)?;
+    CompressedDocument::construct(text, record_boundaries, &mut sub).map_err(scrunch_error)?;
     drop(sub);
     let mut sub = builder.sub(FieldNumber::must(2));
     BitVector::from_indices(
@@ -710,7 +721,8 @@ pub fn convert_clues_to_analogize<P: AsRef<Path>>(
         &second_boundaries,
         &mut sub,
     )
-    .ok_or(scrunch::Error::InvalidBitVector)?;
+    .ok_or(scrunch::Error::InvalidBitVector)
+    .map_err(scrunch_error)?;
     drop(sub);
     drop(builder);
     std::fs::write(analogize.as_ref(), buf)?;
@@ -734,7 +746,7 @@ struct AnalogizeDocument<'a> {
 }
 
 impl AnalogizeDocument<'_> {
-    fn query(&self, syms: &SymbolTable, query: &Query) -> Result<HashSet<RecordOffset>, Error> {
+    fn query(&self, syms: &SymbolTable, query: &Query) -> Result<HashSet<RecordOffset>, SError> {
         let records = if let Query::Or(subqueries) = query {
             let mut records = HashSet::new();
             for query in subqueries {
@@ -751,14 +763,14 @@ impl AnalogizeDocument<'_> {
             }
             let mut needles = needles.into_iter();
             if let Some(needle) = needles.next() {
-                for offset in self.document.search(&needle)? {
-                    results.insert(self.document.lookup(offset)?);
+                for offset in self.document.search(&needle).map_err(scrunch_error)? {
+                    results.insert(self.document.lookup(offset).map_err(scrunch_error)?);
                 }
             }
             for needle in needles {
                 let inner = std::mem::take(&mut results);
-                for offset in self.document.search(&needle)? {
-                    let offset = self.document.lookup(offset)?;
+                for offset in self.document.search(&needle).map_err(scrunch_error)? {
+                    let offset = self.document.lookup(offset).map_err(scrunch_error)?;
                     if inner.contains(&offset) {
                         results.insert(offset);
                     }
@@ -771,15 +783,15 @@ impl AnalogizeDocument<'_> {
 }
 
 impl<'a> Unpackable<'a> for AnalogizeDocument<'a> {
-    type Error = Error;
+    type Error = SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let (stub, buf) = AnalogizeDocumentStub::unpack(buf).map_err(|_| Error::Scrunch {
-            core: ErrorCore::default(),
-            what: scrunch::Error::InvalidDocument,
-        })?;
-        let document = CompressedDocument::unpack(stub.document)?.0;
-        let timeline = BitVector::parse(stub.timeline)?.0;
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
+        let (stub, buf) = AnalogizeDocumentStub::unpack(buf)
+            .map_err(|_| scrunch_error(scrunch::Error::InvalidDocument))?;
+        let document = CompressedDocument::unpack(stub.document)
+            .map_err(scrunch_error)?
+            .0;
+        let timeline = BitVector::parse(stub.timeline).map_err(scrunch_error)?.0;
         Ok((AnalogizeDocument { document, timeline }, buf))
     }
 }
@@ -802,8 +814,8 @@ pub enum Query {
 }
 
 impl Query {
-    pub fn parse<S: AsRef<str>>(query: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::query)(query.as_ref())?)
+    pub fn parse<S: AsRef<str>>(query: S) -> Result<Self, SError> {
+        parser::parse_all(parser::query)(query.as_ref()).map_err(parsing_error)
     }
 
     pub fn must<S: AsRef<str>>(query: S) -> Self {
@@ -978,7 +990,7 @@ struct DocumentMapping {
 }
 
 impl DocumentMapping {
-    fn doc(&self) -> Result<AnalogizeDocument<'_>, Error> {
+    fn doc(&self) -> Result<AnalogizeDocument<'_>, SError> {
         // SAFETY(rescrv):  We only ever refer to this region of memory as a slice of u8.
         let buf = unsafe { std::slice::from_raw_parts(self.data as *const u8, self.size) };
         Ok(AnalogizeDocument::unpack(buf)?.0)
@@ -1015,7 +1027,7 @@ impl State {
         logs: PathBuf,
         data: PathBuf,
         mani: Manifest,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         let done = AtomicBool::new(false);
         let syms = if data.join("symbols").exists() {
             SymbolTable::from_file(data.join("symbols"))?
@@ -1054,7 +1066,7 @@ impl State {
 
     fn worker(self: Arc<Self>) {}
 
-    fn get_documents(&self) -> Result<Vec<Arc<DocumentMapping>>, Error> {
+    fn get_documents(&self) -> Result<Vec<Arc<DocumentMapping>>, SError> {
         let mani = self.mani.lock().unwrap();
         fn select_data(s: &str) -> Option<String> {
             s.strip_prefix("data:").map(String::from)
@@ -1067,18 +1079,16 @@ impl State {
         Ok(mappings)
     }
 
-    fn get_document(&self, doc: &str) -> Result<Arc<DocumentMapping>, Error> {
+    fn get_document(&self, doc: &str) -> Result<Arc<DocumentMapping>, SError> {
         let mut docs = self.docs.lock().unwrap();
         if let Some(doc) = docs.get(doc) {
             return Ok(Arc::clone(doc));
         }
         let path = self.data.join(doc);
-        let file = File::open(path)?;
+        let file = File::open(&path)?;
         let md = file.metadata()?;
         if md.len() > usize::MAX as u64 {
-            return Err(Error::FileTooLarge {
-                core: ErrorCore::default(),
-            });
+            return Err(file_too_large(md.len()));
         }
         #[cfg(not(target_os = "macos"))]
         unsafe fn mmap(len: usize, file: RawFd) -> *mut c_void {
@@ -1109,7 +1119,8 @@ impl State {
         // SAFETY(rescrv):  We treat this mapping with respect and only unmap if it's valid.
         let mapping = unsafe { mmap(md.len() as usize, file.as_raw_fd()) };
         if mapping == libc::MAP_FAILED {
-            return Err(std::io::Error::last_os_error().into());
+            return Err(system_error(std::io::Error::last_os_error())
+                .with_string_field("path", path.to_string_lossy().as_ref()));
         }
         let mapping = Arc::new(DocumentMapping {
             data: mapping,
@@ -1119,20 +1130,17 @@ impl State {
         Ok(mapping)
     }
 
-    fn try_ingest(&self) -> Result<(), Error> {
+    fn try_ingest(&self) -> Result<(), SError> {
         self.log_to_ingest()?;
         self.convert_ingested_logs()?;
         Ok(())
     }
 
-    fn log_to_ingest(&self) -> Result<(), Error> {
+    fn log_to_ingest(&self) -> Result<(), SError> {
         let mut mani = self.mani.lock().unwrap();
         let threshold_ns = mani.info('L').unwrap_or("0");
         let threshold_ns =
-            i64::from_str(threshold_ns).map_err(|_| Error::InvalidNumberLiteral {
-                core: ErrorCore::default(),
-                as_str: threshold_ns.to_string(),
-            })?;
+            i64::from_str(threshold_ns).map_err(|_| invalid_number_literal(threshold_ns))?;
         let (logs_to_ingest, threshold_ns) = take_consistent_cut(&self.logs, threshold_ns)?;
         if logs_to_ingest.is_empty() {
             return Ok(());
@@ -1146,7 +1154,7 @@ impl State {
         Ok(())
     }
 
-    fn convert_ingested_logs(&self) -> Result<(), Error> {
+    fn convert_ingested_logs(&self) -> Result<(), SError> {
         // First, read the manifest to figure out what JSON needs to be ingested.
         let (log_inputs, file_number): (Vec<String>, String) = {
             let mani = self.mani.lock().unwrap();
@@ -1161,15 +1169,13 @@ impl State {
         if log_inputs.is_empty() {
             return Ok(());
         }
-        let file_number = u64::from_str(&file_number).map_err(|_| Error::InvalidNumberLiteral {
-            core: ErrorCore::default(),
-            as_str: file_number,
-        })?;
+        let file_number =
+            u64::from_str(&file_number).map_err(|_| invalid_number_literal(&file_number))?;
         // Second, build the analogize file for all the files at once.
         let mut clues = vec![];
         for input in log_inputs.iter() {
             let buf = std::fs::read(self.logs.join(input))?;
-            let mut cv = ClueVector::unpack(&buf)?.0;
+            let mut cv = ClueVector::unpack(&buf).map_err(indicio_error)?.0;
             clues.append(&mut cv.clues);
         }
         let mut edit = Edit::default();
@@ -1178,18 +1184,10 @@ impl State {
             let mut syms = self.syms.lock().unwrap();
             let start_time = clues.iter().map(|x| x.timestamp).min().unwrap_or(0);
             let end_time = clues.iter().map(|x| x.timestamp).max().unwrap_or(0);
-            let start_time = DateTime::from_timestamp_millis(start_time as i64 / 1_000).ok_or(
-                Error::InvalidTimestamp {
-                    core: ErrorCore::default(),
-                    what: start_time as i64,
-                },
-            )?;
-            let end_time = DateTime::from_timestamp_millis(end_time as i64 / 1_000).ok_or(
-                Error::InvalidTimestamp {
-                    core: ErrorCore::default(),
-                    what: end_time as i64,
-                },
-            )?;
+            let start_time = DateTime::from_timestamp_millis(start_time as i64 / 1_000)
+                .ok_or_else(|| invalid_timestamp(start_time as i64))?;
+            let end_time = DateTime::from_timestamp_millis(end_time as i64 / 1_000)
+                .ok_or_else(|| invalid_timestamp(end_time as i64))?;
             let output_path = format!(
                 "{}_{}_{}.analogize",
                 date_time_to_string(start_time),
@@ -1255,13 +1253,10 @@ pub struct Analogize {
 }
 
 impl Analogize {
-    pub fn new(options: AnalogizeOptions) -> Result<Self, Error> {
+    pub fn new(options: AnalogizeOptions) -> Result<Self, SError> {
         let logs = PathBuf::from(&options.logs);
         if !logs.exists() || !logs.is_dir() {
-            return Err(Error::DirectoryNotFound {
-                core: ErrorCore::default(),
-                what: options.logs,
-            });
+            return Err(directory_not_found(&options.logs));
         }
         let data = PathBuf::from(&options.data);
         let mani = Manifest::open(options.mani.clone(), data.clone())?;
@@ -1272,7 +1267,7 @@ impl Analogize {
         Ok(this)
     }
 
-    pub fn query(&self, query: Query) -> Result<Vec<Value>, Error> {
+    pub fn query(&self, query: Query) -> Result<Vec<Value>, SError> {
         let query = query.normalize();
         let docs = self.state.get_documents()?;
         let mut values = vec![];
@@ -1296,7 +1291,7 @@ impl Analogize {
         Ok(values)
     }
 
-    pub fn exemplars(&self, num_results: usize) -> Result<Vec<Value>, Error> {
+    pub fn exemplars(&self, num_results: usize) -> Result<Vec<Value>, SError> {
         let doc_ptrs = self.state.get_documents()?;
         let mut docs = vec![];
         for ptr in doc_ptrs.iter() {
@@ -1316,7 +1311,7 @@ impl Analogize {
         Ok(values)
     }
 
-    pub fn correlates(&self, query: Query, num_results: usize) -> Result<Vec<Value>, Error> {
+    pub fn correlates(&self, query: Query, num_results: usize) -> Result<Vec<Value>, SError> {
         let doc_ptrs = self.state.get_documents()?;
         let mut docs = vec![];
         for ptr in doc_ptrs.iter() {
@@ -1368,7 +1363,7 @@ fn ctime(md: &Metadata) -> i64 {
 fn take_consistent_cut<P: AsRef<Path>>(
     dir: P,
     threshold_ns: i64,
-) -> Result<(Vec<String>, i64), Error> {
+) -> Result<(Vec<String>, i64), SError> {
     loop {
         let mut new_threshold_ns = threshold_ns;
         let md1 = metadata(dir.as_ref())?;
@@ -1382,18 +1377,19 @@ fn take_consistent_cut<P: AsRef<Path>>(
                 if path.starts_with(dir.as_ref()) {
                     path = path
                         .strip_prefix(dir.as_ref())
-                        .map_err(|_| Error::InvalidPath {
-                            core: ErrorCore::default(),
-                            what: format!("path {} prefix won't strip", path.to_string_lossy()),
+                        .map_err(|_| {
+                            invalid_path(format!(
+                                "path {} prefix won't strip",
+                                path.to_string_lossy()
+                            ))
                         })?
                         .to_path_buf();
                 }
                 let display = path.to_string_lossy().to_string();
                 if Path::new(&display) != path {
-                    return Err(Error::InvalidPath {
-                        core: ErrorCore::default(),
-                        what: format!("path {display} contains invalid characters"),
-                    });
+                    return Err(invalid_path(format!(
+                        "path {display} contains invalid characters"
+                    )));
                 }
                 paths.push(display);
                 new_threshold_ns = std::cmp::max(ts_ns, new_threshold_ns);

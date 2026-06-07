@@ -19,14 +19,12 @@ crc32c = { workspace = true }
 biometrics = { workspace = true }
 buffertk = { workspace = true }
 guacamole = { workspace = true }
+handled = { workspace = true }
 indicio = { workspace = true, optional = true }
 one_two_eight = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 utilz = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
-zerror_derive = { workspace = true }
 
 [[bin]]
 name = "rpc-pb-gen-host-id"

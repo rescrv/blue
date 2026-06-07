@@ -16,14 +16,12 @@ binaries = []
 nom = { workspace = true }
 
 buffertk = { workspace = true }
+handled = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 sst = { workspace = true }
 tuple_key = { workspace = true }
 tuple_key_derive = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
-zerror_derive = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -15,7 +15,7 @@ use sync42::work_coalescing_queue::{WorkCoalescingCore, WorkCoalescingQueue};
 
 use super::setsum::Setsum;
 use super::{
-    Builder, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef,
+    Builder, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePair, KeyValuePut, KeyValueRef, SError,
     TABLE_FULL_SIZE, check_key_len, check_table_size, check_value_len,
     corruption_crc_checksum_failed, corruption_entry_size_exceeds_max, corruption_fsync_failed,
     corruption_header_size_exceeds_max, corruption_invalid_discriminant, corruption_log_poisoned,
@@ -63,7 +63,7 @@ fn next_boundary(offset: u64) -> u64 {
     (block_offset(offset) + 1) << BLOCK_BITS
 }
 
-fn check_batch_size(size: usize) -> Result<(), Error> {
+fn check_batch_size(size: usize) -> Result<(), SError> {
     if size as u64 > BLOCK_SIZE {
         Err(table_full(size, BLOCK_SIZE as usize))
     } else {
@@ -71,7 +71,7 @@ fn check_batch_size(size: usize) -> Result<(), Error> {
     }
 }
 
-fn check_batch_size_plus<P: Packable>(buffer: &[u8], pa: P) -> Result<(), Error> {
+fn check_batch_size_plus<P: Packable>(buffer: &[u8], pa: P) -> Result<(), SError> {
     let size = buffer.len() + pa.pack_sz();
     check_batch_size(size)
 }
@@ -132,24 +132,24 @@ impl Default for LogOptions {
 /// An extension of std::io::Write that does fsync.
 pub trait Write: std::io::Write {
     /// Return when the data is known to be durable.
-    fn fsync(&mut self) -> Result<(), Error>;
+    fn fsync(&mut self) -> Result<(), SError>;
 }
 
 impl Write for File {
-    fn fsync(&mut self) -> Result<(), Error> {
+    fn fsync(&mut self) -> Result<(), SError> {
         io_result_with_context(self.sync_data(), "log fsync")
     }
 }
 
 impl Write for &mut Vec<u8> {
-    fn fsync(&mut self) -> Result<(), Error> {
+    fn fsync(&mut self) -> Result<(), SError> {
         // pass
         Ok(())
     }
 }
 
 impl<W: Write> Write for BufWriter<W> {
-    fn fsync(&mut self) -> Result<(), Error> {
+    fn fsync(&mut self) -> Result<(), SError> {
         self.get_mut().fsync()
     }
 }
@@ -165,7 +165,7 @@ pub struct WriteBatch {
 
 impl WriteBatch {
     /// Insert the key-value pair into the write batch.
-    pub fn insert(&mut self, kvr: KeyValueRef<'_>) -> Result<(), Error> {
+    pub fn insert(&mut self, kvr: KeyValueRef<'_>) -> Result<(), SError> {
         if let Some(value) = kvr.value {
             self.put(kvr.key, kvr.timestamp, value)
         } else {
@@ -174,7 +174,7 @@ impl WriteBatch {
     }
 
     /// Merge one batch into an other.  Will only error if the resulting batch size is too large.
-    pub fn merge(&mut self, wb: &WriteBatch) -> Result<(), Error> {
+    pub fn merge(&mut self, wb: &WriteBatch) -> Result<(), SError> {
         check_batch_size(self.buffer.len() + wb.buffer.len())?;
         self.buffer.extend_from_slice(&wb.buffer);
         self.setsum += wb.setsum;
@@ -189,7 +189,7 @@ impl Builder for WriteBatch {
         self.buffer.len()
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         check_key_len(key)?;
         check_value_len(value)?;
         self.setsum.put(key, timestamp, value);
@@ -205,7 +205,7 @@ impl Builder for WriteBatch {
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         check_key_len(key)?;
         self.setsum.del(key, timestamp);
         let del = KeyValueDel {
@@ -219,7 +219,7 @@ impl Builder for WriteBatch {
         Ok(())
     }
 
-    fn seal(self) -> Result<Self::Sealed, Error> {
+    fn seal(self) -> Result<Self::Sealed, SError> {
         Ok(self)
     }
 }
@@ -236,7 +236,7 @@ pub struct LogBuilder<W: Write> {
 
 impl LogBuilder<File> {
     /// Create a new log builder with the provided options at the prescribed path.
-    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, SError> {
         let file: File = OpenOptions::new()
             .create_new(true)
             .read(true)
@@ -250,7 +250,7 @@ impl LogBuilder<File> {
     }
 
     /// fsync the log builder.
-    pub fn fsync(&mut self) -> Result<(), Error> {
+    pub fn fsync(&mut self) -> Result<(), SError> {
         FSYNC.click();
         io_result_with_context(self.output.flush(), "log builder flush")?;
         io_result_with_context(self.output.get_mut().sync_data(), "log builder sync_data")
@@ -259,7 +259,7 @@ impl LogBuilder<File> {
 
 impl<W: Write> LogBuilder<W> {
     /// Create a new LogBuilder from options and a write.
-    pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
+    pub fn from_write(options: LogOptions, write: W) -> Result<Self, SError> {
         let output = BufWriter::with_capacity(options.write_buffer, write);
         Ok(Self {
             options,
@@ -270,12 +270,12 @@ impl<W: Write> LogBuilder<W> {
     }
 
     /// Flush the log to the OS.  This does not call fsync.
-    pub fn flush(&mut self) -> Result<(), Error> {
+    pub fn flush(&mut self) -> Result<(), SError> {
         io_result_with_context(self.output.flush(), "log builder flush")
     }
 
     /// Append a write batch to the log.
-    pub fn append(&mut self, write_batch: &WriteBatch) -> Result<(), Error> {
+    pub fn append(&mut self, write_batch: &WriteBatch) -> Result<(), SError> {
         if write_batch.buffer.is_empty() {
             return Err(empty_batch());
         }
@@ -284,7 +284,7 @@ impl<W: Write> LogBuilder<W> {
         self._append(&write_batch.buffer)
     }
 
-    fn _append(&mut self, buffer: &[u8]) -> Result<(), Error> {
+    fn _append(&mut self, buffer: &[u8]) -> Result<(), SError> {
         let header = Header {
             size: buffer.len() as u64,
             crc32c: crc32c::crc32c(buffer),
@@ -310,7 +310,7 @@ impl<W: Write> LogBuilder<W> {
         }
     }
 
-    fn append_split(&mut self, buffer: &[u8]) -> Result<(), Error> {
+    fn append_split(&mut self, buffer: &[u8]) -> Result<(), SError> {
         let nb = next_boundary(self.bytes_written);
         let roundup = nb - self.bytes_written;
         if roundup <= HEADER_MAX_SIZE {
@@ -344,7 +344,7 @@ impl<W: Write> LogBuilder<W> {
         Ok(())
     }
 
-    fn true_up(&mut self, nb: u64) -> Result<(), Error> {
+    fn true_up(&mut self, nb: u64) -> Result<(), SError> {
         assert!(nb >= self.bytes_written);
         let roundup = (nb - self.bytes_written) as usize;
         assert!(roundup as u64 <= HEADER_MAX_SIZE);
@@ -356,7 +356,7 @@ impl<W: Write> LogBuilder<W> {
         }
     }
 
-    fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
+    fn write(&mut self, buffer: &[u8]) -> Result<(), SError> {
         io_result_with_context(self.output.write_all(buffer), "log write_all")?;
         self.bytes_written += buffer.len() as u64;
         Ok(())
@@ -370,21 +370,21 @@ impl<W: Write> Builder for LogBuilder<W> {
         self.bytes_written as usize
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         let mut wb = WriteBatch::default();
         wb.put(key, timestamp, value)?;
         self.append(&wb)?;
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         let mut wb = WriteBatch::default();
         wb.del(key, timestamp)?;
         self.append(&wb)?;
         Ok(())
     }
 
-    fn seal(mut self) -> Result<Self::Sealed, Error> {
+    fn seal(mut self) -> Result<Self::Sealed, SError> {
         self.flush()?;
         Ok((
             self.setsum,
@@ -402,10 +402,10 @@ struct WriteCoalescingCore<W: Write> {
     written: u64,
 }
 
-impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, Error>> for WriteCoalescingCore<W> {
+impl<W: Write> WorkCoalescingCore<Arc<WriteBatch>, Result<u64, SError>> for WriteCoalescingCore<W> {
     type InputAccumulator = WriteBatch;
     type OutputIterator<'a>
-        = std::iter::Take<std::iter::Repeat<Result<u64, Error>>>
+        = std::iter::Take<std::iter::Repeat<Result<u64, SError>>>
     where
         W: 'a;
 
@@ -483,7 +483,7 @@ impl WorkCoalescingCore<u64, bool> for FsyncCoalescingCore {
 /// A ConcurrentLogBuilder provides a non-standard builder interface that is internally
 /// synchronized.  This will be orders of magnitude faster than standard LogBuilder.
 pub struct ConcurrentLogBuilder<W: Write> {
-    write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Result<u64, Error>, WriteCoalescingCore<W>>,
+    write_cq: WorkCoalescingQueue<Arc<WriteBatch>, Result<u64, SError>, WriteCoalescingCore<W>>,
     // TODO(rescrv): Make this return Option<Error> too.
     fsync_cq: WorkCoalescingQueue<u64, bool, FsyncCoalescingCore>,
     poison: AtomicBool,
@@ -492,13 +492,13 @@ pub struct ConcurrentLogBuilder<W: Write> {
 
 impl ConcurrentLogBuilder<File> {
     /// Create a new concurrent log builder.
-    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, SError> {
         let builder = LogBuilder::new(options, file_name)?;
         Self::from_builder(builder)
     }
 
     /// fsync the data to disk.  This will return when all previously written data is durable.
-    pub fn fsync(&self) -> Result<(), Error> {
+    pub fn fsync(&self) -> Result<(), SError> {
         if !self.fsync_cq.do_work(0) {
             Err(corruption_log_poisoned())
         } else {
@@ -509,13 +509,13 @@ impl ConcurrentLogBuilder<File> {
 
 impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Create a new ConcurrentLogBuilder from the given writer.
-    pub fn from_write(options: LogOptions, write: W) -> Result<Self, Error> {
+    pub fn from_write(options: LogOptions, write: W) -> Result<Self, SError> {
         let builder = LogBuilder::from_write(options, write)?;
         Self::from_builder(builder)
     }
 
     /// Create a new ConcurrentLogBuilder from the provided builder.
-    pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, Error> {
+    pub fn from_builder(builder: LogBuilder<W>) -> Result<Self, SError> {
         let raw_builder = builder.output.get_ref().as_raw_fd();
         let write_cq = WorkCoalescingQueue::new(WriteCoalescingCore {
             builder,
@@ -536,7 +536,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     }
 
     /// Flush data to the OS.
-    pub fn flush(&self) -> Result<(), Error> {
+    pub fn flush(&self) -> Result<(), SError> {
         let mut write = self.write_cq.get_core();
         write.builder.flush()
     }
@@ -550,7 +550,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Append `write_batch` to the log.
     ///
     /// Returns after fsync is done.
-    pub fn append(&self, write_batch: WriteBatch) -> Result<(), Error> {
+    pub fn append(&self, write_batch: WriteBatch) -> Result<(), SError> {
         if write_batch.buffer.is_empty() {
             return Err(empty_batch());
         }
@@ -571,7 +571,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Put a key-value pair in the log.
     ///
     /// Returns after fsync is done.
-    pub fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    pub fn put(&self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         let mut wb = WriteBatch::default();
         wb.put(key, timestamp, value)?;
         self.append(wb)?;
@@ -581,7 +581,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     /// Put a key-value tombstone in the log.
     ///
     /// Returns after fsync is done.
-    pub fn del(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn del(&self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         let mut wb = WriteBatch::default();
         wb.del(key, timestamp)?;
         self.append(wb)?;
@@ -589,7 +589,7 @@ impl<W: Write + AsRawFd> ConcurrentLogBuilder<W> {
     }
 
     /// Seal the log and return its setsum.
-    pub fn seal(self) -> Result<(Setsum, W), Error> {
+    pub fn seal(self) -> Result<(Setsum, W), SError> {
         let core = self.write_cq.into_inner();
         core.builder.seal()
     }
@@ -612,7 +612,7 @@ pub struct LogIterator<R: Read + Seek> {
 
 impl LogIterator<File> {
     /// Open `file_name` using `options` as a guide and return a [LogIterator].
-    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(options: LogOptions, file_name: P) -> Result<Self, SError> {
         let file: File = OpenOptions::new()
             .create(false)
             .read(true)
@@ -627,7 +627,7 @@ impl LogIterator<File> {
 
 impl<R: Read + Seek> LogIterator<R> {
     /// Create a new [LogIterator] from options and a reader.
-    pub fn from_reader(options: LogOptions, reader: R) -> Result<Self, Error> {
+    pub fn from_reader(options: LogOptions, reader: R) -> Result<Self, SError> {
         let input = BufReader::with_capacity(options.read_buffer, reader);
         Ok(Self {
             input,
@@ -638,7 +638,7 @@ impl<R: Read + Seek> LogIterator<R> {
 
     /// Return the next item in the log, or None when the log has been traversed.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<KeyValueRef<'_>>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyValueRef<'_>>, SError> {
         if self.buffer_idx < self.buffer.len() {
             return self.next_from_buffer();
         }
@@ -677,14 +677,14 @@ impl<R: Read + Seek> LogIterator<R> {
         self.next_from_buffer()
     }
 
-    fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef<'_>>, Error> {
+    fn next_from_buffer(&mut self) -> Result<Option<KeyValueRef<'_>>, SError> {
         if self.buffer_idx >= self.buffer.len() {
             return Err(empty_batch());
         }
         let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])
             .map_err(unpack_key_value_entry_prototk)?;
         self.buffer_idx = self.buffer.len() - rem.len();
-        fn check_shared(shared: u64) -> Result<(), Error> {
+        fn check_shared(shared: u64) -> Result<(), SError> {
             if shared != 0 {
                 Err(corruption_shared_not_zero())
             } else {
@@ -720,7 +720,7 @@ impl<R: Read + Seek> LogIterator<R> {
         }
     }
 
-    fn next_frame(&mut self) -> Result<Option<Header>, Error> {
+    fn next_frame(&mut self) -> Result<Option<Header>, SError> {
         let header = match self.next_header()? {
             Some(header) => header,
             None => {
@@ -743,7 +743,7 @@ impl<R: Read + Seek> LogIterator<R> {
         Ok(Some(header))
     }
 
-    fn next_header(&mut self) -> Result<Option<Header>, Error> {
+    fn next_header(&mut self) -> Result<Option<Header>, SError> {
         'looping: loop {
             let header_sz: &mut [u8] = &mut [0; 1];
             let header: &mut [u8] = &mut [0; HEADER_MAX_SIZE as usize];
@@ -783,7 +783,7 @@ impl<R: Read + Seek> LogIterator<R> {
         }
     }
 
-    fn true_up(&mut self) -> Result<(), Error> {
+    fn true_up(&mut self) -> Result<(), SError> {
         let offset = io_result(self.input.stream_position())?;
         let trued_up = compute_true_up(offset);
         if trued_up - offset > HEADER_MAX_SIZE {
@@ -801,7 +801,7 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
     log_options: LogOptions,
     log_path: P,
     mut builder: B,
-) -> Result<Option<B::Sealed>, Error> {
+) -> Result<Option<B::Sealed>, SError> {
     let mut log_iter = LogIterator::new(log_options, log_path)?;
     let mut kvrs = Vec::new();
     while let Some(kvr) = log_iter.next().unwrap() {
@@ -833,7 +833,7 @@ pub fn log_to_builder<P: AsRef<Path>, B: Builder>(
 pub fn log_to_setsum<P: AsRef<Path>>(
     log_options: LogOptions,
     log_path: P,
-) -> Result<Setsum, Error> {
+) -> Result<Setsum, SError> {
     let mut log_iter = LogIterator::new(log_options, log_path)?;
     let mut acc = Setsum::default();
     while let Some(kvr) = log_iter.next().unwrap() {
@@ -854,7 +854,7 @@ pub fn log_to_setsum<P: AsRef<Path>>(
 pub fn truncate_final_partial_frame<P: AsRef<Path>>(
     log_options: LogOptions,
     log_path: P,
-) -> Result<Option<u64>, Error> {
+) -> Result<Option<u64>, SError> {
     let mut iter = LogIterator::new(log_options, log_path)?;
     let mut offset = 0;
     let mut last_was_valid = true;

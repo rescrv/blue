@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::log::log_to_builder;
 use super::setsum::Setsum;
 use super::{
-    Builder, Error, LogBuilder, LogOptions, SstBuilder, SstOptions, TABLE_FULL_SIZE,
+    Builder, LogBuilder, LogOptions, SError, SstBuilder, SstOptions, TABLE_FULL_SIZE,
     error_with_path, is_table_full, system_error_with_path_and_context,
 };
 
@@ -69,11 +69,11 @@ impl Jester {
     }
 
     /// Flush the Jester.
-    pub fn flush(&mut self) -> Result<(), Error> {
+    pub fn flush(&mut self) -> Result<(), SError> {
         self.get_builder()?.flush()
     }
 
-    fn get_builder(&mut self) -> Result<&mut LogBuilder<File>, Error> {
+    fn get_builder(&mut self) -> Result<&mut LogBuilder<File>, SError> {
         if let Some(builder) = &self.builder {
             let size = builder.approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.log.rollover_size {
@@ -95,7 +95,7 @@ impl Jester {
         }
     }
 
-    fn rollover_builder(&mut self) -> Result<(), Error> {
+    fn rollover_builder(&mut self) -> Result<(), SError> {
         if self.builder.is_some() {
             let builder = self.builder.take().unwrap();
             let setsum = builder.seal()?.0;
@@ -105,7 +105,7 @@ impl Jester {
         Ok(())
     }
 
-    fn convert_builder(&mut self, input: PathBuf, setsum: Setsum) -> Result<(), Error> {
+    fn convert_builder(&mut self, input: PathBuf, setsum: Setsum) -> Result<(), SError> {
         let output =
             PathBuf::from(&self.options.sst_dir).join(format!("{}.tmp", setsum.hexdigest()));
         let builder = SstBuilder::new(self.options.sst.clone(), &output)?;
@@ -139,7 +139,7 @@ impl Builder for Jester {
         }
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         match self.get_builder()?.put(key, timestamp, value) {
             Ok(_) => Ok(()),
             Err(err) if is_table_full(&err) => {
@@ -150,7 +150,7 @@ impl Builder for Jester {
         }
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         match self.get_builder()?.del(key, timestamp) {
             Ok(_) => Ok(()),
             Err(err) if is_table_full(&err) => {
@@ -161,7 +161,7 @@ impl Builder for Jester {
         }
     }
 
-    fn seal(mut self) -> Result<(), Error> {
+    fn seal(mut self) -> Result<(), SError> {
         self.rollover_builder()?;
         Ok(())
     }

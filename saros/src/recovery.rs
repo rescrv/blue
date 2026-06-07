@@ -34,10 +34,10 @@ impl RecoveryBiometricsStore {
         Window::new(start?, limit?)
     }
 
-    pub fn load(&mut self, path: &Path) -> Result<(), Error> {
+    pub fn load(&mut self, path: &Path) -> Result<(), SError> {
         let contents = std::fs::read_to_string(path)?;
         let prometheus_lines = super::support_nom::parse_all(super::prometheus::parse)(&contents)
-            .map_err(|e| Error::text(e.to_string()))?;
+            .map_err(|e| text_error(e.to_string()))?;
         let mut counters = HashSet::new();
         let mut gauges = HashSet::new();
         for line in prometheus_lines.iter() {
@@ -58,14 +58,14 @@ impl RecoveryBiometricsStore {
             if let PrometheusLine::MetricReading(reading) = line {
                 let mut tags = vec![];
                 let tag = Tag::new("__name__", &reading.metric_name)
-                    .ok_or_else(|| Error::text("tag did not parse"))?;
+                    .ok_or_else(|| text_error("tag did not parse"))?;
                 tags.insert(0, tag);
                 let local_tags = reading
                     .labels
                     .iter()
                     .map(|(k, v)| {
                         Tag::new(k, v)
-                            .ok_or_else(|| Error::text("tag did not parse"))
+                            .ok_or_else(|| text_error("tag did not parse"))
                             .map(Tag::into_owned)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -74,7 +74,7 @@ impl RecoveryBiometricsStore {
                 let ts = reading
                     .timestamp
                     .and_then(|ts| Time::from_micros(1_000 * (ts as i64)))
-                    .ok_or_else(|| Error::text("timestamp did not parse"))?;
+                    .ok_or_else(|| text_error("timestamp did not parse"))?;
                 if counters.contains(reading.metric_name.as_str()) {
                     self.counters
                         .entry(tags)
@@ -97,7 +97,7 @@ impl BiometricsStore for RecoveryBiometricsStore {
         &self,
         _: &rpc_pb::Context,
         req: FetchCountersRequest,
-    ) -> Result<FetchCountersResponse, Error> {
+    ) -> Result<FetchCountersResponse, SError> {
         let Some(req_tags) = Tags::new(&req.tags) else {
             todo!();
         };
@@ -133,7 +133,7 @@ impl BiometricsStore for RecoveryBiometricsStore {
         &self,
         _: &rpc_pb::Context,
         _: FetchGaugesRequest,
-    ) -> Result<FetchGaugesResponse, Error> {
+    ) -> Result<FetchGaugesResponse, SError> {
         Ok(FetchGaugesResponse::default())
     }
 
@@ -141,7 +141,7 @@ impl BiometricsStore for RecoveryBiometricsStore {
         &self,
         _: &rpc_pb::Context,
         _: FetchHistogramsRequest,
-    ) -> Result<FetchHistogramsResponse, Error> {
+    ) -> Result<FetchHistogramsResponse, SError> {
         Ok(FetchHistogramsResponse::default())
     }
 }

@@ -19,12 +19,10 @@ use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
 use sst::{Builder, Cursor, KeyRef, Sst, SstCursor, SstMetadata, SstMultiBuilder};
 use sync42::lru::{LeastRecentlyUsedCache, Value as LruValue};
-use zerror::Z;
-use zerror_core::ErrorCore;
 
 use super::{
-    COMPACTION_DIR, Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_SST, ensure_dir,
-    make_all_dirs,
+    COMPACTION_DIR, LsmtkOptions, MANI_ROOT, ResultSErrorExt, SError, SST_FILE, TRASH_SST,
+    corruption, duplicate_sst, ensure_dir, logic_error, make_all_dirs,
 };
 use crate::reference_counter::ReferenceCounter;
 use crate::{TRACING, verifier};
@@ -237,7 +235,7 @@ fn compare_for_min_max(lhs: &&[u8], rhs: &&[u8]) -> Ordering {
 }
 
 impl Version {
-    fn open(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Self, Error> {
+    fn open(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Self, SError> {
         recover(options, metadata)
     }
 
@@ -262,7 +260,7 @@ impl Version {
         setsums
     }
 
-    fn ingest(&self, to_add: SstMetadata) -> Result<Self, Error> {
+    fn ingest(&self, to_add: SstMetadata) -> Result<Self, SError> {
         // TODO(rescrv):  Put it at the highest level with a hole.
         let mut new_tree = self.clone();
         new_tree.levels[0].ssts.push(Arc::new(to_add));
@@ -296,7 +294,7 @@ impl Version {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, sst::Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         *is_tombstone = false;
         let mut level0 = self.levels[0].ssts.clone();
         level0.sort_by_key(|md| md.biggest_timestamp);
@@ -327,7 +325,7 @@ impl Version {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, sst::Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         let setsum = Setsum::from_digest(md.setsum);
         let sst = if let Some(sst) = sc.lookup(&setsum) {
             sst.ptr
@@ -353,13 +351,13 @@ impl Version {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor>>, sst::Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor>>, SError> {
         fn lazy_cursor(
             fm: &FileManager,
             sc: &LeastRecentlyUsedCache<Setsum, CachedSst>,
             root: &str,
             setsum: Setsum,
-        ) -> Result<SstCursor, sst::Error> {
+        ) -> Result<SstCursor, SError> {
             if let Some(sst) = sc.lookup(&setsum) {
                 Ok(sst.ptr.cursor())
             } else {
@@ -560,7 +558,7 @@ impl Version {
         }
     }
 
-    fn release_compaction(&self, compaction: Compaction) -> Result<(), Error> {
+    fn release_compaction(&self, compaction: Compaction) -> Result<(), SError> {
         let mut ongoing_list = self.ongoing.lock().unwrap();
         for (idx, ongoing) in ongoing_list.iter().enumerate() {
             if Arc::ptr_eq(ongoing, &compaction.core) {
@@ -568,17 +566,14 @@ impl Version {
                 return Ok(());
             }
         }
-        Err(Error::LogicError {
-            core: ErrorCore::default(),
-            context: "Provided a compaction that is not ongoing".to_string(),
-        })
+        Err(logic_error("Provided a compaction that is not ongoing"))
     }
 
     fn apply_compaction(
         &self,
         compaction: Compaction,
         outputs: Vec<SstMetadata>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         let mut ongoing_list = self.ongoing.lock().unwrap();
         for (idx, ongoing) in ongoing_list.iter().enumerate() {
             if Arc::ptr_eq(ongoing, &compaction.core) {
@@ -586,17 +581,14 @@ impl Version {
                 return self.apply_compaction_inner(compaction.core, outputs);
             }
         }
-        Err(Error::LogicError {
-            core: ErrorCore::default(),
-            context: "Provided a compaction that is not ongoing".to_string(),
-        })
+        Err(logic_error("Provided a compaction that is not ongoing"))
     }
 
     fn apply_compaction_inner(
         &self,
         compaction: Arc<CompactionCore>,
         outputs: Vec<SstMetadata>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         let mut new_tree = self.clone();
         // NOTE(rescrv): Intentionally do not include upper level.
         for level in compaction.lower_level..compaction.upper_level {
@@ -1053,7 +1045,7 @@ impl VersionRef<'_> {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, sst::Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         self.version.load(
             &self.tree.file_manager,
             &self.tree.sst_cache,
@@ -1068,7 +1060,7 @@ impl VersionRef<'_> {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MergingCursor<Box<dyn Cursor>>, sst::Error> {
+    ) -> Result<MergingCursor<Box<dyn Cursor>>, SError> {
         self.version.range_scan(
             &self.tree.file_manager,
             &self.tree.sst_cache,
@@ -1101,7 +1093,7 @@ pub struct LsmTree {
 }
 
 impl LsmTree {
-    pub fn open(options: LsmtkOptions) -> Result<Self, Error> {
+    pub fn open(options: LsmtkOptions) -> Result<Self, SError> {
         let root: PathBuf = PathBuf::from(&options.path);
         ensure_dir(root.clone(), "root")?;
         make_all_dirs(&root)?;
@@ -1116,7 +1108,7 @@ impl LsmTree {
         Self::from_manifest(options, mani)
     }
 
-    pub(crate) fn from_manifest(options: LsmtkOptions, mani: Manifest) -> Result<Self, Error> {
+    pub(crate) fn from_manifest(options: LsmtkOptions, mani: Manifest) -> Result<Self, SError> {
         let root: PathBuf = PathBuf::from(&options.path);
         let mani = RwLock::new(mani);
         let file_manager = Arc::new(FileManager::new(options.max_open_files));
@@ -1131,13 +1123,11 @@ impl LsmTree {
             .map(|s| s.to_string())
             .unwrap_or(Setsum::default().hexdigest());
         if version_setsum != mani_setsum {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "setsum of tree does not match setsum of manifest".to_string(),
-            })
-            .as_z()
-            .with_info("tree", version_setsum)
-            .with_info("mani", mani_setsum);
+            return Err(
+                corruption("setsum of tree does not match setsum of manifest")
+                    .with_debug_field("tree", version_setsum)
+                    .with_debug_field("mani", mani_setsum),
+            );
         }
         let stall = Condvar::new();
         let compact = Condvar::new();
@@ -1169,13 +1159,12 @@ impl LsmTree {
         root: P,
         mani: &Manifest,
         file_manager: &FileManager,
-    ) -> Result<Vec<SstMetadata>, Error> {
+    ) -> Result<Vec<SstMetadata>, SError> {
         let mut metadata = vec![];
         let mut setsums = HashSet::new();
         for hexdigest in mani.strs() {
-            let setsum = Setsum::from_hexdigest(hexdigest).ok_or(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "setsum invalid".to_string(),
+            let setsum = Setsum::from_hexdigest(hexdigest).ok_or_else(|| {
+                corruption("setsum invalid").with_debug_field("hexdigest", hexdigest)
             })?;
             let path = SST_FILE(&root, setsum);
             let file = file_manager.open(&path)?;
@@ -1186,7 +1175,7 @@ impl LsmTree {
         Ok(metadata)
     }
 
-    fn cleanup_orphans(&mut self) -> Result<(), Error> {
+    fn cleanup_orphans(&mut self) -> Result<(), SError> {
         let manis = verifier::list_mani_fragments(&self.root)?;
         let mut ssts_to_remove = HashSet::new();
         for mani in manis.into_iter() {
@@ -1222,7 +1211,7 @@ impl LsmTree {
         Ok(())
     }
 
-    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P) -> Result<(), Error> {
+    pub fn ingest<P: AsRef<Path>>(&self, sst_path: P) -> Result<(), SError> {
         self._ingest(sst_path, None)
     }
 
@@ -1230,7 +1219,7 @@ impl LsmTree {
         &self,
         sst_path: P,
         log_num: Option<u64>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), SError> {
         // For each SST, hardlink it into the ingest root.
         let mut edit = Edit::default();
         let mut acc = Setsum::default();
@@ -1243,13 +1232,10 @@ impl LsmTree {
         // Hard-link the file into place.
         let target = SST_FILE(&self.root, setsum);
         if target.exists() {
-            return Err(Error::DuplicateSst {
-                core: ErrorCore::default(),
-                what: target.to_string_lossy().to_string(),
-            });
+            return Err(duplicate_sst(target.to_string_lossy()));
         }
         INGEST_LINK.click();
-        hard_link(&sst_path, target).as_z()?;
+        hard_link(&sst_path, target)?;
         edit.add(&setsum.hexdigest())?;
         if let Some(log_num) = log_num {
             edit.info('L', &format!("{log_num}"))?;
@@ -1259,7 +1245,7 @@ impl LsmTree {
     }
 
     // TODO(rescrv):  Make this pub(crate).
-    pub fn compaction_thread(&self) -> Result<(), Error> {
+    pub fn compaction_thread(&self) -> Result<(), SError> {
         loop {
             let compaction = {
                 let mut mutex = self.compaction.lock().unwrap();
@@ -1283,7 +1269,7 @@ impl LsmTree {
         }
     }
 
-    fn perform_compaction(&self, compaction: Compaction) -> Result<(), Error> {
+    fn perform_compaction(&self, compaction: Compaction) -> Result<(), SError> {
         COMPACTION_PERFORM.click();
         if compaction.inputs().count() == 1 {
             // SAFETY(rescrv): This is ensured by count in a good implementation.
@@ -1341,7 +1327,7 @@ impl LsmTree {
         )
     }
 
-    fn perform_garbage_collection(&self, compaction: Compaction) -> Result<(), Error> {
+    fn perform_garbage_collection(&self, compaction: Compaction) -> Result<(), SError> {
         GARBAGE_COLLECTION_PERFORM.click();
         let mut mani_edit = Edit::default();
         let (input_setsum, mut cursor, compaction_dir) =
@@ -1369,10 +1355,7 @@ impl LsmTree {
             let retain = if let Some(gcn) = gc_next {
                 match gcn.cmp(&KeyRef::from(&kvr)) {
                     Ordering::Less => {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            context: "gc iterator out of sync with inputs".to_string(),
-                        });
+                        return Err(logic_error("gc iterator out of sync with inputs"));
                     }
                     Ordering::Equal => {
                         gc_next = gc.next()?;
@@ -1418,7 +1401,7 @@ impl LsmTree {
         &self,
         compaction: &Compaction,
         mani_edit: &mut Edit,
-    ) -> Result<(Setsum, MergingCursor<SstCursor>, PathBuf), Error> {
+    ) -> Result<(Setsum, MergingCursor<SstCursor>, PathBuf), SError> {
         let mut cursors: Vec<SstCursor> = vec![];
         let mut acc = Setsum::default();
         // Figure out the moves to make, update the mani_edit, compute setsum, and create a cursor.
@@ -1432,9 +1415,7 @@ impl LsmTree {
         // Setup the compaction output directory.
         let compaction_dir = COMPACTION_DIR(&self.root, acc);
         if compaction_dir.exists() {
-            remove_dir_all(&compaction_dir)
-                .as_z()
-                .with_info("dir", &compaction_dir)?;
+            remove_dir_all(&compaction_dir).with_debug_field("dir", &compaction_dir)?;
         }
         create_dir(&compaction_dir)?;
         Ok((acc, MergingCursor::new(cursors)?, compaction_dir))
@@ -1448,7 +1429,7 @@ impl LsmTree {
         input_setsum: Setsum,
         discard_setsum: Setsum,
         mut mani_edit: Edit,
-    ) -> Result<(), Error> {
+    ) -> Result<(), SError> {
         let mut outputs = vec![];
         let mut output_setsum = Setsum::default();
         // NOTE(rescrv):  Sometimes compaction generates the same file as input and output.  We are
@@ -1466,30 +1447,26 @@ impl LsmTree {
                 Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
                 err @ Err(_) => {
                     return err
-                        .as_z()
-                        .with_info("src", path)
-                        .with_info("dst", &new_path);
+                        .with_debug_field("src", path)
+                        .with_debug_field("dst", &new_path);
                 }
             };
             outputs.push(metadata);
         }
         if input_setsum != output_setsum + discard_setsum {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "setsum does not balance input = output + discard".to_string(),
-            }
-            .with_info("input_setsum", input_setsum.hexdigest())
-            .with_info("output_setsum", output_setsum.hexdigest())
-            .with_info("discard_setsum", discard_setsum.hexdigest()));
+            return Err(
+                corruption("setsum does not balance input = output + discard")
+                    .with_debug_field("input_setsum", input_setsum.hexdigest())
+                    .with_debug_field("output_setsum", output_setsum.hexdigest())
+                    .with_debug_field("discard_setsum", discard_setsum.hexdigest()),
+            );
         }
         let ret = self.apply_manifest_compaction(compaction, discard_setsum, mani_edit, outputs);
         for path in paths.into_iter() {
             COMPACTION_REMOVE.click();
-            remove_file(&path).as_z().with_info("path", &path)?;
+            remove_file(&path).with_debug_field("path", &path)?;
         }
-        remove_dir(&compaction_dir)
-            .as_z()
-            .with_info("dir", &compaction_dir)?;
+        remove_dir(&compaction_dir).with_debug_field("dir", &compaction_dir)?;
         ret
     }
 
@@ -1498,7 +1475,7 @@ impl LsmTree {
         setsum: Setsum,
         mut mani_edit: Edit,
         new: SstMetadata,
-    ) -> Result<(), Error> {
+    ) -> Result<(), SError> {
         let mut mutex = self.compaction.lock().unwrap();
         let mut version = self.take_snapshot();
         while version.version.should_stall_ingest() {
@@ -1533,7 +1510,7 @@ impl LsmTree {
         discard_setsum: Setsum,
         mut mani_edit: Edit,
         outputs: Vec<SstMetadata>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), SError> {
         let _mutex = self.compaction.lock().unwrap();
         let version = self.take_snapshot();
         let tree_setsum = version.version.compute_setsum();
@@ -1552,7 +1529,11 @@ impl LsmTree {
         Ok(())
     }
 
-    fn apply_moving_compaction(&self, compaction: Compaction, output: Setsum) -> Result<(), Error> {
+    fn apply_moving_compaction(
+        &self,
+        compaction: Compaction,
+        output: Setsum,
+    ) -> Result<(), SError> {
         let _mutex = self.compaction.lock().unwrap();
         let sst = self.open_sst(output)?;
         let meta = sst.metadata()?;
@@ -1567,7 +1548,7 @@ impl LsmTree {
     }
 
     // TODO(rescrv): Dedupe with tree.
-    fn open_sst(&self, setsum: Setsum) -> Result<Arc<Sst>, Error> {
+    fn open_sst(&self, setsum: Setsum) -> Result<Arc<Sst>, SError> {
         if let Some(sst) = self.sst_cache.lookup(&setsum) {
             Ok(sst.ptr)
         } else {
@@ -1620,21 +1601,21 @@ impl LsmTree {
         }
     }
 
-    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, SError> {
         let mut is_tombstone = false;
         self.load(key, &mut is_tombstone)
     }
 
-    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Error> {
+    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, SError> {
         let version = self.take_snapshot();
-        Ok(version.load(key, u64::MAX, is_tombstone)?)
+        version.load(key, u64::MAX, is_tombstone)
     }
 
     pub fn range_scan<T: AsRef<[u8]>>(
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<impl Cursor, Error> {
+    ) -> Result<impl Cursor, SError> {
         let version = self.take_snapshot();
         let version_scan = version.range_scan(start_bound, end_bound, u64::MAX)?;
         let cursor = PruningCursor::new(version_scan, u64::MAX)?;

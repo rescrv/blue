@@ -1,6 +1,6 @@
 //! Lazy cursoring, so we can limit the number of files open at once.
 
-use super::{Cursor, Error, KeyRef, SstCursor};
+use super::{Cursor, KeyRef, SError, SstCursor};
 
 ///////////////////////////////////////////// Position /////////////////////////////////////////////
 
@@ -14,12 +14,12 @@ enum Position {
 //////////////////////////////////////////// LazyCursor ////////////////////////////////////////////
 
 /// A LazyCursor instantiates its contents lazily, one file at a time.
-pub struct LazyCursor<F: FnMut() -> Result<SstCursor, Error>> {
+pub struct LazyCursor<F: FnMut() -> Result<SstCursor, SError>> {
     position: Position,
     instantiate: F,
 }
 
-impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
+impl<F: FnMut() -> Result<SstCursor, SError>> LazyCursor<F> {
     /// Create a new LazyCursor.
     pub fn new(instantiate: F) -> Self {
         Self {
@@ -28,7 +28,7 @@ impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
         }
     }
 
-    fn establish_cursor(&mut self) -> Result<&mut SstCursor, Error> {
+    fn establish_cursor(&mut self) -> Result<&mut SstCursor, SError> {
         let cursor = (self.instantiate)()?;
         self.position = Position::Instantiated { cursor };
         if let Position::Instantiated { cursor } = &mut self.position {
@@ -39,18 +39,18 @@ impl<F: FnMut() -> Result<SstCursor, Error>> LazyCursor<F> {
     }
 }
 
-impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+impl<F: FnMut() -> Result<SstCursor, SError>> Cursor for LazyCursor<F> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.position = Position::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.position = Position::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         let cursor = match &mut self.position {
             Position::First => self.establish_cursor()?,
             Position::Last => self.establish_cursor()?,
@@ -63,7 +63,7 @@ impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         match &mut self.position {
             Position::First => {}
             Position::Last => {
@@ -84,7 +84,7 @@ impl<F: FnMut() -> Result<SstCursor, Error>> Cursor for LazyCursor<F> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         match &mut self.position {
             Position::First => {
                 let cursor = self.establish_cursor()?;
