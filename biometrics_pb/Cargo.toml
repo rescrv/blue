@@ -13,5 +13,6 @@ buffertk = { workspace = true }
 one_two_eight = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
+sig_fig_histogram = { workspace = true }
 tuple_key = { workspace = true }
 tuple_key_derive = { workspace = true }

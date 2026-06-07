@@ -132,9 +132,17 @@ impl Sensor for Moments {
 
 ///////////////////////////////////////////// Histogram ////////////////////////////////////////////
 
+/// Stores histogram observations for a [`Histogram`] sensor.
+///
+/// Implementations provide the storage strategy.  The crate ships an implementation for
+/// [`sig_fig_histogram::LockFreeHistogram`], which is suitable for static sensors shared across
+/// threads.
 pub trait HistogramImpl: Send + Sync {
+    /// Record one observation.
     fn observe(&self, x: f64) -> Result<(), sig_fig_histogram::Error>;
+    /// Record `n` copies of one observation.
     fn observe_n(&self, x: f64, n: u64) -> Result<(), sig_fig_histogram::Error>;
+    /// Convert the current state to an owned histogram reading.
     fn to_histogram(&self) -> sig_fig_histogram::Histogram;
 }
 
@@ -152,6 +160,11 @@ impl<const N: usize> HistogramImpl for sig_fig_histogram::LockFreeHistogram<N> {
     }
 }
 
+/// [Histogram] captures a distribution of non-negative floating point observations.
+///
+/// Invalid observations do not escape as errors.  Instead, observations that exceed the backing
+/// histogram's maximum bucket increment [`Histogram::exceeds_max`], while negative observations
+/// increment [`Histogram::is_negative`].
 pub struct Histogram {
     label: &'static str,
     histogram: &'static dyn HistogramImpl,
@@ -160,6 +173,7 @@ pub struct Histogram {
 }
 
 impl Histogram {
+    /// Create a new histogram sensor with the provided label and backing implementation.
     pub const fn new(label: &'static str, histogram: &'static dyn HistogramImpl) -> Self {
         let exceeds_max = Counter::new(label);
         let is_negative = Counter::new(label);
@@ -173,14 +187,17 @@ impl Histogram {
 }
 
 impl Histogram {
+    /// Return the counter for observations that exceed the backing histogram's maximum bucket.
     pub fn exceeds_max(&self) -> &Counter {
         &self.exceeds_max
     }
 
+    /// Return the counter for observations that are negative.
     pub fn is_negative(&self) -> &Counter {
         &self.is_negative
     }
 
+    /// Record one observation or count why it could not be recorded.
     pub fn observe(&self, x: f64) {
         match self.histogram.observe(x) {
             Ok(()) => {}
@@ -193,6 +210,7 @@ impl Histogram {
         }
     }
 
+    /// Record `n` copies of one observation or count why they could not be recorded.
     pub fn observe_n(&self, x: f64, n: u64) {
         match self.histogram.observe_n(x, n) {
             Ok(()) => {}
@@ -240,8 +258,29 @@ mod tests {
     }
 
     #[test]
+    fn counter_counts_clicks_and_batches() {
+        let counter = Counter::new("counter.counts.clicks.and.batches");
+
+        assert_eq!("counter.counts.clicks.and.batches", counter.label());
+        assert_eq!(0, counter.read());
+        counter.click();
+        counter.count(41);
+        assert_eq!(42, counter.read());
+    }
+
+    #[test]
     fn gauge_may_be_static() {
         static _GAUGE: Gauge = Gauge::new("gauge.may.be.static");
+    }
+
+    #[test]
+    fn gauge_sets_floating_point_value() {
+        let gauge = Gauge::new("gauge.sets.floating.point.value");
+
+        assert_eq!("gauge.sets.floating.point.value", gauge.label());
+        assert_eq!(0.0_f64.to_bits(), gauge.read().to_bits());
+        gauge.set(-13.5);
+        assert_eq!((-13.5_f64).to_bits(), gauge.read().to_bits());
     }
 
     #[test]
@@ -255,8 +294,16 @@ mod tests {
         MOMENTS.add(0.0);
         MOMENTS.add(5.0);
         MOMENTS.add(10.0);
-        assert_eq!(MOMENTS.read().n(), 3);
-        assert_eq!(MOMENTS.read().mean(), 5.0);
+        assert_eq!(
+            moments::Moments {
+                n: 3,
+                m1: 5.0,
+                m2: 50.0,
+                m3: 0.0,
+                m4: 1250.0,
+            },
+            MOMENTS.read()
+        );
     }
 
     #[test]
@@ -267,5 +314,26 @@ mod tests {
         HISTOGRAM_SENSOR.observe(0.0);
         HISTOGRAM_SENSOR.observe(5.0);
         HISTOGRAM_SENSOR.observe(10.0);
+    }
+
+    #[test]
+    fn histogram_records_observations_and_error_counters() {
+        static HISTOGRAM: sig_fig_histogram::LockFreeHistogram<1> =
+            sig_fig_histogram::LockFreeHistogram::new(2);
+        static HISTOGRAM_SENSOR: Histogram = Histogram::new(
+            "histogram.records.observations.and.error.counters",
+            &HISTOGRAM,
+        );
+
+        HISTOGRAM_SENSOR.observe_n(1.0, 4);
+        HISTOGRAM_SENSOR.observe(2.0);
+        HISTOGRAM_SENSOR.observe(-1.0);
+
+        assert_eq!(
+            vec![(1.0, 4)],
+            HISTOGRAM_SENSOR.read().iter().collect::<Vec<_>>()
+        );
+        assert_eq!(1, HISTOGRAM_SENSOR.exceeds_max().read());
+        assert_eq!(1, HISTOGRAM_SENSOR.is_negative().read());
     }
 }

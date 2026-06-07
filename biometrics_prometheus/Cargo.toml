@@ -9,9 +9,20 @@ repository = "https://github.com/rescrv/blue"
 
 [dependencies]
 libc = { workspace = true }
+biometrics_sys = { workspace = true }
+arrrg = { workspace = true }
+arrrg_derive = { workspace = true }
+getopts = { workspace = true }
 
 biometrics = { workspace = true }
 utf8path = { workspace = true }
 
-[dev-dependencies]
-biometrics_sys = { workspace = true }
+[[bin]]
+name = "with-system-metrics"
+path = "src/bin/with-system-metrics.rs"
+required-features = ["binaries"]
+
+[features]
+default = ["binaries"]
+
+binaries = []

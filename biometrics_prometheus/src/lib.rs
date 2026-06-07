@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::os::fd::AsRawFd;
@@ -9,10 +11,14 @@ use utf8path::Path;
 
 ////////////////////////////////////////////// Options /////////////////////////////////////////////
 
+/// Configuration for the file-backed Prometheus emitter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
+    /// Maximum approximate bytes to write before rotating to a new output segment.
     pub segment_size: usize,
+    /// Maximum approximate time to keep writing one output segment before rotating.
     pub flush_interval: Duration,
+    /// File path prefix.  The emitter appends `<epoch_millis>.prom`.
     pub prefix: Path<'static>,
 }
 
@@ -26,19 +32,26 @@ impl Default for Options {
     }
 }
 
+fn prometheus_name(label: impl fmt::Display) -> String {
+    label.to_string().replace('.', "_")
+}
+
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
+/// An in-memory emitter that renders Prometheus-compatible text.
 #[derive(Clone, Debug, Default)]
 pub struct SlashMetrics {
     output: Option<String>,
 }
 
 impl SlashMetrics {
+    /// Create an empty in-memory emitter.
     pub fn new() -> Self {
         let output = None;
         Self { output }
     }
 
+    /// Consume this emitter and return the rendered output.
     pub fn take(mut self) -> String {
         self.output.take().unwrap_or_default()
     }
@@ -54,7 +67,7 @@ impl biometrics::Emitter for SlashMetrics {
     type Error = std::io::Error;
 
     fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
-        let label = counter.label().replace(".", "_");
+        let label = prometheus_name(counter.label());
         let reading = counter.read();
         self.write_line(format!(
             "# TYPE {label} counter
@@ -64,7 +77,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
-        let label = gauge.label().replace(".", "_");
+        let label = prometheus_name(gauge.label());
         let reading = gauge.read();
         self.write_line(format!(
             "# TYPE {label} gauge
@@ -74,7 +87,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
-        let label = moments.label().replace(".", "_");
+        let label = prometheus_name(moments.label());
         let reading = moments.read();
         self.write_line(format!(
             "# TYPE {label}_count counter
@@ -97,7 +110,7 @@ impl biometrics::Emitter for SlashMetrics {
     }
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
-        let label = histogram.label().replace(".", "_");
+        let label = prometheus_name(histogram.label());
         self.write_line(format!("# TYPE {label} histogram\n"))?;
         let mut total = 0;
         let mut acc = 0.0;
@@ -120,6 +133,7 @@ impl biometrics::Emitter for SlashMetrics {
 
 ////////////////////////////////////////////// Emitter /////////////////////////////////////////////
 
+/// A file-backed Prometheus emitter.
 pub struct Emitter {
     options: Options,
     output: Option<BufWriter<File>>,
@@ -130,6 +144,7 @@ pub struct Emitter {
 }
 
 impl Emitter {
+    /// Create a new file-backed emitter.
     pub fn new(options: Options) -> Self {
         let output = None;
         let written = 0;
@@ -146,6 +161,7 @@ impl Emitter {
         }
     }
 
+    /// Flush pending output to the current file.
     pub fn flush(&mut self) -> Result<(), std::io::Error> {
         if let Some(output) = self.output.as_mut() {
             output.flush()?;
@@ -225,23 +241,23 @@ impl biometrics::Emitter for Emitter {
     type Error = std::io::Error;
 
     fn emit_counter(&mut self, counter: &Counter, now: u64) -> Result<(), std::io::Error> {
-        let label = counter.label();
+        let label = prometheus_name(counter.label());
         let reading = counter.read();
-        self.emit_type_once(label, "counter", now)?;
+        self.emit_type_once(&label, "counter", now)?;
         self.write_line(format!("{label} {reading} {now}\n"), now)?;
         Ok(())
     }
 
     fn emit_gauge(&mut self, gauge: &Gauge, now: u64) -> Result<(), std::io::Error> {
-        let label = gauge.label();
+        let label = prometheus_name(gauge.label());
         let reading = gauge.read();
-        self.emit_type_once(label, "gauge", now)?;
+        self.emit_type_once(&label, "gauge", now)?;
         self.write_line(format!("{label} {reading} {now}\n"), now)?;
         Ok(())
     }
 
     fn emit_moments(&mut self, moments: &Moments, now: u64) -> Result<(), std::io::Error> {
-        let label = moments.label();
+        let label = prometheus_name(moments.label());
         let reading = moments.read();
         self.emit_type_once(format!("{label}_count"), "counter", now)?;
         self.emit_type_once(format!("{label}_mean"), "gauge", now)?;
@@ -268,8 +284,8 @@ impl biometrics::Emitter for Emitter {
     }
 
     fn emit_histogram(&mut self, histogram: &Histogram, now: u64) -> Result<(), std::io::Error> {
-        let label = histogram.label();
-        self.emit_type_once(label, "histogram", now)?;
+        let label = prometheus_name(histogram.label());
+        self.emit_type_once(&label, "histogram", now)?;
         self.emit_type_once(format!("{label}_sum"), "gauge", now)?;
         self.emit_type_once(format!("{label}_count"), "counter", now)?;
         self.emit_type_once(format!("{label}_exceeds_max"), "gauge", now)?;
@@ -296,10 +312,12 @@ impl biometrics::Emitter for Emitter {
 
 ////////////////////////////////////////////// Reader //////////////////////////////////////////////
 
+/// A locked reader for one emitted metrics file.
 #[derive(Debug)]
 pub struct Reader(Path<'static>, File);
 
 impl Reader {
+    /// Open a metrics file and wait until the writer releases its lock.
     pub fn open(path: Path) -> Result<Self, std::io::Error> {
         Self::_open(path, libc::F_SETLKW)
     }
@@ -328,10 +346,12 @@ impl Reader {
         Ok(Self(path, file))
     }
 
+    /// Return the path backing this reader.
     pub fn path(&self) -> &Path<'static> {
         &self.0
     }
 
+    /// Remove the file backing this reader.
     pub fn unlink(self) -> Result<(), std::io::Error> {
         std::fs::remove_file(self.path())
     }
@@ -347,11 +367,13 @@ impl std::ops::Deref for Reader {
 
 ////////////////////////////////////////////// Watcher /////////////////////////////////////////////
 
+/// A directory watcher that processes unlocked metrics files.
 pub struct Watcher {
     path: Path<'static>,
 }
 
 impl Watcher {
+    /// Create a new watcher for `path`.
     pub fn new(path: Path) -> Self {
         let path = path.into_owned();
         Self { path }
@@ -370,6 +392,9 @@ impl Watcher {
         for dirent in std::fs::read_dir(&self.path)? {
             let dirent = dirent?;
             let metadata = dirent.metadata()?;
+            if !metadata.is_file() {
+                continue;
+            }
             let path = Path::try_from(dirent.path()).map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path: not UTF-8")
             })?;
@@ -476,6 +501,31 @@ foo 0 42
     }
 
     #[test]
+    fn emitter_sanitizes_metric_names() {
+        static MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // SAFETY(rescrv):  Mutex poisoning.
+        let _guard = MUTEX.lock().unwrap();
+        if Path::from("tmp.dots.99.prom").exists() {
+            remove_file("tmp.dots.99.prom").unwrap();
+        }
+        let mut emitter = Emitter::new(Options {
+            segment_size: 1024,
+            flush_interval: Duration::from_secs(1),
+            prefix: Path::new("tmp.dots."),
+        });
+        emitter
+            .emit_counter(&Counter::new("foo.bar.baz"), 99)
+            .unwrap();
+        drop(emitter);
+
+        assert_eq!(
+            "# TYPE foo_bar_baz counter\nfoo_bar_baz 0 99\n",
+            read_to_string("tmp.dots.99.prom").unwrap()
+        );
+        remove_file("tmp.dots.99.prom").unwrap();
+    }
+
+    #[test]
     fn reader() {
         let _reader = Reader::open(Path::new("README.md")).unwrap();
     }
@@ -496,7 +546,6 @@ foo 0 42
             found.basename().as_str().starts_with("README.md")
                 || found.basename().as_str().starts_with("Cargo.toml")
                 || found.basename().as_str().starts_with("k8s.metrics")
-                || found.basename().as_str().starts_with("src")
                 || found.basename().as_str().starts_with("tmp.foo.")
                 || found.basename().as_str().starts_with(".gitignore"),
             "found: {found:?}",

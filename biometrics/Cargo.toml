@@ -3,9 +3,23 @@ name = "biometrics"
 version = "0.14.0"
 authors = ["Robert Escriva <robert@rescrv.net>"]
 edition = { workspace = true }
-description = "Biometrics provide the vitals of a process in the form of counters, gauges, moments, and T-digests."
+description = "Biometrics provide the vitals of a process in the form of counters, gauges, moments, and histograms."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = ["dep:proc-macro2", "dep:serde", "dep:syn", "dep:toml"]
+
 [dependencies]
+proc-macro2 = { workspace = true, features = ["span-locations"], optional = true }
+serde = { workspace = true, optional = true }
 sig_fig_histogram = { workspace = true }
+syn = { version = "2.0", features = ["full", "visit"], optional = true }
+toml = { workspace = true, optional = true }
+
+[[bin]]
+name = "biometrics-audit-counters"
+path = "src/bin/biometrics-audit-counters.rs"
+required-features = ["binaries"]

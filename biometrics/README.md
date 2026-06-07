@@ -15,14 +15,18 @@ will affect how to register sensors in order to solve the dependency graph probl
 Scope
 -----
 
-Biometrics will provide core sensor types and a plaintext emitter for counter, gauge, and moments types.  Protocol
-buffer definitions for sensor readings can be found in the [biometrics_pb](https://crates.io/crates/biometrics_pb)
+Biometrics will provide core sensor types and a plaintext emitter for counter, gauge, moments, and histogram types.
+Protocol buffer definitions for sensor readings can be found in the
+[biometrics_pb](https://crates.io/crates/biometrics_pb)
 
 Warts
 -----
 
 - The blue repo currently is not uniform in its register_biometrics functions.  The convention is that a public method
   should not call other public methods.
+- A future breaking cleanup should make histogram observation errors directly visible, likely with `try_observe` and
+  `try_observe_n` methods or fallible `observe` methods.
+- A future breaking cleanup should normalize `register_biometrics` conventions across the wider blue repo.
 
 Documentation
 -------------
