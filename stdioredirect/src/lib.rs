@@ -2,16 +2,40 @@
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpenMode {
+    Read,
+    Write,
+}
+
+#[cfg(not(unix))]
+pub fn make_stdio(
+    subs: &HashMap<char, String>,
+    close: bool,
+    file: Option<String>,
+    mode: OpenMode,
+) -> std::process::Stdio {
+    if close {
+        std::process::Stdio::null()
+    } else if let Some(file) = file {
+        std::process::Stdio::from(open_redirect_file(subs, file, mode))
+    } else {
+        std::process::Stdio::inherit()
+    }
+}
+
+#[cfg(unix)]
 pub fn close_or_dup2(
     subs: &HashMap<char, String>,
     close: bool,
     file: Option<String>,
     fd: libc::c_int,
-    opts: OpenOptions,
+    mode: OpenMode,
 ) {
     // take care of stdin
     if close {
@@ -21,23 +45,32 @@ pub fn close_or_dup2(
             libc::close(fd);
         }
     } else if let Some(file) = file {
-        let Some(file) = pct_substitution(subs, &file) else {
-            panic!("could not %-substitute {file}");
-        };
-        if !PathBuf::from(&file)
-            .parent()
-            .unwrap_or(Path::new(".."))
-            .exists()
-        {
-            panic!("could not open {file}: containing directory does not exist");
-        }
-        let file = opts.open(file).expect("file should open");
+        let file = open_redirect_file(subs, file, mode);
         unsafe {
             if libc::dup2(file.as_raw_fd(), fd) < 0 {
                 panic!("could not dup2: {:?}", std::io::Error::last_os_error());
             }
         }
     }
+}
+
+fn open_redirect_file(subs: &HashMap<char, String>, file: String, mode: OpenMode) -> std::fs::File {
+    let Some(file) = pct_substitution(subs, &file) else {
+        panic!("could not %-substitute {file}");
+    };
+    if !PathBuf::from(&file)
+        .parent()
+        .unwrap_or(Path::new(".."))
+        .exists()
+    {
+        panic!("could not open {file}: containing directory does not exist");
+    }
+    let mut opts = OpenOptions::new();
+    match mode {
+        OpenMode::Read => opts.read(true),
+        OpenMode::Write => opts.write(true).truncate(true).create(true),
+    };
+    opts.open(file).expect("file should open")
 }
 
 pub fn pct_substitution(subs: &HashMap<char, String>, input: &str) -> Option<String> {
