@@ -4,7 +4,7 @@ extern crate prototk_derive;
 
 use buffertk::stack_pack;
 
-use prototk::Error;
+use prototk::SError;
 
 #[derive(Clone, Debug, Default, Eq, Message, PartialEq)]
 struct Foo {
@@ -18,19 +18,19 @@ struct Foo {
 #[allow(dead_code)]
 struct Bar {
     #[prototk(1, message)]
-    res: Result<Foo, Error>,
+    res: Result<Foo, SError>,
 }
 
 impl Default for Bar {
     fn default() -> Self {
         Self {
-            res: Err(Error::default()),
+            res: Err(prototk::success()),
         }
     }
 }
 
 // TODO(rescrv): de-dupe this
-fn test_helper(res: Result<Foo, Error>, exp: &[u8]) {
+fn test_helper(res: Result<Foo, SError>, exp: &[u8]) {
     // test packing
     let buf: Vec<u8> = stack_pack(&res).to_vec();
     let got: &[u8] = &buf;
@@ -38,7 +38,7 @@ fn test_helper(res: Result<Foo, Error>, exp: &[u8]) {
 
     // test unpacking
     let mut up = buffertk::Unpacker::new(exp);
-    let got: Result<Foo, Error> = up.unpack().unwrap();
+    let got: Result<Foo, SError> = up.unpack().unwrap();
     assert_eq!(res, got, "unpacker failed");
 
     // test remainder
@@ -55,7 +55,14 @@ fn result_ok() {
 #[test]
 fn result_err() {
     test_helper(
-        Err(Error::UnknownDiscriminant { discriminant: 33 }),
-        &[18, 7, 210, 128, 128, 1, 2, 8, 33],
+        Err(prototk::unknown_discriminant(33)),
+        &[
+            18, 103, 102, 40, 101, 114, 114, 111, 114, 32, 40, 112, 104, 97, 115, 101, 32, 112,
+            114, 111, 116, 111, 116, 107, 41, 32, 40, 99, 111, 100, 101, 32, 117, 110, 107, 110,
+            111, 119, 110, 45, 100, 105, 115, 99, 114, 105, 109, 105, 110, 97, 110, 116, 41, 32,
+            40, 109, 101, 115, 115, 97, 103, 101, 32, 34, 117, 110, 107, 110, 111, 119, 110, 32,
+            100, 105, 115, 99, 114, 105, 109, 105, 110, 97, 110, 116, 34, 41, 32, 40, 100, 105,
+            115, 99, 114, 105, 109, 105, 110, 97, 110, 116, 32, 51, 51, 41, 41,
+        ],
     );
 }

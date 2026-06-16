@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use biometrics::Counter;
 
 use buffertk::{Unpacker, stack_pack};
-use prototk::Error as PrototkError;
+use prototk::SError as PrototkError;
 
 use prototk_derive::Message;
 

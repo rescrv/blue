@@ -7,9 +7,10 @@
 #![allow(clippy::len_zero)]
 #![allow(clippy::from_over_into)]
 
-use super::Error;
 use super::Packable;
+use super::SError;
 use super::Unpackable;
+use super::{signed_overflow, unsigned_overflow, varint_overflow};
 
 use std::convert::TryInto;
 
@@ -31,12 +32,12 @@ impl From<u8> for v64 {
 }
 
 impl TryInto<u8> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<u8, Error> {
+    fn try_into(self) -> Result<u8, SError> {
         match self.x.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::UnsignedOverflow { value: self.x }),
+            Err(_) => Err(unsigned_overflow(self.x)),
         }
     }
 }
@@ -48,12 +49,12 @@ impl From<u16> for v64 {
 }
 
 impl TryInto<u16> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<u16, Error> {
+    fn try_into(self) -> Result<u16, SError> {
         match self.x.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::UnsignedOverflow { value: self.x }),
+            Err(_) => Err(unsigned_overflow(self.x)),
         }
     }
 }
@@ -65,12 +66,12 @@ impl From<u32> for v64 {
 }
 
 impl TryInto<u32> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<u32, Error> {
+    fn try_into(self) -> Result<u32, SError> {
         match self.x.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::UnsignedOverflow { value: self.x }),
+            Err(_) => Err(unsigned_overflow(self.x)),
         }
     }
 }
@@ -94,13 +95,13 @@ impl From<i8> for v64 {
 }
 
 impl TryInto<i8> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<i8, Error> {
+    fn try_into(self) -> Result<i8, SError> {
         let value: i64 = self.x as i64;
         match value.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::SignedOverflow { value }),
+            Err(_) => Err(signed_overflow(value)),
         }
     }
 }
@@ -112,13 +113,13 @@ impl From<i16> for v64 {
 }
 
 impl TryInto<i16> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<i16, Error> {
+    fn try_into(self) -> Result<i16, SError> {
         let value: i64 = self.x as i64;
         match value.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::SignedOverflow { value }),
+            Err(_) => Err(signed_overflow(value)),
         }
     }
 }
@@ -130,13 +131,13 @@ impl From<i32> for v64 {
 }
 
 impl TryInto<i32> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn try_into(self) -> Result<i32, Error> {
+    fn try_into(self) -> Result<i32, SError> {
         let value: i64 = self.x as i64;
         match value.try_into() {
             Ok(x) => Ok(x),
-            Err(_) => Err(Error::SignedOverflow { value }),
+            Err(_) => Err(signed_overflow(value)),
         }
     }
 }
@@ -196,7 +197,7 @@ impl Packable for v64 {
 }
 
 impl v64 {
-    fn unpack_slow(buf: &[u8]) -> Result<(Self, &[u8]), Error> {
+    fn unpack_slow(buf: &[u8]) -> Result<(Self, &[u8]), SError> {
         let bytes: usize = if buf.len() < 10 { buf.len() } else { 10 };
         let mut ret = 0u64;
         let mut idx = 0;
@@ -212,11 +213,11 @@ impl v64 {
             let ret: v64 = ret.into();
             Ok((ret, &buf[idx..]))
         } else {
-            Err(Error::VarintOverflow { bytes })
+            Err(varint_overflow(bytes))
         }
     }
 
-    fn unpack_size<const SZ: usize>(buf: &[u8]) -> Result<(Self, &[u8]), Error> {
+    fn unpack_size<const SZ: usize>(buf: &[u8]) -> Result<(Self, &[u8]), SError> {
         let mut result = (buf[SZ - 1] as u64) << (7 * (SZ - 1));
         let mut offset = 0;
         for b in buf.iter().take(SZ - 1) {
@@ -228,10 +229,10 @@ impl v64 {
 }
 
 impl<'a> Unpackable<'a> for v64 {
-    type Error = Error;
+    type Error = crate::SError;
 
     #[inline(always)]
-    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
+    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError>
     where
         'b: 'a,
     {
@@ -259,7 +260,7 @@ impl<'a> Unpackable<'a> for v64 {
         } else if buf[9] < 128 {
             Self::unpack_size::<10>(buf)
         } else {
-            Err(Error::VarintOverflow { bytes: buf.len() })
+            Err(varint_overflow(buf.len()))
         }
     }
 }
@@ -292,8 +293,8 @@ mod tests {
     fn try_into_u8() {
         let x: u64 = (u8::MAX as u64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<u8, Error> = v.try_into();
-        assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
+        let x2: Result<u8, SError> = v.try_into();
+        assert_eq!(Err(unsigned_overflow(x)), x2);
     }
 
     #[test]
@@ -307,8 +308,8 @@ mod tests {
     fn try_into_u16() {
         let x: u64 = (u16::MAX as u64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<u16, Error> = v.try_into();
-        assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
+        let x2: Result<u16, SError> = v.try_into();
+        assert_eq!(Err(unsigned_overflow(x)), x2);
     }
 
     #[test]
@@ -322,8 +323,8 @@ mod tests {
     fn try_into_u32() {
         let x: u64 = (u32::MAX as u64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<u32, Error> = v.try_into();
-        assert_eq!(Err(Error::UnsignedOverflow { value: x }), x2);
+        let x2: Result<u32, SError> = v.try_into();
+        assert_eq!(Err(unsigned_overflow(x)), x2);
     }
 
     #[test]
@@ -346,8 +347,8 @@ mod tests {
     fn try_into_i8() {
         let x: i64 = (i8::MAX as i64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<i8, Error> = v.try_into();
-        assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
+        let x2: Result<i8, SError> = v.try_into();
+        assert_eq!(Err(signed_overflow(x)), x2);
     }
 
     #[test]
@@ -363,8 +364,8 @@ mod tests {
     fn try_into_i16() {
         let x: i64 = (i16::MAX as i64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<i16, Error> = v.try_into();
-        assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
+        let x2: Result<i16, SError> = v.try_into();
+        assert_eq!(Err(signed_overflow(x)), x2);
     }
 
     #[test]
@@ -380,8 +381,8 @@ mod tests {
     fn try_into_i32() {
         let x: i64 = (i32::MAX as i64) + 1;
         let v: v64 = v64::from(x);
-        let x2: Result<i32, Error> = v.try_into();
-        assert_eq!(Err(Error::SignedOverflow { value: x }), x2);
+        let x2: Result<i32, SError> = v.try_into();
+        assert_eq!(Err(signed_overflow(x)), x2);
     }
 
     #[test]

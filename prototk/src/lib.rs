@@ -9,760 +9,144 @@ pub use zigzag::unzigzag;
 pub use zigzag::zigzag;
 
 use buffertk::{Packable, Unpackable, Unpacker, stack_pack, v64};
+pub use handled::SError;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-/// Error captures the possible error conditions for packing and unpacking.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub enum Error {
-    /// The default error is succes.
-    #[default]
-    Success,
-    /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
-    /// available in the underlying memory.
-    BufferTooShort {
-        /// The number of bytes required to unpack.
-        required: usize,
-        /// The number of bytes available to unpack.
-        had: usize,
-    },
-    /// InvalidFieldNumber indicates that the field is not a user-assignable field.
-    InvalidFieldNumber {
-        /// The u32 field number that's invalid.
-        field_number: u32,
-        /// A human-readable description of why the field number is invalid.
-        what: String,
-    },
-    /// UnhandledWireType indicates that the wire_type is not understood by this process and cannot
-    /// be skipped.
-    UnhandledWireType {
-        /// The wire type that's not handled.
-        wire_type: u32,
-    },
-    /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge {
-        /// The tag that's too large.
-        tag: u64,
-    },
-    /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow {
-        /// The number of bytes witnessed in the varint.
-        bytes: usize,
-    },
-    /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow {
-        /// The u64 that doesn't fit a u32.
-        value: u64,
-    },
-    /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow {
-        /// The i64 that doesn't fit an i32.
-        value: i64,
-    },
-    /// WrongLength indicates that a bytes32 did not have 32 bytes.
-    WrongLength {
-        /// The required number of bytes for the type.
-        required: usize,
-        /// The number of bytes the type claims to be.
-        had: usize,
-    },
-    /// StringEncoding indicates that a value is not UTF-8 friendly.
-    StringEncoding,
-    /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant {
-        /// The discriminant that's not handled by this process.
-        discriminant: u32,
-    },
-    /// NotAChar indicates that the prescribed value was tried to unpack as a char, but it's not a
-    /// char.
-    NotAChar {
-        /// Value that's not a char.
-        value: u32,
-    },
+const PHASE: &str = "prototk";
+
+/// A default `prototk` error value.
+pub const CODE_SUCCESS: &str = "success";
+/// A buffer did not contain enough bytes to unpack a value.
+pub const CODE_BUFFER_TOO_SHORT: &str = "buffer-too-short";
+/// A field number is not user-assignable.
+pub const CODE_INVALID_FIELD_NUMBER: &str = "invalid-field-number";
+/// A wire type is not understood by this process.
+pub const CODE_UNHANDLED_WIRE_TYPE: &str = "unhandled-wire-type";
+/// A tag exceeded the 32-bit protobuf tag representation.
+pub const CODE_TAG_TOO_LARGE: &str = "tag-too-large";
+/// A varint exceeded the maximum encoded length.
+pub const CODE_VARINT_OVERFLOW: &str = "varint-overflow";
+/// An unsigned value did not fit the requested target type.
+pub const CODE_UNSIGNED_OVERFLOW: &str = "unsigned-overflow";
+/// A signed value did not fit the requested target type.
+pub const CODE_SIGNED_OVERFLOW: &str = "signed-overflow";
+/// A fixed-size bytes field had the wrong length.
+pub const CODE_WRONG_LENGTH: &str = "wrong-length";
+/// A serialized string was not valid UTF-8 or not a valid S-expression.
+pub const CODE_STRING_ENCODING: &str = "string-encoding";
+/// A discriminant was not recognized.
+pub const CODE_UNKNOWN_DISCRIMINANT: &str = "unknown-discriminant";
+/// A numeric value is not a valid Unicode scalar value.
+pub const CODE_NOT_A_CHAR: &str = "not-a-char";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), std::fmt::Error> {
-        match self {
-            Error::Success => fmt.debug_struct("SerializationError").finish(),
-            Error::BufferTooShort { required, had } => fmt
-                .debug_struct("BufferTooShort")
-                .field("required", required)
-                .field("had", had)
-                .finish(),
-            Error::InvalidFieldNumber { field_number, what } => fmt
-                .debug_struct("InvalidFieldNumber")
-                .field("field_number", field_number)
-                .field("what", what)
-                .finish(),
-            Error::UnhandledWireType { wire_type } => fmt
-                .debug_struct("UnhandledWireType")
-                .field("wire_type", wire_type)
-                .finish(),
-            Error::TagTooLarge { tag } => {
-                fmt.debug_struct("TagTooLarge").field("tag", tag).finish()
-            }
-            Error::VarintOverflow { bytes } => fmt
-                .debug_struct("VarintOverflow")
-                .field("bytes", bytes)
-                .finish(),
-            Error::UnsignedOverflow { value } => fmt
-                .debug_struct("UnsignedOverflow")
-                .field("value", value)
-                .finish(),
-            Error::SignedOverflow { value } => fmt
-                .debug_struct("SignedOverflow")
-                .field("value", value)
-                .finish(),
-            Error::WrongLength { required, had } => fmt
-                .debug_struct("WrongLength")
-                .field("required", required)
-                .field("had", had)
-                .finish(),
-            Error::StringEncoding => fmt.debug_struct("StringEncoding").finish(),
-            Error::UnknownDiscriminant { discriminant } => fmt
-                .debug_struct("UnknownDiscriminant")
-                .field("discriminant", discriminant)
-                .finish(),
-            Error::NotAChar { value } => {
-                fmt.debug_struct("NotAChar").field("value", value).finish()
-            }
-        }
-    }
+/// Construct a default `prototk` error value.
+pub fn success() -> SError {
+    error(CODE_SUCCESS).with_message("success")
 }
 
-impl From<buffertk::Error> for Error {
-    fn from(x: buffertk::Error) -> Self {
-        match x {
-            buffertk::Error::BufferTooShort { required, had } => {
-                Error::BufferTooShort { required, had }
-            }
-            buffertk::Error::VarintOverflow { bytes } => Error::VarintOverflow { bytes },
-            buffertk::Error::UnsignedOverflow { value } => Error::UnsignedOverflow { value },
-            buffertk::Error::SignedOverflow { value } => Error::SignedOverflow { value },
-            buffertk::Error::TagTooLarge { tag } => Error::TagTooLarge { tag },
-            buffertk::Error::UnknownDiscriminant { discriminant } => {
-                Error::UnknownDiscriminant { discriminant }
-            }
-            buffertk::Error::NotAChar { value } => Error::NotAChar { value },
-        }
+/// Construct a buffer-too-short error.
+pub fn buffer_too_short(required: usize, had: usize) -> SError {
+    error(CODE_BUFFER_TOO_SHORT)
+        .with_message("buffer too short")
+        .with_atom_field("required", required)
+        .with_atom_field("had", had)
+}
+
+/// Construct an invalid-field-number error.
+pub fn invalid_field_number(field_number: u32, what: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_FIELD_NUMBER)
+        .with_message("invalid field number")
+        .with_atom_field("field_number", field_number)
+        .with_string_field("what", what.as_ref())
+}
+
+/// Construct an unhandled-wire-type error.
+pub fn unhandled_wire_type(wire_type: u32) -> SError {
+    error(CODE_UNHANDLED_WIRE_TYPE)
+        .with_message("unhandled wire type")
+        .with_atom_field("wire_type", wire_type)
+}
+
+/// Construct a tag-too-large error.
+pub fn tag_too_large(tag: u64) -> SError {
+    error(CODE_TAG_TOO_LARGE)
+        .with_message("tag too large")
+        .with_atom_field("tag", tag)
+}
+
+/// Construct a varint-overflow error.
+pub fn varint_overflow(bytes: usize) -> SError {
+    error(CODE_VARINT_OVERFLOW)
+        .with_message("varint overflow")
+        .with_atom_field("bytes", bytes)
+}
+
+/// Construct an unsigned-overflow error.
+pub fn unsigned_overflow(value: u64) -> SError {
+    error(CODE_UNSIGNED_OVERFLOW)
+        .with_message("unsigned integer overflow")
+        .with_atom_field("value", value)
+}
+
+/// Construct a signed-overflow error.
+pub fn signed_overflow(value: i64) -> SError {
+    error(CODE_SIGNED_OVERFLOW)
+        .with_message("signed integer overflow")
+        .with_atom_field("value", value)
+}
+
+/// Construct a wrong-length error.
+pub fn wrong_length(required: usize, had: usize) -> SError {
+    error(CODE_WRONG_LENGTH)
+        .with_message("wrong length")
+        .with_atom_field("required", required)
+        .with_atom_field("had", had)
+}
+
+/// Construct a string-encoding error.
+pub fn string_encoding() -> SError {
+    error(CODE_STRING_ENCODING).with_message("string encoding error")
+}
+
+/// Construct an unknown-discriminant error.
+pub fn unknown_discriminant(discriminant: u32) -> SError {
+    error(CODE_UNKNOWN_DISCRIMINANT)
+        .with_message("unknown discriminant")
+        .with_atom_field("discriminant", discriminant)
+}
+
+/// Construct a not-a-char error.
+pub fn not_a_char(value: u32) -> SError {
+    error(CODE_NOT_A_CHAR)
+        .with_message("not a valid char")
+        .with_atom_field("value", value)
+}
+
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a handled::SExpr> {
+    match err.detail() {
+        handled::SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            handled::SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                handled::SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-impl Packable for Error {
-    fn pack_sz(&self) -> usize {
-        match self {
-            Error::Success => {
-                let prototk_empty: &[u8] = &[];
-                stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(262144),
-                    &prototk_empty,
-                ))
-                .pack_sz()
-            }
-            Error::BufferTooShort { required, had } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    required,
-                ));
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262145),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::InvalidFieldNumber { field_number, what } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    field_number,
-                ));
-                let pa = pa.pack(field_types::string::field_packer(
-                    FieldNumber::must(2),
-                    what,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262146),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::UnhandledWireType { wire_type } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    wire_type,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262147),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::TagTooLarge { tag } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(1), tag));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262148),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::VarintOverflow { bytes } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    bytes,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262149),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::UnsignedOverflow { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262150),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::SignedOverflow { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::int64::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262151),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::WrongLength { required, had } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    required,
-                ));
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262152),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::StringEncoding => {
-                let prototk_empty: &[u8] = &[];
-                stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(262153),
-                    &prototk_empty,
-                ))
-                .pack_sz()
-            }
-            Error::UnknownDiscriminant { discriminant } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    discriminant,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262154),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-            Error::NotAChar { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262155),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .pack_sz()
-            }
-        }
-    }
-
-    fn pack(&self, buf: &mut [u8]) {
-        match self {
-            Error::Success => {
-                let prototk_empty: &[u8] = &[];
-                stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(262144),
-                    &prototk_empty,
-                ))
-                .into_slice(buf);
-            }
-            Error::BufferTooShort { required, had } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    required,
-                ));
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262145),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::InvalidFieldNumber { field_number, what } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    field_number,
-                ));
-                let pa = pa.pack(field_types::string::field_packer(
-                    FieldNumber::must(2),
-                    what,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262146),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::UnhandledWireType { wire_type } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    wire_type,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262147),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::TagTooLarge { tag } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(1), tag));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262148),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::VarintOverflow { bytes } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    bytes,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262149),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::UnsignedOverflow { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262150),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::SignedOverflow { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::int64::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262151),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::WrongLength { required, had } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint64::field_packer(
-                    FieldNumber::must(1),
-                    required,
-                ));
-                let pa = pa.pack(field_types::uint64::field_packer(FieldNumber::must(2), had));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262152),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::StringEncoding => {
-                let prototk_empty: &[u8] = &[];
-                stack_pack(field_types::bytes::field_packer(
-                    FieldNumber::must(262153),
-                    &prototk_empty,
-                ))
-                .into_slice(buf);
-            }
-            Error::UnknownDiscriminant { discriminant } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    discriminant,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262154),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-            Error::NotAChar { value } => {
-                let pa = stack_pack(());
-                let pa = pa.pack(field_types::uint32::field_packer(
-                    FieldNumber::must(1),
-                    value,
-                ));
-                stack_pack(Tag {
-                    field_number: FieldNumber::must(262155),
-                    wire_type: WireType::LengthDelimited,
-                })
-                .pack(pa.length_prefixed())
-                .into_slice(buf);
-            }
-        }
+/// Return the machine-readable code from a `prototk` error.
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(handled::SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
-
-impl<'a> Unpackable<'a> for Error {
-    type Error = Error;
-
-    fn unpack<'b>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error>
-    where
-        'b: 'a,
-    {
-        let mut up = Unpacker::new(buf);
-        let tag: Tag = up.unpack()?;
-        let num: u32 = tag.field_number.into();
-        let wire_type: WireType = tag.wire_type;
-        match (num, wire_type) {
-            (262144, WireType::LengthDelimited) => {
-                let x: v64 = up.unpack()?;
-                up.advance(x.into());
-                Ok((Error::Success, up.remain()))
-            }
-            (262145, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_required: field_types::uint64 =
-                    field_types::uint64::default();
-                let mut prototk_field_had: field_types::uint64 = field_types::uint64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_required, _) = Unpackable::unpack(buf)?;
-                        }
-                        (2, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_had, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::BufferTooShort {
-                    required: prototk_field_required.into(),
-                    had: prototk_field_had.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262146, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_field_number: field_types::uint32 =
-                    field_types::uint32::default();
-                let mut prototk_field_what: field_types::string = field_types::string::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint32::WIRE_TYPE) => {
-                            (prototk_field_field_number, _) = Unpackable::unpack(buf)?;
-                        }
-                        (2, field_types::string::WIRE_TYPE) => {
-                            (prototk_field_what, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::InvalidFieldNumber {
-                    field_number: prototk_field_field_number.into(),
-                    what: prototk_field_what.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262147, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_wire_type: field_types::uint32 =
-                    field_types::uint32::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint32::WIRE_TYPE) => {
-                            (prototk_field_wire_type, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::UnhandledWireType {
-                    wire_type: prototk_field_wire_type.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262148, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_tag: field_types::uint64 = field_types::uint64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_tag, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::TagTooLarge {
-                    tag: prototk_field_tag.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262149, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_bytes: field_types::uint64 = field_types::uint64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_bytes, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::VarintOverflow {
-                    bytes: prototk_field_bytes.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262150, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_value: field_types::uint64 = field_types::uint64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_value, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::UnsignedOverflow {
-                    value: prototk_field_value.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262151, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_value: field_types::int64 = field_types::int64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::int64::WIRE_TYPE) => {
-                            (prototk_field_value, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::SignedOverflow {
-                    value: prototk_field_value.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262152, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_required: field_types::uint64 =
-                    field_types::uint64::default();
-                let mut prototk_field_had: field_types::uint64 = field_types::uint64::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_required, _) = Unpackable::unpack(buf)?;
-                        }
-                        (2, field_types::uint64::WIRE_TYPE) => {
-                            (prototk_field_had, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::WrongLength {
-                    required: prototk_field_required.into(),
-                    had: prototk_field_had.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262153, WireType::LengthDelimited) => {
-                let x: v64 = up.unpack()?;
-                up.advance(x.into());
-                Ok((Error::StringEncoding, up.remain()))
-            }
-            (262154, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_discriminant: field_types::uint32 =
-                    field_types::uint32::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint32::WIRE_TYPE) => {
-                            (prototk_field_discriminant, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::UnknownDiscriminant {
-                    discriminant: prototk_field_discriminant.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            (262155, WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<Error> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
-                let fields = FieldIterator::new(local_buf, &mut error);
-                let mut prototk_field_value: field_types::uint32 = field_types::uint32::default();
-                for (tag, buf) in fields {
-                    let num: u32 = tag.field_number.into();
-                    match (num, tag.wire_type) {
-                        (1, field_types::uint32::WIRE_TYPE) => {
-                            (prototk_field_value, _) = Unpackable::unpack(buf)?;
-                        }
-                        (_, _) => {
-                            return Err(Error::UnknownDiscriminant { discriminant: num });
-                        }
-                    }
-                }
-                let ret = Error::NotAChar {
-                    value: prototk_field_value.into(),
-                };
-                Ok((ret, up.remain()))
-            }
-            _ => Err(Error::UnknownDiscriminant { discriminant: num }),
-        }
-    }
-}
-
-impl FieldPackHelper<'_, field_types::message<Error>> for Error {
-    fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag)
-            .pack(stack_pack(self).length_prefixed())
-            .pack_sz()
-    }
-
-    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag)
-            .pack(stack_pack(self).length_prefixed())
-            .into_slice(out);
-    }
-}
-
-impl FieldUnpackHelper<'_, field_types::message<Error>> for Error {
-    fn merge_field(&mut self, proto: field_types::message<Error>) {
-        *self = proto.unwrap_message();
-    }
-}
-
-impl From<field_types::message<Error>> for Error {
-    fn from(proto: field_types::message<Error>) -> Self {
-        proto.unwrap_message()
-    }
-}
-
-impl Message<'_> for Error {}
 
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
@@ -783,15 +167,13 @@ pub enum WireType {
 
 impl WireType {
     /// Possibly create a new WireType from the tag bits.
-    pub fn new(tag_bits: u32) -> Result<WireType, Error> {
+    pub fn new(tag_bits: u32) -> Result<WireType, SError> {
         match tag_bits {
             0 => Ok(WireType::Varint),
             1 => Ok(WireType::SixtyFour),
             2 => Ok(WireType::LengthDelimited),
             5 => Ok(WireType::ThirtyTwo),
-            _ => Err(Error::UnhandledWireType {
-                wire_type: tag_bits,
-            }),
+            _ => Err(unhandled_wire_type(tag_bits)),
         }
     }
 
@@ -837,24 +219,18 @@ impl FieldNumber {
     }
 
     /// Create a new [FieldNumber] if `field_number` is valid and not reserved.
-    pub fn new(field_number: u32) -> Result<FieldNumber, Error> {
+    pub fn new(field_number: u32) -> Result<FieldNumber, SError> {
         if field_number < FIRST_FIELD_NUMBER {
-            return Err(Error::InvalidFieldNumber {
+            return Err(invalid_field_number(
                 field_number,
-                what: "field number must be positive integer".to_string(),
-            });
+                "field number must be positive integer",
+            ));
         }
         if field_number > LAST_FIELD_NUMBER {
-            return Err(Error::InvalidFieldNumber {
-                field_number,
-                what: "field number too large".to_string(),
-            });
+            return Err(invalid_field_number(field_number, "field number too large"));
         }
         if (FIRST_RESERVED_FIELD_NUMBER..=LAST_RESERVED_FIELD_NUMBER).contains(&field_number) {
-            return Err(Error::InvalidFieldNumber {
-                field_number,
-                what: "field is reserved".to_string(),
-            });
+            return Err(invalid_field_number(field_number, "field is reserved"));
         }
         Ok(FieldNumber { field_number })
     }
@@ -931,14 +307,14 @@ impl Packable for Tag {
 }
 
 impl<'a> Unpackable<'a> for Tag {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let tag: v64 = up.unpack()?;
         let tag: u64 = tag.into();
         if tag > u32::MAX as u64 {
-            return Err(Error::TagTooLarge { tag });
+            return Err(tag_too_large(tag));
         }
         let tag: u32 = tag as u32;
         let f: u32 = tag >> 3;
@@ -1195,12 +571,12 @@ where
 // TODO(rescrv): This panicked once and I didn't debug it.  Fix that.
 pub struct FieldIterator<'a, 'b> {
     up: Unpacker<'a>,
-    err: &'b mut Option<Error>,
+    err: &'b mut Option<SError>,
 }
 
 impl<'a, 'b> FieldIterator<'a, 'b> {
     /// Create a new field iterator that will return tags and their byte strings.
-    pub fn new(buf: &'a [u8], err: &'b mut Option<Error>) -> Self {
+    pub fn new(buf: &'a [u8], err: &'b mut Option<SError>) -> Self {
         Self {
             up: Unpacker::new(buf),
             err,
@@ -1242,10 +618,7 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
             WireType::SixtyFour => {
                 let buf: &[u8] = self.up.remain();
                 if buf.len() < 8 {
-                    *self.err = Some(Error::BufferTooShort {
-                        required: 8,
-                        had: buf.len(),
-                    });
+                    *self.err = Some(buffer_too_short(8, buf.len()));
                     return None;
                 }
                 self.up.advance(8);
@@ -1262,10 +635,7 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
                 };
                 let sz: usize = x.into();
                 if buf.len() < x.pack_sz() + sz {
-                    *self.err = Some(Error::BufferTooShort {
-                        required: sz,
-                        had: buf.len(),
-                    });
+                    *self.err = Some(buffer_too_short(sz, buf.len()));
                     return None;
                 }
                 self.up.advance(sz);
@@ -1274,10 +644,7 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
             WireType::ThirtyTwo => {
                 let buf: &[u8] = self.up.remain();
                 if buf.len() < 4 {
-                    *self.err = Some(Error::BufferTooShort {
-                        required: 4,
-                        had: buf.len(),
-                    });
+                    *self.err = Some(buffer_too_short(4, buf.len()));
                     return None;
                 }
                 self.up.advance(4);
@@ -1287,18 +654,66 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
     }
 }
 
+////////////////////////////////////////////// Unpack //////////////////////////////////////////////
+
+/// Unpack `T` from `buf`, converting its native unpack error into [SError].
+pub fn unpack_as<'a, T>(buf: &'a [u8]) -> Result<(T, &'a [u8]), SError>
+where
+    T: Unpackable<'a>,
+    <T as Unpackable<'a>>::Error: Into<SError>,
+{
+    T::unpack(buf).map_err(Into::into)
+}
+
+/// Unpack `T` from an [Unpacker], converting its native unpack error into [SError].
+pub fn unpack_from<'a, T>(up: &mut Unpacker<'a>) -> Result<T, SError>
+where
+    T: Unpackable<'a>,
+    <T as Unpackable<'a>>::Error: Into<SError>,
+{
+    let before = up.remain();
+    let (t, after) = T::unpack(before).map_err(Into::into)?;
+    up.advance(before.len() - after.len());
+    Ok(t)
+}
+
 ////////////////////////////////////////////// Message /////////////////////////////////////////////
 
 /// A protocol buffers messsage.
 pub trait Message<'a>:
     Default
     + buffertk::Packable
-    + buffertk::Unpackable<'a, Error = Error>
+    + buffertk::Unpackable<'a, Error: Into<SError> + From<buffertk::SError>>
     + FieldPackHelper<'a, field_types::message<Self>>
     + FieldUnpackHelper<'a, field_types::message<Self>>
     + 'a
-where
-    <Self as Unpackable<'a>>::Error: Into<Error>,
-    Error: From<Self::Error>,
 {
 }
+
+impl FieldPackHelper<'_, field_types::message<SError>> for SError {
+    fn field_pack_sz(&self, tag: &Tag) -> usize {
+        stack_pack(tag)
+            .pack(stack_pack(self).length_prefixed())
+            .pack_sz()
+    }
+
+    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
+        stack_pack(tag)
+            .pack(stack_pack(self).length_prefixed())
+            .into_slice(out);
+    }
+}
+
+impl FieldUnpackHelper<'_, field_types::message<SError>> for SError {
+    fn merge_field(&mut self, proto: field_types::message<SError>) {
+        *self = proto.unwrap_message();
+    }
+}
+
+impl From<field_types::message<SError>> for SError {
+    fn from(proto: field_types::message<SError>) -> Self {
+        proto.unwrap_message()
+    }
+}
+
+impl Message<'_> for SError {}

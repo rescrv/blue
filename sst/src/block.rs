@@ -93,7 +93,7 @@ impl Block {
         let mut up = Unpacker::new(&bytes[bytes.len() - 4..]);
         let num_restarts: u32 = up
             .unpack()
-            .map_err(|e: buffertk::Error| unpack_block_restarts(e.into()))?;
+            .map_err(|e: buffertk::SError| unpack_block_restarts(e.into()))?;
         let num_restarts: usize = num_restarts as usize;
         // Footer size.
         // |tag 10|v64 of num bytes|packed num_restarts u32s|tag 11|fixed32 capstone|

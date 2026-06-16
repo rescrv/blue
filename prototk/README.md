@@ -15,7 +15,7 @@ Scope
 This library is about serialization and deserialization of messages.  It strives to distil protocol buffers to this:
 
 ```ignore
-use handled::SError;
+use prototk::SError;
 
 #[derive(Debug, Default, Message)]
 pub enum Response {
@@ -50,7 +50,7 @@ Reserved Field Ranges
 
 The error types in my libraries all have diffrent field numbers.  Here is where I track them.
 
-- 262144..262400 prototk::Error
+- 262144..262400 prototk::SError
 - 278528..278784 rpc_pb structured values
 - 294912..295168 macarunes structured values
 - 311296..311552 tuple_key structured values

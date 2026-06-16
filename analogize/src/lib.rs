@@ -118,7 +118,7 @@ fn scrunch_error(err: scrunch::Error) -> SError {
         .with_debug_field("cause", err)
 }
 
-fn indicio_error(err: prototk::Error) -> SError {
+fn indicio_error(err: prototk::SError) -> SError {
     error(CODE_INDICIO)
         .with_message("indicio protobuf error")
         .with_string_field("cause", &err.to_string())
@@ -783,7 +783,7 @@ impl AnalogizeDocument<'_> {
 }
 
 impl<'a> Unpackable<'a> for AnalogizeDocument<'a> {
-    type Error = SError;
+    type Error = handled::SError;
 
     fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (stub, buf) = AnalogizeDocumentStub::unpack(buf)

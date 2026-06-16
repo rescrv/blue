@@ -96,9 +96,9 @@ pub fn derive_message(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
 
         impl #exp_impl_generics buffertk::Unpackable<#lifetime> for #ty_name #ty_generics #where_clause {
-            type Error = ::prototk::Error;
+            type Error = ::prototk::SError;
 
-            fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), ::prototk::Error>
+            fn unpack<'b>(buf: &'b [u8]) -> std::result::Result<(Self, &'b [u8]), ::prototk::SError>
                 where
                     'b: #lifetime,
             {
@@ -682,7 +682,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { field.span() =>
             (#field_number, ::prototk::field_types::#field_type::WIRE_TYPE) => {
-                let (prototk_tmp, _): (::prototk::field_types::#field_type, _) = Unpackable::unpack(field_value)?;
+                let (prototk_tmp, _): (::prototk::field_types::#field_type, _) =
+                    ::prototk::unpack_as(field_value)?;
                 ret.#field_ident.merge_field(prototk_tmp);
             },
         }
@@ -691,7 +692,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn struct_snippet(&mut self, _ty_name: &syn::Ident, fields: &[TokenStream]) -> TokenStream {
         quote! {
             let mut ret = Self::default();
-            let mut error: Option<::prototk::Error> = None;
+            let mut error: Option<::prototk::SError> = None;
             let fields = ::prototk::FieldIterator::new(buf, &mut error);
             for (tag, field_value) in fields {
                 let num: u32 = tag.field_number.into();
@@ -743,7 +744,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
             field_decls.push(decl);
             let block = quote! {
                 (#enum_number, ::prototk::field_types::#enum_type::WIRE_TYPE) => {
-                    let enum_value: ::prototk::field_types::#enum_type = Unpackable::unpack(buf)?.0;
+                    let enum_value: ::prototk::field_types::#enum_type =
+                        ::prototk::unpack_as(buf)?.0;
                     #field_name.merge_field(enum_value);
                 },
             };
@@ -755,8 +757,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         }
         quote! {
             (#field_number, ::prototk::WireType::LengthDelimited) => {
-                let length: v64 = up.unpack()?;
-                let mut error: Option<::prototk::Error> = None;
+                let length: v64 = ::prototk::unpack_from(&mut up)?;
+                let mut error: Option<::prototk::SError> = None;
                 let local_buf: &'b [u8] = &up.remain()[0..length.into()];
                 up.advance(length.into());
                 let fields = ::prototk::FieldIterator::new(local_buf, &mut error);
@@ -766,7 +768,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
                     match (num, tag.wire_type) {
                         #(#field_blocks)*
                         (_, _) => {
-                            return Err(::prototk::Error::UnknownDiscriminant { discriminant: num }.into());
+                            return Err(::prototk::unknown_discriminant(num).into());
                         },
                     }
                 }
@@ -787,7 +789,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
             (#field_number, ::prototk::field_types::#field_type::WIRE_TYPE) => {
-                let tmp: ::prototk::field_types::#field_type = up.unpack()?;
+                let tmp: ::prototk::field_types::#field_type =
+                    ::prototk::unpack_from(&mut up)?;
                 #[allow(clippy::useless_conversion)]
                 Ok((#ctor(tmp.into_native().into()), up.remain()))
             },
@@ -802,7 +805,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
             (#field_number, ::prototk::WireType::LengthDelimited) => {
-                let x: v64 = up.unpack()?;
+                let x: v64 = ::prototk::unpack_from(&mut up)?;
                 up.advance(x.into());
                 Ok((#ctor, up.remain()))
             },
@@ -812,13 +815,13 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     fn enum_snippet(&mut self, _ty_name: &syn::Ident, variants: &[TokenStream]) -> TokenStream {
         quote! {
             let mut up = ::buffertk::Unpacker::new(buf);
-            let tag: ::prototk::Tag = up.unpack()?;
+            let tag: ::prototk::Tag = ::prototk::unpack_from(&mut up)?;
             let num: u32 = tag.field_number.into();
             let wire_type: ::prototk::WireType = tag.wire_type;
             match (num, wire_type) {
                 #(#variants)*
                 _ => {
-                    return Err(::prototk::Error::UnknownDiscriminant { discriminant: num }.into());
+                    return Err(::prototk::unknown_discriminant(num).into());
                 },
             }
         }

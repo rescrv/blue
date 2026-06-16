@@ -594,43 +594,43 @@ fn corruption_fsync_failed() -> SError {
     error(CODE_CORRUPTION_FSYNC_FAILED)
 }
 
-fn unpack_final_block_offset(error: prototk::Error) -> SError {
+fn unpack_final_block_offset(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_FINAL_BLOCK_OFFSET, error.to_string())
 }
 
-fn unpack_final_block(error: prototk::Error) -> SError {
+fn unpack_final_block(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_FINAL_BLOCK, error.to_string())
 }
 
-fn unpack_table_entry(error: prototk::Error) -> SError {
+fn unpack_table_entry(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_TABLE_ENTRY, error.to_string())
 }
 
-fn unpack_block_metadata(error: prototk::Error) -> SError {
+fn unpack_block_metadata(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_BLOCK_METADATA, error.to_string())
 }
 
-fn unpack_key_value_pair(error: prototk::Error, offset: usize) -> SError {
+fn unpack_key_value_pair(error: prototk::SError, offset: usize) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_KEY_VALUE_PAIR, error.to_string())
         .with_atom_field(FIELD_OFFSET, offset)
 }
 
-fn unpack_block_restarts(error: prototk::Error) -> SError {
+fn unpack_block_restarts(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_BLOCK_RESTARTS, error.to_string())
 }
 
-fn unpack_key_value_entry_prototk(error: prototk::Error) -> SError {
+fn unpack_key_value_entry_prototk(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_KEY_VALUE_ENTRY, error.to_string())
 }
 
-fn unpack_log_header(error: prototk::Error) -> SError {
+fn unpack_log_header(error: prototk::SError) -> SError {
     UNPACK_ERROR.click();
     error_with_message(CODE_UNPACK_LOG_HEADER, error.to_string())
 }
@@ -1418,7 +1418,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let final_block_offset: u64 = up
             .unpack()
-            .map_err(|e: buffertk::Error| unpack_final_block_offset(e.into()))?;
+            .map_err(|e: buffertk::SError| unpack_final_block_offset(e.into()))?;
         // Read and parse the final block
         if file_size < final_block_offset {
             CORRUPTION.click();
