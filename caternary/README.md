@@ -177,6 +177,86 @@ Notes:
 - `FOLD` quotation must consume `(accumulator, element)` and leave one accumulator.
 - `EACH` quotation must consume one element and leave no extra values.
 
+### Locals
+
+A word `>name` is a *binder*: it pops the top of the stack and binds it to a
+local named `name`. A bare word that matches a bound local is a *reference*: it
+pushes that local's value back onto the stack. Reference lookup happens
+scope-first, ahead of definitions and operators, so a local shadows any
+definition or builtin of the same name.
+
+| Program | Meaning | Resulting stack |
+|---|---|---|
+| `5 >x x x` | bind `5` to `x`, then push it twice | `5 5` |
+| `1 2 >b >a a b` | bind `2`→`b`, `1`→`a`, then push `a` then `b` | `1 2` |
+
+A name is a leading ASCII letter or `_` followed by ASCII alphanumerics or `_`
+(the same grammar as optimizer pattern variables).
+
+Scoping rules:
+
+- **Single-assignment.** Binding a name that is already bound in the same scope
+  is an error (`5 >x 6 >x` fails).
+- **Per-call lifetime.** Locals live in a per-call environment and are reset at
+  the top level between calls; they do not persist from one `eval` to the next.
+- **By-value capture.** A quotation captures the locals in scope *by value* at
+  the point it is pushed. A reference that is free in the quotation body (not
+  shadowed by a `>name` binder lexically preceding it) is baked in, so a
+  quotation that escapes its defining scope still resolves its references. A
+  quotation pushed with no locals in scope is byte-for-byte the original token
+  stream, so programs without locals are unaffected.
+
+```text
+Program: 10 >x [x ADD] CALL
+Meaning: bind 10 to x, push a quotation that captures x by value, then call it
+Stack (with 5 on the stack before, ADD registered): 15
+```
+
+### User Function Definitions
+
+A top-level `[ body ] :name` pair *defines* a function: the quotation before the
+`:name` binder becomes the body of a function callable by `name`. Definitions
+are collected by a static pre-pass, `Evaluator::load`, run before any
+evaluation:
+
+```rust
+use caternary::{Evaluator, parse, register_all_builtins};
+
+let mut eval: Evaluator<Value> = Evaluator::new();
+register_all_builtins(&mut eval);
+
+// Load definitions once, then evaluate many programs against them.
+eval.load(&parse("[1 ADD] :inc [inc inc] :twice")?)?;
+
+let stack = eval.eval(&parse("5 twice")?)?; // 7
+```
+
+Because `load` sees the whole token stream before execution:
+
+- **Order does not matter.** Forward references resolve: `[inc inc] :twice` may
+  appear before `[1 ADD] :inc`.
+- **Recursion works.** A body resolves its own name at call time against the
+  fully populated table.
+- **Load is additive.** Call `load` repeatedly to assemble a library
+  incrementally; a redefinition is rejected both within a call and across calls.
+
+Resolution order is **locals, then definitions, then operators**: a `>name`
+local shadows a definition, and a definition may shadow a builtin operator.
+Definitions are visible inside quotations (`5 [inc] CALL` calls `inc`).
+
+A `:`-prefixed word is legal *only* as the second half of a top-level
+`[ body ] :name` pair. Every other occurrence is a static definition error,
+reported by `load`:
+
+- a binder nested inside a quotation,
+- a binder with no preceding quotation,
+- a binder following a non-quotation word,
+- a malformed name (e.g. `:2x` or a bare `:`),
+- a redefinition of an existing name.
+
+As a backstop, evaluation itself fails loudly if a binder is reached without
+having been loaded, so a stray `:name` can never be mistaken for a literal.
+
 ## Optimizer Features
 
 The optimizer rewrites token streams with pattern rules until fixpoint, with cycle detection.
