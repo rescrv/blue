@@ -701,6 +701,9 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
                     (_, _) => {},
                 }
             }
+            if let Some(error) = error {
+                return Err(error);
+            }
             Ok((ret, &[]))
         }
     }
@@ -757,10 +760,8 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
         }
         quote! {
             (#field_number, ::prototk::WireType::LengthDelimited) => {
-                let length: v64 = ::prototk::unpack_from(&mut up)?;
                 let mut error: Option<::prototk::SError> = None;
-                let local_buf: &'b [u8] = &up.remain()[0..length.into()];
-                up.advance(length.into());
+                let local_buf: &'b [u8] = ::prototk::take_length_prefixed(&mut up)?;
                 let fields = ::prototk::FieldIterator::new(local_buf, &mut error);
                 #(#field_decls;)*
                 for (tag, buf) in fields {
@@ -771,6 +772,9 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
                             return Err(::prototk::unknown_discriminant(num).into());
                         },
                     }
+                }
+                if let Some(error) = error {
+                    return Err(error);
                 }
                 let ret = #ctor {
                     #(#hydration)*
@@ -805,8 +809,7 @@ impl ProtoTKVisitor for UnpackMessageVisitor {
     ) -> TokenStream {
         quote_spanned! { variant.span() =>
             (#field_number, ::prototk::WireType::LengthDelimited) => {
-                let x: v64 = ::prototk::unpack_from(&mut up)?;
-                up.advance(x.into());
+                let _ = ::prototk::take_length_prefixed(&mut up)?;
                 Ok((#ctor, up.remain()))
             },
         }

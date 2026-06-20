@@ -64,6 +64,14 @@ fn named_struct() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
+#[test]
+fn named_struct_rejects_truncated_field() {
+    let mut up = buffertk::Unpacker::new(&[10, 3, 1]);
+    let got: Result<NamedStruct, prototk::SError> = up.unpack();
+
+    assert_eq!(Err(prototk::buffer_too_short(3, 1)), got);
+}
+
 /////////////////////////////////////////// UnnamedStruct //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, Message, PartialEq)]
