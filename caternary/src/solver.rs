@@ -647,8 +647,7 @@ where
     }
 }
 
-/// Is this word the `if` combinator (either the spec's `if` or the runtime
-/// `IF` — see [`crate::BUILTIN_NAME_MAP`])?
+/// Is this word the `IF` combinator?
 fn is_if(word: &str) -> bool {
     word.eq_ignore_ascii_case("if")
 }
@@ -1083,6 +1082,25 @@ impl ExploratoryCache {
         self.verdicts.is_empty()
     }
 
+    /// Discharge an **obligation** `goal` through the per-obligation discharge
+    /// cache (§12 M14 / §10.7), keyed on its exact canonical content (predicate +
+    /// in-scope facts). On a cache **hit** the memoized verdict is returned with
+    /// `from_cache = true` and **no solver call is made** (warm-compile reuse);
+    /// on a miss the goal is discharged once, memoized, and `solves` is bumped.
+    ///
+    /// This is the same machinery the strict-`assume` exploratory check uses
+    /// (the M12 cache), surfaced as a general per-obligation cache so a
+    /// whole-program warm recompile re-solves only the obligations whose content
+    /// changed. Changing one obligation changes only its key; every other
+    /// obligation hits the cache.
+    pub fn discharge_obligation<S: Solver + FactSnapshot>(
+        &mut self,
+        solver: &mut S,
+        goal: &Pred,
+    ) -> (Verdict, bool) {
+        self.discharge_cached(solver, goal)
+    }
+
     /// Run the exploratory drop-and-re-run for `goal` under the solver's live
     /// facts, reusing a cached verdict when the obligation's canonical content
     /// (predicate + in-scope facts) is unchanged. Returns the verdict and whether
@@ -1131,6 +1149,23 @@ fn obligation_key(goal: &Pred, facts: &[Pred]) -> String {
         push_part(&mut key, f);
     }
     key
+}
+
+/// The **per-obligation sub-hash** (§12 M14): the content-hash of an obligation
+/// — its goal predicate plus the order-independent set of in-scope facts. The
+/// discharge cache itself uses the full canonical content key (see
+/// [`ExploratoryCache`]) so a hash collision cannot alias two obligations; this
+/// helper is only the exported M14 fingerprint for selective-invalidation
+/// reporting. The whole-program attestation hash ([`crate::ContractSet`]) is the
+/// contract-set counterpart; this is its per-obligation granularity.
+pub fn obligation_sub_hash(goal: &Pred, facts: &[Pred]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hash;
+    use std::hash::Hasher;
+
+    let mut h = DefaultHasher::new();
+    obligation_key(goal, facts).hash(&mut h);
+    h.finish()
 }
 
 /// The free variables of `pred` in **left-to-right first-appearance order** — the
