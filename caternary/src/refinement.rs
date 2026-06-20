@@ -192,14 +192,61 @@ pub enum Pred {
 ///
 /// The type is stored as its source identifier (e.g. `Num`, `List`); Tier 0 owns
 /// shape inference, so the refinement layer keeps only the surface name.
+///
+/// # Higher-order binders (§3-reserved Quote pre/post payload)
+///
+/// A binder whose type is a **quotation arrow** — `q: ( … -- … )` — carries its
+/// own refined pre/post contract in [`Binder::quote`]. This is the §3 "Tier 1
+/// payload" that a `Quote` arrow reserves: a refined quotation parameter
+/// declaring the contract it is *expected* to satisfy when it crosses a
+/// higher-order boundary (§10.6). For such a binder, [`Binder::ty`] is the
+/// surface marker `"Quote"` and [`Binder::quote`] is `Some`; for an ordinary
+/// scalar binder, [`Binder::quote`] is `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binder {
     /// The binder's name (the SMT-visible variable, §10.2).
     pub name: String,
-    /// The binder's surface type name, e.g. `Num` or `List`.
+    /// The binder's surface type name, e.g. `Num` or `List`. For a higher-order
+    /// (quotation-typed) binder this is the marker `"Quote"`; the actual refined
+    /// arrow lives in [`Binder::quote`].
     pub ty: String,
     /// The location of this binder in the refinement source text.
     pub span: RefineSpan,
+    /// The refined quotation contract this binder declares, when it is a
+    /// **higher-order** (quotation-typed) parameter `q: ( pre -- post )` — the
+    /// §3-reserved Quote pre/post payload. `None` for a scalar binder. This is
+    /// the *expected* contract checked by subsumption (§10.6) when a quotation
+    /// value crosses into this parameter position.
+    pub quote: Option<Box<QuoteContract>>,
+}
+
+/// The refined arrow a higher-order (quotation-typed) binder declares (§3 /
+/// §10.6): the pre/post contract the quotation parameter is expected to satisfy.
+///
+/// Structurally this is a [`RefinementSig`] without a `name` — two
+/// [`RefinementSide`]s, demands (the quotation's expected precondition) and
+/// guarantees (its expected postcondition). It is the *expected* side of a
+/// higher-order subsumption check (§10.6); the *provided* side is the contract
+/// of the quotation value actually passed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuoteContract {
+    /// Input side: the quotation's expected demand predicates (pre).
+    pub demands: RefinementSide,
+    /// Output side: the quotation's expected guarantee predicates (post).
+    pub guarantees: RefinementSide,
+}
+
+impl QuoteContract {
+    /// View this contract as a nameless [`RefinementSig`] so it can be handed to
+    /// the §10.6 subsumption checker, which speaks `RefinementSig`. The synthetic
+    /// `name` is never read by subsumption (it aligns binders positionally).
+    pub fn as_sig(&self) -> RefinementSig {
+        RefinementSig {
+            name: "<quote>".to_string(),
+            demands: self.demands.clone(),
+            guarantees: self.guarantees.clone(),
+        }
+    }
 }
 
 /// One side of a refinement signature: the named binders plus an optional
@@ -763,6 +810,28 @@ impl<'a> Parser<'a> {
             }
         };
         self.expect(&Tok::Colon, "`:` between a binder name and its type")?;
+        // A binder's type is either a scalar type identifier (`Num`, `List`) or a
+        // **higher-order** refined quotation arrow `( pre -- post )` — the §3
+        // Quote pre/post payload (§10.6). The opening `(` distinguishes them.
+        if matches!(self.peek(), Some(Tok::LParen)) {
+            self.expect(&Tok::LParen, "`(` to open a quotation contract")?;
+            let demands = self.parse_side(SideEnd::Arrow)?;
+            self.expect(
+                &Tok::Arrow,
+                "`--` separating a quotation contract's inputs from outputs",
+            )?;
+            let guarantees = self.parse_side(SideEnd::RParen)?;
+            let close = self.expect(&Tok::RParen, "`)` to close a quotation contract")?;
+            return Ok(Binder {
+                name,
+                ty: "Quote".to_string(),
+                span: RefineSpan::new(name_span.start, close.end),
+                quote: Some(Box::new(QuoteContract {
+                    demands,
+                    guarantees,
+                })),
+            });
+        }
         let (ty, ty_span) = match self.bump() {
             Some(Spanned {
                 tok: Tok::Ident(t),
@@ -772,13 +841,17 @@ impl<'a> Parser<'a> {
                 let span = other
                     .map(|s| s.span)
                     .unwrap_or(RefineSpan::new(self.end, self.end));
-                return Err(RefineParseError::new("expected a binder type", span));
+                return Err(RefineParseError::new(
+                    "expected a binder type (a type name or a `( … -- … )` quotation contract)",
+                    span,
+                ));
             }
         };
         Ok(Binder {
             name,
             ty,
             span: RefineSpan::new(name_span.start, ty_span.end),
+            quote: None,
         })
     }
 }
@@ -1031,5 +1104,93 @@ mod tests {
     fn unexpected_char_is_located_error() {
         let err = parse_predicate("a & b").expect_err("`&` is not a token");
         assert_eq!(err.span, RefineSpan::new(2, 3));
+    }
+
+    // --- §10.6 / §3: a higher-order (quotation-typed) binder carrying its own
+    // refined pre/post arrow parses into a QuoteContract ---------------------
+    #[test]
+    fn higher_order_binder_parses_into_a_quote_contract() {
+        // `apply` takes a refined quotation `q: ( -- r: Num where r > 0 )` and
+        // returns a refined `s: Num where s > 0`. The quotation binder must carry
+        // its declared pre/post contract (§3 Quote payload), not a scalar type.
+        let sig =
+            parse_signature("apply : ( q: ( -- r: Num where r > 0 )  --  s: Num where s > 0 )")
+                .expect("higher-order signature parses");
+
+        assert_eq!(sig.name, "apply");
+
+        // Input side: one binder `q`, which is a quotation contract (not scalar).
+        assert_eq!(sig.demands.binders.len(), 1);
+        let q = &sig.demands.binders[0];
+        assert_eq!(q.name, "q");
+        assert_eq!(
+            q.ty, "Quote",
+            "a higher-order binder carries the Quote marker"
+        );
+        let contract = q
+            .quote
+            .as_ref()
+            .expect("a quotation-typed binder carries its declared contract");
+        // The quotation's declared post is `r > 0` over `r: Num`; its pre is absent.
+        assert!(contract.demands.binders.is_empty());
+        assert_eq!(contract.demands.predicate, None);
+        assert_eq!(contract.guarantees.binders.len(), 1);
+        assert_eq!(contract.guarantees.binders[0].name, "r");
+        assert_eq!(
+            contract.guarantees.predicate,
+            Some(bin(BinOp::Gt, v("r"), n("0")))
+        );
+
+        // The outer output side is an ordinary scalar binder.
+        assert_eq!(sig.guarantees.binders.len(), 1);
+        assert_eq!(sig.guarantees.binders[0].name, "s");
+        assert!(sig.guarantees.binders[0].quote.is_none());
+        assert_eq!(
+            sig.guarantees.predicate,
+            Some(bin(BinOp::Gt, v("s"), n("0")))
+        );
+    }
+
+    #[test]
+    fn higher_order_binder_with_pre_and_post_parses() {
+        // A fully refined quotation arrow: pre `n >= 0`, post `r >= 0`.
+        let sig = parse_signature(
+            "g : ( q: ( n: Num where n >= 0 -- r: Num where r >= 0 )  --  s: Num )",
+        )
+        .expect("higher-order signature with pre and post parses");
+        let q = &sig.demands.binders[0];
+        let c = q.quote.as_ref().unwrap();
+        assert_eq!(c.demands.binders.len(), 1);
+        assert_eq!(c.demands.binders[0].name, "n");
+        assert_eq!(c.demands.predicate, Some(bin(BinOp::Ge, v("n"), n("0"))));
+        assert_eq!(c.guarantees.binders.len(), 1);
+        assert_eq!(c.guarantees.binders[0].name, "r");
+        assert_eq!(c.guarantees.predicate, Some(bin(BinOp::Ge, v("r"), n("0"))));
+    }
+
+    // --- negative: a malformed higher-order signature is a LOCATED error -----
+    #[test]
+    fn malformed_higher_order_signature_missing_inner_arrow_is_located() {
+        // The quotation contract `( r: Num where r > 0 )` is missing its inner
+        // `--`: a quotation arrow must separate inputs from outputs. The error is
+        // located (a byte span into the source), never a panic.
+        let src = "apply : ( q: ( r: Num where r > 0 )  --  s: Num )";
+        let err = parse_signature(src).expect_err("a quotation contract without `--` must error");
+        assert!(err.span.start <= src.len() && err.span.end <= src.len());
+        // It is detected at/after the inner `(` (where the contract opens).
+        let inner_open = src.find("( r:").unwrap();
+        assert!(
+            err.span.start >= inner_open,
+            "error should be inside the quotation contract, got {:?}",
+            err.span
+        );
+    }
+
+    #[test]
+    fn malformed_higher_order_signature_unclosed_quote_is_located() {
+        // The quotation contract never closes its `(`.
+        let src = "apply : ( q: ( -- r: Num where r > 0  --  s: Num )";
+        let err = parse_signature(src).expect_err("an unclosed quotation contract must error");
+        assert!(err.span.start <= src.len() && err.span.end <= src.len());
     }
 }

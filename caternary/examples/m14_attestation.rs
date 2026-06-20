@@ -58,21 +58,29 @@ impl Quotable for Value {
     }
 }
 
-fn plus_scheme() -> Scheme {
+/// A neutral Tier-0 scheme of the given pop/push arity over `Num`:
+/// `( 'S Num…(pops) -- 'S Num…(pushes) )`.
+fn num_scheme(pops: usize, pushes: usize) -> Scheme {
     let s = Span { start: 0, end: 1 };
     Scheme::new(
         vec![],
         vec![0],
         WordTy::new(
-            StackTy::new(vec![Ty::num(s), Ty::num(s)], 0, s),
-            StackTy::new(vec![Ty::num(s)], 0, s),
+            StackTy::new((0..pops).map(|_| Ty::num(s)).collect(), 0, s),
+            StackTy::new((0..pushes).map(|_| Ty::num(s)).collect(), 0, s),
         ),
     )
 }
 
 fn build(src: &str) -> Evaluator<Value> {
     let mut eval: Evaluator<Value> = Evaluator::new();
-    eval.register_operator_with_contract("+", plus_scheme());
+    // The embedder attests host operators: `+`, an opaque `mk` producer, and a
+    // refined `sqrt` whose Tier-0 arrow ( Num -- Num ) carries a Tier-1 demand.
+    eval.register_operator_with_contract("+", num_scheme(2, 1));
+    eval.register_operator_with_contract("mk", num_scheme(0, 1));
+    eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+    eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+        .expect("sqrt refinement attaches");
     let toks = parse_with_spans(src).unwrap();
     eval.load_with_spans(&toks).unwrap();
     eval
@@ -87,13 +95,22 @@ fn ge(a: &str, k: &str) -> Pred {
 }
 
 fn main() {
-    // A small whole program: `inc` adds one, `main` calls it.
-    let src = "[ 1 + ] :inc [ 2 inc ] :main";
+    // A small whole program with a refined, `assume`-bearing definition:
+    //   `foo`  produces an opaque value, asserts `result >= 0` over it (an
+    //          `assume` the solver cannot otherwise discharge), and feeds it to
+    //          the refined `sqrt` (which demands `n >= 0`);
+    //   `main` runs `foo` and closes against the empty stack.
+    let src = "[ mk \"assume(result >= 0)\" sqrt drop ] :foo [ foo ] :main";
     let eval = build(src);
 
-    // (1) The CI gate: full Tier-0 verification pays at build time.
-    check(&eval).expect("the program is checked");
-    println!("== caternary check: PASS (build-time gate) ==\n");
+    // (1) The CI gate — a SINGLE build-time act (§10.10, invariant 19/20): one
+    // call runs Tier 0 (shape safety) first and, only on green, Tier 1 +
+    // operator-axiom discharge, returning the unified outcome (the whole-program
+    // ledger). This replaces the pre-gate two-call `check` + `check_program`
+    // pattern, so the Tier-0-gates-Tier-1 ordering is structural, not convention.
+    let ledger = check_whole_program(&eval, SmtLibSolver::new)
+        .expect("the program is checked: Tier 0 then Tier 1 in one act");
+    println!("== caternary check: PASS (build-time gate — Tier 0 + Tier 1 in one call) ==\n");
 
     // (2) The one artifact attestation hash, stable across rebuilds.
     let h1 = attestation_hash(&eval).unwrap();
@@ -110,25 +127,17 @@ fn main() {
     }
     println!();
 
-    // (4) The one global ledger of assumes = grep assume over the source.
-    let foo_body = parse("opaque \"assume(result >= 0)\" sqrt").unwrap();
-    let defs = vec![Definition {
-        name: "foo".into(),
-        body: foo_body.clone(),
-        sig: None,
-    }];
-    let lookup = |w: &str| match w {
-        "sqrt" => parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").ok(),
-        _ => None,
-    };
-    let ledger = check_program(&defs, &lookup, SmtLibSolver::new).unwrap();
+    // (4) The one global ledger of assumes = grep assume over the source. This
+    // is the SAME `ledger` the gate returned in (1) — the single act already
+    // paid the Tier-1 cost; we just read it back here.
+    let foo_body = eval.definition_body("foo").unwrap();
     println!("one global ledger — complete user trusted base:");
     for surface in ledger.grep_assume() {
         println!("  {surface}");
     }
     println!(
         "grep assume over source:       {:?}",
-        grep_assume_tokens(&foo_body)
+        grep_assume_tokens(foo_body)
     );
     println!("foo's honest status:           {}\n", ledger.status("foo"));
 

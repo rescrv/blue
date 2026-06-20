@@ -533,7 +533,16 @@ pub fn bind_positional(
     for depth in 0..n {
         let binder = &binders[n - 1 - depth];
         let slot = &stack.slots[stack.slots.len() - 1 - depth];
-        let term = slot.as_term()?.clone();
+        // A **higher-order** (quotation-typed) parameter occupies a `Quote` slot
+        // and carries a contract, not a scalar value; bind it to a symbolic
+        // stand-in named after the binder so a scalar `where` predicate stays
+        // well-formed. Its real contract is checked by subsumption (§10.6), never
+        // by scalar substitution — so the stand-in is never meaningfully read.
+        let term = if binder.quote.is_some() {
+            Pred::Var(binder.name.clone())
+        } else {
+            slot.as_term()?.clone()
+        };
         out.push(NamedBinding {
             name: binder.name.clone(),
             term,
@@ -571,6 +580,7 @@ mod tests {
             name: name.to_string(),
             ty: ty.to_string(),
             span: rspan(),
+            quote: None,
         }
     }
 
