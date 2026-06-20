@@ -75,9 +75,9 @@ impl Packable for int32 {
 }
 
 impl<'a> Unpackable<'a> for int32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i32 = v.try_into()?;
         Ok((int32(x), buf))
@@ -140,9 +140,9 @@ impl Packable for int64 {
 }
 
 impl<'a> Unpackable<'a> for int64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = v.into();
         Ok((int64(x), buf))
@@ -205,9 +205,9 @@ impl Packable for uint32 {
 }
 
 impl<'a> Unpackable<'a> for uint32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u32 = v.try_into()?;
         Ok((uint32(x), buf))
@@ -294,9 +294,9 @@ impl Packable for uint64 {
 }
 
 impl<'a> Unpackable<'a> for uint64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
         Ok((uint64(x), buf))
@@ -359,15 +359,15 @@ impl Packable for sint32 {
 }
 
 impl<'a> Unpackable<'a> for sint32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
         let x: i32 = match x.try_into() {
             Ok(x) => x,
             Err(_) => {
-                return Err(Error::SignedOverflow { value: x });
+                return Err(signed_overflow(x));
             }
         };
         Ok((sint32(x), buf))
@@ -430,9 +430,9 @@ impl Packable for sint64 {
 }
 
 impl<'a> Unpackable<'a> for sint64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: i64 = unzigzag(v.into());
         Ok((sint64(x), buf))
@@ -493,9 +493,9 @@ impl Packable for fixed32 {
 }
 
 impl<'a> Unpackable<'a> for fixed32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = u32::unpack(buf)?;
         Ok((fixed32(x), buf))
     }
@@ -555,9 +555,9 @@ impl Packable for fixed64 {
 }
 
 impl<'a> Unpackable<'a> for fixed64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = u64::unpack(buf)?;
         Ok((fixed64(x), buf))
     }
@@ -617,9 +617,9 @@ impl Packable for sfixed32 {
 }
 
 impl<'a> Unpackable<'a> for sfixed32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = i32::unpack(buf)?;
         Ok((sfixed32(x), buf))
     }
@@ -679,9 +679,9 @@ impl Packable for sfixed64 {
 }
 
 impl<'a> Unpackable<'a> for sfixed64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = i64::unpack(buf)?;
         Ok((sfixed64(x), buf))
     }
@@ -741,9 +741,9 @@ impl Packable for float {
 }
 
 impl<'a> Unpackable<'a> for float {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = f32::unpack(buf)?;
         Ok((float(x), buf))
     }
@@ -803,9 +803,9 @@ impl Packable for double {
 }
 
 impl<'a> Unpackable<'a> for double {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (x, buf) = f64::unpack(buf)?;
         Ok((double(x), buf))
     }
@@ -866,9 +866,9 @@ impl Packable for Bool {
 }
 
 impl<'a> Unpackable<'a> for Bool {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (v, buf) = v64::unpack(buf)?;
         let x: u64 = v.into();
         let b = x != 0;
@@ -977,18 +977,15 @@ impl Packable for bytes<'_> {
 }
 
 impl<'a> Unpackable<'a> for bytes<'a> {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
+            return Err(buffer_too_short(v, rem.len()));
         }
         Ok((Self(&rem[..v]), &rem[v..]))
     }
@@ -1049,30 +1046,21 @@ impl Packable for bytes16 {
 }
 
 impl<'a> Unpackable<'a> for bytes16 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
+            return Err(buffer_too_short(v, rem.len()));
         }
         if v < 16 {
-            return Err(Error::BufferTooShort {
-                required: 16,
-                had: v,
-            });
+            return Err(buffer_too_short(16, v));
         }
         if v != 16 {
-            return Err(Error::WrongLength {
-                required: 16,
-                had: v,
-            });
+            return Err(wrong_length(16, v));
         }
         let mut ret = [0u8; 16];
         ret[..16].copy_from_slice(&rem[..16]);
@@ -1134,30 +1122,21 @@ impl Packable for bytes32 {
 }
 
 impl<'a> Unpackable<'a> for bytes32 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
+            return Err(buffer_too_short(v, rem.len()));
         }
         if v < 32 {
-            return Err(Error::BufferTooShort {
-                required: 32,
-                had: v,
-            });
+            return Err(buffer_too_short(32, v));
         }
         if v != 32 {
-            return Err(Error::WrongLength {
-                required: 32,
-                had: v,
-            });
+            return Err(wrong_length(32, v));
         }
         let mut ret = [0u8; 32];
         ret[..32].copy_from_slice(&rem[..32]);
@@ -1226,30 +1205,21 @@ impl Packable for bytes64 {
 }
 
 impl<'a> Unpackable<'a> for bytes64 {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
+            return Err(buffer_too_short(v, rem.len()));
         }
         if v < 64 {
-            return Err(Error::BufferTooShort {
-                required: 64,
-                had: v,
-            });
+            return Err(buffer_too_short(64, v));
         }
         if v != 64 {
-            return Err(Error::WrongLength {
-                required: 64,
-                had: v,
-            });
+            return Err(wrong_length(64, v));
         }
         let mut ret = [0u8; 64];
         ret[..64].copy_from_slice(&rem[..64]);
@@ -1358,24 +1328,21 @@ impl Packable for string<'_> {
 }
 
 impl<'a> Unpackable<'a> for string<'a> {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let mut up = Unpacker::new(buf);
         let v: v64 = up.unpack()?;
         let v: usize = v.into();
         let rem = up.remain();
         if rem.len() < v {
-            return Err(Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            });
+            return Err(buffer_too_short(v, rem.len()));
         }
         let x: &'a [u8] = &rem[..v];
         let s: &'a str = match std::str::from_utf8(x) {
             Ok(s) => s,
             Err(_) => {
-                return Err(Error::StringEncoding);
+                return Err(string_encoding());
             }
         };
         Ok((string(s), &rem[v..]))
@@ -1422,7 +1389,7 @@ impl<M: Packable> Packable for message<M> {
 impl<'a, M> Unpackable<'a> for message<M>
 where
     M: Unpackable<'a>,
-    <M as Unpackable<'a>>::Error: From<buffertk::Error>,
+    <M as Unpackable<'a>>::Error: From<buffertk::SError>,
 {
     type Error = M::Error;
 
@@ -1438,11 +1405,7 @@ where
         let rem = up.remain();
         // TODO(rescrv): this pattern multiple times; try to move to Unpacker.
         if rem.len() < v {
-            return Err(buffertk::Error::BufferTooShort {
-                required: v,
-                had: rem.len(),
-            }
-            .into());
+            return Err(buffertk::buffer_too_short(v, rem.len()).into());
         }
         let buf: &'b [u8] = &rem[..v];
         let rem: &'b [u8] = &rem[v..];

@@ -10,7 +10,7 @@ pub enum Error {
     #[prototk(2, message)]
     Serialization {
         #[prototk(1, message)]
-        err: prototk::Error,
+        err: prototk::SError,
         #[prototk(2, string)]
         context: String,
     },
@@ -23,29 +23,11 @@ pub enum Error {
     },
 }
 
-impl From<buffertk::Error> for Error {
-    fn from(err: buffertk::Error) -> Error {
-        Error::Serialization {
-            err: err.into(),
-            context: "buffertk unpack error".to_string(),
-        }
-    }
-}
-
-impl From<prototk::Error> for Error {
-    fn from(err: prototk::Error) -> Error {
-        Error::Serialization {
-            err,
-            context: "prototk unpack error".to_string(),
-        }
-    }
-}
-
 impl From<rpc_pb::SError> for Error {
     fn from(err: rpc_pb::SError) -> Error {
         Error::Transport {
             err,
-            context: "prototk unpack error".to_string(),
+            context: "rpc error".to_string(),
         }
     }
 }

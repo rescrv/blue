@@ -13,6 +13,7 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
+handled = { workspace = true }
 
 [dev-dependencies]
 arrrg = { workspace = true }

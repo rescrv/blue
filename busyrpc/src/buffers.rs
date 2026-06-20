@@ -129,10 +129,7 @@ impl RecvBuffer {
                     }
                     if hdr[0] as usize > HEADER_MAX_SIZE - 1 {
                         return Err(rpc_pb::serialization_error(
-                            prototk::Error::BufferTooShort {
-                                required: hdr[*idx] as usize,
-                                had: *idx,
-                            },
+                            prototk::buffer_too_short(hdr[*idx] as usize, *idx),
                             "frame header size invalid",
                         ));
                     }

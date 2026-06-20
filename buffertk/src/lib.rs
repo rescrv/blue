@@ -4,85 +4,107 @@ use std::fmt::Debug;
 
 mod varint;
 
+pub use handled::{SError, SExpr};
 pub use varint::v64;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-/// All Error conditions within `buffertk`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Error {
-    /// BufferTooShort indicates that there was a need to pack or unpack more bytes than were
-    /// available in the underlying memory.
-    BufferTooShort {
-        /// Number of bytes required to read the buffer.
-        required: usize,
-        /// Number of bytes available to read.
-        had: usize,
-    },
-    /// VarintOverflow indicates that a varint field did not terminate with a number < 128.
-    VarintOverflow {
-        /// Number of bytes in the varint.
-        bytes: usize,
-    },
-    /// UnsignedOverflow indicates that a value will not fit its intended (unsigned) target.
-    UnsignedOverflow {
-        /// Value that would overflow (typically a u32).
-        value: u64,
-    },
-    /// SignedOverflow indicates that a value will not fit its intended (signed) target.
-    SignedOverflow {
-        /// Value that would overflow (typically an i32).
-        value: i64,
-    },
-    /// TagTooLarge indicates the tag would overflow a 32-bit number.
-    TagTooLarge {
-        /// Value that's too large for a tag.
-        tag: u64,
-    },
-    /// UnknownDiscriminant indicates a variant that is not understood by this code.
-    UnknownDiscriminant {
-        /// Discriminant that's not known.
-        discriminant: u32,
-    },
-    /// NotAChar indicates that the prescribed value was tried to unpack as a char, but it's not a
-    /// char.
-    NotAChar {
-        /// Value that's not a char.
-        value: u32,
-    },
+const PHASE: &str = "buffertk";
+
+/// A buffer did not contain enough bytes to unpack a value.
+pub const CODE_BUFFER_TOO_SHORT: &str = "buffer-too-short";
+/// A varint exceeded the maximum encoded length.
+pub const CODE_VARINT_OVERFLOW: &str = "varint-overflow";
+/// An unsigned value did not fit the requested target type.
+pub const CODE_UNSIGNED_OVERFLOW: &str = "unsigned-overflow";
+/// A signed value did not fit the requested target type.
+pub const CODE_SIGNED_OVERFLOW: &str = "signed-overflow";
+/// A tag exceeded the 32-bit protobuf tag representation.
+pub const CODE_TAG_TOO_LARGE: &str = "tag-too-large";
+/// A discriminant was not recognized.
+pub const CODE_UNKNOWN_DISCRIMINANT: &str = "unknown-discriminant";
+/// A numeric value is not a valid Unicode scalar value.
+pub const CODE_NOT_A_CHAR: &str = "not-a-char";
+/// A serialized string was not valid UTF-8 or not a valid S-expression.
+pub const CODE_STRING_ENCODING: &str = "string-encoding";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::BufferTooShort { required, had } => fmt
-                .debug_struct("BufferTooShort")
-                .field("required", required)
-                .field("had", had)
-                .finish(),
-            Error::VarintOverflow { bytes } => fmt
-                .debug_struct("VarintOverflow")
-                .field("bytes", bytes)
-                .finish(),
-            Error::UnsignedOverflow { value } => fmt
-                .debug_struct("UnsignedOverflow")
-                .field("value", value)
-                .finish(),
-            Error::SignedOverflow { value } => fmt
-                .debug_struct("SignedOverflow")
-                .field("value", value)
-                .finish(),
-            Error::TagTooLarge { tag } => {
-                fmt.debug_struct("TagTooLarge").field("tag", tag).finish()
-            }
-            Error::UnknownDiscriminant { discriminant } => fmt
-                .debug_struct("UnknownDiscriminant")
-                .field("discriminant", discriminant)
-                .finish(),
-            Error::NotAChar { value } => {
-                fmt.debug_struct("NotAChar").field("value", value).finish()
-            }
-        }
+/// Construct a buffer-too-short error.
+pub fn buffer_too_short(required: usize, had: usize) -> SError {
+    error(CODE_BUFFER_TOO_SHORT)
+        .with_message("buffer too short")
+        .with_atom_field("required", required)
+        .with_atom_field("had", had)
+}
+
+/// Construct a varint-overflow error.
+pub fn varint_overflow(bytes: usize) -> SError {
+    error(CODE_VARINT_OVERFLOW)
+        .with_message("varint overflow")
+        .with_atom_field("bytes", bytes)
+}
+
+/// Construct an unsigned-overflow error.
+pub fn unsigned_overflow(value: u64) -> SError {
+    error(CODE_UNSIGNED_OVERFLOW)
+        .with_message("unsigned integer overflow")
+        .with_atom_field("value", value)
+}
+
+/// Construct a signed-overflow error.
+pub fn signed_overflow(value: i64) -> SError {
+    error(CODE_SIGNED_OVERFLOW)
+        .with_message("signed integer overflow")
+        .with_atom_field("value", value)
+}
+
+/// Construct a tag-too-large error.
+pub fn tag_too_large(tag: u64) -> SError {
+    error(CODE_TAG_TOO_LARGE)
+        .with_message("tag too large")
+        .with_atom_field("tag", tag)
+}
+
+/// Construct an unknown-discriminant error.
+pub fn unknown_discriminant(discriminant: u32) -> SError {
+    error(CODE_UNKNOWN_DISCRIMINANT)
+        .with_message("unknown discriminant")
+        .with_atom_field("discriminant", discriminant)
+}
+
+/// Construct a not-a-char error.
+pub fn not_a_char(value: u32) -> SError {
+    error(CODE_NOT_A_CHAR)
+        .with_message("not a valid char")
+        .with_atom_field("value", value)
+}
+
+/// Construct a string-encoding error.
+pub fn string_encoding() -> SError {
+    error(CODE_STRING_ENCODING).with_message("string encoding error")
+}
+
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Return the machine-readable code from a `buffertk` error.
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
@@ -322,19 +344,16 @@ macro_rules! packable_with_to_le_bytes {
         }
 
         impl<'a> Unpackable<'a> for $what {
-            type Error = Error;
+            type Error = crate::SError;
 
-            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
                 const SZ: usize = std::mem::size_of::<$what>();
                 if buf.len() >= SZ {
                     let mut fbuf: [u8; SZ] = [0; SZ];
                     fbuf.copy_from_slice(&buf[0..SZ]);
                     Ok((<$what>::from_le_bytes(fbuf), &buf[SZ..]))
                 } else {
-                    Err(Error::BufferTooShort {
-                        required: SZ,
-                        had: buf.len(),
-                    })
+                    Err(buffer_too_short(SZ, buf.len()))
                 }
             }
         }
@@ -372,9 +391,9 @@ macro_rules! packable_with_to_bits_to_le_bytes {
             }
         }
         impl<'a> Unpackable<'a> for $what {
-            type Error = Error;
+            type Error = crate::SError;
 
-            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
                 const SZ: usize = std::mem::size_of::<$what>();
                 if buf.len() >= SZ {
                     let mut fbuf: [u8; SZ] = [0; SZ];
@@ -384,10 +403,7 @@ macro_rules! packable_with_to_bits_to_le_bytes {
                         &buf[SZ..],
                     ))
                 } else {
-                    Err(Error::BufferTooShort {
-                        required: SZ,
-                        had: buf.len(),
-                    })
+                    Err(buffer_too_short(SZ, buf.len()))
                 }
             }
         }
@@ -410,14 +426,14 @@ impl Packable for char {
 }
 
 impl<'a> Unpackable<'a> for char {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(char, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(char, &'b [u8]), SError> {
         let (c, buf) = u32::unpack(buf)?;
         if let Some(c) = char::from_u32(c) {
             Ok((c, buf))
         } else {
-            Err(Error::NotAChar { value: c })
+            Err(not_a_char(c))
         }
     }
 }
@@ -496,19 +512,44 @@ impl Packable for &[u8] {
 }
 
 impl<'a> Unpackable<'a> for &'a [u8] {
-    type Error = Error;
+    type Error = crate::SError;
 
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
         let (vsz, buf): (v64, &'b [u8]) = v64::unpack(buf)?;
         let x: usize = vsz.into();
         if x > buf.len() {
-            Err(Error::BufferTooShort {
-                required: x,
-                had: buf.len(),
-            })
+            Err(buffer_too_short(x, buf.len()))
         } else {
             Ok((&buf[0..x], &buf[x..]))
         }
+    }
+}
+
+////////////////////////////////////////////// SError //////////////////////////////////////////////
+
+impl Packable for SError {
+    fn pack_sz(&self) -> usize {
+        let serialized = self.to_string();
+        let bytes: &[u8] = serialized.as_bytes();
+        stack_pack(bytes).pack_sz()
+    }
+
+    fn pack(&self, out: &mut [u8]) {
+        let serialized = self.to_string();
+        let bytes: &[u8] = serialized.as_bytes();
+        stack_pack(bytes).into_slice(out);
+    }
+}
+
+impl<'a> Unpackable<'a> for SError {
+    type Error = crate::SError;
+
+    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
+        let mut up = Unpacker::new(buf);
+        let serialized: &'a [u8] = up.unpack()?;
+        let serialized = std::str::from_utf8(serialized).map_err(|_| string_encoding())?;
+        let err = handled::parse(serialized).map_err(|_| string_encoding())?;
+        Ok((SError::from(err), up.remain()))
     }
 }
 
@@ -525,9 +566,9 @@ macro_rules! impl_pack_unpack_tuple {
         }
 
         impl<'a> Unpackable<'a> for () {
-            type Error = Error;
+            type Error = crate::SError;
 
-            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Error> {
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
                 Ok(((), buf))
             }
         }
@@ -630,7 +671,7 @@ where
     T: Unpackable<'a>,
     E: Unpackable<'a>
         + Debug
-        + From<Error>
+        + From<SError>
         + From<<T as Unpackable<'a>>::Error>
         + From<<E as Unpackable<'a>>::Error>,
 {
@@ -643,7 +684,7 @@ where
         let mut up = Unpacker::new(buf);
         let tag: v64 = up.unpack()?;
         if <v64 as Into<u64>>::into(tag) > u32::MAX as u64 {
-            return Err(Error::TagTooLarge { tag: tag.into() }.into());
+            return Err(tag_too_large(tag.into()).into());
         }
         let tag: u32 = tag.try_into().unwrap();
         match tag {
@@ -661,7 +702,7 @@ where
                 let (e, _): (E, _) = <E as Unpackable>::unpack(buf)?;
                 Ok((Err(e), up.remain()))
             }
-            _ => Err(Error::UnknownDiscriminant { discriminant: tag }.into()),
+            _ => Err(unknown_discriminant(tag).into()),
         }
     }
 }
@@ -677,9 +718,29 @@ mod tests {
         let buf: &mut [u8; 0] = &mut [];
         ().pack(buf);
         let mut up = Unpacker::new(buf);
-        let x: Result<(), Error> = up.unpack();
+        let x: Result<(), SError> = up.unpack();
         assert_eq!(Ok(()), x, "human got decode wrong?");
         assert_eq!(0, up.buf.len(), "human got remainder wrong?");
+    }
+
+    #[test]
+    fn handled_error_round_trips() {
+        let err = SError::new("buffertk-test")
+            .with_code("round-trip")
+            .with_message("round trip through buffertk");
+        let buf = stack_pack(&err).to_vec();
+        let mut up = Unpacker::new(&buf);
+        let got: SError = up.unpack().unwrap();
+        assert_eq!(err, got);
+        assert!(up.is_empty());
+    }
+
+    #[test]
+    fn handled_error_rejects_invalid_utf8() {
+        let bytes: &[u8] = &[0xff];
+        let buf = stack_pack(bytes).to_vec();
+        let got = SError::unpack(&buf).unwrap_err();
+        assert_eq!(Some(CODE_STRING_ENCODING), error_code(&got));
     }
 
     macro_rules! test_pack_with_to_le_bytes {
@@ -699,7 +760,7 @@ mod tests {
             {
                 let mut up = Unpacker::new(HUMAN);
                 let x = up.unpack();
-                let expect: Result<$what, Error> = Ok(X);
+                let expect: Result<$what, SError> = Ok(X);
                 assert_eq!(expect, x, "human got implementation wrong?");
                 assert_eq!(0, up.buf.len(), "human got remainder wrong?");
             }
@@ -748,7 +809,7 @@ mod tests {
             {
                 let mut up = Unpacker::new(HUMAN);
                 let x = up.unpack();
-                let expect: Result<$what, Error> = Ok(X);
+                let expect: Result<$what, SError> = Ok(X);
                 assert_eq!(expect, x, "human got implementation wrong?");
                 assert_eq!(0, up.buf.len(), "human got remainder wrong?");
             }
@@ -825,15 +886,15 @@ mod tests {
     fn unpacker() {
         let buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         let mut up = Unpacker::new(buf);
-        let x = up.unpack::<Error, ()>();
+        let x = up.unpack::<SError, ()>();
         assert_eq!(Ok(()), x, "human got () unpacker wrong?");
-        let x = up.unpack::<Error, u8>();
+        let x = up.unpack::<SError, u8>();
         assert_eq!(Ok(1u8), x, "human got u8 unpacker wrong?");
-        let x = up.unpack::<Error, u16>();
+        let x = up.unpack::<SError, u16>();
         assert_eq!(Ok(770u16), x, "human got u16 unpacker wrong?");
-        let x = up.unpack::<Error, u32>();
+        let x = up.unpack::<SError, u32>();
         assert_eq!(Ok(117835012u32), x, "human got u32 unpacker wrong?");
-        let x = up.unpack::<Error, u64>();
+        let x = up.unpack::<SError, u64>();
         assert_eq!(
             Ok(1084818905618843912u64),
             x,

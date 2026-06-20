@@ -207,7 +207,7 @@ impl ChannelCriticalSection {
             let resp: rpc_pb::Response = match up.unpack() {
                 Ok(resp) => resp,
                 Err(err) => {
-                    ms.sht.set_error(err.into());
+                    ms.sht.set_error(err);
                     continue 'buffersing;
                 }
             };
@@ -621,14 +621,14 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
                 Ok(resp) => resp,
                 Err(err) => {
                     chandle.kill();
-                    return Err(err.into());
+                    return Err(err);
                 }
             };
             if let Some(rpc_error) = resp.rpc_error {
                 let mut up = Unpacker::new(rpc_error);
                 let rpc_error: rpc_pb::SError = match up.unpack() {
                     Ok(rpc_error) => rpc_error,
-                    Err(unpack_error) => unpack_error.into(),
+                    Err(unpack_error) => unpack_error,
                 };
                 Err(rpc_error)
             } else if let Some(service_error) = resp.service_error {

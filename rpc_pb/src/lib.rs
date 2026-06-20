@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn serialization_error_round_trips() {
-        do_test(serialization_error(prototk::Error::Success, "Some context"));
+        do_test(serialization_error(prototk::success(), "Some context"));
     }
 
     #[test]

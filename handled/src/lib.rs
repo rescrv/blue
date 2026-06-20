@@ -2,10 +2,6 @@
 
 use std::fmt::Debug;
 
-use buffertk::{Packable, Unpackable, Unpacker, stack_pack};
-use prototk::field_types::{message as proto_message, string as proto_string};
-use prototk::{FieldPackHelper, FieldUnpackHelper, Message, Tag};
-
 /// A symbolic expression: the fundamental data structure for representing structured data.
 ///
 /// S-expressions provide a uniform representation for both code and data, enabling
@@ -301,24 +297,6 @@ impl From<SExpr> for SError {
     }
 }
 
-impl From<buffertk::Error> for SError {
-    fn from(err: buffertk::Error) -> Self {
-        SError::new("buffertk")
-            .with_code("serialization-error")
-            .with_message("buffertk serialization error")
-            .with_string_field("cause", &err.to_string())
-    }
-}
-
-impl From<prototk::Error> for SError {
-    fn from(err: prototk::Error) -> Self {
-        SError::new("prototk")
-            .with_code("serialization-error")
-            .with_message("prototk serialization error")
-            .with_string_field("cause", &err.to_string())
-    }
-}
-
 impl From<std::io::Error> for SError {
     fn from(err: std::io::Error) -> Self {
         SError::new("io")
@@ -336,55 +314,6 @@ impl Default for SError {
             .with_message("default SError value")
     }
 }
-
-impl Packable for SError {
-    fn pack_sz(&self) -> usize {
-        stack_pack(proto_string(&self.to_string())).pack_sz()
-    }
-
-    fn pack(&self, buf: &mut [u8]) {
-        stack_pack(proto_string(&self.to_string())).into_slice(buf);
-    }
-}
-
-impl<'a> Unpackable<'a> for SError {
-    type Error = prototk::Error;
-
-    fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), Self::Error> {
-        let mut up = Unpacker::new(buf);
-        let serialized: proto_string<'a> = up.unpack()?;
-        let err = parse(serialized.0).map_err(|_| prototk::Error::StringEncoding)?;
-        Ok((SError::from(err), up.remain()))
-    }
-}
-
-impl FieldPackHelper<'_, proto_message<SError>> for SError {
-    fn field_pack_sz(&self, tag: &Tag) -> usize {
-        stack_pack(tag)
-            .pack(stack_pack(self).length_prefixed())
-            .pack_sz()
-    }
-
-    fn field_pack(&self, tag: &Tag, out: &mut [u8]) {
-        stack_pack(tag)
-            .pack(stack_pack(self).length_prefixed())
-            .into_slice(out);
-    }
-}
-
-impl FieldUnpackHelper<'_, proto_message<SError>> for SError {
-    fn merge_field(&mut self, proto: proto_message<SError>) {
-        *self = proto.unwrap_message();
-    }
-}
-
-impl From<proto_message<SError>> for SError {
-    fn from(proto: proto_message<SError>) -> Self {
-        proto.unwrap_message()
-    }
-}
-
-impl Message<'_> for SError {}
 
 fn field(name: &str, value: SExpr) -> SExpr {
     SExpr::List(vec![SExpr::Atom(name.to_string()), value])

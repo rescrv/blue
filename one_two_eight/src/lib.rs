@@ -195,19 +195,16 @@ macro_rules! generate_id_prototk {
         }
 
         impl<'a> buffertk::Unpackable<'a> for $what {
-            type Error = prototk::Error;
+            type Error = prototk::SError;
 
-            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), prototk::Error> {
+            fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), prototk::SError> {
                 let mut up = buffertk::Unpacker::new(buf);
                 let tag: buffertk::v64 = up.unpack()?;
                 let v: buffertk::v64 = up.unpack()?;
                 let v: usize = v.into();
                 let rem = up.remain();
                 if rem.len() < v {
-                    return Err(prototk::Error::BufferTooShort {
-                        required: v,
-                        had: rem.len(),
-                    });
+                    return Err(prototk::buffer_too_short(v, rem.len()));
                 }
                 // TODO(rescrv): Have an error if v != 16.
                 let id = $what {

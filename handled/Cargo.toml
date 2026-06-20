@@ -13,9 +13,6 @@ default = ["binaries"]
 binaries = []
 
 [dependencies]
-biometrics = { workspace = true }
-buffertk = { workspace = true }
-prototk = { workspace = true }
 
 [dev-dependencies]
 guacamole = { workspace = true }
