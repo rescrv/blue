@@ -191,6 +191,16 @@ pub struct Evaluator<T> {
     /// private and reachable only through the type checker's read path — no
     /// Caternary surface writes it.
     annotations: HashMap<String, (crate::Span, Vec<crate::SpannedToken>)>,
+    /// Parallel **refinement table** (Tier 1, M6): definition name → the parsed
+    /// [`crate::RefinementSig`] attached to it (§10.1). This is the third
+    /// attachment surface, a sibling of `definitions` (`[ body ] :name`) and
+    /// `annotations` (`[ effect ] @name`); see the recorded design note in
+    /// `refinement.rs` for why a refinement signature gets its **own infix source
+    /// channel** rather than riding the postfix token stream. Populated only by
+    /// [`Evaluator::attach_refinement`]; the runtime never reads it and Tier 0
+    /// never reads it either (the signature is the §3-reserved `pre`/`post`
+    /// payload, forwarded untouched, invariant 10).
+    refinements: HashMap<String, crate::RefinementSig>,
 }
 
 impl<T> Default for Evaluator<T>
@@ -211,6 +221,7 @@ impl<T> Evaluator<T> {
             contracts: HashMap::new(),
             definition_spans: HashMap::new(),
             annotations: HashMap::new(),
+            refinements: HashMap::new(),
         }
     }
 
@@ -319,6 +330,44 @@ impl<T> Evaluator<T> {
     /// The span of a definition's annotation effect bracket, if present.
     pub fn annotation_span(&self, name: &str) -> Option<crate::Span> {
         self.annotations.get(name).map(|(span, _)| *span)
+    }
+
+    /// Attach a **Tier 1 refinement signature** (§10.1) to a definition from raw
+    /// infix source text, e.g.
+    ///
+    /// ```text
+    /// sqrt : ( n: Num where n >= 0  --  r: Num where r >= 0 and r * r = n )
+    /// ```
+    ///
+    /// This is the third (and final, for Tier 1) attachment surface, recorded
+    /// here and in `refinement.rs` because `docs/typing.md` is read-only. A
+    /// refinement signature is an **infix** language and is parsed by the
+    /// **separate** refinement parser ([`crate::parse_signature`]) — it never
+    /// rides the postfix token stream that `load`/`load_with_spans` consume, so
+    /// the two parsers stay separate (§10.1). The head identifier of the
+    /// signature names the definition it refines; the parsed
+    /// [`crate::RefinementSig`] is recorded in a side table and is the
+    /// §3-reserved `pre`/`post` payload — **forwarded untouched and never read by
+    /// Tier 0** (invariant 10).
+    ///
+    /// Returns the parsed signature on success, or a located
+    /// [`crate::RefineParseError`] (carrying a byte span into `source`) when the
+    /// signature is malformed. This is **parse-only** (M6): nothing here builds a
+    /// shadow stack, generates VCs, or calls a solver.
+    pub fn attach_refinement(
+        &mut self,
+        source: &str,
+    ) -> Result<crate::RefinementSig, crate::RefineParseError> {
+        let sig = crate::parse_signature(source)?;
+        self.refinements.insert(sig.name.clone(), sig.clone());
+        Ok(sig)
+    }
+
+    /// The refinement signature attached to `name`, if any (§10.1). The read path
+    /// for later Tier 1 milestones; `None` when the definition carries no
+    /// refinement (which §10.7 reads as `where true`).
+    pub fn refinement(&self, name: &str) -> Option<&crate::RefinementSig> {
+        self.refinements.get(name)
     }
 
     /// Loads function definitions from a top-level token stream.
@@ -1445,5 +1494,36 @@ mod tests {
             vec![word("@dupw")],
             "an `@name` word is an inert literal, never an executed operator"
         );
+    }
+
+    #[test]
+    fn refinement_signatures_leave_zero_runtime_residue() {
+        // §10.10 / invariant 20 (extended to M6): a refinement signature is the
+        // strongest form of runtime inertness — it is **never in any token
+        // stream at all**. It arrives through a separate infix source channel
+        // ([`Evaluator::attach_refinement`]), so it cannot perturb either `load`
+        // or `eval`. Attaching one to a definition leaves the runtime byte-for-
+        // byte identical.
+        let mut eval = locals_eval();
+        let tokens = crate::parse_with_spans("[ 1 ADD ] :inc").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        // Record the runtime body BEFORE attaching any refinement.
+        let body_before = eval.definition_body("inc").unwrap().to_vec();
+
+        // Attach a refinement signature for `inc` via the SEPARATE infix parser.
+        eval.attach_refinement("inc : ( n: Num -- m: Num where m = n + 1 )")
+            .expect("refinement signature attaches");
+        assert!(eval.refinement("inc").is_some());
+
+        // The runtime body is unchanged — the signature lives only in the side
+        // table, never spliced into the body or any evaluated stream.
+        let body_after = eval.definition_body("inc").unwrap().to_vec();
+        assert_eq!(body_before, body_after);
+
+        // Running a program against the loaded definition produces the ordinary
+        // result; no refinement text ever reaches evaluation.
+        let program = parse("5 inc").unwrap();
+        assert_eq!(eval.eval(&program).unwrap(), vec![word("6")]);
     }
 }

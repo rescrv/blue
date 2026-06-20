@@ -2374,4 +2374,57 @@ mod tests {
             other => panic!("the gate must reject an underflow, got {other:?}"),
         }
     }
+
+    // ----- §3 / invariant 10 (M6): refinement payload is inert at Tier 0 -----
+
+    #[test]
+    fn tier0_inference_ignores_an_attached_refinement() {
+        // Build the SAME program twice — once with a refinement signature
+        // attached to a definition, once without — and assert Tier 0 infers the
+        // identical whole-program shape. The refinement is a forwarded payload
+        // Tier 0 never reads (§3): attaching it must not perturb inference.
+        let prog = "[ 1 2 + ] :sum  [ 3 sum ] :main";
+
+        let mut bare: Evaluator<Value> = Evaluator::new();
+        bare.register_operator_with_contract("+", plus_scheme());
+        bare.load_with_spans(&parse_with_spans(prog).unwrap())
+            .unwrap();
+        let bare_effect = type_check(&bare).expect("bare program type-checks");
+
+        let mut refined: Evaluator<Value> = Evaluator::new();
+        refined.register_operator_with_contract("+", plus_scheme());
+        refined
+            .load_with_spans(&parse_with_spans(prog).unwrap())
+            .unwrap();
+        // Attach a refinement signature to `sum` via the separate infix parser.
+        let sig = refined
+            .attach_refinement("sum : ( a: Num b: Num -- s: Num where s = a + b )")
+            .expect("refinement signature parses and attaches");
+        assert_eq!(sig.name, "sum");
+        assert!(refined.refinement("sum").is_some());
+        let refined_effect = type_check(&refined).expect("refined program type-checks");
+
+        // Identical shape: same inputs, same outputs, same row identity.
+        assert_eq!(bare_effect.input.elems, refined_effect.input.elems);
+        assert_eq!(bare_effect.output.elems, refined_effect.output.elems);
+        assert_eq!(
+            bare_effect.input.row == bare_effect.output.row,
+            refined_effect.input.row == refined_effect.output.row
+        );
+        // And the inferred whole-program arrow carries NO refinement payload —
+        // Tier 0 produced shape only; the attached signature stayed in its side
+        // table, never read.
+        assert!(refined_effect.refinement.is_none());
+    }
+
+    #[test]
+    fn malformed_attached_refinement_is_a_located_error() {
+        // The attachment surface surfaces a located parse error (§12 M6) rather
+        // than panicking or silently dropping the signature.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let err = eval
+            .attach_refinement("sqrt : ( n: Num where n >=  --  r: Num )")
+            .expect_err("malformed where must be a located parse error");
+        assert!(err.span.start <= "sqrt : ( n: Num where n >=  --  r: Num )".len());
+    }
 }

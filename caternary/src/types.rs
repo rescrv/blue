@@ -317,12 +317,40 @@ pub struct WordTy {
     pub input: StackTy,
     /// The stack after the word runs.
     pub output: StackTy,
+    /// **Tier 1 refinement payload (§3, reserved here).** The optional `pre`/`post`
+    /// predicate signature attached to a quotation arrow (demands on inputs,
+    /// guarantees on outputs). **Tier 0 never reads this** — it is forwarded
+    /// untouched and the unifier matches on shape (`input`/`output`) alone
+    /// (invariant 10). It wakes up only at the VC boundary (§10), which is a later
+    /// milestone. For M6 it is a parse-only payload: the [`crate::RefinementSig`]
+    /// the §10.1 parser produces lands here so the shape exists for later tiers.
+    pub refinement: Option<Box<crate::refinement::RefinementSig>>,
 }
 
 impl WordTy {
-    /// Construct an arrow from `input` to `output`.
+    /// Construct a Tier-0 arrow from `input` to `output` with **no** refinement
+    /// payload (the common path: Tier 0 builds shape-only arrows).
     pub fn new(input: StackTy, output: StackTy) -> Self {
-        WordTy { input, output }
+        WordTy {
+            input,
+            output,
+            refinement: None,
+        }
+    }
+
+    /// Construct an arrow carrying a Tier 1 refinement payload (§3). The payload
+    /// is **forwarded untouched** and never read by Tier 0; this is how a parsed
+    /// [`crate::RefinementSig`] is wired into the §3-reserved `Quote` shape.
+    pub fn with_refinement(
+        input: StackTy,
+        output: StackTy,
+        refinement: crate::refinement::RefinementSig,
+    ) -> Self {
+        WordTy {
+            input,
+            output,
+            refinement: Some(Box::new(refinement)),
+        }
     }
 }
 
@@ -757,10 +785,13 @@ impl InferCtx {
     /// [`InferCtx::resolve_stack_deep`]). The canonical form of an inferred
     /// effect, used to report and assert a sequence's principal type.
     pub fn resolve_word_deep(&self, w: &WordTy) -> WordTy {
-        WordTy::new(
-            self.resolve_stack_deep(&w.input),
-            self.resolve_stack_deep(&w.output),
-        )
+        WordTy {
+            input: self.resolve_stack_deep(&w.input),
+            output: self.resolve_stack_deep(&w.output),
+            // Resolution chases type/row bindings; the refinement payload (§3) is
+            // over named binders, so it is forwarded untouched — never read.
+            refinement: w.refinement.clone(),
+        }
     }
 
     /// Occurs check for a **type** variable: does `v` appear anywhere in `term`,
@@ -1030,6 +1061,9 @@ fn rename_word(word: &WordTy, ty_map: &[(TyVar, TyVar)], row_map: &[(RowVar, Row
     WordTy {
         input: rename_stack(&word.input, ty_map, row_map),
         output: rename_stack(&word.output, ty_map, row_map),
+        // The refinement payload (§3) is over named binders, not type/row
+        // variables, so renaming never touches it — forward it untouched.
+        refinement: word.refinement.clone(),
     }
 }
 
@@ -1306,6 +1340,55 @@ mod tests {
             "no leading-quote variable names: {text}"
         );
         assert!(text.contains("byte 5") && text.contains("byte 12"));
+    }
+
+    // §3 / invariant 10: the Tier 1 refinement payload on a `Quote` arrow is
+    // forwarded untouched and NEVER read by Tier 0. Two arrows that differ ONLY
+    // in their refinement payload must unify identically (shape-only), and the
+    // payload must survive resolution untouched.
+    #[test]
+    fn refinement_payload_is_inert_to_tier0_unification() {
+        let s = sp();
+        let sig = crate::parse_signature(
+            "sqrt : ( n: Num where n >= 0  --  r: Num where r >= 0 and r * r = n )",
+        )
+        .expect("signature parses");
+
+        // Same shape ( 'r -- 'r Num ), one refined and one bare.
+        let refined = WordTy::with_refinement(
+            StackTy::empty(0, s),
+            StackTy::new(vec![Ty::num(s)], 0, s),
+            sig.clone(),
+        );
+        let bare = WordTy::new(StackTy::empty(1, s), StackTy::new(vec![Ty::num(s)], 1, s));
+
+        let mut ctx = InferCtx::new();
+        // Tier 0 unifies on shape alone: the refinement payload is invisible.
+        ctx.unify_ty(&Ty::quote(refined.clone(), s), &Ty::quote(bare, s))
+            .expect("refined and bare quotes unify on shape");
+
+        // The payload survives deep resolution untouched (forwarded, not read).
+        let resolved = ctx.resolve_word_deep(&refined);
+        assert_eq!(resolved.refinement.as_deref(), Some(&sig));
+    }
+
+    #[test]
+    fn refinement_payload_does_not_change_mismatch_outcome() {
+        // A shape mismatch is still a mismatch regardless of payload presence:
+        // the unifier never consults the refinement to accept or reject.
+        let s = sp();
+        let sig = crate::parse_signature("f : ( a: Num  --  b: Num )").unwrap();
+        let refined_num = WordTy::with_refinement(
+            StackTy::empty(0, s),
+            StackTy::new(vec![Ty::num(s)], 0, s),
+            sig,
+        );
+        let bare_bool = WordTy::new(StackTy::empty(1, s), StackTy::new(vec![Ty::bool(s)], 1, s));
+        let mut ctx = InferCtx::new();
+        let err = ctx
+            .unify_ty(&Ty::quote(refined_num, s), &Ty::quote(bare_bool, s))
+            .unwrap_err();
+        assert!(matches!(err, UnifyError::Mismatch { .. }));
     }
 
     #[test]
