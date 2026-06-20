@@ -50,6 +50,10 @@ fn main() {
         eprintln!("mutually exclusive options --close-stderr and --stderr specified");
         std::process::exit(254);
     }
+    if free.is_empty() {
+        eprintln!("no command specified");
+        std::process::exit(253);
+    }
     // HashMap of chars to %-notation.
     let epoch_now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
