@@ -338,6 +338,217 @@ where
     type_check(evaluator).map(|_effect| ())
 }
 
+/// The failure mode of the **combined whole-program gate** ([`check_whole_program`]):
+/// either Tier 0 (shape safety) rejected the program, or — only reached when Tier 0
+/// is green — Tier 1 (refinement / shadow-stack) rejected it, either structurally
+/// ([`GateError::Tier1`]), by leaving one or more refinement **obligations
+/// undischarged** ([`GateError::Tier1Violated`] — §10.7 Situation B, a demand
+/// actually violated with a counterexample), or by recording one or more **illegal
+/// `assume`s** in an otherwise-completed ledger ([`GateError::Tier1Rejected`]).
+///
+/// The variants encode the gate's **ordering invariant** structurally (§10.10,
+/// invariant 19): a [`GateError::Tier1`] / [`GateError::Tier1Rejected`] can only
+/// ever be observed for a program whose arities Tier 0 has *already* balanced,
+/// because the gate never reaches the Tier 1 call when Tier 0 returns
+/// [`GateError::Tier0`].
+///
+/// [`GateError::Tier1Rejected`] is how the gate **fails closed** on a §10.7 hard
+/// error: `check_program` records an illegal `assume` (provable goal, or no opaque
+/// dependency in its chain) into the ledger's rejections and still returns `Ok`, so
+/// the gate inspects the ledger and turns a non-clean one into this error. This
+/// honors invariant 13 ("the ledger means *cannot honestly prove*, never *didn't
+/// bother*") and invariant 20 (the CI gate fails closed): `Ok(ledger)` from the
+/// gate means a *clean* ledger, and a caller never has to consult
+/// [`is_clean`](crate::Ledger::is_clean) to learn pass/fail.
+#[derive(Debug)]
+pub enum GateError {
+    /// Tier 0 (shape safety) rejected the program. Tier 1 was **not** run.
+    Tier0(crate::TypeError),
+    /// Tier 1 (refinement verification / operator-axiom discharge) rejected the
+    /// program **structurally** (e.g. a shadow-stack failure). Only reachable
+    /// after Tier 0 passed.
+    Tier1(crate::ShadowError),
+    /// Tier 1 completed but the resulting ledger is **not clean**: it carries one
+    /// or more illegal `assume`s (§10.7 hard error — provable goal, or no opaque
+    /// dependency). The rejected [`AssumeRecord`](crate::AssumeRecord)s travel
+    /// with the error so their structured reasons
+    /// ([`ASSUME_PROVABLE_MSG`](crate::ASSUME_PROVABLE_MSG) /
+    /// [`ASSUME_NO_OPAQUE_MSG`](crate::ASSUME_NO_OPAQUE_MSG)) survive. Only
+    /// reachable after Tier 0 passed.
+    Tier1Rejected(Vec<crate::AssumeRecord>),
+    /// Tier 1 completed but one or more refinement **obligations were not
+    /// discharged**: a demand/guarantee whose VC came back `Sat` (refuted, with a
+    /// counterexample [`Model`](crate::Model)) or `Unknown` (undecided — fails
+    /// closed for higher-order subsumption per §10.6). This is §10.7 *Situation B*
+    /// — a refinement demand actually violated, *not* assumed away — and the gate
+    /// must fail closed (§10.5 M9 / invariant 20). The undischarged
+    /// [`Obligation`](crate::Obligation)s travel with the error so the
+    /// counterexample model survives for diagnostics. Only reachable after Tier 0
+    /// passed.
+    Tier1Violated(Vec<crate::Obligation>),
+}
+
+impl std::fmt::Display for GateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GateError::Tier0(e) => write!(f, "{e}"),
+            GateError::Tier1(e) => write!(f, "{e}"),
+            GateError::Tier1Rejected(rejections) => {
+                write!(
+                    f,
+                    "Tier 1 rejected {} illegal `assume`(s):",
+                    rejections.len()
+                )?;
+                for rec in rejections {
+                    let reason = rec
+                        .legality
+                        .message()
+                        .unwrap_or("illegal `assume` (hard error)");
+                    write!(f, "\n  - {} at `{}`: {reason}", rec.surface, rec.site)?;
+                }
+                Ok(())
+            }
+            GateError::Tier1Violated(violations) => {
+                write!(
+                    f,
+                    "Tier 1 left {} refinement obligation(s) undischarged:",
+                    violations.len()
+                )?;
+                for ob in violations {
+                    write!(
+                        f,
+                        "\n  - `{}` demands `{}` ({:?})",
+                        ob.word,
+                        crate::render_smtlib(&ob.goal),
+                        ob.verdict
+                    )?;
+                    // A targeted diagnostic (carries-no-contract / fail-closed,
+                    // §10.7/§10.6 invariant 12) supersedes the bare SMT witness:
+                    // the actionable cause, not the incidental counterexample.
+                    if let Some(message) = &ob.message {
+                        write!(f, " — {message}")?;
+                    } else if let Some(model) = &ob.model {
+                        write!(f, " — counterexample {model}")?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for GateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            GateError::Tier0(e) => Some(e),
+            GateError::Tier1(e) => Some(e),
+            // The rejected assumes / undischarged obligations are carried as data,
+            // not as a single source error, so there is no single underlying cause
+            // to surface here.
+            GateError::Tier1Rejected(_) => None,
+            GateError::Tier1Violated(_) => None,
+        }
+    }
+}
+
+/// The **single whole-program CI gate** — the one build-time act the spec
+/// personifies as `caternary check` (§10.10, invariant 20): it pays the *entire*
+/// verification cost in one call — Tier 0, then Tier 1, then operator-axiom
+/// discharge — and returns the unified outcome (the [`Ledger`](crate::Ledger) of
+/// the Tier 1 pass) or the first tier that rejected.
+///
+/// This composes the two halves that were previously separately-shaped and wired
+/// nowhere but tests:
+///
+/// 1. **Tier 0 first.** Runs [`check`] over the whole program loaded into
+///    `evaluator`. On rejection it returns [`GateError::Tier0`] **immediately and
+///    runs no Tier 1** — the shadow stack and the solver are never touched.
+/// 2. **Tier 1 only on green.** With Tier 0 satisfied, derives the
+///    [`Definition`](crate::Definition) list (each definition's name, its body, and
+///    its attached [`RefinementSig`](crate::RefinementSig)) and a refinement-sig
+///    `lookup` from the evaluator, then runs
+///    [`check_program`](crate::check_program) (Tier 1 + operator-axiom discharge).
+///    `Ok(ledger)` means a **clean** ledger *and* every refinement obligation
+///    **discharged**. The gate **fails closed** on two distinct Tier-1 hard errors:
+///    a refinement obligation left undischarged (a demand/guarantee refuted with a
+///    counterexample, or undecided — §10.5/§10.7 Situation B) **fails closed** as
+///    [`GateError::Tier1Violated`] carrying the offending obligations and their
+///    counterexample models; an illegal `assume` (§10.7 hard error) **fails closed**
+///    as [`GateError::Tier1Rejected`] carrying the rejected records. The gate never
+///    returns `Ok` on a non-clean ledger, so callers read pass/fail straight off
+///    the `Result` and need not consult [`is_clean`](crate::Ledger::is_clean).
+///
+/// This realizes invariant 19 **structurally rather than by caller convention**:
+/// Tier 1's shadow-stack soundness is parasitic on Tier 0 having already balanced
+/// every arity, and the gate guarantees Tier 1 never runs on a program Tier 0 has
+/// not first accepted.
+///
+/// `mk_solver` builds a fresh solver per definition (the seam is
+/// per-checking-session); pass [`SmtLibSolver::new`](crate::SmtLibSolver::new) for
+/// the default in-tree backend (a checked program links no solver — invariants
+/// 14/20 — so the solver is a build-time-only dependency).
+///
+/// Definitions are gathered in **name order** so the resulting ledger is
+/// deterministic regardless of the (unspecified) iteration order of the evaluator's
+/// definition table.
+pub fn check_whole_program<T, S, MkSolver>(
+    evaluator: &Evaluator<T>,
+    mk_solver: MkSolver,
+) -> Result<crate::Ledger, GateError>
+where
+    T: Quotable,
+    S: crate::Solver + crate::CounterModel + crate::FactSnapshot,
+    MkSolver: FnMut() -> S,
+{
+    // Tier 0 first — the immutability barrier and the arity floor Tier 1 rides on
+    // (invariant 19). On rejection we return *without* constructing a shadow stack
+    // or a solver: Tier 1 must never run on a program Tier 0 has not accepted.
+    check(evaluator).map_err(GateError::Tier0)?;
+
+    // Tier 0 is green: bridge the evaluator into the Tier 1 shape. Each loaded
+    // definition contributes its name, its (spanless) body, and its attached
+    // refinement signature; the lookup resolves any referenced word's signature
+    // (callees, operators) the same way the standalone Tier 1 entry does.
+    let mut names: Vec<&str> = evaluator.definition_names().collect();
+    names.sort_unstable();
+    let defs: Vec<crate::Definition> = names
+        .iter()
+        .map(|&name| crate::Definition {
+            name: name.to_string(),
+            body: evaluator
+                .definition_body(name)
+                .map(<[crate::Token]>::to_vec)
+                .unwrap_or_default(),
+            sig: evaluator.refinement(name).cloned(),
+        })
+        .collect();
+    let lookup = |w: &str| evaluator.refinement(w).cloned();
+
+    let ledger = crate::check_program(&defs, &lookup, mk_solver).map_err(GateError::Tier1)?;
+
+    // Fail closed on an UNDISCHARGED obligation (§10.5/§10.7 Situation B):
+    // `check_program` records every refuted (`Sat`, with a counterexample) or
+    // undecided (`Unknown`) VC into the ledger's violations and *still* returns
+    // `Ok`. The CI gate must reject a program whose refinement demand is actually
+    // violated (invariant 20 / M9), so any violation becomes a gate error carrying
+    // the offending obligations and their counterexample models.
+    if !ledger.violations().is_empty() {
+        return Err(GateError::Tier1Violated(ledger.violations().to_vec()));
+    }
+
+    // Fail closed on a §10.7 hard error: `check_program` records an illegal
+    // `assume` (provable goal, or no opaque dependency in its chain) into the
+    // ledger's rejections and *still* returns `Ok`. The CI gate must reject such a
+    // program (invariants 13/20), so a non-clean ledger becomes a gate error
+    // carrying the rejected records (and their ASSUME_PROVABLE_MSG /
+    // ASSUME_NO_OPAQUE_MSG reasons). Only a clean ledger is a pass.
+    if !ledger.is_clean() {
+        return Err(GateError::Tier1Rejected(ledger.rejections().to_vec()));
+    }
+
+    Ok(ledger)
+}
+
 /// Type-checks the whole program: locate the distinguished entry [`MAIN`] and
 /// check it against the empty initial stack.
 ///
@@ -664,6 +875,22 @@ where
         return Ok(WordTy::new(
             StackTy::empty(r, span),
             StackTy::new(vec![Ty::bool(span)], r, span),
+        ));
+    }
+
+    // `assume( P )` (§10.7) is a Tier-1 path-condition marker, **not** a value
+    // operator: it asserts a predicate about the current top of stack and moves
+    // no data, so its Tier-0 shape effect is the identity ( 'r -- 'r ). Tier 1
+    // (`verify_ctx`) intercepts the same word before word resolution; Tier 0 must
+    // likewise accept it natively — it is a language construct (like `if`), never a
+    // registered operator and never in the operator table — so an assume-bearing
+    // program passes the whole-program gate's Tier-0 half (invariant 19/20). The
+    // predicate text is opaque to Tier 0; a malformed clause surfaces at Tier 1.
+    if crate::parse_assume(w).is_some() {
+        let r = ctx.fresh_row();
+        return Ok(WordTy::new(
+            StackTy::empty(r, span),
+            StackTy::empty(r, span),
         ));
     }
 
@@ -2443,5 +2670,665 @@ mod tests {
             .attach_refinement("sqrt : ( n: Num where n >=  --  r: Num )")
             .expect_err("malformed where must be a located parse error");
         assert!(err.span.start <= "sqrt : ( n: Num where n >=  --  r: Num )".len());
+    }
+
+    // -----------------------------------------------------------------------
+    // The combined whole-program CI gate (`check_whole_program`): Tier 0 then,
+    // only on green, Tier 1 + operator-axiom discharge, in one call (§10.10,
+    // invariant 19/20).
+    // -----------------------------------------------------------------------
+
+    /// A neutral Tier-0 scheme of the given pop/push arity over `Num` —
+    /// ( 'S Num…(pops) -- 'S Num…(pushes) ). Used to register the refined `sqrt`
+    /// and the opaque producer the assume guards.
+    fn num_scheme(pops: usize, pushes: usize) -> Scheme {
+        let s = sp();
+        let input = StackTy::new((0..pops).map(|_| Ty::num(s)).collect(), 0, s);
+        let output = StackTy::new((0..pushes).map(|_| Ty::num(s)).collect(), 0, s);
+        Scheme::new(vec![], vec![0], WordTy::new(input, output))
+    }
+
+    /// Build a small **assume-bearing refined whole program** loaded into an
+    /// evaluator: `mk` is an opaque `( -- Num )` producer; `sqrt` carries a
+    /// Tier-0 arrow ( Num -- Num ) and a refinement demanding `n >= 0`; `foo`
+    /// produces an opaque value, asserts `result >= 0` over it, and feeds it to
+    /// `sqrt`; `main` calls `foo`. The `assume` is legal (a genuinely opaque
+    /// dependency it cannot prove otherwise), so the Tier-1 ledger records `foo`
+    /// verified modulo `{ result >= 0 }`.
+    fn assume_bearing_program() -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("mk", num_scheme(0, 1));
+        eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+        eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+            .expect("sqrt refinement attaches");
+        let src = "[ mk \"assume(result >= 0)\" sqrt DROP ] :foo [ foo ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        eval
+    }
+
+    #[test]
+    fn gate_runs_tier0_then_tier1_and_returns_the_ledger() {
+        // The single act: Tier 0 (shape) THEN Tier 1 (+ axiom discharge), one
+        // call, unified outcome (§10.10 / invariant 20). The returned Ledger is
+        // the Tier-1 ledger, enumerating the user trusted base.
+        let eval = assume_bearing_program();
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("Tier 0 green, so the gate runs Tier 1 and returns its ledger");
+
+        // The one accepted assumption is in the ledger, attributed to `foo`.
+        assert_eq!(
+            ledger.grep_assume(),
+            vec!["assume(result >= 0)".to_string()]
+        );
+        assert!(ledger.is_clean(), "rejections: {:?}", ledger.rejections());
+        assert!(
+            ledger.status("foo").is_modulo(),
+            "foo is verified modulo its assume: {}",
+            ledger.status("foo")
+        );
+    }
+
+    #[test]
+    fn gate_fails_closed_on_an_illegal_assume() {
+        // §10.7 HARD ERROR / invariants 13+20: `check_program` records an illegal
+        // `assume` into the ledger's rejections and still returns Ok, so the gate
+        // must inspect the ledger and FAIL CLOSED — never return Ok on a non-clean
+        // ledger. Here `foo` asserts `assume(1 >= 0)`: a concrete goal with no
+        // opaque dependency in its chain, which strict legality rejects.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+        eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+            .expect("sqrt refinement attaches");
+        // `1` is a concrete Num — no opaque/uncontracted value sits in the
+        // obligation's chain, so the assume is illegal (ASSUME_NO_OPAQUE_MSG).
+        let src = "[ 1 \"assume(1 >= 0)\" sqrt DROP ] :foo [ foo ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).expect_err(
+            "an illegal assume is a §10.7 hard error: the gate must fail closed, not return Ok",
+        );
+
+        match err {
+            GateError::Tier1Rejected(rejections) => {
+                assert_eq!(
+                    rejections.len(),
+                    1,
+                    "exactly one illegal assume was rejected"
+                );
+                let reason = rejections[0]
+                    .legality
+                    .message()
+                    .expect("a rejected assume carries a hard-error reason");
+                assert!(
+                    reason == crate::ASSUME_NO_OPAQUE_MSG || reason == crate::ASSUME_PROVABLE_MSG,
+                    "the rejection reason is one of the §10.7 hard-error messages, got: {reason}"
+                );
+            }
+            other => panic!(
+                "the gate must fail closed with Tier1Rejected carrying the reason, got: {other}"
+            ),
+        }
+    }
+
+    #[test]
+    fn gate_fails_closed_on_a_violated_obligation() {
+        // §10.7 SITUATION B / §10.5 M9 / invariant 20: an opaque producer feeds an
+        // unconstrained value into a refined demand with NO assume to cover it, so
+        // the VC `true => n >= 0` is `Sat` (refuted) with a counterexample. `verify`
+        // records the violated obligation but does NOT error — discharge-checking is
+        // the gate's job — so the gate must inspect the obligation stream and FAIL
+        // CLOSED, surfacing the counterexample, never return Ok.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("mk", num_scheme(0, 1));
+        eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+        eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+            .expect("sqrt refinement attaches");
+        // `mk` is opaque ( -- Num ) with no fact bounding its output; feeding it to
+        // `sqrt`'s demand `n >= 0` with no assume is the §10.7 Situation B hole.
+        let src = "[ mk sqrt DROP ] :foo [ foo ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).expect_err(
+            "a violated refinement demand (§10.7 Situation B) must fail closed, not return Ok",
+        );
+
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert_eq!(
+                    violations.len(),
+                    1,
+                    "exactly one refinement obligation was left undischarged"
+                );
+                let ob = &violations[0];
+                assert_eq!(ob.word, "sqrt", "the demand belongs to `sqrt`");
+                assert!(
+                    !ob.is_discharged(),
+                    "the surfaced obligation is genuinely undischarged"
+                );
+                assert_eq!(
+                    ob.verdict,
+                    crate::Verdict::Sat,
+                    "the VC `true => n >= 0` is refuted (Sat), not merely undecided"
+                );
+                let model = ob
+                    .model
+                    .as_ref()
+                    .expect("a refuted, fully-decidable VC carries a counterexample model (§10.5)");
+                assert!(
+                    !model.is_empty(),
+                    "the counterexample constrains the opaque input: {model}"
+                );
+            }
+            other => panic!(
+                "the gate must fail closed with Tier1Violated carrying the counterexample, got: {other}"
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // M10 end-to-end: higher-order subsumption reached THROUGH the whole-program
+    // gate (§10.6 — the centerpiece, no longer test-only). These promote the
+    // solver-level m10_* unit tests to whole-program acceptance: a refined
+    // quotation crosses a higher-order boundary into a word whose signature
+    // declares a refined-quotation parameter, and `check_whole_program` runs the
+    // §10.6 subsumption check — accepting a stronger contract, failing closed on a
+    // weaker or undecidable one.
+    // -----------------------------------------------------------------------
+
+    /// A Tier-0 scheme for a combinator-like operator that pops one element of
+    /// **any** type (so a quotation value type-checks into the slot) and pushes a
+    /// `Num`: ( 'S a -- 'S Num ). This is the shape of the higher-order `apply`
+    /// the subsumption tests pass a refined quotation through.
+    fn apply_scheme() -> Scheme {
+        let s = sp();
+        let input = StackTy::new(vec![Ty::var(1, s)], 0, s);
+        let output = StackTy::new(vec![Ty::num(s)], 0, s);
+        Scheme::new(vec![1], vec![0], WordTy::new(input, output))
+    }
+
+    /// Build a whole program in which `foo` passes a quotation `[ producer ]`
+    /// through the higher-order `apply`, whose signature declares its parameter
+    /// `q` as a refined quotation guaranteeing `r OP_EXPECTED k_expected`.
+    /// `producer` is a refined definition guaranteeing `r OP_PROVIDED k_provided`.
+    /// The §10.6 subsumption check runs at the `apply` boundary in `foo`.
+    fn higher_order_program(
+        apply_sig: &str,
+        producer_sig: &str,
+        producer_body: &str,
+    ) -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("apply", apply_scheme());
+        eval.attach_refinement(apply_sig)
+            .expect("apply higher-order refinement attaches");
+        eval.attach_refinement(producer_sig)
+            .expect("producer refinement attaches");
+        let src =
+            format!("[ {producer_body} ] :producer [ [ producer ] apply DROP ] :foo [ foo ] :main");
+        let tokens = parse_with_spans(&src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        eval
+    }
+
+    #[test]
+    fn gate_accepts_a_stronger_quotation_guarantee_at_a_higher_order_boundary() {
+        // §10.6 covariant guarantee, reached end-to-end: a quotation guaranteeing
+        // `r > 5` passed where `r > 0` is expected. The subsumption VC
+        // `r>5 ⟹ r>0` is valid (a STRONGER guarantee subsumes a weaker one), so
+        // the gate returns Ok(clean) — the subsumption check ran through
+        // `check_whole_program`, not a direct `check_subsumption` call.
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where r > 0 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 5 )",
+            "6",
+        );
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new).expect(
+            "a stronger quotation guarantee subsumes the expected one: the gate returns Ok(clean)",
+        );
+        assert!(
+            ledger.is_clean(),
+            "covariant subsumption is preserved, so no violations: {:?}",
+            ledger.violations()
+        );
+        assert!(
+            ledger.violations().is_empty(),
+            "a preserved higher-order contract leaves no undischarged obligation"
+        );
+    }
+
+    #[test]
+    fn gate_fails_closed_on_a_weaker_quotation_guarantee_at_a_higher_order_boundary() {
+        // §10.6 covariant guarantee, reached end-to-end and FAILING: a quotation
+        // guaranteeing only `r > 0` passed where `r > 5` is expected. The VC
+        // `r>0 ⟹ r>5` is INVALID (a weaker guarantee cannot substitute), so the
+        // gate must fail closed carrying the subsumption counterexample — never
+        // return Ok.
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where r > 5 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 0 )",
+            "1",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).expect_err(
+            "a weaker quotation guarantee violates §10.6 covariance: the gate must fail closed",
+        );
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert_eq!(
+                    violations.len(),
+                    1,
+                    "exactly one subsumption direction is violated"
+                );
+                let ob = &violations[0];
+                assert!(
+                    ob.word.contains("subsumption"),
+                    "the violation is a subsumption obligation, got `{}`",
+                    ob.word
+                );
+                assert!(
+                    ob.word.contains("guarantee"),
+                    "the failing direction is the covariant guarantee, got `{}`",
+                    ob.word
+                );
+                assert_eq!(
+                    ob.verdict,
+                    crate::Verdict::Sat,
+                    "a present-but-weaker contract is refuted (Sat), not merely undecided"
+                );
+                let model = ob.model.as_ref().expect(
+                    "a refuted, decidable subsumption VC carries a counterexample model (§10.6/§10.5)",
+                );
+                assert!(
+                    !model.is_empty(),
+                    "the counterexample witnesses the gap (a value > 0 but not > 5): {model}"
+                );
+            }
+            other => panic!(
+                "the gate must fail closed with Tier1Violated carrying the subsumption counterexample, got: {other}"
+            ),
+        }
+    }
+
+    #[test]
+    fn gate_fails_closed_on_an_undecidable_subsumption_at_a_higher_order_boundary() {
+        // §10.6 fail-closed (invariant 12), reached end-to-end: the expected
+        // guarantee is `length r > 0` (an uninterpreted `length`), so the
+        // covariant VC `r>0 ⟹ length r > 0` is UNKNOWN. An undecidable subsumption
+        // VC must REJECT — never a silent pass — so the gate fails closed.
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where length r > 0 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 0 )",
+            "6",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect_err("an Unknown subsumption VC must fail closed (§10.6), never return Ok");
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert_eq!(violations.len(), 1, "one undecidable subsumption direction");
+                let ob = &violations[0];
+                assert!(
+                    ob.word.contains("subsumption"),
+                    "the violation is a subsumption obligation, got `{}`",
+                    ob.word
+                );
+                assert_eq!(
+                    ob.verdict,
+                    crate::Verdict::Unknown,
+                    "the VC is undecided (Unknown), which fails closed (§10.6)"
+                );
+                assert!(
+                    !ob.is_discharged(),
+                    "an Unknown is never accepted as discharged"
+                );
+                assert!(
+                    ob.model.is_none(),
+                    "an Unknown never carries a fabricated counterexample (§10.5)"
+                );
+            }
+            other => panic!(
+                "an Unknown subsumption VC must fail closed with Tier1Violated, got: {other}"
+            ),
+        }
+    }
+
+    #[test]
+    fn gate_fails_closed_on_a_stronger_quotation_demand_at_a_higher_order_boundary() {
+        // §10.6 contravariant demand (the FLIP), reached end-to-end and FAILING:
+        // the quotation `producer` *demands* `n > 5`, but `apply` only promises to
+        // call it where `n > 0` holds. The contravariant VC `expected_pre ⟹
+        // provided_pre`, i.e. `n>0 ⟹ n>5`, is INVALID (a quotation demanding MORE
+        // than the boundary supplies cannot substitute), so the gate fails closed.
+        let eval = higher_order_program(
+            "apply : ( q: ( n: Num where n > 0 -- r: Num ) -- s: Num )",
+            "producer : ( n: Num where n > 5 -- r: Num )",
+            "6",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).expect_err(
+            "a stronger quotation demand violates §10.6 contravariance: the gate must fail closed",
+        );
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert!(
+                    violations.iter().any(|o| o.word.contains("subsumption")
+                        && o.word.contains("demand")
+                        && o.verdict == crate::Verdict::Sat),
+                    "the contravariant demand direction is the refuted subsumption VC: {:?}",
+                    violations.iter().map(|o| &o.word).collect::<Vec<_>>()
+                );
+            }
+            other => panic!(
+                "a stronger quotation demand must fail closed with Tier1Violated, got: {other}"
+            ),
+        }
+    }
+
+    #[test]
+    fn gate_accepts_a_weaker_quotation_demand_at_a_higher_order_boundary() {
+        // §10.6 contravariant demand, the accepting twin: `producer` demands only
+        // `n > 0` where `apply` promises `n > 5`. The VC `n>5 ⟹ n>0` is valid (a
+        // WEAKER provided demand subsumes a stronger expected one), so the gate
+        // returns Ok(clean).
+        let eval = higher_order_program(
+            "apply : ( q: ( n: Num where n > 5 -- r: Num ) -- s: Num )",
+            "producer : ( n: Num where n > 0 -- r: Num )",
+            "6",
+        );
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("a weaker quotation demand subsumes: the gate returns Ok(clean)");
+        assert!(
+            ledger.is_clean(),
+            "contravariant demand is preserved: {:?}",
+            ledger.violations()
+        );
+    }
+
+    #[test]
+    fn gate_subsumption_is_reached_from_a_non_test_code_path() {
+        // The acceptance bar: the subsumption check is invoked from a NON-TEST
+        // code path reachable through `check_whole_program` (not a direct
+        // `check_subsumption` call). We assert that by observing a subsumption
+        // obligation surfacing through the gate's ledger — only `verify`'s
+        // higher-order boundary handling produces one, and only when a refined
+        // quotation crosses into a refined-quotation parameter.
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where r > 5 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 0 )",
+            "1",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect_err("the weaker contract fails closed");
+        let GateError::Tier1Violated(violations) = err else {
+            panic!("expected a Tier1Violated subsumption failure");
+        };
+        assert!(
+            violations.iter().any(|o| o.word.contains("subsumption")),
+            "a subsumption obligation reached the ledger through the gate (not a direct call)"
+        );
+    }
+
+    /// Build a higher-order program whose `producer` carries **no** refinement
+    /// signature — an **unrefined** quotation (§10.7 absent-payload). It is passed
+    /// through `apply`, whose signature declares its parameter `q` as a *refined*
+    /// quotation. The §10.6 subsumption boundary then sees a `where true` provided
+    /// contract meeting a required guarantee: the gradual-interop "carries no
+    /// contract" case (M11), as opposed to [`higher_order_program`] which always
+    /// attaches a producer contract.
+    fn unrefined_producer_program(apply_sig: &str, producer_body: &str) -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("apply", apply_scheme());
+        eval.attach_refinement(apply_sig)
+            .expect("apply higher-order refinement attaches");
+        // NOTE: deliberately NO `attach_refinement` for `producer` — it stays
+        // unrefined so its relayed contract is `where true` (absent payload).
+        let src =
+            format!("[ {producer_body} ] :producer [ [ producer ] apply DROP ] :foo [ foo ] :main");
+        let tokens = parse_with_spans(&src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        eval
+    }
+
+    #[test]
+    fn gate_surfaces_carries_no_contract_for_an_unrefined_quotation_meeting_a_guarantee() {
+        // §10.7 / M11 / invariant 12, reached end-to-end: an UNREFINED quotation
+        // (`producer` has no contract) passed where a guarantee `r > 0` is
+        // required. The covariant guarantee VC `true ⟹ r>0` fails, but the honest,
+        // actionable diagnosis is the ABSENT contract — not a bare SMT witness for
+        // some incidental value. The gate must fail closed AND render the targeted
+        // SUBSUMPTION_NO_CONTRACT_MSG, never a bare counterexample.
+        let eval =
+            unrefined_producer_program("apply : ( q: ( -- r: Num where r > 0 ) -- s: Num )", "6");
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).expect_err(
+            "an unrefined quotation meeting a required guarantee fails closed (§10.7/M11)",
+        );
+        let GateError::Tier1Violated(ref violations) = err else {
+            panic!("expected a Tier1Violated subsumption failure, got: {err}");
+        };
+        assert_eq!(
+            violations.len(),
+            1,
+            "one clear cause per boundary: the carries-no-contract guarantee direction"
+        );
+        let ob = &violations[0];
+        assert!(
+            ob.word.contains("subsumption") && ob.word.contains("guarantee"),
+            "the absent-contract failure is the covariant guarantee direction, got `{}`",
+            ob.word
+        );
+        assert_eq!(
+            ob.message.as_deref(),
+            Some(crate::SUBSUMPTION_NO_CONTRACT_MSG),
+            "the obligation carries the targeted carries-no-contract message"
+        );
+        assert!(
+            ob.model.is_none(),
+            "the absent-contract case surfaces no incidental SMT witness"
+        );
+        // The rendered gate error must say "carries no contract" and NOT show a
+        // bare counterexample — the diagnostic must be actionable (§7).
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains(crate::SUBSUMPTION_NO_CONTRACT_MSG),
+            "the gate error must contain the carries-no-contract message, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("carries no contract"),
+            "the gate error text names the missing contract, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("counterexample"),
+            "the carries-no-contract diagnostic must NOT degrade to a bare counterexample, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn gate_keeps_the_counterexample_for_a_present_but_weaker_guarantee_no_carries_no_contract() {
+        // The present-vs-absent distinction, end-to-end: a PRESENT-but-weaker
+        // guarantee (`r > 0` where `r > 5` is required) is a genuine M10 violation
+        // — the contract exists and is simply too weak — so the gate keeps the SMT
+        // counterexample and must NOT emit the carries-no-contract message
+        // (which is reserved for the absent-contract case).
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where r > 5 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 0 )",
+            "1",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect_err("a present-but-weaker guarantee fails closed with a counterexample");
+        let GateError::Tier1Violated(ref violations) = err else {
+            panic!("expected a Tier1Violated subsumption failure, got: {err}");
+        };
+        assert_eq!(violations.len(), 1, "one violated guarantee direction");
+        let ob = &violations[0];
+        assert_eq!(
+            ob.verdict,
+            crate::Verdict::Sat,
+            "a present-but-weaker contract is refuted (Sat), keeping its counterexample"
+        );
+        assert!(
+            ob.message.is_none(),
+            "a present contract is NOT the carries-no-contract case — no targeted message"
+        );
+        assert!(
+            ob.model.is_some(),
+            "the present-but-weaker violation keeps its counterexample model (§10.5)"
+        );
+        let rendered = err.to_string();
+        assert!(
+            !rendered.contains("carries no contract"),
+            "a present-but-weaker guarantee must NOT claim the quotation carries no contract, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("counterexample"),
+            "the present-but-weaker violation surfaces its counterexample, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn gate_surfaces_fail_closed_message_for_an_undecidable_subsumption() {
+        // §10.6 fail-closed (invariant 12), end-to-end with diagnostic fidelity:
+        // the expected guarantee `length r > 0` (uninterpreted `length`) makes the
+        // covariant VC `r>0 ⟹ length r > 0` UNKNOWN. The boundary fails closed AND
+        // the gate must render the targeted SUBSUMPTION_FAIL_CLOSED_MSG, not just a
+        // bare verdict.
+        let eval = higher_order_program(
+            "apply : ( q: ( -- r: Num where length r > 0 ) -- s: Num )",
+            "producer : ( -- r: Num where r > 0 )",
+            "6",
+        );
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect_err("an Unknown subsumption VC must fail closed (§10.6)");
+        let GateError::Tier1Violated(ref violations) = err else {
+            panic!("expected a Tier1Violated subsumption failure, got: {err}");
+        };
+        assert_eq!(violations.len(), 1, "one undecidable subsumption direction");
+        let ob = &violations[0];
+        assert_eq!(
+            ob.verdict,
+            crate::Verdict::Unknown,
+            "the VC is undecided (Unknown), which fails closed (§10.6)"
+        );
+        assert_eq!(
+            ob.message.as_deref(),
+            Some(crate::SUBSUMPTION_FAIL_CLOSED_MSG),
+            "the obligation carries the targeted fail-closed message"
+        );
+        assert!(
+            ob.model.is_none(),
+            "an Unknown never carries a fabricated counterexample (§10.5)"
+        );
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains(crate::SUBSUMPTION_FAIL_CLOSED_MSG),
+            "the gate error must contain the fail-closed message, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("counterexample"),
+            "the fail-closed diagnostic carries no counterexample, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn gate_returns_ok_when_the_demand_is_satisfied() {
+        // The positive twin of the Situation B test: the SAME refined `sqrt` demand
+        // `n >= 0`, but fed a value the solver can prove satisfies it (a constant
+        // `4`), with no assume. The VC `true => 4 >= 0` is `Unsat` (discharged), so
+        // the obligation stream is clean and the gate returns Ok(clean ledger).
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+        eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+            .expect("sqrt refinement attaches");
+        let src = "[ 4 sqrt DROP ] :foo [ foo ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("a satisfied refinement demand discharges: the gate returns Ok(clean)");
+        assert!(
+            ledger.is_clean(),
+            "no violations or rejections: {:?} / {:?}",
+            ledger.violations(),
+            ledger.rejections()
+        );
+        assert!(
+            ledger.violations().is_empty(),
+            "the discharged demand leaves no violated obligation"
+        );
+    }
+
+    #[test]
+    fn gate_does_not_run_tier1_when_tier0_fails() {
+        // Invariant 19: Tier 1 is parasitic on Tier 0 having balanced every
+        // arity, so the gate must NOT reach the shadow stack / solver when Tier 0
+        // rejects. A top-level `DROP` underflows the empty stack (§12 M2).
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        // A solver factory that PANICS if the gate ever builds a solver — i.e. if
+        // it ever reached the Tier-1 half. Tier-0 rejection must short-circuit
+        // before this fires.
+        let solver_built = std::cell::Cell::new(0usize);
+        let mk_solver = || {
+            solver_built.set(solver_built.get() + 1);
+            crate::SmtLibSolver::new()
+        };
+
+        let err = check_whole_program(&eval, mk_solver)
+            .expect_err("a Tier-0 underflow must reject at the gate");
+        assert!(
+            matches!(err, GateError::Tier0(_)),
+            "the gate must return the Tier-0 error, got: {err}"
+        );
+        assert_eq!(
+            solver_built.get(),
+            0,
+            "Tier 1 must NOT run when Tier 0 fails — no solver may be built"
+        );
+    }
+
+    #[test]
+    fn gate_ledger_equals_the_separate_check_then_check_program_sequence() {
+        // The gate is exactly the composition the M14 example wired by hand:
+        // `check` then `check_program`. Driving them separately must yield the
+        // same ledger the one-call gate returns (same accepted entries / modulo
+        // status).
+        let eval = assume_bearing_program();
+
+        // --- the separate two-call sequence (the pre-gate pattern) ---
+        check(&eval).expect("Tier 0 passes");
+        let mut names: Vec<&str> = eval.definition_names().collect();
+        names.sort_unstable();
+        let defs: Vec<crate::Definition> = names
+            .iter()
+            .map(|&name| crate::Definition {
+                name: name.to_string(),
+                body: eval.definition_body(name).unwrap().to_vec(),
+                sig: eval.refinement(name).cloned(),
+            })
+            .collect();
+        let lookup = |w: &str| eval.refinement(w).cloned();
+        let separate =
+            crate::check_program(&defs, &lookup, crate::SmtLibSolver::new).expect("Tier 1 passes");
+
+        // --- the one-call combined gate ---
+        let combined = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("the gate composes the same two halves");
+
+        // Equivalent ledgers: same accepted entries, same per-word modulo status.
+        assert_eq!(separate.grep_assume(), combined.grep_assume());
+        assert_eq!(
+            separate.assumptions().len(),
+            combined.assumptions().len(),
+            "same number of accepted assumptions"
+        );
+        for name in &names {
+            assert_eq!(
+                separate.status(name).to_string(),
+                combined.status(name).to_string(),
+                "modulo status of `{name}` must match between the separate sequence and the gate"
+            );
+        }
+        assert_eq!(separate.is_clean(), combined.is_clean());
     }
 }

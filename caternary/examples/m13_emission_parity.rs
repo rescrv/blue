@@ -19,6 +19,7 @@ fn binder(name: &str) -> Binder {
         name: name.into(),
         ty: "Num".into(),
         span: RefineSpan { start: 0, end: 0 },
+        quote: None,
     }
 }
 
