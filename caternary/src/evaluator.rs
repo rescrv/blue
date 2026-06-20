@@ -279,6 +279,17 @@ impl<T> Evaluator<T> {
         self.contracts.len()
     }
 
+    /// The names of every **embedder-registered** operator contract (the
+    /// `register_operator_with_contract` entries). This is the read path the M14
+    /// whole-program attestation uses to enumerate the embedder half of the
+    /// operator table — the **modulo** of every proof (architecture / invariants
+    /// 16/17). Order is unspecified; callers that need determinism sort. The
+    /// language-core primitives (`call`/`dip`/`if` …) are *not* here — they live
+    /// in [`crate::core_scheme`], baked in rather than attested at embed time.
+    pub fn contract_names(&self) -> impl Iterator<Item = &str> {
+        self.contracts.keys().map(String::as_str)
+    }
+
     /// True if `name` is a loaded `[ body ] :name` definition (flat global
     /// namespace populated by [`Evaluator::load`]). The type checker rides on the
     /// same table the runtime resolves against.

@@ -1078,6 +1078,23 @@ fn parse_elem(
 ///
 /// Returns the map `name → Scheme`. A definition word later resolves by
 /// instantiating its scheme; recursion no longer inlines bodies.
+/// The **generalized signature** ([`Scheme`]) of every loaded definition (M3 /
+/// §6), keyed by name — the definition half of the whole-program contract set
+/// the M14 attestation hash content-addresses (architecture section / §12 M14).
+///
+/// This runs the same SCC generalization pass [`type_check`] runs, so a program
+/// that does not type-check returns the same [`TypeError`] here; a checked
+/// program returns one `Scheme` per definition. It reads the evaluator
+/// read-only (the §3 immutability barrier). Use [`crate::ContractSet`] to fold
+/// these together with the operator table into the artifact attestation hash.
+pub fn definition_schemes<T>(evaluator: &Evaluator<T>) -> Result<HashMap<String, Scheme>, TypeError>
+where
+    T: Quotable,
+{
+    let mut ctx = InferCtx::new();
+    infer_definition_schemes(evaluator, &mut ctx)
+}
+
 fn infer_definition_schemes<T>(
     evaluator: &Evaluator<T>,
     ctx: &mut InferCtx,
