@@ -24,7 +24,8 @@
 //!    corresponding M14 fingerprint, so changing one obligation invalidates only
 //!    its own cache entry (warm-compile reuse).
 //! 4. **CI gate; free runtime** (invariants 14/20): a *checked* program links no
-//!    solver (there is no `z3` crate in the dependency graph) and carries no
+//!    solver (the native `z3` backend is a build-time-only check backend behind
+//!    an optional, off-by-default feature) and carries no
 //!    shadow-stack/solver machinery at runtime (the shadow stack is compile-time
 //!    only; it is never a field of [`crate::Evaluator`]). [`caternary check`] —
 //!    the public [`crate::check`] / [`crate::Evaluator::check_refinements`] path
@@ -83,8 +84,9 @@ impl OperatorOrigin {
 /// One attested operator contract — a row of the operator table (invariant 17).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorContract {
-    /// The operator name as written in Caternary source (UPPER_SNAKE_CASE for
-    /// core primitives, the registered name for embedder ops).
+    /// The operator name as written in Caternary source (the runtime
+    /// UPPER_SNAKE_CASE spelling for core primitives, the registered name for
+    /// embedder ops).
     pub name: String,
     /// Who attested it (language core vs. embedder).
     pub origin: OperatorOrigin,
@@ -104,17 +106,18 @@ pub struct OperatorTable {
 
 impl OperatorTable {
     /// Build the operator table of an [`Evaluator`]: the language-core primitives
-    /// ([`crate::core_scheme`], in fixed UPPER_SNAKE_CASE order) followed by the
-    /// embedder's registered contracts (sorted by name). The result is deterministic
-    /// for a fixed embedding — the input to the stable attestation hash.
+    /// ([`crate::core_scheme`], in the fixed runtime-name order) followed
+    /// by the embedder's registered contracts (sorted by name). The result is
+    /// deterministic for a fixed embedding — the input to the stable attestation
+    /// hash.
     pub fn of<T>(evaluator: &Evaluator<T>) -> Self {
         let mut entries = Vec::new();
         // Language core: every primitive that has a core scheme, in the fixed
-        // UPPER_SNAKE_CASE order (deterministic).
-        for runtime in CORE_PRIMITIVES {
-            if let Some(scheme) = core_scheme(runtime) {
+        // runtime-name order (deterministic).
+        for name in CORE_PRIMITIVES {
+            if let Some(scheme) = core_scheme(name) {
                 entries.push(OperatorContract {
-                    name: (*runtime).to_string(),
+                    name: (*name).to_string(),
                     origin: OperatorOrigin::LanguageCore,
                     scheme,
                 });

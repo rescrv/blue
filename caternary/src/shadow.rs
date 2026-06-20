@@ -25,7 +25,7 @@
 //!
 //!   * **Aliasing under `DUP`/shuffles.** [`ShadowStack::dup`] pushes the *exact
 //!     same term* (it clones the slot, it does **not** mint a fresh literal), so
-//!     the solver keeps the aliasing fact and trivial proofs like `x x - = 0`
+//!     the solver keeps the aliasing fact and trivial proofs like `x DUP - = 0`
 //!     discharge. `DUP` copying the term is just the `n = 1` case of "shadow
 //!     execution mirrors real execution." `SWAP`/`OVER`/`ROT`/`NIP`/`TUCK`
 //!     exchange/copy/discard terms with the identical index arithmetic the
@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn dup_aliases_the_same_term_by_identity() {
         // §10.3 / invariant 7: `x DUP` leaves TWO slots carrying the SAME term
-        // by identity (dup clones, it does not mint a fresh literal), so
+        // by identity (DUP clones, it does not mint a fresh literal), so
         // `x DUP -` is `x - x` over an IDENTICAL `x` and discharges to 0.
         let mut s = ShadowStack::new();
         s.push_term(var("x"));
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn zip_binds_correct_names_after_a_nontrivial_dip() {
-        // §10.2 post-shuffle: after a non-trivial dip the zip must still bind the
+        // §10.2 post-shuffle: after a non-trivial DIP the zip must still bind the
         // right names to the right slots. Start: a b c (top c). Run `[ SWAP ] DIP`
         // which swaps a,b under c -> b a c. Now name a 3-binder signature
         // ( p q r -- ) against the result: r<-top=c, q<-second=a, p<-third=b.
@@ -790,8 +790,8 @@ mod tests {
     // =======================================================================
 
     // An identity-carrying runtime value: each seeded value has a distinct tag,
-    // so we can observe EXACTLY how the interpreter moves data (dup clones a
-    // tag, swap moves tags, etc.). Quotations are carried so dip/call run.
+    // so we can observe EXACTLY how the interpreter moves data (DUP clones a
+    // tag, SWAP moves tags, etc.). Quotations are carried so DIP/CALL run.
     #[derive(Debug, Clone, PartialEq)]
     enum Tagged {
         Val(u32),
@@ -868,7 +868,7 @@ mod tests {
         Quote(Vec<Token>),
     }
 
-    // The shuffle resolver: only core shuffles + dip/call. Anything else is a bug
+    // The shuffle resolver: only core shuffles + DIP/CALL. Anything else is a bug
     // in the generated program.
     fn shuffle_resolver(w: &str) -> ShadowWord {
         core_shadow_word(w)
@@ -911,9 +911,9 @@ mod tests {
 
     #[test]
     fn conformance_core_shuffles_enumerated() {
-        // Fixed cases over the core shuffles and a non-trivial dip. Programs use
+        // Fixed cases over the core shuffles and a non-trivial DIP. Programs use
         // the runtime (uppercase) builtin names so the interpreter dispatches the
-        // real operators; the shadow resolver uses the same spellings.
+        // real operators; the shadow resolver matches those names exactly.
         assert_conformance("DUP", 1);
         assert_conformance("DROP", 1);
         assert_conformance("SWAP", 2);
@@ -949,7 +949,7 @@ mod tests {
         };
 
         // Words requiring at least N values present (excluding the quotation for
-        // dip/call). Track an abstract height so generated programs are valid.
+        // DIP/CALL). Track an abstract height so generated programs are valid.
         for _ in 0..2000 {
             let depth = 2 + (next() % 4); // 2..=5 seeded values
             let mut height = depth as i64;
@@ -989,7 +989,7 @@ mod tests {
 
     #[test]
     fn conformance_dip_matches_interpreter_with_inner_shuffles() {
-        // Targeted dip conformance: dip's set-aside/restore must mirror
+        // Targeted DIP conformance: DIP's set-aside/restore must mirror
         // combinators.rs::dip with arbitrary inner shuffles.
         assert_conformance("[ SWAP ] DIP", 3);
         assert_conformance("[ SWAP OVER ] DIP", 4);
@@ -1044,12 +1044,12 @@ mod tests {
         let mut s = ShadowStack::new();
         let err = s.dup().unwrap_err();
         assert!(err.to_string().contains("underflow"));
-        // dip needs a quotation on top and a value below.
+        // DIP needs a quotation on top and a value below.
         let mut s2 = ShadowStack::new();
         s2.push_term(var("only"));
         let toks = parse("[ DUP ] DIP").unwrap();
         // Only one value under the quotation -> the quotation pops, then the
-        // hidden pop succeeds, leaving the inner dup with an empty stack: error.
+        // hidden pop succeeds, leaving the inner DUP with an empty stack: error.
         let _ = s2.exec(&toks, &term_resolver); // must not panic
     }
 }
