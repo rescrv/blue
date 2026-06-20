@@ -1,11 +1,15 @@
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::time::SystemTime;
 
 use arrrg::CommandLine;
 
+use stdioredirect::OpenMode;
+#[cfg(unix)]
 use stdioredirect::close_or_dup2;
+#[cfg(not(unix))]
+use stdioredirect::make_stdio;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Options {
@@ -54,39 +58,63 @@ fn main() {
         ('p', format!("{}", std::process::id())),
         ('s', format!("{}", epoch_now.as_secs())),
     ]);
-    // take care of stdin
-    let mut opts = OpenOptions::new();
-    opts.read(true);
-    close_or_dup2(
-        &subs,
-        options.close_stdin,
-        options.stdin,
-        libc::STDIN_FILENO,
-        opts,
-    );
-    // take care of stdout
-    let mut opts = OpenOptions::new();
-    opts.write(true).truncate(true).create(true);
-    close_or_dup2(
-        &subs,
-        options.close_stdout,
-        options.stdout,
-        libc::STDOUT_FILENO,
-        opts,
-    );
-    // take care of stderr
-    let mut opts = OpenOptions::new();
-    opts.write(true).truncate(true).create(true);
-    close_or_dup2(
-        &subs,
-        options.close_stderr,
-        options.stderr,
-        libc::STDERR_FILENO,
-        opts,
-    );
-    // now exec
-    panic!(
-        "{:?}",
-        std::process::Command::new(&free[0]).args(&free[1..]).exec()
-    );
+
+    let mut cmd = std::process::Command::new(&free[0]);
+    cmd.args(&free[1..]);
+
+    #[cfg(unix)]
+    {
+        // take care of stdin
+        close_or_dup2(
+            &subs,
+            options.close_stdin,
+            options.stdin,
+            libc::STDIN_FILENO,
+            OpenMode::Read,
+        );
+        // take care of stdout
+        close_or_dup2(
+            &subs,
+            options.close_stdout,
+            options.stdout,
+            libc::STDOUT_FILENO,
+            OpenMode::Write,
+        );
+        // take care of stderr
+        close_or_dup2(
+            &subs,
+            options.close_stderr,
+            options.stderr,
+            libc::STDERR_FILENO,
+            OpenMode::Write,
+        );
+        // now exec
+        panic!("{:?}", cmd.exec());
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = cmd
+            .stdin(make_stdio(
+                &subs,
+                options.close_stdin,
+                options.stdin,
+                OpenMode::Read,
+            ))
+            .stdout(make_stdio(
+                &subs,
+                options.close_stdout,
+                options.stdout,
+                OpenMode::Write,
+            ))
+            .stderr(make_stdio(
+                &subs,
+                options.close_stderr,
+                options.stderr,
+                OpenMode::Write,
+            ))
+            .status()
+            .expect("failed to execute process");
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }

@@ -14,10 +14,12 @@ binaries = []
 
 [dependencies]
 getopts = { workspace = true }
-libc = { workspace = true }
 
 arrrg = { workspace = true }
 arrrg_derive = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [[bin]]
 name = "stdioredirect"
