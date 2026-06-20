@@ -20,11 +20,17 @@ fn main() {
                     ty: "Num".into(),
                     span: rspan(),
                 }],
-                demand: Pred::Bin(
+                demand: Some(Pred::Bin(
                     BinOp::Ge,
                     Box::new(Pred::Var("n".into())),
                     Box::new(Pred::Num("0".into())),
-                ),
+                )),
+                out_binders: vec![Binder {
+                    name: "r".into(),
+                    ty: "Num".into(),
+                    span: rspan(),
+                }],
+                guarantee: None,
                 arrow: WordTy::new(
                     StackTy::new(vec![Ty::num(span())], 0, span()),
                     StackTy::new(vec![Ty::num(span())], 0, span()),
