@@ -100,8 +100,11 @@ const CORE_SPAN: Span = Span { start: 0, end: 0 };
 /// IF    : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
 /// ```
 ///
-/// `DIP` is intentionally deferred to M4 (combinators); M2 needs only the words
-/// its acceptance snippets use.
+/// `DIP` is the M4 §8 **relay** combinator: its scheme alone states the only
+/// fact `DIP` contributes — the set-aside value `a` returns unchanged while the
+/// quotation runs on the rest. The quotation's **declared** arrow `( 'S -- 'T )`
+/// is relayed verbatim; the body is never expanded into the caller's contract
+/// (§13 invariant 8).
 pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
     let s = CORE_SPAN;
     // The quotation argument's arrow ( 'S -- 'T ): rowvar 0 = 'S, rowvar 1 = 'T.
@@ -145,6 +148,19 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
             WordTy::new(
                 StackTy::new(vec![Ty::quote(arrow_st(), s)], 0, s),
                 StackTy::empty(1, s),
+            ),
+        ),
+        // DIP : ( 'S a ( 'S -- 'T ) -- 'T a ) (§2, §8 relay). Input has the
+        // set-aside value `a` (tyvar 0) below the quotation ( 'S -- 'T ) on top
+        // (rowvar 0 = 'S, rowvar 1 = 'T). The quotation runs on 'S and yields
+        // 'T; `a` is carried through unchanged onto the result 'T a. Only the
+        // declared quotation arrow is relayed — no body expansion (§13 inv 8).
+        "DIP" => Scheme::new(
+            vec![0],
+            vec![0, 1],
+            WordTy::new(
+                StackTy::new(vec![Ty::var(0, s), Ty::quote(arrow_st(), s)], 0, s),
+                StackTy::new(vec![Ty::var(0, s)], 1, s),
             ),
         ),
         "IF" => Scheme::new(

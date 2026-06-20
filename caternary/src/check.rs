@@ -18,16 +18,24 @@
 //! ([`InferCtx::empty_program_effect`]); "Initial stack for a top-level program
 //! is empty" (§12).
 //!
-//! # Scope: M0 only
+//! # Scope: M0–M3
 //!
-//! M0 lands the *driver shape*: definitions load into one namespace; the entry is
-//! located; every word in its body **resolves** to a definition, a registered
-//! operator contract, a numeric literal, a quotation, or a local — and quotation
-//! descent pushes/pops typing frames (the durable provenance spine). Full
-//! arrow unification (M1) and sequence inference (M2) ride on this substrate
-//! later; M0 deliberately stops at resolution closure and demonstrates that a
-//! registered operator's [`Scheme`] is *usable* (it can be looked up and
-//! instantiated with fresh variables).
+//! The driver shape (M0): definitions load into one namespace; the entry is
+//! located; quotation descent pushes/pops typing frames (the durable provenance
+//! spine). Sequence inference (M2) composes each word's stack arrow through the
+//! M1 unifier, with §5 rules for literals, quotation literals, named locals, and
+//! the language-core combinators (`DUP`/`DROP`/`SWAP`/`OVER`/`CALL`/`IF`).
+//! Definitions are generalized by the M3 SCC pass ([`infer_definition_schemes`],
+//! §6): the call graph is condensed by Tarjan, components are processed
+//! dependencies-first, each component is inferred under monomorphic assumptions
+//! (so legitimate self- and mutual recursion type-check as one component, and
+//! inference-defeating polymorphic recursion is rejected with the §6 message),
+//! then generalized into a [`Scheme`] a call site resolves by instantiation.
+//! A quotation sees its **enclosing** locals (captured by value, mirroring the
+//! runtime), so a reference to an outer local resolves to that binding's
+//! monomorphic type.
+
+use std::collections::HashMap;
 
 use crate::Evaluator;
 use crate::Quotable;
@@ -37,8 +45,12 @@ use crate::SpannedTokenKind;
 use crate::evaluator::bind_target;
 use crate::types::InferCtx;
 use crate::types::MAIN;
+use crate::types::RowVar;
+use crate::types::Scheme;
 use crate::types::StackTy;
 use crate::types::Ty;
+use crate::types::TyKind;
+use crate::types::TyVar;
 use crate::types::TypingFrame;
 use crate::types::UnifyError;
 use crate::types::WordTy;
@@ -81,14 +93,56 @@ pub enum TypeError {
     /// Wraps the unifier's [`UnifyError`], which already carries the provenance
     /// pair (both origin spans) and never leaks internal variable names (§7).
     Mismatch(UnifyError),
-    /// A definition refers to itself (directly or transitively) during the M2
-    /// inline-inference of definition bodies. Real recursion is the SCC pass's
-    /// job (M3); until then a recursive reference is rejected cleanly rather than
-    /// looping forever.
+    /// Reserved for a recursion shape Tier-0 genuinely cannot represent and that
+    /// is not already covered by [`TypeError::PolymorphicRecursion`].
+    ///
+    /// With the M3 SCC pass (§6) legitimate self- and mutual recursion is
+    /// accepted (one monomorphic strongly-connected component), and the
+    /// inference-defeating case — a recursive call at a non-unifying type — is
+    /// reported as [`TypeError::PolymorphicRecursion`] with the §6 annotation
+    /// message. This variant is therefore **no longer produced for ordinary
+    /// recursion**; it is retained only as a stable home for any future
+    /// genuinely-unrepresentable case, and **no valid mutually-recursive program
+    /// trips it** (the SCC pass admits them all).
     RecursiveDefinition {
         /// The definition caught referencing itself.
         name: String,
         /// The span of the offending reference.
+        span: Span,
+    },
+    /// A definition uses **polymorphic recursion** (§6): a recursive call at a
+    /// type that does not unify with the definition's monomorphic in-SCC
+    /// assumption. Tier-0 inference cannot solve this (Henglein); the spec
+    /// requires a clean rejection asking for a type annotation rather than a raw
+    /// unification error or silent widening (§13 invariant 9).
+    PolymorphicRecursion {
+        /// The definition that recurses polymorphically.
+        name: String,
+        /// The span of the definition body where the contradiction surfaced.
+        span: Span,
+    },
+    /// A definition applies its **quotation argument at more than one type**
+    /// within a single body — the rank-2 case (§8). Tier-0 inference is rank-1:
+    /// a quotation parameter has a single monomorphic arrow, so applying it at
+    /// two genuinely distinct types cannot be inferred. The spec requires the
+    /// targeted §8 message asking for a type annotation, **not** a raw
+    /// unification mismatch (§13 invariant 8 territory; see §10.11(b)). With a
+    /// correct annotation the body checks instead (the annotation surface).
+    Rank2 {
+        /// The definition that applies its quotation at more than one type.
+        name: String,
+        /// The span of the definition body where the second application clashed.
+        span: Span,
+    },
+    /// A Tier-0 stack-effect annotation (the `[ effect ] @name` surface) is
+    /// malformed: e.g. no `--` separator, a stray separator, or an unparsable
+    /// element. Located at the annotation's span.
+    BadAnnotation {
+        /// The definition the annotation was attached to.
+        name: String,
+        /// What is wrong with the annotation.
+        detail: String,
+        /// The span of the annotation.
         span: Span,
     },
 }
@@ -126,6 +180,27 @@ impl std::fmt::Display for TypeError {
                 write!(
                     f,
                     "recursive definition `{name}` at byte {}: mutual/self recursion is resolved by the SCC pass (not yet available)",
+                    span.start
+                )
+            }
+            TypeError::PolymorphicRecursion { name, span } => {
+                write!(
+                    f,
+                    "`{name}` appears to use polymorphic recursion, which cannot be inferred; add a type annotation (near byte {})",
+                    span.start
+                )
+            }
+            TypeError::Rank2 { name, span } => {
+                write!(
+                    f,
+                    "`{name}` applies its quotation at more than one type; add a type annotation (near byte {})",
+                    span.start
+                )
+            }
+            TypeError::BadAnnotation { name, detail, span } => {
+                write!(
+                    f,
+                    "malformed stack-effect annotation for `{name}` (byte {}): {detail}",
                     span.start
                 )
             }
@@ -168,24 +243,98 @@ where
         })?;
 
     let mut ctx = InferCtx::new();
+
+    // M3: generalize every loaded definition via the SCC pass first (§6). This
+    // both validates all definition bodies (mutual recursion, polymorphic
+    // recursion, mismatches surface here) and yields a `Scheme` per definition
+    // that a call site resolves by *instantiation* — no more inlining bodies.
+    let schemes = infer_definition_schemes(evaluator, &mut ctx)?;
+    let def_env = DefEnv {
+        schemes,
+        mono: HashMap::new(),
+    };
+
     let mut locals: Vec<Local> = Vec::new();
-    // `entry` is on the visiting stack so a `main` (or named entry) that calls
-    // itself is caught as recursion (M3 territory) rather than looping.
-    let mut visiting: Vec<String> = vec![entry.to_string()];
+    let no_poly: HashMap<String, Scheme> = HashMap::new();
 
     // The program is the **top-level** sequence: the initial stack is empty
     // (§12), so any word demanding values from below the empty floor is an
-    // underflow, attributed to that word (§7).
-    let effect = infer_seq(evaluator, body, &mut ctx, &mut locals, &mut visiting, true)?;
+    // underflow, attributed to that word (§7). Definition references inside
+    // `main` resolve through their generalized schemes. The program body has no
+    // polymorphic (rank-2) locals — those exist only inside an annotated word.
+    let effect = infer_seq(
+        evaluator,
+        body,
+        &mut ctx,
+        &mut locals,
+        &def_env,
+        &no_poly,
+        true,
+    )?;
 
     Ok(ctx.resolve_word_deep(&effect))
 }
 
-/// A named local (`>name`) and its monomorphic element type (§5). Each use of the
-/// local yields this *same* `Ty` so all occurrences unify together.
-struct Local {
-    name: String,
-    ty: Ty,
+/// The definition environment threaded through inference (§6). A definition word
+/// resolves either to a **monomorphic in-SCC assumption** (`mono`) — used for
+/// recursive calls within the strongly-connected component currently being
+/// inferred, which must stay un-generalized (the no-polymorphic-recursion rule)
+/// — or to an **already-generalized `Scheme`** (`schemes`) for definitions in
+/// previously-processed SCCs, instantiated fresh at each call site.
+struct DefEnv {
+    /// Generalized schemes for definitions whose SCC has been fully processed.
+    schemes: HashMap<String, Scheme>,
+    /// Monomorphic arrow assumptions for members of the SCC under inference.
+    mono: HashMap<String, WordTy>,
+}
+
+impl DefEnv {
+    /// An empty definition environment (no definitions in scope) — used by the
+    /// bare-snippet inference path in tests.
+    #[cfg(test)]
+    fn empty() -> Self {
+        DefEnv {
+            schemes: HashMap::new(),
+            mono: HashMap::new(),
+        }
+    }
+}
+
+/// A named local (`>name`) (§5). Ordinarily a local is **monomorphic**: every
+/// use yields the *same* `Ty` so all occurrences unify together. The one
+/// exception is the rank-2 case (§8): a quotation parameter that must be applied
+/// at more than one type. Such a local is **polymorphic** — each use instantiates
+/// a fresh copy of its scheme — which is only ever created when checking a body
+/// against a rank-2 annotation (the declared quote scheme) or by the rank-2
+/// *probe* that detects an un-annotated rank-2 word (a fully generic quote).
+#[derive(Clone)]
+enum Local {
+    /// A monomorphic local: one fixed element type shared by every use.
+    Mono {
+        /// The local's name.
+        name: String,
+        /// The single element type every use of the local pushes.
+        ty: Ty,
+    },
+    /// A polymorphic (rank-2) local: a quotation parameter whose *use effect*
+    /// (`( 'a -- 'a Quote(…) )`) is a [`Scheme`] instantiated fresh at every
+    /// use, so the parameter may be applied at more than one type within one body
+    /// (§8). Created only on the annotation-checking path and the rank-2 probe.
+    Poly {
+        /// The local's name.
+        name: String,
+        /// The generalized use effect; each use instantiates it with fresh vars.
+        scheme: Scheme,
+    },
+}
+
+impl Local {
+    /// The local's name (shared by both variants).
+    fn name(&self) -> &str {
+        match self {
+            Local::Mono { name, .. } | Local::Poly { name, .. } => name,
+        }
+    }
 }
 
 /// Infer the stack effect of a token sequence by **composition** (§5): start from
@@ -204,7 +353,8 @@ fn infer_seq<T>(
     tokens: &[SpannedToken],
     ctx: &mut InferCtx,
     locals: &mut Vec<Local>,
-    visiting: &mut Vec<String>,
+    def_env: &DefEnv,
+    poly: &HashMap<String, Scheme>,
     top_level: bool,
 ) -> Result<WordTy, TypeError>
 where
@@ -223,7 +373,7 @@ where
         // The per-token effect, and (for words) the name to blame on underflow.
         let (word_arrow, blame): (WordTy, Option<&str>) = match &token.kind {
             SpannedTokenKind::Word(w) => (
-                word_effect(evaluator, w, token.span, ctx, locals, visiting)?,
+                word_effect(evaluator, w, token.span, ctx, locals, def_env, poly)?,
                 Some(w),
             ),
             SpannedTokenKind::Bracket(inner) => {
@@ -236,11 +386,23 @@ where
                     span: frame_span,
                     expected,
                 });
-                // A quotation opens a fresh lexical scope for locals and is a
-                // *value*, not run here — so it is inferred as a non-top-level
-                // body (its row tail is polymorphic).
-                let mut inner_locals: Vec<Local> = Vec::new();
-                let result = infer_seq(evaluator, inner, ctx, &mut inner_locals, visiting, false);
+                // A quotation opens a lexical scope for locals, but it must see
+                // the **enclosing** locals: the runtime captures them into the
+                // quotation by value (evaluator.rs::capture_body), so a reference
+                // to an outer local resolves to the SAME monomorphic `Ty` here
+                // (cloning preserves the type variable). An inner `>name` rebind
+                // shadows the captured one because `word_effect` resolves locals
+                // innermost-first (`rev().find`) and binders push onto the end.
+                let mut inner_locals: Vec<Local> = locals.clone();
+                let result = infer_seq(
+                    evaluator,
+                    inner,
+                    ctx,
+                    &mut inner_locals,
+                    def_env,
+                    poly,
+                    false,
+                );
                 ctx.frames.pop();
                 let body_arrow = result?;
                 // Quotation literal: ( 'a -- 'a Quote(P -- Q) ) (§5).
@@ -294,14 +456,16 @@ where
 
 /// The stack effect of a single non-bracket word (§5): a binding `>name`, a use
 /// of a bound local, a numeric or boolean literal, a registered operator, a
-/// language-core primitive, or a definition (inlined for M2).
+/// language-core primitive, or a definition (resolved through its generalized
+/// `Scheme`, or its monomorphic in-SCC assumption for a recursive call, §6).
 fn word_effect<T>(
     evaluator: &Evaluator<T>,
     w: &str,
     span: Span,
     ctx: &mut InferCtx,
     locals: &mut Vec<Local>,
-    visiting: &mut Vec<String>,
+    def_env: &DefEnv,
+    poly: &HashMap<String, Scheme>,
 ) -> Result<WordTy, TypeError>
 where
     T: Quotable,
@@ -313,22 +477,45 @@ where
         let t = Ty::var(ctx.fresh_ty(), span);
         let input = StackTy::new(vec![t.clone()], r, span);
         let output = StackTy::empty(r, span);
-        locals.push(Local {
-            name: name.to_string(),
-            ty: t,
-        });
+        // A binder names the popped value. Normally the local is monomorphic
+        // (§5). The exception: if `name` is flagged polymorphic for this body
+        // (the rank-2 case, §8) — either by a rank-2 annotation or the rank-2
+        // probe — bind it as a `Poly` local so each use instantiates fresh,
+        // letting the quotation parameter be applied at more than one type.
+        if let Some(scheme) = poly.get(name) {
+            locals.push(Local::Poly {
+                name: name.to_string(),
+                scheme: scheme.clone(),
+            });
+        } else {
+            locals.push(Local::Mono {
+                name: name.to_string(),
+                ty: t,
+            });
+        }
         return Ok(WordTy::new(input, output));
     }
 
-    // A use of a bound local: ( 'a -- 'a t ) with the *same* `t` every time
-    // (innermost binding wins on shadowing) (§5).
-    if let Some(local) = locals.iter().rev().find(|l| l.name == w) {
-        let t = local.ty.clone();
-        let r = ctx.fresh_row();
-        return Ok(WordTy::new(
-            StackTy::empty(r, span),
-            StackTy::new(vec![Ty { kind: t.kind, span }], r, span),
-        ));
+    // A use of a bound local (innermost binding wins on shadowing) (§5). A
+    // monomorphic local yields the *same* `t` every time; a polymorphic (rank-2)
+    // local instantiates its use-effect scheme fresh, so distinct uses may be
+    // applied at distinct types (§8).
+    if let Some(local) = locals.iter().rev().find(|l| l.name() == w) {
+        match local {
+            Local::Mono { ty, .. } => {
+                let t = ty.clone();
+                let r = ctx.fresh_row();
+                return Ok(WordTy::new(
+                    StackTy::empty(r, span),
+                    StackTy::new(vec![Ty { kind: t.kind, span }], r, span),
+                ));
+            }
+            Local::Poly { scheme, .. } => {
+                let scheme = scheme.clone();
+                let inst = ctx.instantiate(&scheme);
+                return Ok(respan_word(&inst, span));
+            }
+        }
     }
 
     // Numeric literal: ( 'a -- 'a Num ) (§5).
@@ -365,24 +552,20 @@ where
         return Ok(respan_word(&inst, span));
     }
 
-    // A definition in the flat global namespace. For M2 we infer its body inline
-    // (monomorphic); the SCC pass (M3) replaces this with proper generalization.
-    // A `visiting` guard turns recursion into a clean error instead of a loop.
-    if evaluator.has_definition(w) {
-        if visiting.iter().any(|n| n == w) {
-            return Err(TypeError::RecursiveDefinition {
-                name: w.to_string(),
-                span,
-            });
-        }
-        let body = evaluator
-            .definition_body_spanned(w)
-            .expect("has_definition implies a spanned body when loaded with spans");
-        visiting.push(w.to_string());
-        let mut body_locals: Vec<Local> = Vec::new();
-        let body_arrow = infer_seq(evaluator, body, ctx, &mut body_locals, visiting, false);
-        visiting.pop();
-        return body_arrow;
+    // A definition under inference in the *current* SCC: use its monomorphic
+    // arrow assumption directly (recursive calls share the un-generalized type,
+    // the no-polymorphic-recursion rule, §6). Re-anchor the spans at this call
+    // site; the var ids are preserved so every recursive use unifies together.
+    if let Some(arrow) = def_env.mono.get(w) {
+        return Ok(respan_word(arrow, span));
+    }
+
+    // A definition in a previously-processed SCC: instantiate its generalized
+    // `Scheme` with fresh vars (so distinct call sites do not alias) and
+    // re-anchor at this call site (§6, §5 `lookup`).
+    if let Some(scheme) = def_env.schemes.get(w) {
+        let inst = ctx.instantiate(scheme);
+        return Ok(respan_word(&inst, span));
     }
 
     Err(TypeError::UnresolvedWord {
@@ -391,12 +574,717 @@ where
     })
 }
 
+// ===========================================================================
+// M4 — combinator schemes are in `types::core_scheme` (DIP); this section is
+// rank-2 detection (§8) and the Tier-0 stack-effect annotation surface.
+// ===========================================================================
+//
+// # Recorded design: the Tier-0 stack-effect annotation surface (§8 / §10.11(b))
+//
+// `docs/typing.md` is read-only, so the *concrete syntax* of the one admitted
+// Tier-0 annotation (the rank-2 case) is defined and recorded HERE, reconciled
+// with the existing parser (which only ever produces `Word`/`Bracket` tokens via
+// shell tokenization — `parser.rs`).
+//
+// A stack-effect annotation is a top-level construct that **parallels** the
+// `[ body ] :name` definition: a **bracket** holding the effect tokens, followed
+// by an **annotation binder word** `@name` naming the definition it annotates:
+//
+// ```text
+// [ [ a -- ] -- ] @rank2     [ >f  1 f CALL  true f CALL ] :rank2
+// ```
+//
+// Every token there (`[`, `]`, `@rank2`, `--`, `a`) is an ordinary parser token,
+// so no parser change is needed; `Evaluator::load_with_spans` records the effect
+// bracket against the named definition (the runtime `load` ignores it).
+//
+// Inside the effect bracket the postfix mini-language is:
+//   * the bare word `--` separates the input element list (left) from the output
+//     element list (right); exactly one `--` at the bracket's top level.
+//   * `Num` / `Bool` are base types.
+//   * any other identifier word is a **type variable**, interned by name so
+//     repeated occurrences in one annotation are the same variable.
+//   * a nested bracket `[ … -- … ]` is a **quotation arrow element**. A quotation
+//     element in the **input** list is the rank-2 marker: the parameter it types
+//     is applied **polymorphically** (instantiated fresh at each use) — exactly
+//     the one admitted Tier-0 shape annotation (§8 / §10.11(b)).
+//   * row variables are anonymous: each stack (outer input, outer output, and
+//     each quotation arrow's two ends) carries a fresh row standing for its tail.
+//
+// # How an annotated body is checked
+//
+// The body's leading `>name` binders name the annotated input positions
+// top-of-stack first (binder 0 ↔ top input). A binder whose input position is a
+// rank-2 quotation becomes a **polymorphic local** bound to that quotation's
+// generalized *use effect*, so each application instantiates fresh and the
+// quotation may be used at more than one type. The body is then inferred with
+// those polymorphic bindings (`infer_seq`'s `poly` map) and its arrow is unified
+// against the declared annotation arrow. The declared signature — never the
+// quotation body — is what `DIP`/combinator-style relay typing is checked
+// against (§13 invariant 8).
+//
+// # How an un-annotated rank-2 word is detected
+//
+// Tier-0 inference is rank-1: a quotation parameter bound by `>name` is one
+// monomorphic arrow. If a body applies such a parameter at two genuinely
+// distinct types, monomorphic inference fails with a `Mismatch`. To tell that
+// apart from an ordinary type error, the checker runs a **rank-2 probe**: it
+// re-infers the body with every quotation parameter that is applied two or more
+// times bound to a *fully generic* quotation (a fresh instance per use). If the
+// probe succeeds where monomorphic inference failed, the failure was precisely
+// the rank-2 pattern — reported with the targeted §8 message asking for an
+// annotation (`TypeError::Rank2`), not a raw mismatch. If the probe still fails,
+// the original `Mismatch` is the honest diagnostic and is returned unchanged.
+
+/// The neutral span carried by synthesized annotation/probe nodes that have no
+/// single source byte of their own; real diagnostics re-anchor at the offending
+/// call site, exactly as the language-core schemes do.
+const SYNTH_SPAN: Span = Span { start: 0, end: 0 };
+
+/// True if `w` is an application combinator — `CALL` or `DIP` — i.e. a word
+/// that *runs* a quotation. Used to recognize the rank-2 "applies its quotation"
+/// pattern (§8).
+fn is_apply_word(w: &str) -> bool {
+    w == "CALL" || w == "DIP"
+}
+
+/// The maximal prefix of `tokens` that are `>name` binder words, in body order
+/// (so the first entry names the **top** of the input stack). Used to map an
+/// annotation's input positions onto the body's named parameters.
+fn leading_binders(tokens: &[SpannedToken]) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in tokens {
+        match &token.kind {
+            SpannedTokenKind::Word(w) => match bind_target(w) {
+                Some(name) => out.push(name.to_string()),
+                None => break,
+            },
+            SpannedTokenKind::Bracket(_) => break,
+        }
+    }
+    out
+}
+
+/// The names of quotation parameters that are **applied at two or more sites**
+/// in `tokens` — the rank-2 candidates (§8). A parameter is any `>name` binder;
+/// an application is the parameter word immediately followed by `CALL`/`DIP`.
+/// Scans nested quotations too, counting applications per name across the body.
+fn rank2_candidates(tokens: &[SpannedToken]) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut binders: HashSet<String> = HashSet::new();
+    let mut applies: HashMap<String, usize> = HashMap::new();
+    fn walk(
+        tokens: &[SpannedToken],
+        binders: &mut HashSet<String>,
+        applies: &mut HashMap<String, usize>,
+    ) {
+        for (i, token) in tokens.iter().enumerate() {
+            match &token.kind {
+                SpannedTokenKind::Word(w) => {
+                    if let Some(name) = bind_target(w) {
+                        binders.insert(name.to_string());
+                    } else if let Some(next) = tokens.get(i + 1)
+                        && let SpannedTokenKind::Word(nw) = &next.kind
+                        && is_apply_word(nw)
+                    {
+                        *applies.entry(w.clone()).or_insert(0) += 1;
+                    }
+                }
+                SpannedTokenKind::Bracket(inner) => walk(inner, binders, applies),
+            }
+        }
+    }
+    walk(tokens, &mut binders, &mut applies);
+    let mut out: Vec<String> = binders
+        .into_iter()
+        .filter(|n| applies.get(n).copied().unwrap_or(0) >= 2)
+        .collect();
+    out.sort();
+    out
+}
+
+/// The *use effect* of a **fully generic** quotation parameter:
+/// `( 'r -- 'r ( 's -- 't ) )` generalized over `'r 's 't`. Instantiating it
+/// (one per use) pushes a fresh quotation whose arrow constrains nothing — the
+/// rank-2 probe binding (§8). If the body type-checks with every twice-applied
+/// parameter bound this way, the only thing that was wrong was rank-1
+/// monomorphism, i.e. the word is genuinely rank-2.
+fn generic_quote_use_scheme() -> Scheme {
+    let s = SYNTH_SPAN;
+    // Quotation arrow ( 's -- 't ): rows 1 and 2.
+    let quote = Ty::quote(WordTy::new(StackTy::empty(1, s), StackTy::empty(2, s)), s);
+    // Use effect ( 'r -- 'r quote ): row 0.
+    let word = WordTy::new(StackTy::empty(0, s), StackTy::new(vec![quote], 0, s));
+    Scheme::new(vec![], vec![0, 1, 2], word)
+}
+
+/// The rank-2 probe (§8): re-infer `body` with every quotation parameter that is
+/// applied two or more times bound to a *fully generic* quotation, each use a
+/// fresh instance. Runs on a CLONE of `ctx` so it never pollutes real inference
+/// state. Returns `true` iff this poly-aware inference succeeds — i.e. the body
+/// is well-typed once the quotation parameter is allowed to be applied at more
+/// than one type, which is exactly the rank-2 pattern. Returns `false` when there
+/// are no such candidates, or when the body fails for a different reason.
+fn rank2_probe<T>(
+    evaluator: &Evaluator<T>,
+    body: &[SpannedToken],
+    ctx: &InferCtx,
+    def_env: &DefEnv,
+) -> bool
+where
+    T: Quotable,
+{
+    let candidates = rank2_candidates(body);
+    if candidates.is_empty() {
+        return false;
+    }
+    let mut poly: HashMap<String, Scheme> = HashMap::new();
+    for name in candidates {
+        poly.insert(name, generic_quote_use_scheme());
+    }
+    let mut probe_ctx = ctx.clone();
+    let mut locals: Vec<Local> = Vec::new();
+    infer_seq(
+        evaluator,
+        body,
+        &mut probe_ctx,
+        &mut locals,
+        def_env,
+        &poly,
+        false,
+    )
+    .is_ok()
+}
+
+/// A small interner for an annotation's variables: type variables by name,
+/// row variables freshly numbered. Ids are *local* to one annotation; the parsed
+/// arrows are generalized and then instantiated with real `InferCtx` vars, so
+/// these small ids never collide with inference state.
+struct AnnVars {
+    ty: HashMap<String, TyVar>,
+    next_ty: TyVar,
+    next_row: RowVar,
+}
+
+impl AnnVars {
+    fn new() -> Self {
+        AnnVars {
+            ty: HashMap::new(),
+            next_ty: 0,
+            next_row: 0,
+        }
+    }
+
+    fn tyvar(&mut self, name: &str) -> TyVar {
+        if let Some(&v) = self.ty.get(name) {
+            return v;
+        }
+        let v = self.next_ty;
+        self.next_ty += 1;
+        self.ty.insert(name.to_string(), v);
+        v
+    }
+
+    fn row(&mut self) -> RowVar {
+        let v = self.next_row;
+        self.next_row += 1;
+        v
+    }
+}
+
+/// A parsed Tier-0 stack-effect annotation (§8 / §10.11(b)). `word` is the
+/// declared arrow (with small interned var ids; generalize+instantiate before
+/// use). `poly_input_use[k]` is `Some(scheme)` when the input element `k` *from
+/// the top of stack* is a rank-2 quotation, carrying that parameter's
+/// generalized use-effect scheme.
+struct Annotation {
+    word: WordTy,
+    poly_input_use: Vec<Option<Scheme>>,
+}
+
+/// Parse the inner tokens of an annotation's effect bracket into an
+/// [`Annotation`] (the surface recorded above). `name`/`span` are used only for
+/// diagnostics.
+fn parse_annotation(
+    name: &str,
+    tokens: &[SpannedToken],
+    span: Span,
+) -> Result<Annotation, TypeError> {
+    let mut vars = AnnVars::new();
+    let bad = |detail: &str| TypeError::BadAnnotation {
+        name: name.to_string(),
+        detail: detail.to_string(),
+        span,
+    };
+
+    let (input_toks, output_toks) = split_on_arrow(tokens).ok_or_else(|| {
+        bad("a stack effect needs exactly one `--` separating inputs from outputs")
+    })?;
+
+    let in_row = vars.row();
+    let out_row = vars.row();
+    let input = parse_elems(input_toks, &mut vars, &bad)?;
+    let output = parse_elems(output_toks, &mut vars, &bad)?;
+
+    // Rank-2 markers: a quotation in an INPUT position. Build the parameter's
+    // generalized use-effect scheme, indexed from the TOP of the input stack
+    // (input is stored bottom-first, so reverse).
+    let mut poly_input_use: Vec<Option<Scheme>> = Vec::with_capacity(input.len());
+    for elem in input.iter().rev() {
+        if matches!(elem.kind, TyKind::Quote(_)) {
+            let r = vars.row();
+            let use_word = WordTy::new(
+                StackTy::empty(r, SYNTH_SPAN),
+                StackTy::new(vec![elem.clone()], r, SYNTH_SPAN),
+            );
+            poly_input_use.push(Some(generalize(&use_word)));
+        } else {
+            poly_input_use.push(None);
+        }
+    }
+
+    let word = WordTy::new(
+        StackTy::new(input, in_row, span),
+        StackTy::new(output, out_row, span),
+    );
+    Ok(Annotation {
+        word,
+        poly_input_use,
+    })
+}
+
+/// Split a token list on the single top-level `--` word, returning
+/// `(before, after)`, or `None` if there is not exactly one.
+fn split_on_arrow(tokens: &[SpannedToken]) -> Option<(&[SpannedToken], &[SpannedToken])> {
+    let mut at = None;
+    for (i, token) in tokens.iter().enumerate() {
+        if let SpannedTokenKind::Word(w) = &token.kind
+            && w == "--"
+        {
+            if at.is_some() {
+                return None;
+            }
+            at = Some(i);
+        }
+    }
+    let i = at?;
+    Some((&tokens[..i], &tokens[i + 1..]))
+}
+
+/// Parse a stack element list (left-to-right = bottom-to-top, top last).
+fn parse_elems(
+    tokens: &[SpannedToken],
+    vars: &mut AnnVars,
+    bad: &dyn Fn(&str) -> TypeError,
+) -> Result<Vec<Ty>, TypeError> {
+    let mut out = Vec::new();
+    for token in tokens {
+        out.push(parse_elem(token, vars, bad)?);
+    }
+    Ok(out)
+}
+
+/// Parse a single annotation element: a base type, a type variable, or a nested
+/// quotation arrow.
+fn parse_elem(
+    token: &SpannedToken,
+    vars: &mut AnnVars,
+    bad: &dyn Fn(&str) -> TypeError,
+) -> Result<Ty, TypeError> {
+    match &token.kind {
+        SpannedTokenKind::Word(w) => {
+            if w == "--" {
+                return Err(bad("unexpected `--` inside a stack element list"));
+            }
+            if w == crate::types::NUM {
+                Ok(Ty::num(token.span))
+            } else if w == crate::types::BOOL {
+                Ok(Ty::bool(token.span))
+            } else if w
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            {
+                Ok(Ty::var(vars.tyvar(w), token.span))
+            } else {
+                Err(bad(
+                    "a stack element must be `Num`, `Bool`, a type variable, or a `[ .. -- .. ]` quotation",
+                ))
+            }
+        }
+        SpannedTokenKind::Bracket(inner) => {
+            let (qin, qout) = split_on_arrow(inner)
+                .ok_or_else(|| bad("a quotation element needs one `--` inside its brackets"))?;
+            let qin_row = vars.row();
+            let qout_row = vars.row();
+            let qin_elems = parse_elems(qin, vars, bad)?;
+            let qout_elems = parse_elems(qout, vars, bad)?;
+            let arrow = WordTy::new(
+                StackTy::new(qin_elems, qin_row, token.span),
+                StackTy::new(qout_elems, qout_row, token.span),
+            );
+            Ok(Ty::quote(arrow, token.span))
+        }
+    }
+}
+
+// ===========================================================================
+// M3 — SCC generalization of top-level definitions (§6)
+// ===========================================================================
+
+/// Generalize every loaded definition into a `Scheme` (§6). The pipeline:
+///
+/// 1. Build the **call graph** (edge `A → B` when `A`'s body references the
+///    definition `B`).
+/// 2. **Tarjan SCC** to group mutually-recursive definitions; Tarjan emits each
+///    component only after its dependencies, i.e. in **reverse-topological
+///    order**, which is exactly the order §6 wants (dependencies first).
+/// 3. For each SCC: assign each member a fresh **monomorphic** arrow assumption,
+///    infer every body under those assumptions (recursive calls inside the SCC
+///    use the un-generalized assumption — the no-polymorphic-recursion rule),
+///    unify each inferred body against its assumption, then **generalize** each
+///    member over the variables free in its arrow into a `Scheme`.
+///
+/// Returns the map `name → Scheme`. A definition word later resolves by
+/// instantiating its scheme; recursion no longer inlines bodies.
+fn infer_definition_schemes<T>(
+    evaluator: &Evaluator<T>,
+    ctx: &mut InferCtx,
+) -> Result<HashMap<String, Scheme>, TypeError>
+where
+    T: Quotable,
+{
+    // A stable list of the definition names (Tarjan needs deterministic indices;
+    // the *result* is order-independent, but a fixed iteration order keeps the
+    // diagnostics and tests reproducible).
+    let mut names: Vec<String> = evaluator.definition_names().map(str::to_string).collect();
+    names.sort();
+    let index: HashMap<&str, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i))
+        .collect();
+
+    // Call graph: adjacency over definition indices. An edge A → B exists when
+    // A's body references the definition B (B is a loaded definition name). This
+    // over-approximates harmlessly (a local shadowing a definition name only
+    // merges SCCs, which stays sound; the merged assumption is simply unused).
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); names.len()];
+    for (i, name) in names.iter().enumerate() {
+        let body = evaluator
+            .definition_body_spanned(name)
+            .expect("a loaded definition has a spanned body when loaded with spans");
+        let mut refs: Vec<usize> = Vec::new();
+        collect_def_refs(body, &index, &mut refs);
+        refs.sort_unstable();
+        refs.dedup();
+        adj[i] = refs;
+    }
+
+    let sccs = tarjan_sccs(&adj);
+
+    // Parse every definition's Tier-0 stack-effect annotation up front (the
+    // rank-2 surface, §8). A definition with no `[ effect ] @name` simply has no
+    // entry; a malformed annotation is rejected here.
+    let mut anns: HashMap<String, Annotation> = HashMap::new();
+    for name in &names {
+        if let Some(toks) = evaluator.annotation_tokens(name) {
+            let span = evaluator
+                .annotation_span(name)
+                .unwrap_or(Span { start: 0, end: 0 });
+            anns.insert(name.clone(), parse_annotation(name, toks, span)?);
+        }
+    }
+
+    let no_poly: HashMap<String, Scheme> = HashMap::new();
+
+    let mut def_env = DefEnv {
+        schemes: HashMap::new(),
+        mono: HashMap::new(),
+    };
+
+    for scc in &sccs {
+        // 1. Assign each member its in-SCC assumption. An **annotated** member's
+        //    assumption is its declared arrow (instantiated fresh), so recursive
+        //    references see the declared type. An **un-annotated** member gets a
+        //    fresh monomorphic arrow ( 'r1 -- 'r2 ) shared by every in-SCC
+        //    reference, forcing recursive uses to one monomorphic type.
+        for &i in scc {
+            let name = &names[i];
+            let span = evaluator
+                .definition_span(name)
+                .unwrap_or(Span { start: 0, end: 0 });
+            let assumption = if let Some(ann) = anns.get(name) {
+                ctx.instantiate(&generalize(&ann.word))
+            } else {
+                let r_in = ctx.fresh_row();
+                let r_out = ctx.fresh_row();
+                WordTy::new(StackTy::empty(r_in, span), StackTy::empty(r_out, span))
+            };
+            def_env.mono.insert(name.clone(), assumption);
+        }
+
+        // 2. Infer each member's body under the assumptions and unify the body's
+        //    arrow against the member's assumption.
+        for &i in scc {
+            let name = &names[i];
+            let span = evaluator
+                .definition_span(name)
+                .unwrap_or(Span { start: 0, end: 0 });
+            let body = evaluator
+                .definition_body_spanned(name)
+                .expect("a loaded definition has a spanned body when loaded with spans");
+            let assumption = def_env
+                .mono
+                .get(name)
+                .expect("the assumption was inserted above")
+                .clone();
+
+            if let Some(ann) = anns.get(name) {
+                // Annotated: check the body against the declared signature. Map
+                // the leading `>name` binders onto the annotation's input
+                // positions (top-of-stack first); a rank-2 quotation input binds
+                // a polymorphic local so it may be applied at more than one type
+                // (§8). The body is then checked from the DECLARED signature, not
+                // by expanding any quotation body (§13 invariant 8).
+                let binders = leading_binders(body);
+                let mut poly: HashMap<String, Scheme> = HashMap::new();
+                for (k, binder) in binders.iter().enumerate() {
+                    if let Some(Some(scheme)) = ann.poly_input_use.get(k) {
+                        poly.insert(binder.clone(), scheme.clone());
+                    }
+                }
+                let mut locals: Vec<Local> = Vec::new();
+                let body_arrow =
+                    infer_seq(evaluator, body, ctx, &mut locals, &def_env, &poly, false)?;
+                // The body must match its declared arrow (which is `assumption`).
+                ctx.unify_stack(&body_arrow.input, &assumption.input)
+                    .and_then(|()| ctx.unify_stack(&body_arrow.output, &assumption.output))
+                    .map_err(TypeError::Mismatch)?;
+                continue;
+            }
+
+            // Un-annotated: ordinary monomorphic inference (rank-1). Checkpoint
+            // first so a failed attempt can be rewound before the rank-2 probe.
+            let cp = ctx.subst.checkpoint();
+            let mut locals: Vec<Local> = Vec::new();
+            let body_arrow =
+                match infer_seq(evaluator, body, ctx, &mut locals, &def_env, &no_poly, false) {
+                    Ok(arrow) => arrow,
+                    Err(TypeError::Mismatch(mismatch)) => {
+                        // A `Mismatch` might be the rank-2 pattern: a quotation
+                        // parameter applied at two distinct types (§8). Rewind to
+                        // a clean state and re-infer with every twice-applied
+                        // parameter bound to a fully generic quotation. If THAT
+                        // succeeds, the only obstacle was rank-1 monomorphism, so
+                        // emit the targeted §8 diagnostic; otherwise the original
+                        // mismatch is the honest error.
+                        ctx.subst.rewind(cp);
+                        if rank2_probe(evaluator, body, ctx, &def_env) {
+                            return Err(TypeError::Rank2 {
+                                name: name.clone(),
+                                span,
+                            });
+                        }
+                        return Err(TypeError::Mismatch(mismatch));
+                    }
+                    Err(other) => return Err(other),
+                };
+            // A failure of THIS unify means a recursive use forced the assumption
+            // to a shape the body cannot satisfy — polymorphic recursion (§6).
+            ctx.unify_stack(&body_arrow.input, &assumption.input)
+                .and_then(|()| ctx.unify_stack(&body_arrow.output, &assumption.output))
+                .map_err(|_| TypeError::PolymorphicRecursion {
+                    name: name.clone(),
+                    span,
+                })?;
+        }
+
+        // 3. Generalize each member over the variables free in its (now fully
+        //    constrained) arrow and publish the scheme; drop the monomorphic
+        //    assumption so later SCCs resolve this definition by instantiation.
+        for &i in scc {
+            let name = &names[i];
+            let assumption = def_env
+                .mono
+                .remove(name)
+                .expect("the assumption was inserted above");
+            let resolved = ctx.resolve_word_deep(&assumption);
+            let scheme = generalize(&resolved);
+            def_env.schemes.insert(name.clone(), scheme);
+        }
+    }
+
+    Ok(def_env.schemes)
+}
+
+/// Collect the indices of every definition referenced (transitively through
+/// nested quotations) by a definition body. A word token is a reference iff it
+/// names a loaded definition.
+fn collect_def_refs(tokens: &[SpannedToken], index: &HashMap<&str, usize>, out: &mut Vec<usize>) {
+    for token in tokens {
+        match &token.kind {
+            SpannedTokenKind::Word(w) => {
+                if let Some(&i) = index.get(w.as_str()) {
+                    out.push(i);
+                }
+            }
+            SpannedTokenKind::Bracket(inner) => collect_def_refs(inner, index, out),
+        }
+    }
+}
+
+/// Iterative Tarjan strongly-connected-components over the adjacency list. Returns
+/// the SCCs in the order Tarjan finalizes them, which is **reverse-topological**
+/// over the condensation (every component is emitted after all components it
+/// depends on) — exactly the dependencies-first order §6 requires. The recursion
+/// is made explicit on a worklist so a deep call chain cannot overflow the stack
+/// (the same robustness mandate as the occurs check, §13 invariant 4).
+///
+/// The translation from the textbook recursive form preserves its two lowlink
+/// rules exactly: a **tree edge** folds the child's *lowlink* into the parent's
+/// when the child frame finishes (`fold_into` records the parent to update); a
+/// **back edge** to a node still on the stack folds that node's *index*.
+fn tarjan_sccs(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let n = adj.len();
+    let mut indices: Vec<Option<usize>> = vec![None; n];
+    let mut lowlink: Vec<usize> = vec![0; n];
+    let mut on_stack: Vec<bool> = vec![false; n];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut sccs: Vec<Vec<usize>> = Vec::new();
+    let mut next_index = 0usize;
+
+    // A frame on the explicit call stack: the node `v`, the next adjacency edge
+    // to examine, and the parent to fold `v`'s lowlink into when `v` finishes
+    // (the recursive form's `min(parent.lowlink, v.lowlink)` after the call).
+    struct Frame {
+        v: usize,
+        edge: usize,
+        fold_into: Option<usize>,
+    }
+
+    for start in 0..n {
+        if indices[start].is_some() {
+            continue;
+        }
+        let mut work: Vec<Frame> = vec![Frame {
+            v: start,
+            edge: 0,
+            fold_into: None,
+        }];
+
+        // Initialize the start frame's node (the `Enter` step) before looping.
+        indices[start] = Some(next_index);
+        lowlink[start] = next_index;
+        next_index += 1;
+        stack.push(start);
+        on_stack[start] = true;
+
+        while let Some(frame) = work.last_mut() {
+            let v = frame.v;
+            if frame.edge < adj[v].len() {
+                let w = adj[v][frame.edge];
+                frame.edge += 1;
+                match indices[w] {
+                    None => {
+                        // Tree edge: descend into w, folding its lowlink back
+                        // into v when w's frame finishes.
+                        indices[w] = Some(next_index);
+                        lowlink[w] = next_index;
+                        next_index += 1;
+                        stack.push(w);
+                        on_stack[w] = true;
+                        work.push(Frame {
+                            v: w,
+                            edge: 0,
+                            fold_into: Some(v),
+                        });
+                    }
+                    Some(w_index) => {
+                        // Back/forward/cross edge: fold w's index iff w is still
+                        // on the stack (i.e. in the current SCC search tree).
+                        if on_stack[w] {
+                            lowlink[v] = lowlink[v].min(w_index);
+                        }
+                    }
+                }
+            } else {
+                // v is finished: if it is a root, pop its SCC, then fold v's
+                // lowlink into its parent.
+                if lowlink[v] == indices[v].expect("v has an index") {
+                    let mut component = Vec::new();
+                    loop {
+                        let w = stack.pop().expect("non-empty while popping an SCC");
+                        on_stack[w] = false;
+                        component.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    sccs.push(component);
+                }
+                let fold_into = frame.fold_into;
+                work.pop();
+                if let Some(parent) = fold_into {
+                    lowlink[parent] = lowlink[parent].min(lowlink[v]);
+                }
+            }
+        }
+    }
+
+    sccs
+}
+
+/// Generalize a fully-resolved arrow into a `Scheme` by quantifying over every
+/// type and row variable that appears in it (§6). At top level there is no
+/// enclosing monomorphic environment — previously-processed definitions are
+/// closed schemes contributing no free variables — so every free variable in the
+/// arrow is generalizable.
+fn generalize(arrow: &WordTy) -> Scheme {
+    let mut tyvars: Vec<TyVar> = Vec::new();
+    let mut rowvars: Vec<RowVar> = Vec::new();
+    free_vars_stack(&arrow.input, &mut tyvars, &mut rowvars);
+    free_vars_stack(&arrow.output, &mut tyvars, &mut rowvars);
+    tyvars.sort_unstable();
+    tyvars.dedup();
+    rowvars.sort_unstable();
+    rowvars.dedup();
+    Scheme::new(tyvars, rowvars, arrow.clone())
+}
+
+/// Accumulate the free type and row variables of a (resolved) stack type.
+fn free_vars_stack(s: &StackTy, tyvars: &mut Vec<TyVar>, rowvars: &mut Vec<RowVar>) {
+    rowvars.push(s.row);
+    for e in &s.elems {
+        free_vars_ty(e, tyvars, rowvars);
+    }
+}
+
+/// Accumulate the free type and row variables of a (resolved) element type,
+/// recursing uniformly through `Quote` arrow interiors.
+fn free_vars_ty(ty: &Ty, tyvars: &mut Vec<TyVar>, rowvars: &mut Vec<RowVar>) {
+    match &ty.kind {
+        TyKind::Var(v) => tyvars.push(*v),
+        TyKind::Con(_) => {}
+        TyKind::App(_, args) => {
+            for a in args {
+                free_vars_ty(a, tyvars, rowvars);
+            }
+        }
+        TyKind::Quote(w) => {
+            free_vars_stack(&w.input, tyvars, rowvars);
+            free_vars_stack(&w.output, tyvars, rowvars);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Token;
     use crate::parse;
     use crate::parse_with_spans;
+    use crate::types::BOOL;
     use crate::types::NUM;
     use crate::types::Scheme;
     use crate::types::StackTy;
@@ -566,8 +1454,17 @@ mod tests {
         let tokens = parse_with_spans(src).unwrap();
         let mut ctx = InferCtx::new();
         let mut locals: Vec<Local> = Vec::new();
-        let mut visiting: Vec<String> = Vec::new();
-        let arrow = infer_seq(&eval, &tokens, &mut ctx, &mut locals, &mut visiting, false)?;
+        let def_env = DefEnv::empty();
+        let no_poly: HashMap<String, Scheme> = HashMap::new();
+        let arrow = infer_seq(
+            &eval,
+            &tokens,
+            &mut ctx,
+            &mut locals,
+            &def_env,
+            &no_poly,
+            false,
+        )?;
         Ok(ctx.resolve_word_deep(&arrow))
     }
 
@@ -811,5 +1708,341 @@ mod tests {
         assert_eq!(eval.contract_count(), 0);
         // And there is no contract for the defined operator.
         assert!(eval.contract("NOOP").is_none());
+    }
+
+    // ----- Locals captured into quotations (regression vs M0; finding 1) -----
+
+    #[test]
+    fn quotation_references_an_enclosing_local() {
+        // `[ 5 >x [ x ] CALL ] :main` must type-check: the runtime captures `x`
+        // into the inner quotation by value (evaluator.rs::capture_body), so the
+        // checker must make the enclosing local visible inside the quotation.
+        // Before this fix the inner `x` was rejected as UnresolvedWord.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ 5 >x [ x ] CALL ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        type_check(&eval).expect("a quotation referencing an enclosing local type-checks");
+    }
+
+    #[test]
+    fn captured_local_resolves_to_the_bindings_monomorphic_type() {
+        // `>x [ x ] CALL`: the popped value is a fresh monomorphic `t`; the
+        // captured `x` inside the quotation must resolve to the SAME `t`, so the
+        // snippet threads one variable through: ( 'a t -- 'a t ).
+        let arrow = infer_snippet(">x [ x ] CALL").unwrap();
+        assert_eq!(arrow.input.elems.len(), 1, "consumes the bound value");
+        assert_eq!(arrow.output.elems.len(), 1, "re-produces it via the quote");
+        let inv = &arrow.input.elems[0].kind;
+        assert!(
+            matches!(inv, TyKind::Var(_)),
+            "the binding stays a monomorphic var"
+        );
+        assert_eq!(
+            arrow.output.elems[0].kind, *inv,
+            "the captured use resolves to the SAME variable as the binding"
+        );
+    }
+
+    #[test]
+    fn inner_binder_shadows_a_captured_local() {
+        // `true >x [ 5 >x x ] CALL`: the outer `x` is a Bool, but the inner
+        // `>x` rebinds `x` to a Num and the inner `x` must resolve to that Num
+        // (innermost binding wins). The whole snippet therefore produces a Num;
+        // were shadowing broken (outer wins) it would produce a Bool.
+        let arrow = infer_snippet("true >x [ 5 >x x ] CALL").unwrap();
+        assert!(arrow.input.elems.is_empty(), "consumes nothing net");
+        assert_eq!(arrow.output.elems.len(), 1);
+        assert_eq!(
+            arrow.output.elems[0].kind,
+            TyKind::Con(NUM.into()),
+            "the inner >x shadows the captured Bool with a Num"
+        );
+    }
+
+    // ----- §12 M3 acceptance: definitions / SCC generalization -----
+
+    /// Run the SCC generalization pass over a program's definitions (with `+`
+    /// registered) and return the per-definition schemes. This is the M3
+    /// build-order unit: it validates every definition body and generalizes it,
+    /// independent of any `main` entry.
+    fn check_defs(src: &str) -> Result<HashMap<String, Scheme>, TypeError> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("+", plus_scheme());
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let mut ctx = InferCtx::new();
+        infer_definition_schemes(&eval, &mut ctx)
+    }
+
+    #[test]
+    fn m3_order_independence_use_before_define() {
+        // `:foo` references `bar` and is defined BEFORE `bar`. The flat global
+        // pre-pass + SCC processing in reverse-topological order makes this
+        // type-check regardless of textual order.
+        let schemes = check_defs("[ bar 1 + ] :foo [ 2 ] :bar").unwrap();
+        assert!(schemes.contains_key("foo"));
+        assert!(schemes.contains_key("bar"));
+        // `foo` produces a Num ( 'a -- 'a Num ).
+        let foo = &schemes["foo"];
+        assert_eq!(foo.ty.output.elems.len(), 1);
+        assert_eq!(foo.ty.output.elems[0].kind, TyKind::Con(NUM.into()));
+    }
+
+    #[test]
+    fn m3_mutual_recursion_type_checks_as_one_scc() {
+        // `even`/`odd` reference each other: a single strongly-connected
+        // component, inferred monomorphically. The M2 stopgap rejected ALL such
+        // references as RecursiveDefinition; the SCC pass accepts them.
+        let schemes = check_defs("[ odd ] :even [ even ] :odd").unwrap();
+        assert!(schemes.contains_key("even"));
+        assert!(schemes.contains_key("odd"));
+    }
+
+    #[test]
+    fn m3_nonrecursive_helper_used_at_two_distinct_types() {
+        // A generalized helper `id : ( 'a -- 'a )` used by one caller at Num and
+        // another at Bool. Generalization (instantiate-per-call-site) lets both
+        // type-check; a single shared monomorphic type could not satisfy both.
+        let schemes = check_defs("[ ] :id [ 1 id ] :usenum [ true id ] :usebool").unwrap();
+        // `id` is generalized: it quantifies over its row variable(s).
+        let id = &schemes["id"];
+        assert!(
+            !id.rowvars.is_empty(),
+            "the helper is generalized over its row tail, not monomorphic"
+        );
+        // Each caller instantiated `id` at its own concrete type.
+        let usenum = &schemes["usenum"];
+        assert_eq!(usenum.ty.output.elems.len(), 1);
+        assert_eq!(usenum.ty.output.elems[0].kind, TyKind::Con(NUM.into()));
+        let usebool = &schemes["usebool"];
+        assert_eq!(usebool.ty.output.elems.len(), 1);
+        assert_eq!(usebool.ty.output.elems[0].kind, TyKind::Con(BOOL.into()));
+    }
+
+    #[test]
+    fn m3_polymorphic_recursion_yields_the_section6_diagnostic() {
+        // `[ DUP foo ] :foo` calls itself at a stack one element larger than its
+        // own — a self-call at a non-unifying type. Tier-0 cannot infer this; it
+        // must be rejected with the §6 polymorphic-recursion message, NOT a raw
+        // unification or cyclic-type error.
+        let err = check_defs("[ DUP foo ] :foo").unwrap_err();
+        match &err {
+            TypeError::PolymorphicRecursion { name, .. } => assert_eq!(name, "foo"),
+            other => panic!("expected PolymorphicRecursion for foo, got {other:?}"),
+        }
+        let text = err.to_string();
+        assert!(
+            text.contains("polymorphic recursion") && text.contains("type annotation"),
+            "the §6 diagnostic must name the failure and ask for an annotation: {text}"
+        );
+        assert!(!text.contains('\''), "no internal variable names: {text}");
+    }
+
+    // ----- §12 M4 acceptance: combinators + rank-2 -----
+
+    /// A `List` element type (the App constructor exercised by the §12 M4 `push`
+    /// snippet).
+    fn list_ty(s: Span) -> Ty {
+        Ty {
+            kind: TyKind::App("List".to_string(), Vec::new()),
+            span: s,
+        }
+    }
+
+    #[test]
+    fn m4_core_scheme_returns_the_dip_scheme() {
+        // DIP : ( 'S a ( 'S -- 'T ) -- 'T a ). The set-aside `a` sits below the
+        // quotation on input and is carried through unchanged on output; the
+        // output row 'T (the quotation's result) differs from the input row 'S.
+        let scheme = core_scheme("DIP").expect("DIP has a core scheme at M4");
+        assert_eq!(
+            scheme.ty.input.elems.len(),
+            2,
+            "input is `a` then the quote"
+        );
+        assert!(matches!(scheme.ty.input.elems[0].kind, TyKind::Var(_)));
+        assert!(matches!(scheme.ty.input.elems[1].kind, TyKind::Quote(_)));
+        assert_eq!(scheme.ty.output.elems.len(), 1, "output carries `a`");
+        // Same variable in and out: the set-aside value returns unchanged.
+        assert_eq!(
+            scheme.ty.input.elems[0].kind,
+            scheme.ty.output.elems[0].kind
+        );
+        assert_ne!(
+            scheme.ty.input.row, scheme.ty.output.row,
+            "output row is 'T, input row is 'S"
+        );
+        assert!(core_scheme("DIP").is_some());
+    }
+
+    #[test]
+    fn m4_dip_relays_quotation_and_carries_the_set_aside_value() {
+        // §12 M4: `xs total [ 99 push ] DIP` type-checks; result shape `… List
+        // Num`; DIP contributes ONLY that `total` is carried through. `DIP` is
+        // typed from its declared scheme — the quotation body is not expanded.
+        let s = sp();
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        // push : ( 'S List Num -- 'S List )
+        eval.register_operator_with_contract(
+            "push",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(
+                    StackTy::new(vec![list_ty(s), Ty::num(s)], 0, s),
+                    StackTy::new(vec![list_ty(s)], 0, s),
+                ),
+            ),
+        );
+        // xs : ( 'S -- 'S List ) and total : ( 'S -- 'S Num ) seed the stack.
+        eval.register_operator_with_contract(
+            "xs",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(StackTy::empty(0, s), StackTy::new(vec![list_ty(s)], 0, s)),
+            ),
+        );
+        eval.register_operator_with_contract(
+            "total",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(StackTy::empty(0, s), StackTy::new(vec![Ty::num(s)], 0, s)),
+            ),
+        );
+
+        let tokens = parse_with_spans("xs total [ 99 push ] DIP").unwrap();
+        let mut ctx = InferCtx::new();
+        let mut locals: Vec<Local> = Vec::new();
+        let def_env = DefEnv::empty();
+        let no_poly: HashMap<String, Scheme> = HashMap::new();
+        let arrow = infer_seq(
+            &eval,
+            &tokens,
+            &mut ctx,
+            &mut locals,
+            &def_env,
+            &no_poly,
+            false,
+        )
+        .unwrap();
+        let arrow = ctx.resolve_word_deep(&arrow);
+
+        assert!(arrow.input.elems.is_empty(), "consumes nothing from below");
+        assert_eq!(arrow.output.elems.len(), 2, "result shape is `List Num`");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert!(args.is_empty());
+            }
+            other => panic!("expected a List below, got {other:?}"),
+        }
+        // The set-aside `total` (a Num) is carried through unchanged on top.
+        assert_eq!(arrow.output.elems[1].kind, TyKind::Con(NUM.into()));
+    }
+
+    #[test]
+    fn m4_rank2_without_annotation_yields_the_section8_diagnostic() {
+        // `>f` binds a quotation parameter applied at TWO distinct types (to a
+        // Num and to a Bool). Rank-1 inference cannot type it; the checker must
+        // emit the targeted §8 message, NOT a raw mismatch.
+        let err = check_defs("[ >f 1 f CALL true f CALL ] :rank2").unwrap_err();
+        match &err {
+            TypeError::Rank2 { name, .. } => assert_eq!(name, "rank2"),
+            other => panic!("expected Rank2 for rank2, got {other:?}"),
+        }
+        let text = err.to_string();
+        assert!(
+            text.contains("applies its quotation at more than one type")
+                && text.contains("type annotation"),
+            "the §8 diagnostic must name the failure and ask for an annotation: {text}"
+        );
+        assert!(!text.contains('\''), "no internal variable names: {text}");
+    }
+
+    #[test]
+    fn m4_rank1_quotation_use_still_infers_without_annotation() {
+        // A quotation parameter applied at ONE type is ordinary rank-1 inference:
+        // it must type-check with no annotation and no §8 diagnostic.
+        let schemes = check_defs("[ >f 1 f CALL ] :rank1").unwrap();
+        assert!(schemes.contains_key("rank1"));
+    }
+
+    #[test]
+    fn m4_rank2_with_a_correct_annotation_type_checks() {
+        // The SAME rank-2 word, now annotated `( ( a -- ) -- )`: its quotation
+        // parameter is declared polymorphic, so each application instantiates
+        // fresh and the body checks against the declared signature (§8).
+        let src = "[ [ a -- ] -- ] @rank2 [ >f 1 f CALL true f CALL ] :rank2";
+        let schemes = check_defs(src).unwrap();
+        assert!(
+            schemes.contains_key("rank2"),
+            "the annotated rank-2 word must check"
+        );
+    }
+
+    #[test]
+    fn m4_incorrect_annotation_is_a_mismatch_not_silently_accepted() {
+        // An annotation that mistypes the parameter as `Num` (not a quotation)
+        // must reject the body: applying a Num via `CALL` cannot unify. With an
+        // annotation present we report the honest mismatch, not the §8 hint.
+        let src = "[ Num -- ] @rank2 [ >f 1 f CALL true f CALL ] :rank2";
+        let err = check_defs(src).unwrap_err();
+        assert!(
+            matches!(err, TypeError::Mismatch(_)),
+            "a body that contradicts its annotation is a mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn m4_malformed_annotation_is_rejected() {
+        // No `--` separator inside the effect bracket is a located annotation
+        // error, not a panic.
+        let src = "[ a b ] @bad [ >f ] :bad";
+        let err = check_defs(src).unwrap_err();
+        match &err {
+            TypeError::BadAnnotation { name, .. } => assert_eq!(name, "bad"),
+            other => panic!("expected BadAnnotation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tarjan_groups_cycles_and_emits_dependencies_first() {
+        // Graph: 0→1, 1→2, 2→0 (a 3-cycle), 3→0 (depends on the cycle), 4 alone.
+        // Expected SCCs: {0,1,2}, {3}, {4}; the cycle (a dependency of 3) must be
+        // emitted BEFORE {3} (reverse-topological), and {4} stands alone.
+        let adj = vec![vec![1], vec![2], vec![0], vec![0], vec![]];
+        let order: Vec<Vec<usize>> = tarjan_sccs(&adj)
+            .into_iter()
+            .map(|mut c| {
+                c.sort_unstable();
+                c
+            })
+            .collect();
+        assert_eq!(order.len(), 3, "exactly three components: {order:?}");
+        assert!(
+            order.contains(&vec![0, 1, 2]),
+            "the cycle is one SCC: {order:?}"
+        );
+        assert!(order.contains(&vec![3]));
+        assert!(order.contains(&vec![4]));
+
+        // Dependencies-first: the cycle {0,1,2} is emitted before {3} (3 → 0).
+        let idx_cycle = order.iter().position(|c| c == &vec![0, 1, 2]).unwrap();
+        let idx_three = order.iter().position(|c| c == &vec![3]).unwrap();
+        assert!(
+            idx_cycle < idx_three,
+            "the cycle (a dependency of 3) must be emitted first: {order:?}"
+        );
+    }
+
+    #[test]
+    fn m3_program_with_mutual_recursion_type_checks_via_driver() {
+        // The whole-program driver accepts mutual recursion reached from `main`.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ even ] :main [ odd ] :even [ even ] :odd").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        type_check(&eval).expect("mutual recursion reachable from main type-checks");
     }
 }
