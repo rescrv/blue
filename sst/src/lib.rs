@@ -1418,7 +1418,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         let mut up = Unpacker::new(&buf);
         let final_block_offset: u64 = up
             .unpack()
-            .map_err(|e: buffertk::SError| unpack_final_block_offset(e.into()))?;
+            .map_err(|e: buffertk::SError| unpack_final_block_offset(e))?;
         // Read and parse the final block
         if file_size < final_block_offset {
             CORRUPTION.click();

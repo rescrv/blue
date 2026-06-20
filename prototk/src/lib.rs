@@ -609,7 +609,7 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
                 let x: v64 = match self.up.unpack() {
                     Ok(x) => x,
                     Err(e) => {
-                        *self.err = Some(e.into());
+                        *self.err = Some(e);
                         return None;
                     }
                 };
@@ -629,7 +629,7 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
                 let x: v64 = match self.up.unpack() {
                     Ok(x) => x,
                     Err(e) => {
-                        *self.err = Some(e.into());
+                        *self.err = Some(e);
                         return None;
                     }
                 };
