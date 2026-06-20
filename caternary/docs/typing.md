@@ -1,12 +1,12 @@
 # Caternary Type System — Implementation Spec (rev 4)
 
-**Audience:** the implementing agent (Sid worker). You are working in the Caternary codebase on the latest `blue`. This document is the contract for what to build and how the judge will verify it. Read the whole thing before writing code. Where this spec names a builtin or an internal symbol you cannot find, **locate the real one in the codebase and reconcile** — do not invent.
+**Audience:** the implementing agent (Sid worker). You are working in the Caternary codebase on the latest `blue`. This document is the contract for what to build and how the judge will verify it. Read the whole thing before writing code. Builtin names in this document use the runtime **UPPER_SNAKE_CASE** spelling. Where this spec names a builtin or an internal symbol you cannot find, **locate the real one in the codebase and reconcile** — do not invent.
 
 > **Ratified decisions (rev 4).** Argued and settled; do not relitigate without a recorded reason.
 > (a) **One numeric type `Num`** — no Int/Float split, no overloading; specialization, if ever, is post-inference monomorphization.
 > (b) **Flat substitution + trailed undo log** (Tier-0 inference backtracking only) for O(1)/zero-alloc — *not* a persistent HAMT, *not* union-find; **typing frames are the durable provenance spine** for anything the trail unwinds.
-> (c) **`if` is a combinator** with a hand-written scheme.
-> (d) The **shadow stack is an abstract evaluator** mirroring runtime data flow exactly (`dup` aliases the same term; combinators execute their real shuffle; **arity comes from the Tier 0 arrow**); core-shuffle conformance is property-tested because a mis-shuffle yields a *vacuous proof*, not a crash.
+> (c) **`IF` is a combinator** with a hand-written scheme.
+> (d) The **shadow stack is an abstract evaluator** mirroring runtime data flow exactly (`DUP` aliases the same term; combinators execute their real shuffle; **arity comes from the Tier 0 arrow**); core-shuffle conformance is property-tested because a mis-shuffle yields a *vacuous proof*, not a crash.
 > (e) **Higher-order refinement subsumption is SMT-discharged only, never inferred**, and **fails closed**.
 > (f) **Whole-program, no modules** — one compilation unit, one global ledger, no serialized contracts, no version skew.
 > (g) **Embeddable; operators are contracted at registration** by two registrants (language core + embedder); the **user registers nothing**. Registration is **explicit attestation**; the operator table is the **modulo** of every proof. Operator contracts (axioms) and user `assume` are **separate buckets** — the strict anti-rot check applies to `assume` only, which is now **near-vestigial**.
@@ -36,7 +36,7 @@ Caternary is **embedded** into a Rust host. Two populations, separated by a capa
 
 So there is **one trusted-contract mechanism — operator registration carries a type — with two registrants, and the user is neither:**
 
-1. **The language core** registers the irreducible primitives (`call`, `dip`, `if` — the words with no Caternary body, because "apply a quotation" *is* the runtime operation that makes quotations mean anything). Each carries its **Tier 0 scheme** (§2) *and* its **Tier 1 refinement axiom** (§8 / §10.6).
+1. **The language core** registers the irreducible primitives (`CALL`, `DIP`, `IF` — the words with no Caternary body, because "apply a quotation" *is* the runtime operation that makes quotations mean anything). Each carries its **Tier 0 scheme** (§2) *and* its **Tier 1 refinement axiom** (§8 / §10.6).
 2. **The embedder** registers host operators (syscalls, DB calls, whatever the host exposes), each with a type, at embed time.
 
 The user's only unproven-fact mechanism is `assume` (§10.7). **Because every foreign thing arrives pre-contracted by the party who wrote it, the user inherits operator contracts automatically and the `assume` surface shrinks to near-zero** — `assume` survives only as a vestige for the rare local assertion about a *Caternary* construct the solver cannot reach.
@@ -90,18 +90,18 @@ This is Hindley–Milner where the function arrow is the stack arrow, extended w
 Signatures (convention: `'R 'S 'T` are row variables, lowercase `a b` are element type variables, top on the right):
 
 ```
-dup   : ( 'S a        -- 'S a a )
-drop  : ( 'S a        -- 'S )
-swap  : ( 'S a b       -- 'S b a )
-call  : ( 'S ('S -- 'T) -- 'T )
-dip   : ( 'S a ('S -- 'T) -- 'T a )
-if    : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
+DUP   : ( 'S a        -- 'S a a )
+DROP  : ( 'S a        -- 'S )
+SWAP  : ( 'S a b       -- 'S b a )
+CALL  : ( 'S ('S -- 'T) -- 'T )
+DIP   : ( 'S a ('S -- 'T) -- 'T a )
+IF    : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
 +     : ( 'S Num Num    -- 'S Num )
 literal n  : ( 'S -- 'S Num )                       -- numeric literal (one numeric type)
 literal [q]: ( 'S -- 'S (P -- Q) )  where q : (P -- Q)  -- quotation value
 ```
 
-The row variable is what makes combinators expressible. You **cannot** state `dip` or `if` without quantifying over "the rest of the stack." `call`/`dip`/`if` are **registered by the language core** (architecture section) — they have no Caternary body; the schemes above are their authored Tier 0 contracts.
+The row variable is what makes combinators expressible. You **cannot** state `DIP` or `IF` without quantifying over "the rest of the stack." `CALL`/`DIP`/`IF` are **registered by the language core** (architecture section) — they have no Caternary body; the schemes above are their authored Tier 0 contracts.
 
 ---
 
@@ -178,7 +178,7 @@ occurs_stack(v, s):
     (s.row is v) or any occurs(v, e) for e in s.elems
 ```
 
-Implement unification and `occurs` with an explicit **depth bound or worklist** so a malicious/accidental cyclic program (e.g. `[ dup call ] dup call`, which forces `a ~ ( 'X a -- 'Y )`) is **rejected with a cyclic-type error, not a compiler stack overflow.** That robustness is part of correctness here.
+Implement unification and `occurs` with an explicit **depth bound or worklist** so a malicious/accidental cyclic program (e.g. `[ DUP CALL ] DUP CALL`, which forces `a ~ ( 'X a -- 'Y )`) is **rejected with a cyclic-type error, not a compiler stack overflow.** That robustness is part of correctness here.
 
 That is the entire unification machinery. No labels, no field reordering, no record solving.
 
@@ -202,7 +202,7 @@ infer_seq(words, env):
 
 - **Numeric literal** `n`: `( 'a -- 'a Num )`. One numeric type (§1).
 - **Quotation literal** `[ q ]`: infer `q` to get `(P -- Q)`; literal’s word type is `( 'a -- 'a Quote(P -- Q) )`. Quotations are syntactic values, so the `Quote(...)` **may be generalized** at a binding site.
-- **`if`** is a **primitive combinator** with the hand-written scheme in §2 — `( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )`. Branch agreement falls out of unifying both branch quotations against the shared `( 'S -- 'T )`. Do **not** special-case `if` beyond supplying its scheme.
+- **`IF`** is a **primitive combinator** with the hand-written scheme in §2 — `( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )`. Branch agreement falls out of unifying both branch quotations against the shared `( 'S -- 'T )`. Do **not** special-case `IF` beyond supplying its scheme.
 
 ### Named locals (`>name`)
 `>name` pops the top and binds it in a **local environment** for the remainder of the scope.
@@ -230,8 +230,8 @@ The global pre-pass already collects all `[ body ] :name` definitions **order-in
 
 Composition means a mistake on line 2 can surface as a unification failure "near" line 40. Untreated, this makes the checker unusable. Three layered requirements, in payoff order, **all backed by the §3 data structures that exist from commit one:**
 
-1. **Provenance pair, not failure site.** On `unify_ty` mismatch you hold two origin spans: where each conflicting type was born. Report both — *"this is `Num` because of `+` at L3; it must be `Bool` because `if` at L7 demands it"* — not merely the enclosing word where unification blew up.
-2. **Quotation boundaries are frames.** Render the typing-frame stack as a breadcrumb: *"in the quotation at L7 ▸ which `if` expects effect `( 'S -- 'S )` ▸ `foo` breaks it by producing `Bool`."* Nesting becomes a backtrace, not one opaque site.
+1. **Provenance pair, not failure site.** On `unify_ty` mismatch you hold two origin spans: where each conflicting type was born. Report both — *"this is `Num` because of `+` at L3; it must be `Bool` because `IF` at L7 demands it"* — not merely the enclosing word where unification blew up.
+2. **Quotation boundaries are frames.** Render the typing-frame stack as a breadcrumb: *"in the quotation at L7 ▸ which `IF` expects effect `( 'S -- 'S )` ▸ `foo` breaks it by producing `Bool`."* Nesting becomes a backtrace, not one opaque site.
 3. **Localize inward.** Anchor at the **innermost** frame where both conflicting types are already concrete — that is almost always the user's actual mistake; the outer row-unification failure is the consequence. Walk inward to the deepest frame still carrying the contradiction.
 
 **Never** leak internal variable names (`'t7`, `'r3`) to the user; debug-only, behind a flag. The judge rejects any user-facing diagnostic that leaks them or omits a span.
@@ -240,8 +240,8 @@ Composition means a mistake on line 2 can surface as a unification failure "near
 
 ## 8. Combinators and the rank boundary
 
-- **Primitive combinators are language-core operator registrations** (architecture section). `dip`, `call`, `if` have no Caternary body — the language core registers them, each carrying its hand-written **Tier 0 scheme** (§2) *and*, at Tier 1, a hand-written **refinement axiom** (§10.6). They live in the operator-contract (axiom) bucket, authored once, invisible to the user — **not** in the `assume` ledger. Combinators written *in* Caternary (`keep`, `bi`, derived shuffles) are **transparent definitions**, inferred and verified through their bodies, with no authored contract.
-- **`dip`/combinator rule — relay, never expand.** A combinator's contract is written using only the **declared** arrow of its quotation argument; never expand the quotation's body into the caller's contract. Categorically, `dip q = q ⊗ id_a`. The only fact `dip` itself contributes is that the set-aside value returns unchanged. (Its Tier 1 refinement axiom in §10.6 is exactly this rule lifted to predicates.)
+- **Primitive combinators are language-core operator registrations** (architecture section). `DIP`, `CALL`, `IF` have no Caternary body — the language core registers them, each carrying its hand-written **Tier 0 scheme** (§2) *and*, at Tier 1, a hand-written **refinement axiom** (§10.6). They live in the operator-contract (axiom) bucket, authored once, invisible to the user — **not** in the `assume` ledger. Combinators written *in* Caternary (`KEEP`, `BI`, derived shuffles) are **transparent definitions**, inferred and verified through their bodies, with no authored contract.
+- **`DIP`/combinator rule — relay, never expand.** A combinator's contract is written using only the **declared** arrow of its quotation argument; never expand the quotation's body into the caller's contract. Categorically, `DIP q = q ⊗ id_a`. The only fact `DIP` itself contributes is that the set-aside value returns unchanged. (Its Tier 1 refinement axiom in §10.6 is exactly this rule lifted to predicates.)
 - **Rank-1 is inferred. Rank-2 requires annotation.** The one non-inferable case: a user-defined word that applies its quotation argument at **two genuinely distinct types** in one definition. Detect this and emit *"this word applies its quotation at more than one type; add a type annotation."* With an annotation, check against it.
 
 ---
@@ -270,18 +270,18 @@ Tier 0 is positional and anonymous; SMT needs names. At a call boundary, zip the
 ### 10.3 Symbolic shadow stack (compile-time only) — a second evaluator
 The shadow stack is an **abstract interpreter over the *same* operational semantics as the runtime**, whose values are **symbolic terms** in the refinement logic instead of runtime values. Every word that moves data at runtime moves terms here with **byte-identical data flow.** This single mandate subsumes three requirements people get wrong:
 
-- **Aliasing under `dup`/shuffles.** `dup` pushes the **exact same term** (same identity), not a second fresh literal; `swap` exchanges terms; `drop` discards one. If `dup` minted two fresh terms, the solver would lose the aliasing fact and trivial proofs like `x x - = 0` would fail to discharge. "`dup` copies the term" is just the `n=1` case of "shadow execution mirrors real execution."
-- **Combinator data flow.** Tier 0 *types* `dip` via its declared signature, but the shadow stack must **execute `dip`'s shuffle at compile time**: pop the set-aside term, run the quotation's shadow effects on the rest, restore the term. The shadow stack must mirror the exact data flow of every core combinator, or the positional binding (§10.2) zips the wrong SMT names to the wrong slots after a non-trivial shuffle.
+- **Aliasing under `DUP`/shuffles.** `DUP` pushes the **exact same term** (same identity), not a second fresh literal; `SWAP` exchanges terms; `DROP` discards one. If `DUP` minted two fresh terms, the solver would lose the aliasing fact and trivial proofs like `x x - = 0` would fail to discharge. "`DUP` copies the term" is just the `n=1` case of "shadow execution mirrors real execution."
+- **Combinator data flow.** Tier 0 *types* `DIP` via its declared signature, but the shadow stack must **execute `DIP`'s shuffle at compile time**: pop the set-aside term, run the quotation's shadow effects on the rest, restore the term. The shadow stack must mirror the exact data flow of every core combinator, or the positional binding (§10.2) zips the wrong SMT names to the wrong slots after a non-trivial shuffle.
 - **Arity comes from the Tier 0 arrow — the shadow evaluator owns NO independent notion of it.** For *every* word it executes, including opaque ones, the shadow evaluator reads that word's **already-inferred, already-generalized Tier 0 type** to know exactly how many terms to pop and push. An opaque `lib : ( Num Num -- Num )` pops two terms and pushes **one** fresh literal — the shape is known (Tier 0 proved it) even though the *meaning* is not. Opacity is only about whether the pushed term carries a predicate, **never** about how many terms move. **Tier 0's shape closure is the structural rail the shadow stack runs on** — which is *why* Tier 1 is gated behind a green Tier 0: the shadow evaluator's soundness is parasitic on Tier 0 having already balanced every arity.
 
 Each slot carries the term describing its value; after `x 0 >` the top slot's term is the proposition `x > 0` (types alone say only `Bool`). When a value's producing term is opaque (returned from an uninterpreted word), its slot carries a **fresh literal**: soundness holds, precision degrades gracefully — but see §10.7 for what happens when that opaque value flows into an obligation.
 
-**Conformance is a soundness requirement, not hygiene.** A mis-shuffled shadow stack does not crash — it emits a *well-formed VC about the wrong variables*, which Z3 discharges or refutes, producing a **green checkmark that proves nothing (vacuous verification)** — the worst failure class in the system. Therefore: **shadow data flow for the core shuffles (`dup swap drop dip` and friends) is property-tested against the interpreter's data flow, not eyeballed.** The `dup`-aliasing test (`x x -` discharges to `0`) and a post-shuffle zip test (§10.2 binds the right names after `dip`) are the guards.
+**Conformance is a soundness requirement, not hygiene.** A mis-shuffled shadow stack does not crash — it emits a *well-formed VC about the wrong variables*, which Z3 discharges or refutes, producing a **green checkmark that proves nothing (vacuous verification)** — the worst failure class in the system. Therefore: **shadow data flow for the core shuffles (`DUP SWAP DROP DIP` and friends) is property-tested against the interpreter's data flow, not eyeballed.** The `DUP`-aliasing test (`x x -` discharges to `0`) and a post-shuffle zip test (§10.2 binds the right names after `DIP`) are the guards.
 
 **The shadow stack does not exist at runtime** — a compile-time analysis artifact discarded before the binary ships, like a dataflow lattice.
 
 ### 10.4 Path conditions
-VC generation under control flow must assert branch facts. For `cond [ then ] [ else ] if`: recover `cond`'s proposition `P` from the shadow stack; verify `[ then ]` with `P` asserted into the solver scope and `[ else ]` with `¬P`. This requires the solver seam to support **scoped** assertions — `push_scope` before a branch, `pop_scope` after (§10.8). The shadow stack (§10.3) and positional binding (§10.2) are the substrate; this is two scoped assertions on top. (These scopes live in the Z3 trait + shadow-evaluator state only — never the Tier 0 substitution; §3 invariant 1.)
+VC generation under control flow must assert branch facts. For `cond [ then ] [ else ] IF`: recover `cond`'s proposition `P` from the shadow stack; verify `[ then ]` with `P` asserted into the solver scope and `[ else ]` with `¬P`. This requires the solver seam to support **scoped** assertions — `push_scope` before a branch, `pop_scope` after (§10.8). The shadow stack (§10.3) and positional binding (§10.2) are the substrate; this is two scoped assertions on top. (These scopes live in the Z3 trait + shadow-evaluator state only — never the Tier 0 substitution; §3 invariant 1.)
 
 ### 10.5 VC = verification condition
 A VC is a pure logical formula whose validity means an obligation holds — no program left, just math. Generate one at **each call site** for each `where` clause. At `x sqrt`, the VC is `(facts known about x) ⟹ (x >= 0)`. **Encoding (the thing people get wrong):** to check validity, assert the hypotheses and the **negation** of the goal, then `check()`. `Unsat` ⇒ no counterexample ⇒ **valid**. `Sat` ⇒ pull the model; it **is** your counterexample, surface it. `Unknown` ⇒ degrade (and fail closed for subsumption, §10.6).
@@ -294,7 +294,7 @@ Refinements are part of the Tier 1 type, attached to `Quote` as a **forwarded pa
 
 This is subtyping on the arrow — the thing banned for *inference* in the value language. Resolution: **subsumption is emitted as these two SMT implications and discharged by Z3, never inferred by the type engine.** The checker only *generates* the implications; the solver settles them. Subtyping-the-inference stays banned (principal typing intact, §1); subtyping-the-obligation lives entirely in the SMT seam. Control plane (inference) stays unification-only and decidable; the directional reasoning is pushed to the data plane (the solver you already pay for).
 
-**Operator refinement axioms.** The primitive combinators (`dip`, `call`, `if`) are language-core registrations (§8) and carry **authored refinement axioms** here — the Tier 1 counterpart to their §2 schemes. `dip`'s axiom is the relay rule made predicate-level: the set-aside value's predicate is preserved unchanged **and** the quotation's `post` holds on the rest (`dip q = q ⊗ id_a`, lifted to predicates). Without these axioms, a refined quotation passing through `dip` would have no axiom connecting its guarantee to the post-`dip` stack, and the contract would evaporate exactly as at an unaxiomatized foreign call. Embedder operators carry their own `pre`/`post` from registration; the user's proofs discharge against those, on faith (the operator table is the modulo — architecture section).
+**Operator refinement axioms.** The primitive combinators (`DIP`, `CALL`, `IF`) are language-core registrations (§8) and carry **authored refinement axioms** here — the Tier 1 counterpart to their §2 schemes. `DIP`'s axiom is the relay rule made predicate-level: the set-aside value's predicate is preserved unchanged **and** the quotation's `post` holds on the rest (`DIP q = q ⊗ id_a`, lifted to predicates). Without these axioms, a refined quotation passing through `DIP` would have no axiom connecting its guarantee to the post-`DIP` stack, and the contract would evaporate exactly as at an unaxiomatized foreign call. Embedder operators carry their own `pre`/`post` from registration; the user's proofs discharge against those, on faith (the operator table is the modulo — architecture section).
 
 **Undecidable subsumption fails closed.** If Z3 returns `Unknown` on a subsumption VC, **reject**: *"could not prove this contract is preserved across the combinator; annotate or simplify the predicate."* Never a silent pass. A refinement that fails open is worse than no refinement.
 
@@ -334,7 +334,7 @@ The VC generator emits **SMT-LIB2 text** through the trait; the Z3 call sits beh
 **Z3 is not linked into the Caternary runtime and is never called during execution.** By the time a program runs, every contract is already proven and there is nothing left to check — this is build-time verification, like a borrow-check, not a runtime assert. The shadow stack (§10.3) is compile-time only. **No refinement machinery has any runtime cost.** This is what makes the CI-gate model work: **`caternary check`** pays the entire verification cost — Tier 0 + Tier 1 + operator-axiom discharge — at build time, so a *checked* program ships with **no solver, no shadow stack, no contract residue.** Check in CI; run lean.
 
 ### 10.11 Annotation burden (what the user actually writes)
-Tier 0 infers all shapes; **zero annotations** for shape safety. Refinements are **opt-in per word** — write a `where` clause only on the words whose contracts you want proven. **Refinement is viral downward through demands but inferred upward through composition:** annotate a constraint at its *source* and the obligation propagates to call sites automatically; you never restate it on intermediate words. The total annotation surface is exactly: (a) words you deliberately contract, (b) the rank-2 case (§8), (c) the boundary where an unrefined quotation meets a refined expectation (§10.7), and (d) the near-vestigial `assume`. Foreign words are pre-contracted by the embedder at registration, so they cost the user **nothing**. There is **no** regime requiring annotation on ordinary `dup`/`swap`/straight-line code.
+Tier 0 infers all shapes; **zero annotations** for shape safety. Refinements are **opt-in per word** — write a `where` clause only on the words whose contracts you want proven. **Refinement is viral downward through demands but inferred upward through composition:** annotate a constraint at its *source* and the obligation propagates to call sites automatically; you never restate it on intermediate words. The total annotation surface is exactly: (a) words you deliberately contract, (b) the rank-2 case (§8), (c) the boundary where an unrefined quotation meets a refined expectation (§10.7), and (d) the near-vestigial `assume`. Foreign words are pre-contracted by the embedder at registration, so they cost the user **nothing**. There is **no** regime requiring annotation on ordinary `DUP`/`SWAP`/straight-line code.
 
 ---
 
@@ -346,7 +346,7 @@ For a future crown-jewel routine, shallow-embed words as relations on stacks (co
 
 ## 12. Milestones and acceptance tests
 
-Each milestone is independently verifiable. Green = complete. Caternary snippets use `dup drop swap + dip call if`; **if real builtin names differ in `blue`, reconcile and adjust, recording the mapping.** Initial stack for a top-level program is **empty** unless stated.
+Each milestone is independently verifiable. Green = complete. Caternary snippets use runtime builtin names such as `DUP DROP SWAP + DIP CALL IF`. Initial stack for a top-level program is **empty** unless stated.
 
 ### Tier 0
 
@@ -357,15 +357,15 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 - Row absorption: `( 'a -- )` unifies with `( 'b Num Bool -- )` by `'a := 'b Num Bool`.
 - **Transitive canonicalization:** if `'r1` is already bound to `'r2` and `'r2` to a concrete stack, a further unification still canonicalizes correctly before the occurs check — no false cyclic rejection.
 - Occurs check rejects `'a := 'a Num`.
-- **Cyclic via arrows, no overflow:** `[ dup call ] dup call` is **rejected with a typed cyclic-type error, without stack-overflowing the compiler** (assert a clean rejection, not a crash). Occurs recurses into `Quote` interiors.
+- **Cyclic via arrows, no overflow:** `[ DUP CALL ] DUP CALL` is **rejected with a typed cyclic-type error, without stack-overflowing the compiler** (assert a clean rejection, not a crash). Occurs recurses into `Quote` interiors.
 
 **M2 — Sequence inference**
 - `1 2 +` infers `( 'a -- 'a Num )`.
-- `dup` infers `( 'a b -- 'a b b )`.
+- `DUP` infers `( 'a b -- 'a b b )`.
 - `[ 1 + ]` infers `( 'a -- 'a (`'b Num -- 'b Num`) )`.
-- `[ 1 + ] call` infers `( 'a Num -- 'a Num )`.
-- `true [ 1 ] [ 2 ] if` type-checks; both branches unify to `( 'a -- 'a Num )`.
-- **Underflow:** top-level `drop` (empty initial stack) is **rejected** with an arity error naming `drop`.
+- `[ 1 + ] CALL` infers `( 'a Num -- 'a Num )`.
+- `true [ 1 ] [ 2 ] IF` type-checks; both branches unify to `( 'a -- 'a Num )`.
+- **Underflow:** top-level `DROP` (empty initial stack) is **rejected** with an arity error naming `DROP`.
 
 **M3 — Definitions / SCC**
 - Order independence: `[ bar 1 + ] :foo` before `[ 2 ] :bar` type-checks.
@@ -374,7 +374,7 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 - Polymorphic recursion (self-call at a different type) yields the §6 diagnostic, not a raw unification error.
 
 **M4 — Combinators**
-- `xs total [ 99 push ] dip` type-checks; result shape `… List Num`; `dip` contributes only that `total` is carried through.
+- `xs total [ 99 push ] DIP` type-checks; result shape `… List Num`; `DIP` contributes only that `total` is carried through.
 - Rank-2 without annotation → §8 diagnostic; with a correct annotation → checks.
 
 **M5 — Error quality**
@@ -388,13 +388,13 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 
 **M6 — Refinement parsing.** `sqrt`/`push` (§10.1, `Num`) parse into demand/guarantee predicates over named binders; malformed `where` → located parse error.
 
-**M7 — Positional binding + shadow stack (conformance is the point).** `push : ( xs n -- … )` against inferred `'S Num Num` binds `n←top`, `xs←second`; `'S` never appears as an SMT variable. After `x 0 >`, the shadow stack reports the top term as `x > 0`; an opaque producer yields a fresh literal (sound, imprecise). **Arity-from-Tier-0:** an opaque `lib : ( Num Num -- Num )` pops two terms and pushes exactly one fresh literal (the shadow evaluator reads the inferred arrow, owns no independent arity). **Aliasing:** `x dup -` discharges to `0` (two slots after `dup` carry the *same* term by identity). **Shuffle conformance:** after a non-trivial `dip` shuffle, §10.2 binds the right SMT names to the right slots — property-tested against the interpreter's data flow, so a mis-shuffle is caught as a divergence, not silently shipped as a vacuous proof.
+**M7 — Positional binding + shadow stack (conformance is the point).** `push : ( xs n -- … )` against inferred `'S Num Num` binds `n←top`, `xs←second`; `'S` never appears as an SMT variable. After `x 0 >`, the shadow stack reports the top term as `x > 0`; an opaque producer yields a fresh literal (sound, imprecise). **Arity-from-Tier-0:** an opaque `lib : ( Num Num -- Num )` pops two terms and pushes exactly one fresh literal (the shadow evaluator reads the inferred arrow, owns no independent arity). **Aliasing:** `x DUP -` discharges to `0` (two slots after `DUP` carry the *same* term by identity). **Shuffle conformance:** after a non-trivial `DIP` shuffle, §10.2 binds the right SMT names to the right slots — property-tested against the interpreter's data flow, so a mis-shuffle is caught as a divergence, not silently shipped as a vacuous proof.
 
-**M8 — Path conditions.** `x 0 > [ x sqrt ] [ 0 ] if`: inside the true branch `x > 0` is in scope, so `x sqrt`'s demand `x >= 0` discharges (`Unsat`); **without** the path condition it would fail. The solver receives `push_scope`/`pop_scope` (and `(push 1)`/`(pop 1)` in text mode) around the branches. **Seam:** assert the scope state lives in the Z3 trait, not the Tier 0 substitution (the frozen AST is untouched).
+**M8 — Path conditions.** `x 0 > [ x sqrt ] [ 0 ] IF`: inside the true branch `x > 0` is in scope, so `x sqrt`'s demand `x >= 0` discharges (`Unsat`); **without** the path condition it would fail. The solver receives `push_scope`/`pop_scope` (and `(push 1)`/`(pop 1)` in text mode) around the branches. **Seam:** assert the scope state lives in the Z3 trait, not the Tier 0 substitution (the frozen AST is untouched).
 
 **M9 — First-order VC generation + Z3.** `x sqrt` where facts do not imply `x >= 0` → VC `Sat`, counterexample surfaced; where they do → `Unsat`, accepted. Negated-goal encoding verified at unit level (known-valid ⇒ `Unsat`; known-invalid ⇒ `Sat` + model).
 
-**M10 — Higher-order subsumption + operator axioms.** A quotation with `post: r > 5` passed where `post: r > 0` is expected → covariant VC `r>5 ⟹ r>0` valid, accepted. With `post: r > 0` where `r > 5` expected → invalid, rejected. Contravariant demand case symmetric. A subsumption VC returning **`Unknown` is rejected (fails closed)**, not accepted. **Operator axiom:** a refined quotation (`post: r > 0`) passed through `dip` preserves its guarantee on the far side via `dip`'s authored refinement axiom (§10.6); an embedder operator's registered `post` is usable to discharge a downstream user obligation.
+**M10 — Higher-order subsumption + operator axioms.** A quotation with `post: r > 5` passed where `post: r > 0` is expected → covariant VC `r>5 ⟹ r>0` valid, accepted. With `post: r > 0` where `r > 5` expected → invalid, rejected. Contravariant demand case symmetric. A subsumption VC returning **`Unknown` is rejected (fails closed)**, not accepted. **Operator axiom:** a refined quotation (`post: r > 0`) passed through `DIP` preserves its guarantee on the far side via `DIP`'s authored refinement axiom (§10.6); an embedder operator's registered `post` is usable to discharge a downstream user obligation.
 
 **M11 — Gradual interop.** An unrefined quotation passed where a guarantee is required → rejected with the **"carries no contract"** message (§10.7), not a raw counterexample. An unrefined quotation passed to a contract-agnostic combinator → accepted (`true ⟹ true`). Situation A: a refined word that calls an opaque word whose result is **dropped** verifies silently (no annotation).
 
@@ -414,7 +414,7 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 4. The **occurs check canonicalizes both sides first, is uniform through `Quote` interiors, and never stack-overflows** (depth-bounded or worklist); cyclic ⇒ typed error.
 5. **Flat substitution + trailed undo log** for the **Tier 0** type substitution (inference backtracking only); **no** persistent HAMT, **no** destructive union-find; O(1)/zero-alloc. This trail is **Tier-0-only and is NOT the Tier 1 logical-scope mechanism** (invariant 18). Provenance the trail has unwound degrades to the **frame stack**, not the substitution.
 6. **Origin spans and typing frames exist from the first inference commit.** Frames are the durable provenance spine and persist across `pop_scope`. User-facing diagnostics use provenance pairs and frame breadcrumbs, anchor at the innermost concrete contradiction, and never leak internal variable names.
-7. **The shadow stack is an abstract evaluator mirroring runtime data flow exactly** (§10.3): `dup` aliases the same term, combinators execute their real shuffle, **arity is read from the Tier 0 arrow** (the evaluator owns no independent arity). Core-shuffle conformance is **property-tested against the interpreter**, because a mis-shuffle yields a vacuous proof (a green checkmark proving nothing), not a crash.
+7. **The shadow stack is an abstract evaluator mirroring runtime data flow exactly** (§10.3): `DUP` aliases the same term, combinators execute their real shuffle, **arity is read from the Tier 0 arrow** (the evaluator owns no independent arity). Core-shuffle conformance is **property-tested against the interpreter**, because a mis-shuffle yields a vacuous proof (a green checkmark proving nothing), not a crash.
 8. Word/combinator contracts are typed from **declared signatures only**; a quotation argument's **body is never expanded** into a caller's contract.
 9. **No polymorphic recursion** is silently admitted.
 10. **Tier separation:** Tier 0 passes with **zero dependence on Z3**. Refinements are a **forwarded payload Tier 0 never reads.** The VC generator targets an **interchange format (SMT-LIB)** behind a **solver trait**, never calling a solver in its core.
@@ -423,7 +423,7 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 13. **`assume` is STRICT and near-vestigial.** Legal only where a genuinely opaque/uncontracted dependency sits in the obligation's chain; **rejected** on any goal the solver could discharge without it (the positive-rejection check must actually run). The strict exploratory check is **cached and fails lenient** (timeout ⇒ accept). Every `assume` is a first-class, enumerable ledger entry; the modulo-assumption status propagates to callers visibly. The ledger means *"cannot honestly prove,"* never *"didn't bother."*
 14. **All Tier 1 machinery is compile-time**; Z3 and the shadow stack have **zero runtime presence**.
 15. **Whole-program, no modules.** One compilation unit, one global ledger, definitions in a flat global namespace, program = entry against empty stack. No imports, no serialized contracts, no version skew, no module `Cid`s. `grep assume` over source = the complete user trusted base.
-16. **Two-registrant operator model; the user registers nothing.** Trusted contracts come **only** from operator registration — by the **language core** (primitives `call`/`dip`/`if`, with Tier 0 schemes + Tier 1 refinement axioms) and the **embedder** (host operators). The user cannot register; the capability wall is the embedding API, structural. Operator contracts (axioms) and user `assume` are **separate buckets**; the strict drop-and-re-run check applies to `assume` only.
+16. **Two-registrant operator model; the user registers nothing.** Trusted contracts come **only** from operator registration — by the **language core** (primitives `CALL`/`DIP`/`IF`, with Tier 0 schemes + Tier 1 refinement axioms) and the **embedder** (host operators). The user cannot register; the capability wall is the embedding API, structural. Operator contracts (axioms) and user `assume` are **separate buckets**; the strict drop-and-re-run check applies to `assume` only.
 17. **Registration is explicit attestation.** The embedder visibly attests each operator contract; Caternary takes it on faith (the FFI floor). The **operator table is the modulo** of every proof; a verified program's status is *"sound modulo the attested operator contracts."*
 18. **Tier seam is an immutability barrier.** Tier 1 (shadow evaluator, VC generator) treats the Tier 0 substitution as **read-only**; `push_scope`/`pop_scope` live in the Z3 trait + shadow-evaluator state, never the inference substitution. A Tier 1 branch mutating a Tier 0 binding is **impossible by construction.**
 19. **The shadow evaluator reads the Tier 0 arrow for arity** (folded into 7, restated for emphasis): opaque words pop/push per their inferred Tier 0 type. Tier 0 shape closure is the structural rail — hence Tier 1's gating behind green Tier 0.
@@ -433,13 +433,13 @@ Each milestone is independently verifiable. Green = complete. Caternary snippets
 
 ## 14. Suggested build order
 
-1. **Whole-program driver + operator registration + attestation API.** Flat definition namespace (reuse the pre-pass); `main`-against-empty-stack; `register_operator_with_contract` as a visibly-trusted call; language-core primitives (`call`/`dip`/`if`) registered with their Tier 0 schemes; the user has no registration surface (capability wall). → M0
+1. **Whole-program driver + operator registration + attestation API.** Flat definition namespace (reuse the pre-pass); `main`-against-empty-stack; `register_operator_with_contract` as a visibly-trusted call; language-core primitives (`CALL`/`DIP`/`IF`) registered with their Tier 0 schemes; the user has no registration surface (capability wall). → M0
 2. Type representation + **flat substitution + trailed undo (Tier-0-only)** + **origin spans + typing frames** (§3).
 3. Unifier with **canonicalize-then-occurs, uniform through arrows, depth-guarded** (§4) → M1.
-4. Sequence inference, literals, quotations, locals, `if`-as-combinator (§5) → M2.
+4. Sequence inference, literals, quotations, locals, `IF`-as-combinator (§5) → M2.
 5. SCC pass + generalization (§6) → M3.
 6. Combinator schemes + rank-2 detection (§8) → M4.
 7. Provenance/frame/localize-inward error reframing (§7) → M5. **Tier 0 complete.**
 8. *(Phase 2, gated)* refinement parser (§10.1) → M6; positional binding + **shadow evaluator (arity from Tier 0 arrow) with conformance tests** (§10.2–10.3) → M7; **path conditions + scoped seam (Z3-trait-only)** (§10.4, §10.8) → M8; first-order VCs + Z3 (§10.5, §10.8) → M9; **higher-order subsumption + operator refinement axioms, fail-closed** (§10.6) → M10; **gradual interop** (§10.7) → M11; **`assume` boundary, strict + cached/lenient** (§10.7) → M12; **SMT-LIB parity** (§10.9) → M13; **whole-program ledger + attestation hash + CI-gate/free-runtime checks** (architecture section, §10.10) → M14.
 
-Build Tier 0 end-to-end on `abs` / `sqrt` / `push` / `dip` before anything fancy. Never build value-language subtyping. Subsumption is two implications handed to Z3, not a feature of the type engine. The shadow stack mirrors runtime data flow exactly — including reading arity from the Tier 0 arrow — or your proofs are vacuous. Trusted contracts come only from attested operator registration; `assume` is strict and names only what you genuinely cannot prove. Whole-program, one ledger, no modules. Check in CI; run lean. When in doubt, prefer rejecting cleanly with a good message over widening silently — and fail closed.
+Build Tier 0 end-to-end on `abs` / `sqrt` / `push` / `DIP` before anything fancy. Never build value-language subtyping. Subsumption is two implications handed to Z3, not a feature of the type engine. The shadow stack mirrors runtime data flow exactly — including reading arity from the Tier 0 arrow — or your proofs are vacuous. Trusted contracts come only from attested operator registration; `assume` is strict and names only what you genuinely cannot prove. Whole-program, one ledger, no modules. Check in CI; run lean. When in doubt, prefer rejecting cleanly with a good message over widening silently — and fail closed.

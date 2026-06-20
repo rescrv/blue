@@ -11,6 +11,7 @@ use handled::SError;
 
 use crate::Quotable;
 use crate::Token;
+use crate::types::Scheme;
 
 /// Evaluation error type.
 pub type EvalError = SError;
@@ -41,7 +42,7 @@ pub(crate) fn definition_error(message: impl AsRef<str>) -> EvalError {
 /// Returns `Some(name)` if `w` is a binding word `>name` whose name is a valid
 /// local identifier: a leading ASCII letter or `_`, then ASCII alphanumerics or
 /// `_` (the same grammar the optimizer uses for pattern variables).
-fn bind_target(w: &str) -> Option<&str> {
+pub(crate) fn bind_target(w: &str) -> Option<&str> {
     let rest = w.strip_prefix('>')?;
     if is_local_name(rest) {
         Some(rest)
@@ -146,6 +147,39 @@ pub type Operator<T> = fn(&mut Vec<T>, &Evaluator<T>) -> Result<(), EvalError>;
 pub struct Evaluator<T> {
     operators: HashMap<String, Operator<T>>,
     definitions: HashMap<String, Vec<Token>>,
+    /// Contract-carrying operator registrations: the name → [`Scheme`] table that
+    /// is the **modulo** of every Caternary type proof (architecture section,
+    /// invariants 16/17).
+    ///
+    /// This is a *sibling* of `operators` and `definitions`, never a rename of
+    /// `define`. `define` registers an operator's *runtime behavior*; this table
+    /// records an operator's *attested Tier-0 type*. The two are kept separate on
+    /// purpose: a runtime operator may exist with no contract (untyped, opaque to
+    /// the checker), and the language core / embedder add a contract via
+    /// [`Evaluator::register_operator_with_contract`].
+    ///
+    /// The field is **private**, and no Caternary surface entry point
+    /// (`parse`/`load`/`eval`) reads or writes it. The only mutator is the
+    /// Rust-only registration API below. That privacy *is* the capability wall:
+    /// a user writing Caternary cannot reach this table by construction, not
+    /// merely by convention (invariant 16).
+    contracts: HashMap<String, Scheme>,
+    /// Parallel **span table** for loaded definitions: name → the definition
+    /// body as spanned tokens (§3 invariant 2 / §13 invariant 6 — origin spans
+    /// must exist from the first inference commit and are *not reconstructable
+    /// later*). Populated only by [`Evaluator::load_with_spans`]; plain
+    /// [`Evaluator::load`] leaves it empty (the runtime needs no spans).
+    ///
+    /// The type checker reads this table so its diagnostics anchor at real byte
+    /// offsets instead of a fabricated `Span { 0, 0 }`. It is a *sibling* of
+    /// `definitions`: the spanless `Vec<Token>` body drives the runtime, the
+    /// spanned body drives the checker, and the two are kept in lockstep by
+    /// `load_with_spans`.
+    ///
+    /// The stored [`crate::Span`] is the span of the whole `[ body ]` bracket, so
+    /// the checker has a real source location even for the program-effect node of
+    /// an empty body.
+    definition_spans: HashMap<String, (crate::Span, Vec<crate::SpannedToken>)>,
 }
 
 impl<T> Default for Evaluator<T>
@@ -163,12 +197,94 @@ impl<T> Evaluator<T> {
         Self {
             operators: HashMap::new(),
             definitions: HashMap::new(),
+            contracts: HashMap::new(),
+            definition_spans: HashMap::new(),
         }
     }
 
     /// Defines an operator by name.
+    ///
+    /// This registers an operator's *runtime behavior* only. It does not, and
+    /// must not, touch the type-contract table; an operator defined here is
+    /// untyped from the checker's point of view until a contract is registered
+    /// for it via [`Evaluator::register_operator_with_contract`]. `define` is
+    /// intentionally left unchanged: contract-carrying registration is a
+    /// *sibling*, not a replacement.
     pub fn define(&mut self, name: &str, op: Operator<T>) {
         self.operators.insert(name.to_string(), op);
+    }
+
+    /// Registers an operator's **attested Tier-0 type contract** (architecture
+    /// section; invariants 16/17).
+    ///
+    /// This is **explicit attestation, and a visibly trusted act.** Calling it is
+    /// the registrant — the language core for primitives (`CALL`/`DIP`/`IF`), or
+    /// the embedder for host operators — stating *"I, who wrote this Rust, vouch
+    /// that this operator satisfies this `Scheme`."* Caternary **cannot** check
+    /// that the underlying Rust actually satisfies the contract; that obligation
+    /// lives in Rust-land, outside the language's reach (the FFI floor). The
+    /// resulting table is therefore the **modulo** of every Caternary proof: a
+    /// verified program is *"sound modulo the attested operator contracts."*
+    ///
+    /// Only two populations call this: the language core and the embedder. **The
+    /// user — who writes Caternary, not Rust — has no path here.** The capability
+    /// wall is structural: this is a Rust method on `Evaluator`, the contract
+    /// table it writes is a private field, and no Caternary surface
+    /// (`parse`/`load`/`eval`) can reach either. A user cannot add to the axiom
+    /// set (invariant 16).
+    ///
+    /// Registration is additive and idempotent-by-overwrite: re-registering a
+    /// name replaces its contract (the embedder is trusted to mean the latest
+    /// attestation).
+    pub fn register_operator_with_contract(&mut self, name: &str, scheme: Scheme) {
+        self.contracts.insert(name.to_string(), scheme);
+    }
+
+    /// Looks up the attested type [`Scheme`] for a word, if one is registered.
+    ///
+    /// This is the resolution path the whole-program type checker uses to turn a
+    /// word into its scheme when the word is a *registered operator*. (Resolving a
+    /// word that is a Caternary *definition* into a scheme is the SCC/inference
+    /// job of later milestones; see [`crate::check`].)
+    pub fn contract(&self, name: &str) -> Option<&Scheme> {
+        self.contracts.get(name)
+    }
+
+    /// The number of registered operator contracts. Used by the capability-wall
+    /// tests to assert that no Caternary surface ever adds to this table.
+    pub fn contract_count(&self) -> usize {
+        self.contracts.len()
+    }
+
+    /// True if `name` is a loaded `[ body ] :name` definition (flat global
+    /// namespace populated by [`Evaluator::load`]). The type checker rides on the
+    /// same table the runtime resolves against.
+    pub fn has_definition(&self, name: &str) -> bool {
+        self.definitions.contains_key(name)
+    }
+
+    /// The body of a loaded definition, if present. Read-only access for the
+    /// type checker; the checker never mutates the definition table.
+    pub fn definition_body(&self, name: &str) -> Option<&[Token]> {
+        self.definitions.get(name).map(Vec::as_slice)
+    }
+
+    /// The **spanned** body of a loaded definition, if one was loaded with spans
+    /// via [`Evaluator::load_with_spans`]. This is the read path the type checker
+    /// uses to anchor diagnostics at real source byte offsets (§13 invariant 6).
+    /// Returns `None` for definitions loaded through the spanless
+    /// [`Evaluator::load`].
+    pub fn definition_body_spanned(&self, name: &str) -> Option<&[crate::SpannedToken]> {
+        self.definition_spans
+            .get(name)
+            .map(|(_, body)| body.as_slice())
+    }
+
+    /// The span of the whole `[ body ]` bracket for a definition loaded with
+    /// spans, if present. Lets the type checker anchor the program-effect node at
+    /// a real source location even when the body is empty.
+    pub fn definition_span(&self, name: &str) -> Option<crate::Span> {
+        self.definition_spans.get(name).map(|(span, _)| *span)
     }
 
     /// Loads function definitions from a top-level token stream.
@@ -198,12 +314,12 @@ impl<T> Evaluator<T> {
             for tok in tokens {
                 if let Token::Bracket(inner) = tok {
                     for t in inner {
-                        if let Token::Word(w) = t {
-                            if has_def_prefix(w) {
-                                return Err(definition_error(format!(
-                                    "definition `{w}` must appear at top level, not inside a quotation"
-                                )));
-                            }
+                        if let Token::Word(w) = t
+                            && has_def_prefix(w)
+                        {
+                            return Err(definition_error(format!(
+                                "definition `{w}` must appear at top level, not inside a quotation"
+                            )));
                         }
                     }
                     reject_nested(inner)?;
@@ -216,33 +332,69 @@ impl<T> Evaluator<T> {
         // Walk the top level, pairing each binder with the quotation before it.
         let mut i = 0;
         while i < tokens.len() {
-            if let Token::Word(w) = &tokens[i] {
-                if has_def_prefix(w) {
-                    let name = def_target(w).ok_or_else(|| {
-                        definition_error(format!(
-                            "malformed definition binder `{w}`: expected `:name`"
-                        ))
-                    })?;
-                    if i == 0 {
-                        return Err(definition_error(format!(
-                            "definition `:{name}` has no preceding quotation to bind"
-                        )));
-                    }
-                    let body = match &tokens[i - 1] {
-                        Token::Bracket(body) => body.clone(),
-                        Token::Word(prev) => {
-                            return Err(definition_error(format!(
-                                "definition `:{name}` must follow a quotation, found word `{prev}`"
-                            )));
-                        }
-                    };
-                    if self.definitions.contains_key(name) {
-                        return Err(definition_error(format!(
-                            "redefinition: `:{name}` is already defined"
-                        )));
-                    }
-                    self.definitions.insert(name.to_string(), body);
+            if let Token::Word(w) = &tokens[i]
+                && has_def_prefix(w)
+            {
+                let name = def_target(w).ok_or_else(|| {
+                    definition_error(format!(
+                        "malformed definition binder `{w}`: expected `:name`"
+                    ))
+                })?;
+                if i == 0 {
+                    return Err(definition_error(format!(
+                        "definition `:{name}` has no preceding quotation to bind"
+                    )));
                 }
+                let body = match &tokens[i - 1] {
+                    Token::Bracket(body) => body.clone(),
+                    Token::Word(prev) => {
+                        return Err(definition_error(format!(
+                            "definition `:{name}` must follow a quotation, found word `{prev}`"
+                        )));
+                    }
+                };
+                if self.definitions.contains_key(name) {
+                    return Err(definition_error(format!(
+                        "redefinition: `:{name}` is already defined"
+                    )));
+                }
+                self.definitions.insert(name.to_string(), body);
+            }
+            i += 1;
+        }
+        Ok(())
+    }
+
+    /// Loads function definitions from a **spanned** top-level token stream,
+    /// keeping both the runtime body and a parallel span table in lockstep.
+    ///
+    /// This is [`Evaluator::load`] plus span retention: it performs identical
+    /// validation and populates the spanless `definitions` table exactly as
+    /// `load` does (so the runtime is unaffected), and additionally records each
+    /// definition's **spanned** body so the type checker can anchor diagnostics
+    /// at real source byte offsets (§13 invariant 6). Use this whenever the
+    /// program will be type-checked; use `load` for runtime-only use.
+    pub fn load_with_spans(&mut self, tokens: &[crate::SpannedToken]) -> Result<(), EvalError> {
+        use crate::SpannedTokenKind;
+
+        // Validate and populate the runtime table through the existing path.
+        let spanless: Vec<Token> = tokens.iter().map(crate::SpannedToken::to_token).collect();
+        self.load(&spanless)?;
+
+        // Re-walk the spanned top level to capture each definition's spanned
+        // body. Validation already succeeded above, so the binder pairing is
+        // guaranteed well-formed here.
+        let mut i = 0;
+        while i < tokens.len() {
+            if let SpannedTokenKind::Word(w) = &tokens[i].kind
+                && has_def_prefix(w)
+                && let Some(name) = def_target(w)
+                && let Some(prev) = i.checked_sub(1)
+                && let SpannedTokenKind::Bracket(body) = &tokens[prev].kind
+            {
+                self.definition_spans
+                    .entry(name.to_string())
+                    .or_insert_with(|| (tokens[prev].span, body.clone()));
             }
             i += 1;
         }
