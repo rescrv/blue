@@ -860,6 +860,20 @@ where
 /// boundary is rejected rather than silently admitted.
 pub const SUBSUMPTION_FAIL_CLOSED_MSG: &str = "could not prove this contract is preserved across the combinator; annotate or simplify the predicate";
 
+/// The targeted **gradual-interop** diagnostic (§10.7 / invariant 12 / M11): an
+/// **unrefined** (absent-payload) quotation was passed where a *guarantee* is
+/// required. The subsumption VC `true ⟹ <required guarantee>` is invalid, but the
+/// actionable message is that the quotation carries **no contract** at all — not a
+/// bare SMT counterexample for some incidental witness value. The fix is to add a
+/// contract to the quotation, not to study the counterexample.
+///
+/// This is emitted **only** for the absent-payload case (provided guarantee is
+/// `where true`); a *present-but-weaker* guarantee (e.g. `r > 0` where `r > 5` is
+/// required) keeps the M10 [`SubsumptionOutcome::Violated`] counterexample, since
+/// there the contract exists and is simply too weak.
+pub const SUBSUMPTION_NO_CONTRACT_MSG: &str =
+    "this quotation carries no contract and one is required here";
+
 /// Which of the two directional subsumption VCs (§10.6) a verdict belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubsumptionDirection {
@@ -899,6 +913,16 @@ pub struct SubsumptionVc {
     /// The counterexample model, present **iff** `verdict == Sat` and the VC was
     /// fully decidable. An `Unknown` never carries a (fabricated) model (§10.5).
     pub model: Option<Model>,
+    /// **Gradual-interop marker (§10.7 / M11):** the *provided* (hypothesis) side
+    /// of this directional implication was **absent** (`where true`) while the
+    /// *expected* (goal) side carried a predicate. For the **guarantee**
+    /// direction this is the "carries no contract" signal — an unrefined
+    /// quotation meeting a required guarantee — which earns the targeted
+    /// [`SUBSUMPTION_NO_CONTRACT_MSG`] diagnostic instead of a bare counterexample
+    /// (a present-but-weaker guarantee leaves this `false` and keeps the M10
+    /// counterexample). For the **demand** direction the same shape is just an
+    /// ordinary stronger-demand M10 violation, so the marker is ignored there.
+    pub absent_payload: bool,
 }
 
 impl SubsumptionVc {
@@ -932,6 +956,22 @@ pub enum SubsumptionOutcome {
         /// The verbatim targeted rejection message.
         message: String,
     },
+    /// **Gradual interop (§10.7 / invariant 12 / M11):** an **unrefined**
+    /// (absent-payload) quotation was passed where a *guarantee* is required.
+    /// The boundary is rejected, but with the targeted
+    /// [`SUBSUMPTION_NO_CONTRACT_MSG`] — *"this quotation carries no contract and
+    /// one is required here"* — rather than the bare M10 SMT counterexample. This
+    /// is distinct from [`SubsumptionOutcome::Violated`], which is reserved for a
+    /// contract that is **present but too weak** (and still carries its
+    /// counterexample).
+    CarriesNoContract {
+        /// Which directional implication exposed the missing contract — always
+        /// the covariant [`SubsumptionDirection::Guarantee`] (an unrefined
+        /// *demand* is maximally weak and subsumes fine, §10.7).
+        direction: SubsumptionDirection,
+        /// The verbatim targeted rejection message.
+        message: String,
+    },
 }
 
 /// The result of a higher-order subsumption check (§10.6): the **two** directional
@@ -951,11 +991,32 @@ impl SubsumptionResult {
     /// valid; an `Unknown` rejects (never a silent pass); a `Sat` is a genuine
     /// violation with a counterexample.
     ///
-    /// Precedence is deliberate: an `Unknown` anywhere is reported as
-    /// [`SubsumptionOutcome::Undecidable`] **first** (the fail-closed mandate),
-    /// then a `Sat` as [`SubsumptionOutcome::Violated`], else
-    /// [`SubsumptionOutcome::Preserved`].
+    /// Precedence is deliberate. First the **gradual-interop** case (§10.7 / M11):
+    /// an unrefined quotation meeting a *required guarantee* (the guarantee VC's
+    /// hypothesis absent while its goal is present) is reported as
+    /// [`SubsumptionOutcome::CarriesNoContract`] with the targeted message — the
+    /// missing contract is the actionable root cause, so it precedes both the
+    /// raw counterexample and the fail-closed `Unknown` (which would otherwise
+    /// just describe the symptom). Then an `Unknown` anywhere is reported as
+    /// [`SubsumptionOutcome::Undecidable`] (the fail-closed mandate), then a `Sat`
+    /// as [`SubsumptionOutcome::Violated`] (a present-but-weaker contract, with
+    /// its counterexample), else [`SubsumptionOutcome::Preserved`].
     pub fn outcome(&self) -> SubsumptionOutcome {
+        // §10.7 / M11: unrefined quotation meets a REQUIRED GUARANTEE. The
+        // covariant guarantee VC is `true ⟹ <required>`, which fails — but the
+        // honest diagnosis is the absent contract, not the SMT witness. Only the
+        // guarantee direction earns this: an absent *demand* is maximally weak
+        // (`where true`) and subsumes any expected demand, so the demand
+        // direction's absent-payload shape is an ordinary M10 violation instead.
+        if self.guarantee.direction == SubsumptionDirection::Guarantee
+            && self.guarantee.absent_payload
+            && !self.guarantee.is_valid()
+        {
+            return SubsumptionOutcome::CarriesNoContract {
+                direction: SubsumptionDirection::Guarantee,
+                message: SUBSUMPTION_NO_CONTRACT_MSG.to_string(),
+            };
+        }
         for vc in [&self.guarantee, &self.demand] {
             if vc.verdict == Verdict::Unknown {
                 return SubsumptionOutcome::Undecidable {
@@ -1015,17 +1076,34 @@ fn align_side(side: &RefinementSide, prefix: &str) -> Option<Pred> {
 /// solver via the negated-goal encoding (§10.5), returning the verdict, the
 /// counterexample model on `Sat`, and the implication predicate (for the record).
 ///
-/// An absent `goal` (`where true`) is **trivially valid** (`Unsat`, no model):
-/// `h ⟹ true` always holds. An absent `hypothesis` (`where true`) asserts no
-/// extra fact, so the goal must hold on its own — which is exactly the
-/// unrefined-meets-required case that *should* fail (handled by M11's targeted
-/// diagnostic, but here it simply fails the VC; M10 does not special-case it).
+/// **Absent refinement = `where true`** (§10.7 — the gradual-adoption rule).
+/// Both ends of a boundary are read this way, so unrefined code slots into the
+/// lattice automatically:
+///
+///   * An absent `goal` (`where true`) is **trivially valid** (`Unsat`, no model):
+///     `h ⟹ true` always holds. This is what makes a **contract-agnostic
+///     boundary** accept an unrefined quotation (`true ⟹ true`) and a refined one
+///     alike — the expected side demands nothing.
+///   * An absent `hypothesis` (`where true`) asserts no extra fact, so the goal
+///     must hold on its own. For the **guarantee** direction this is the
+///     unrefined-meets-required case (`true ⟹ <required>`): the VC fails and the
+///     [`SubsumptionVc::absent_payload`] flag is set so [`SubsumptionResult::outcome`]
+///     can surface the targeted "carries no contract" diagnostic (§10.7 / M11)
+///     rather than a bare counterexample.
+///
+/// `absent_payload` records exactly `hypothesis.is_none() && goal.is_some()` — the
+/// provided side is unrefined while a contract is required. The discharge result
+/// is unaffected; only the *diagnosis* of the failure changes.
 fn directional_implication<S: Solver + CounterModel>(
     direction: SubsumptionDirection,
     hypothesis: Option<Pred>,
     goal: Option<Pred>,
     solver: &mut S,
 ) -> SubsumptionVc {
+    // The provided (hypothesis) side is unrefined (`where true`) while the
+    // expected (goal) side requires a contract — the §10.7 absent-payload shape.
+    let absent_payload = hypothesis.is_none() && goal.is_some();
+
     // Build the implication predicate for the record. `true ⟹ goal` reduces to
     // `goal`; `h ⟹ true` reduces to `true`.
     let implication = match (&hypothesis, &goal) {
@@ -1042,6 +1120,7 @@ fn directional_implication<S: Solver + CounterModel>(
                 implication,
                 verdict: Verdict::Unsat,
                 model: None,
+                absent_payload,
             };
         }
         Some(g) => g,
@@ -1061,6 +1140,7 @@ fn directional_implication<S: Solver + CounterModel>(
         implication,
         verdict,
         model,
+        absent_payload,
     }
 }
 
@@ -2819,6 +2899,186 @@ mod tests {
         assert!(!obs[0].is_discharged());
         let m = obs[0].model.as_ref().expect("Sat ⇒ counterexample");
         assert!(m.get("k").is_some(), "counterexample constrains k: {m}");
+    }
+
+    // =======================================================================
+    // M11 — gradual interop: absent refinement = `where true`, the targeted
+    // "carries no contract" diagnostic, and Situation A (§10.7 / §12 M11)
+    // =======================================================================
+
+    // A fully unrefined quotation/signature: `where true` on both sides (absent
+    // payloads). §10.7 reads this as maximally weak demand AND guarantee.
+    fn unrefined_sig() -> RefinementSig {
+        RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+            guarantees: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+        }
+    }
+
+    #[test]
+    fn m11_unrefined_quotation_meets_required_guarantee_carries_no_contract() {
+        // (§12 M11 (a)) An UNREFINED quotation (where true) passed where a
+        // GUARANTEE is required: the covariant VC `true ⟹ r>0` is invalid, but the
+        // actionable diagnosis is that the quotation carries no contract — NOT a
+        // bare SMT counterexample. Assert the targeted message.
+        let provided = unrefined_sig();
+        let expected = post_sig(BinOp::Gt, "0");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        // The guarantee VC is flagged absent-payload (provided side is `where true`).
+        assert!(
+            res.guarantee.absent_payload,
+            "the provided guarantee is absent (where true)"
+        );
+        assert!(
+            !res.guarantee.is_valid(),
+            "true ⟹ r>0 is invalid (the contract is required but missing)"
+        );
+        match res.outcome() {
+            SubsumptionOutcome::CarriesNoContract { direction, message } => {
+                assert_eq!(direction, SubsumptionDirection::Guarantee);
+                assert_eq!(message, SUBSUMPTION_NO_CONTRACT_MSG);
+                assert_eq!(
+                    message,
+                    "this quotation carries no contract and one is required here"
+                );
+            }
+            other => panic!("expected CarriesNoContract, got {other:?}"),
+        }
+        assert!(
+            !res.is_preserved(),
+            "an unrefined quotation does not satisfy a required guarantee"
+        );
+    }
+
+    #[test]
+    fn m11_present_but_weaker_guarantee_keeps_m10_counterexample() {
+        // (§12 M11 (a), the DISTINCTION) A PRESENT-but-weaker guarantee (r>0 where
+        // r>5 is required) is a genuine M10 violation and KEEPS its counterexample
+        // — it must NOT be re-routed to "carries no contract", because the
+        // contract exists; it is merely too weak.
+        let provided = post_sig(BinOp::Gt, "0");
+        let expected = post_sig(BinOp::Gt, "5");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert!(
+            !res.guarantee.absent_payload,
+            "the provided guarantee is present, not absent"
+        );
+        match res.outcome() {
+            SubsumptionOutcome::Violated { direction, model } => {
+                assert_eq!(direction, SubsumptionDirection::Guarantee);
+                assert!(
+                    model.is_some(),
+                    "a present-but-weaker contract keeps its M10 counterexample"
+                );
+            }
+            other => panic!("expected Violated (M10 counterexample), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m11_unrefined_quotation_to_contract_agnostic_combinator_is_accepted() {
+        // (§12 M11 (b)) An unrefined quotation passed to a CONTRACT-AGNOSTIC
+        // boundary (expected demands nothing and guarantees nothing): both
+        // directions reduce to `true ⟹ true` ⇒ ACCEPTED. Gradual adoption: the
+        // unrefined code slots into the lattice automatically.
+        let provided = unrefined_sig();
+        let expected = unrefined_sig();
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert!(
+            res.guarantee.is_valid() && res.demand.is_valid(),
+            "true ⟹ true on both directions"
+        );
+        assert!(
+            !res.guarantee.absent_payload,
+            "no required guarantee ⇒ not the carries-no-contract case"
+        );
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+        assert!(res.is_preserved());
+    }
+
+    #[test]
+    fn m11_refined_quotation_to_contract_agnostic_combinator_is_accepted() {
+        // A REFINED quotation passed to a contract-agnostic boundary is also fine:
+        // `r>5 ⟹ true` is trivially valid — a guarantee no one consumes is no
+        // obligation (the gradual lattice accepts strictly-more-refined code too).
+        let provided = post_sig(BinOp::Gt, "5");
+        let expected = unrefined_sig();
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+    }
+
+    #[test]
+    fn m11_situation_a_dropped_opaque_value_verifies_silently() {
+        // (§12 M11, Situation A) An OPAQUE word's result that is DROPPED never
+        // reaches an obligation, so no VC depends on it and verification is silent
+        // with ZERO user annotation. Here `opaque` is an uncontracted word; its
+        // result is dropped; the only obligation (`sqrt`) is discharged by a
+        // DIFFERENT, properly-contracted fact (`db_count`'s guarantee). The opaque
+        // value never appears in any obligation goal.
+        //   opaque drop db_count sqrt
+        let toks = parse("opaque drop db_count sqrt").unwrap();
+        let db_count = crate::parse_signature("db_count : ( -- c: Num where c >= 0 )").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            // `opaque` is intentionally uncontracted (returns None): the shadow
+            // stack gives it a fresh, fact-free term.
+            "db_count" => Some(db_count.clone()),
+            "sqrt" => Some(sqrt.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        // Exactly one obligation (sqrt's demand) — the dropped opaque value raises
+        // none — and it discharges from db_count's guarantee, silently.
+        assert_eq!(obs.len(), 1, "only sqrt raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "sqrt discharges from db_count's guarantee; the dropped opaque value is irrelevant"
+        );
+        assert!(obs[0].is_discharged());
+        // The opaque value must NOT poison the obligation: its term never appears
+        // in the goal (it was dropped before any obligation).
+        assert!(
+            !format!("{:?}", obs[0].goal).contains("opaque"),
+            "the dropped opaque value must not appear in any obligation: {:?}",
+            obs[0].goal
+        );
+    }
+
+    #[test]
+    fn m11_situation_b_opaque_value_in_obligation_still_fails_closed() {
+        // (§12 M11, Situation B / boundary with M12) The COMPLEMENT of Situation
+        // A: when the opaque value DOES flow into an obligation, the default stays
+        // FAIL-CLOSED — no silent pass, and (deliberately) no `assume` boundary
+        // pulled forward from M12 to rescue it.
+        //   opaque sqrt   (opaque's fact-free term flows into sqrt's demand n>=0)
+        let toks = parse("opaque sqrt").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| (w == "sqrt").then(|| sqrt.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1, "sqrt raises the demand on the opaque value");
+        assert!(
+            !obs[0].is_discharged(),
+            "an opaque value flowing into an obligation must FAIL CLOSED (no M12 assume here): {obs:?}"
+        );
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Sat,
+            "the fact-free opaque value admits a counterexample to n>=0"
+        );
     }
 
     // =======================================================================
