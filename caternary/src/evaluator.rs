@@ -180,6 +180,17 @@ pub struct Evaluator<T> {
     /// the checker has a real source location even for the program-effect node of
     /// an empty body.
     definition_spans: HashMap<String, (crate::Span, Vec<crate::SpannedToken>)>,
+    /// Parallel **annotation table**: definition name → the inner tokens of a
+    /// Tier-0 stack-effect annotation written as `[ effect ] @name`, plus the
+    /// span of the effect bracket. This is the one admitted Tier-0 shape
+    /// annotation, the rank-2 case (§8 / §10.11(b)); its concrete surface is
+    /// defined in `check.rs` (the recorded design note there), since
+    /// `docs/typing.md` is read-only. Populated only by
+    /// [`Evaluator::load_with_spans`]; ignored entirely by the runtime `load`
+    /// (`@name` is an ordinary word at runtime). Like `definition_spans`, this is
+    /// private and reachable only through the type checker's read path — no
+    /// Caternary surface writes it.
+    annotations: HashMap<String, (crate::Span, Vec<crate::SpannedToken>)>,
 }
 
 impl<T> Default for Evaluator<T>
@@ -199,6 +210,7 @@ impl<T> Evaluator<T> {
             definitions: HashMap::new(),
             contracts: HashMap::new(),
             definition_spans: HashMap::new(),
+            annotations: HashMap::new(),
         }
     }
 
@@ -269,6 +281,14 @@ impl<T> Evaluator<T> {
         self.definitions.get(name).map(Vec::as_slice)
     }
 
+    /// The names of every loaded definition in the flat global namespace. The
+    /// type checker uses this to enumerate the definitions whose call graph it
+    /// must build for the SCC generalization pass (§6 / spec M3). Order is
+    /// unspecified — the SCC pass is order-independent by construction.
+    pub fn definition_names(&self) -> impl Iterator<Item = &str> {
+        self.definitions.keys().map(String::as_str)
+    }
+
     /// The **spanned** body of a loaded definition, if one was loaded with spans
     /// via [`Evaluator::load_with_spans`]. This is the read path the type checker
     /// uses to anchor diagnostics at real source byte offsets (§13 invariant 6).
@@ -285,6 +305,20 @@ impl<T> Evaluator<T> {
     /// a real source location even when the body is empty.
     pub fn definition_span(&self, name: &str) -> Option<crate::Span> {
         self.definition_spans.get(name).map(|(span, _)| *span)
+    }
+
+    /// The inner tokens of a Tier-0 stack-effect annotation `[ effect ] @name`
+    /// for the named definition, if one was loaded via
+    /// [`Evaluator::load_with_spans`]. The one admitted Tier-0 shape annotation
+    /// (the rank-2 case, §8); the checker parses it into a scheme. Returns `None`
+    /// when the definition has no annotation.
+    pub fn annotation_tokens(&self, name: &str) -> Option<&[crate::SpannedToken]> {
+        self.annotations.get(name).map(|(_, toks)| toks.as_slice())
+    }
+
+    /// The span of a definition's annotation effect bracket, if present.
+    pub fn annotation_span(&self, name: &str) -> Option<crate::Span> {
+        self.annotations.get(name).map(|(span, _)| *span)
     }
 
     /// Loads function definitions from a top-level token stream.
@@ -395,6 +429,26 @@ impl<T> Evaluator<T> {
                 self.definition_spans
                     .entry(name.to_string())
                     .or_insert_with(|| (tokens[prev].span, body.clone()));
+            }
+            i += 1;
+        }
+
+        // Re-walk for Tier-0 stack-effect annotations `[ effect ] @name` (the
+        // rank-2 surface; §8). An `@name` word preceded by a bracket records that
+        // bracket's inner tokens as the annotation for definition `name`. The
+        // runtime ignored these (`@name` is an ordinary word to `load`); only the
+        // checker reads them.
+        let mut i = 0;
+        while i < tokens.len() {
+            if let SpannedTokenKind::Word(w) = &tokens[i].kind
+                && let Some(name) = w.strip_prefix('@')
+                && is_local_name(name)
+                && let Some(prev) = i.checked_sub(1)
+                && let SpannedTokenKind::Bracket(effect) = &tokens[prev].kind
+            {
+                self.annotations
+                    .entry(name.to_string())
+                    .or_insert_with(|| (tokens[prev].span, effect.clone()));
             }
             i += 1;
         }
