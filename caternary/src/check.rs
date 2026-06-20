@@ -37,9 +37,15 @@ use crate::SpannedTokenKind;
 use crate::evaluator::bind_target;
 use crate::types::InferCtx;
 use crate::types::MAIN;
+use crate::types::StackTy;
+use crate::types::Ty;
 use crate::types::TypingFrame;
+use crate::types::UnifyError;
 use crate::types::WordTy;
+use crate::types::core_scheme;
+use crate::types::is_bool_literal;
 use crate::types::is_numeric_literal;
+use crate::types::respan_word;
 
 /// A Tier-0 type-check error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +61,34 @@ pub enum TypeError {
         /// The offending word.
         word: String,
         /// The span where it appears.
+        span: Span,
+    },
+    /// A word demands more stack values than are available — an **arity
+    /// underflow** (§7, §12 M2). Names the offending word and gives the counts
+    /// (`expected` values demanded vs `found` available) so the diagnostic is
+    /// actionable; leaks no internal variable names (§7).
+    Arity {
+        /// The offending word.
+        word: String,
+        /// The span where it appears.
+        span: Span,
+        /// How many stack values the word consumes.
+        expected: usize,
+        /// How many were available below it.
+        found: usize,
+    },
+    /// Two types failed to unify during inference, or a cyclic type was formed.
+    /// Wraps the unifier's [`UnifyError`], which already carries the provenance
+    /// pair (both origin spans) and never leaks internal variable names (§7).
+    Mismatch(UnifyError),
+    /// A definition refers to itself (directly or transitively) during the M2
+    /// inline-inference of definition bodies. Real recursion is the SCC pass's
+    /// job (M3); until then a recursive reference is rejected cleanly rather than
+    /// looping forever.
+    RecursiveDefinition {
+        /// The definition caught referencing itself.
+        name: String,
+        /// The span of the offending reference.
         span: Span,
     },
 }
@@ -75,6 +109,26 @@ impl std::fmt::Display for TypeError {
                     span.start
                 )
             }
+            TypeError::Arity {
+                word,
+                span,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "stack underflow at `{word}` (byte {}): it needs {expected} value(s) but only {found} are available",
+                    span.start
+                )
+            }
+            TypeError::Mismatch(err) => write!(f, "{err}"),
+            TypeError::RecursiveDefinition { name, span } => {
+                write!(
+                    f,
+                    "recursive definition `{name}` at byte {}: mutual/self recursion is resolved by the SCC pass (not yet available)",
+                    span.start
+                )
+            }
         }
     }
 }
@@ -84,11 +138,10 @@ impl std::error::Error for TypeError {}
 /// Type-checks the whole program: locate the distinguished entry [`MAIN`] and
 /// check it against the empty initial stack.
 ///
-/// Returns the Tier-0 effect the entry is checked against — the empty-stack
-/// identity `( 'a -- 'a )` — so callers can see the convention concretely. In M0
-/// the body is checked for *resolution closure*: every word resolves and every
-/// quotation pushes/pops a typing frame. The returned [`InferCtx`] carries the
-/// substitution arena and (now-empty) frame stack the later milestones reuse.
+/// Returns the **inferred whole-program effect** (§5): the composition of every
+/// word's stack arrow in `main`'s body, unified left-to-right, then required to
+/// close against the empty initial stack. A program that demands inputs from the
+/// empty stack underflows and is rejected (§12 M2).
 pub fn type_check<T>(evaluator: &Evaluator<T>) -> Result<WordTy, TypeError>
 where
     T: Quotable,
@@ -115,79 +168,227 @@ where
         })?;
 
     let mut ctx = InferCtx::new();
-    // The program-effect node is born at the entry's own bracket span — a real
-    // source location, never a fabricated zero span.
-    let span = evaluator
-        .definition_span(entry)
-        .expect("definition_span present whenever definition_body_spanned is");
-    let effect = ctx.empty_program_effect(span);
+    let mut locals: Vec<Local> = Vec::new();
+    // `entry` is on the visiting stack so a `main` (or named entry) that calls
+    // itself is caught as recursion (M3 territory) rather than looping.
+    let mut visiting: Vec<String> = vec![entry.to_string()];
 
-    // Locals introduced by `>name` are monomorphic within the scope (§5). M0
-    // tracks only their *names* so a later reference resolves; the type is
-    // assigned by inference (M2).
-    let mut locals: Vec<String> = Vec::new();
-    resolve_seq(evaluator, body, &mut ctx, &mut locals)?;
+    // The program is the **top-level** sequence: the initial stack is empty
+    // (§12), so any word demanding values from below the empty floor is an
+    // underflow, attributed to that word (§7).
+    let effect = infer_seq(evaluator, body, &mut ctx, &mut locals, &mut visiting, true)?;
 
-    Ok(effect)
+    Ok(ctx.resolve_word_deep(&effect))
 }
 
-/// Resolve every word in a spanned token sequence, descending into quotations.
-/// Returns the first resolution failure, carrying that token's **real** source
-/// span. This is the M0 "type-check" — resolution closure — onto which the M1
-/// unifier and M2 inference attach later.
-fn resolve_seq<T>(
+/// A named local (`>name`) and its monomorphic element type (§5). Each use of the
+/// local yields this *same* `Ty` so all occurrences unify together.
+struct Local {
+    name: String,
+    ty: Ty,
+}
+
+/// Infer the stack effect of a token sequence by **composition** (§5): start from
+/// the identity arrow `( 'a -- 'a )` over one fresh shared row, and for each word
+/// unify the accumulator's output against the word's input, then advance the
+/// accumulator's output to the word's output. The sequence's effect is the
+/// composition of its words.
+///
+/// `top_level` is `true` only for the whole-program entry, whose initial stack is
+/// the *empty* stack (§12). At top level a word that consumes more values than
+/// are currently available underflows and is rejected, named (§7); inside a
+/// quotation or definition body the row tail is polymorphic, so consuming from it
+/// is ordinary inference, not an error.
+fn infer_seq<T>(
     evaluator: &Evaluator<T>,
     tokens: &[SpannedToken],
     ctx: &mut InferCtx,
-    locals: &mut Vec<String>,
-) -> Result<(), TypeError>
+    locals: &mut Vec<Local>,
+    visiting: &mut Vec<String>,
+    top_level: bool,
+) -> Result<WordTy, TypeError>
 where
     T: Quotable,
 {
+    // The identity arrow over one fresh shared row (§5). Both ends share the row
+    // so "whatever is underneath" threads through untouched.
+    let span = tokens
+        .first()
+        .map(|t| t.span)
+        .unwrap_or(Span { start: 0, end: 0 });
+    let row = ctx.fresh_row();
+    let mut acc = WordTy::new(StackTy::empty(row, span), StackTy::empty(row, span));
+
     for token in tokens {
-        match &token.kind {
-            SpannedTokenKind::Word(w) => {
-                if let Some(name) = bind_target(w) {
-                    // `>name` introduces a monomorphic local for the rest of the
-                    // scope (§5). M0 records the name.
-                    locals.push(name.to_string());
-                } else if locals.iter().any(|l| l == w) {
-                    // A reference to a bound local — resolves.
-                } else if is_numeric_literal(w) {
-                    // Numeric literal: ( 'a -- 'a Num ) (§5). Resolves.
-                } else if evaluator.has_definition(w) {
-                    // A definition in the flat global namespace — resolves.
-                } else if evaluator.contract(w).is_some() {
-                    // A registered operator with an attested contract — resolves.
-                } else {
-                    return Err(TypeError::UnresolvedWord {
-                        word: w.clone(),
-                        // The token's real source span — not a fabricated zero.
-                        span: token.span,
-                    });
-                }
-            }
+        // The per-token effect, and (for words) the name to blame on underflow.
+        let (word_arrow, blame): (WordTy, Option<&str>) = match &token.kind {
+            SpannedTokenKind::Word(w) => (
+                word_effect(evaluator, w, token.span, ctx, locals, visiting)?,
+                Some(w),
+            ),
             SpannedTokenKind::Bracket(inner) => {
                 // Descending into a quotation pushes a typing frame: its real
-                // span and the effect expected at entry (§3 invariant 3). Even
-                // though full error rendering (M5) comes later, the frame must
-                // exist from the first commit — it is the durable provenance
-                // spine — and it must carry the quotation's true source span.
+                // span and the effect expected at entry (§3 invariant 3, the
+                // durable provenance spine).
                 let frame_span = token.span;
                 let expected = ctx.empty_program_effect(frame_span);
                 ctx.frames.push(TypingFrame {
                     span: frame_span,
                     expected,
                 });
-                // A quotation opens a fresh lexical scope for locals.
-                let mut inner_locals = locals.clone();
-                let result = resolve_seq(evaluator, inner, ctx, &mut inner_locals);
+                // A quotation opens a fresh lexical scope for locals and is a
+                // *value*, not run here — so it is inferred as a non-top-level
+                // body (its row tail is polymorphic).
+                let mut inner_locals: Vec<Local> = Vec::new();
+                let result = infer_seq(evaluator, inner, ctx, &mut inner_locals, visiting, false);
                 ctx.frames.pop();
-                result?;
+                let body_arrow = result?;
+                // Quotation literal: ( 'a -- 'a Quote(P -- Q) ) (§5).
+                let qrow = ctx.fresh_row();
+                let quote = Ty::quote(body_arrow, frame_span);
+                let arrow = WordTy::new(
+                    StackTy::empty(qrow, frame_span),
+                    StackTy::new(vec![quote], qrow, frame_span),
+                );
+                (arrow, None)
+            }
+        };
+
+        // At top level the initial stack is empty (§12), so the program's
+        // *before* stack — the accumulator input — must stay empty. Record its
+        // current demand so we can attribute any increase to the word that
+        // caused it (§7).
+        let floor_before = if top_level {
+            ctx.resolve_stack(&acc.input).elems.len()
+        } else {
+            0
+        };
+
+        // Compose: unify the accumulator's output against this word's input, then
+        // advance the output to the word's output (§5).
+        ctx.unify_stack(&acc.output, &word_arrow.input)
+            .map_err(TypeError::Mismatch)?;
+        acc = WordTy::new(acc.input, word_arrow.output);
+
+        // Top-level underflow: if composing this word raised the program's
+        // before-stack demand (it pulled values from below the empty floor —
+        // either directly, like `DROP`, or via a combinator whose quotation
+        // demands inputs, like `[ 1 + ] CALL`), reject it, naming the word and
+        // giving counts (§7, §12 M2). A word inside a quotation/definition body
+        // is exempt: there the row tail is genuinely polymorphic.
+        if top_level && let Some(word) = blame {
+            let floor_after = ctx.resolve_stack(&acc.input).elems.len();
+            if floor_after > floor_before {
+                return Err(TypeError::Arity {
+                    word: word.to_string(),
+                    span: token.span,
+                    expected: floor_after,
+                    found: floor_before,
+                });
             }
         }
     }
-    Ok(())
+
+    Ok(acc)
+}
+
+/// The stack effect of a single non-bracket word (§5): a binding `>name`, a use
+/// of a bound local, a numeric or boolean literal, a registered operator, a
+/// language-core primitive, or a definition (inlined for M2).
+fn word_effect<T>(
+    evaluator: &Evaluator<T>,
+    w: &str,
+    span: Span,
+    ctx: &mut InferCtx,
+    locals: &mut Vec<Local>,
+    visiting: &mut Vec<String>,
+) -> Result<WordTy, TypeError>
+where
+    T: Quotable,
+{
+    // `>name` : ( 'a t -- 'a ), introducing `name : t` (fresh `t`) for the rest
+    // of the scope; the local is monomorphic (§5).
+    if let Some(name) = bind_target(w) {
+        let r = ctx.fresh_row();
+        let t = Ty::var(ctx.fresh_ty(), span);
+        let input = StackTy::new(vec![t.clone()], r, span);
+        let output = StackTy::empty(r, span);
+        locals.push(Local {
+            name: name.to_string(),
+            ty: t,
+        });
+        return Ok(WordTy::new(input, output));
+    }
+
+    // A use of a bound local: ( 'a -- 'a t ) with the *same* `t` every time
+    // (innermost binding wins on shadowing) (§5).
+    if let Some(local) = locals.iter().rev().find(|l| l.name == w) {
+        let t = local.ty.clone();
+        let r = ctx.fresh_row();
+        return Ok(WordTy::new(
+            StackTy::empty(r, span),
+            StackTy::new(vec![Ty { kind: t.kind, span }], r, span),
+        ));
+    }
+
+    // Numeric literal: ( 'a -- 'a Num ) (§5).
+    if is_numeric_literal(w) {
+        let r = ctx.fresh_row();
+        return Ok(WordTy::new(
+            StackTy::empty(r, span),
+            StackTy::new(vec![Ty::num(span)], r, span),
+        ));
+    }
+
+    // Boolean literal: ( 'a -- 'a Bool ) — the §2 `IF` scheme demands a Bool.
+    if is_bool_literal(w) {
+        let r = ctx.fresh_row();
+        return Ok(WordTy::new(
+            StackTy::empty(r, span),
+            StackTy::new(vec![Ty::bool(span)], r, span),
+        ));
+    }
+
+    // A registered operator (embedder attestation): instantiate its scheme with
+    // fresh vars and re-anchor the spans at this call site (§5 `lookup`).
+    if let Some(scheme) = evaluator.contract(w) {
+        let scheme = scheme.clone();
+        let inst = ctx.instantiate(&scheme);
+        return Ok(respan_word(&inst, span));
+    }
+
+    // A language-core primitive (DUP/DROP/SWAP/OVER/CALL/IF), looked up under
+    // its runtime UPPER_SNAKE_CASE spelling. The spec uses runtime spelling
+    // directly; there is no lowercase translation layer.
+    if let Some(scheme) = core_scheme(w) {
+        let inst = ctx.instantiate(&scheme);
+        return Ok(respan_word(&inst, span));
+    }
+
+    // A definition in the flat global namespace. For M2 we infer its body inline
+    // (monomorphic); the SCC pass (M3) replaces this with proper generalization.
+    // A `visiting` guard turns recursion into a clean error instead of a loop.
+    if evaluator.has_definition(w) {
+        if visiting.iter().any(|n| n == w) {
+            return Err(TypeError::RecursiveDefinition {
+                name: w.to_string(),
+                span,
+            });
+        }
+        let body = evaluator
+            .definition_body_spanned(w)
+            .expect("has_definition implies a spanned body when loaded with spans");
+        visiting.push(w.to_string());
+        let mut body_locals: Vec<Local> = Vec::new();
+        let body_arrow = infer_seq(evaluator, body, ctx, &mut body_locals, visiting, false);
+        visiting.pop();
+        return body_arrow;
+    }
+
+    Err(TypeError::UnresolvedWord {
+        word: w.to_string(),
+        span,
+    })
 }
 
 #[cfg(test)]
@@ -200,6 +401,7 @@ mod tests {
     use crate::types::Scheme;
     use crate::types::StackTy;
     use crate::types::Ty;
+    use crate::types::TyKind;
 
     /// A minimal stack value type for driver tests.
     #[derive(Debug, Clone, PartialEq)]
@@ -354,14 +556,203 @@ mod tests {
         type_check(&eval).unwrap();
     }
 
-    #[test]
-    fn locals_resolve_within_scope() {
+    /// Infer the principal effect of a bare snippet (no `:main` wrapper, not the
+    /// top-level program), with `+` registered. This is the §5 sequence-inference
+    /// entry the M2 "infers ..." acceptance cases exercise: it returns the
+    /// composed, fully-resolved arrow.
+    fn infer_snippet(src: &str) -> Result<WordTy, TypeError> {
         let mut eval: Evaluator<Value> = Evaluator::new();
         eval.register_operator_with_contract("+", plus_scheme());
-        // bind top to x, then push x twice and add.
-        let tokens = parse_with_spans("[ >x x x + ] :main").unwrap();
+        let tokens = parse_with_spans(src).unwrap();
+        let mut ctx = InferCtx::new();
+        let mut locals: Vec<Local> = Vec::new();
+        let mut visiting: Vec<String> = Vec::new();
+        let arrow = infer_seq(&eval, &tokens, &mut ctx, &mut locals, &mut visiting, false)?;
+        Ok(ctx.resolve_word_deep(&arrow))
+    }
+
+    #[test]
+    fn locals_infer_a_monomorphic_type() {
+        // `>x x x +`: pop the top as a fresh monomorphic `t`, push it twice, add.
+        // The two uses share `t`, and `+` forces `t = Num`, so the inferred
+        // effect is ( 'a Num -- 'a Num ) (§5 named locals).
+        let arrow = infer_snippet(">x x x +").unwrap();
+        assert_eq!(arrow.input.elems.len(), 1, "consumes one value");
+        assert_eq!(arrow.input.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.output.elems.len(), 1, "produces one value");
+        assert_eq!(arrow.output.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.input.row, arrow.output.row, "same shared row tail");
+    }
+
+    // ----- §12 M2 acceptance: sequence inference -----
+
+    #[test]
+    fn m2_one_two_plus_infers_a_to_a_num() {
+        // `1 2 +` infers ( 'a -- 'a Num ).
+        let arrow = infer_snippet("1 2 +").unwrap();
+        assert!(arrow.input.elems.is_empty(), "consumes nothing");
+        assert_eq!(arrow.output.elems.len(), 1);
+        assert_eq!(arrow.output.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.input.row, arrow.output.row, "same shared row tail");
+    }
+
+    #[test]
+    fn m2_dup_infers_a_b_to_a_b_b() {
+        // `DUP` infers ( 'a b -- 'a b b ): one element in, the same element twice.
+        let arrow = infer_snippet("DUP").unwrap();
+        assert_eq!(arrow.input.elems.len(), 1);
+        assert_eq!(arrow.output.elems.len(), 2);
+        // The lone input variable is duplicated: both outputs are the same var.
+        let v = &arrow.input.elems[0].kind;
+        assert!(matches!(v, TyKind::Var(_)));
+        assert_eq!(arrow.output.elems[0].kind, *v);
+        assert_eq!(arrow.output.elems[1].kind, *v);
+        assert_eq!(arrow.input.row, arrow.output.row, "same shared row tail");
+    }
+
+    #[test]
+    fn m2_quotation_literal_carries_its_inferred_arrow() {
+        // `[ 1 + ]` infers ( 'a -- 'a (P Num -- P Num) ): the quote value carries
+        // the arrow inferred for its body.
+        let arrow = infer_snippet("[ 1 + ]").unwrap();
+        assert!(arrow.input.elems.is_empty());
+        assert_eq!(arrow.output.elems.len(), 1);
+        match &arrow.output.elems[0].kind {
+            TyKind::Quote(inner) => {
+                // Body ( P Num -- P Num ): one Num in, one Num out, shared row.
+                assert_eq!(inner.input.elems.len(), 1);
+                assert_eq!(inner.input.elems[0].kind, TyKind::Con(NUM.into()));
+                assert_eq!(inner.output.elems.len(), 1);
+                assert_eq!(inner.output.elems[0].kind, TyKind::Con(NUM.into()));
+                assert_eq!(inner.input.row, inner.output.row);
+            }
+            other => panic!("expected a Quote on the stack, got {other:?}"),
+        }
+        assert_eq!(arrow.input.row, arrow.output.row);
+    }
+
+    #[test]
+    fn m2_quotation_then_call_infers_a_num_to_a_num() {
+        // `[ 1 + ] CALL` infers ( 'a Num -- 'a Num ): running the quote consumes
+        // and produces a Num.
+        let arrow = infer_snippet("[ 1 + ] CALL").unwrap();
+        assert_eq!(arrow.input.elems.len(), 1);
+        assert_eq!(arrow.input.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.output.elems.len(), 1);
+        assert_eq!(arrow.output.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.input.row, arrow.output.row);
+    }
+
+    #[test]
+    fn m2_if_unifies_both_branches() {
+        // `true [ 1 ] [ 2 ] IF` type-checks; both branches unify to a single
+        // ( 'a -- 'a Num ) effect, so the whole thing infers ( 'a -- 'a Num ).
+        let arrow = infer_snippet("true [ 1 ] [ 2 ] IF").unwrap();
+        assert!(arrow.input.elems.is_empty(), "consumes nothing");
+        assert_eq!(arrow.output.elems.len(), 1);
+        assert_eq!(arrow.output.elems[0].kind, TyKind::Con(NUM.into()));
+        assert_eq!(arrow.input.row, arrow.output.row);
+    }
+
+    #[test]
+    fn m2_if_with_disagreeing_branches_is_a_mismatch() {
+        // Branches producing different element types cannot unify against the
+        // single ( 'S -- 'T ) the `IF` scheme shares — a typed mismatch (§7).
+        let err = infer_snippet("true [ 1 ] [ true ] IF").unwrap_err();
+        assert!(
+            matches!(err, TypeError::Mismatch(_)),
+            "disagreeing branches must be a typed mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn m2_top_level_drop_underflows_naming_the_word() {
+        // §12 M2 underflow: top-level `DROP` against the empty initial stack is
+        // rejected with an arity error that NAMES the word and gives counts.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ DROP ] :main").unwrap();
         eval.load_with_spans(&tokens).unwrap();
-        type_check(&eval).unwrap();
+        let err = type_check(&eval).unwrap_err();
+        match err {
+            TypeError::Arity {
+                word,
+                expected,
+                found,
+                ..
+            } => {
+                assert_eq!(word, "DROP", "the arity error must name the word");
+                assert_eq!(expected, 1);
+                assert_eq!(found, 0);
+            }
+            other => panic!("expected an Arity underflow naming DROP, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m2_top_level_call_demanding_input_underflows_naming_call() {
+        // `[ 1 + ] CALL` infers ( 'a Num -- 'a Num ) (so it type-checks as a
+        // sequence), but as a WHOLE PROGRAM against the empty stack it underflows:
+        // running the quote needs a Num below it. The combinator-induced demand is
+        // attributed to `CALL` (§7).
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("+", plus_scheme());
+        let tokens = parse_with_spans("[ [ 1 + ] CALL ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let err = type_check(&eval).unwrap_err();
+        match err {
+            TypeError::Arity { word, found, .. } => {
+                assert_eq!(word, "CALL");
+                assert_eq!(found, 0);
+            }
+            other => panic!("expected an Arity underflow naming CALL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m2_arity_message_names_word_and_counts_no_var_leak() {
+        // §7: the underflow message names the word, gives counts, and never leaks
+        // an internal variable name.
+        let err = TypeError::Arity {
+            word: "DROP".into(),
+            span: Span { start: 2, end: 6 },
+            expected: 1,
+            found: 0,
+        };
+        let text = err.to_string();
+        assert!(text.contains("DROP"), "names the word: {text}");
+        assert!(
+            text.contains('1') && text.contains('0'),
+            "gives counts: {text}"
+        );
+        assert!(!text.contains('\''), "no internal variable names: {text}");
+    }
+
+    #[test]
+    fn m2_top_level_dup_drop_closes_against_empty_stack() {
+        // A whole program that produces its own values before consuming them
+        // closes against the empty *initial* stack: `1 DUP DROP` underflows
+        // nowhere (DUP/DROP both see a value present). The program demands no
+        // inputs, so its before-stack is empty.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ 1 DUP DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let effect = type_check(&eval).unwrap();
+        assert!(
+            effect.input.elems.is_empty(),
+            "consumes nothing from the empty initial stack"
+        );
+        // It leaves one Num behind (1 DUP DROP = one value): the after-stack is
+        // a result, not required to be empty.
+        assert_eq!(effect.output.elems.len(), 1);
+        assert_eq!(effect.output.elems[0].kind, TyKind::Con(NUM.into()));
+    }
+
+    #[test]
+    fn m2_core_scheme_rejects_lowercase_builtin_names() {
+        // The spec and runtime both use UPPER_SNAKE_CASE names. Lowercase words
+        // are ordinary unresolved words unless the user defines them.
+        let err = infer_snippet("dup").unwrap_err();
+        assert!(matches!(err, TypeError::UnresolvedWord { word, .. } if word == "dup"));
     }
 
     #[test]
