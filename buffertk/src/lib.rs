@@ -305,6 +305,17 @@ impl<'a> Unpacker<'a> {
         self.buf
     }
 
+    /// Return the next `by` bytes and advance the buffer.
+    pub fn take(&mut self, by: usize) -> Result<&'a [u8], SError> {
+        if by > self.buf.len() {
+            Err(buffer_too_short(by, self.buf.len()))
+        } else {
+            let (head, tail) = self.buf.split_at(by);
+            self.buf = tail;
+            Ok(head)
+        }
+    }
+
     /// Advance the buffer by `by`.  Saturating.
     pub fn advance(&mut self, by: usize) {
         if by > self.buf.len() {
@@ -690,15 +701,13 @@ where
         match tag {
             10 => {
                 let x: v64 = up.unpack()?;
-                let buf: &[u8] = &up.remain()[..x.into()];
-                up.advance(x.into());
+                let buf: &[u8] = up.take(x.into())?;
                 let (t, _): (T, _) = <T as Unpackable>::unpack(buf)?;
                 Ok((Ok(t), up.remain()))
             }
             18 => {
                 let x: v64 = up.unpack()?;
-                let buf: &[u8] = &up.remain()[..x.into()];
-                up.advance(x.into());
+                let buf: &[u8] = up.take(x.into())?;
                 let (e, _): (E, _) = <E as Unpackable>::unpack(buf)?;
                 Ok((Err(e), up.remain()))
             }
@@ -712,6 +721,27 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum TestResultError {
+        Buffertk(SError),
+        Value(u8),
+    }
+
+    impl From<SError> for TestResultError {
+        fn from(error: SError) -> Self {
+            Self::Buffertk(error)
+        }
+    }
+
+    impl<'a> Unpackable<'a> for TestResultError {
+        type Error = SError;
+
+        fn unpack<'b: 'a>(buf: &'b [u8]) -> Result<(Self, &'b [u8]), SError> {
+            let (value, buf) = u8::unpack(buf)?;
+            Ok((Self::Value(value), buf))
+        }
+    }
 
     #[test]
     fn pack_void() {
@@ -913,5 +943,21 @@ mod tests {
         let mut up = Unpacker::new(exp);
         let got: &[u8] = up.unpack().expect("unpack slice");
         assert_eq!(buf, got);
+    }
+
+    #[test]
+    fn result_rejects_short_ok_payload() {
+        let got =
+            <Result<u8, TestResultError> as Unpackable>::unpack(&[10, 1]).map(|(result, _)| result);
+
+        assert_eq!(Err(TestResultError::Buffertk(buffer_too_short(1, 0))), got);
+    }
+
+    #[test]
+    fn result_rejects_short_err_payload() {
+        let got =
+            <Result<u8, TestResultError> as Unpackable>::unpack(&[18, 1]).map(|(result, _)| result);
+
+        assert_eq!(Err(TestResultError::Buffertk(buffer_too_short(1, 0))), got);
     }
 }

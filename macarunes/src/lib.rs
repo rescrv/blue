@@ -2568,11 +2568,23 @@ signature: [redacted]
     #[test]
     fn macaroon_from_bytes_rejects_trailing_bytes() {
         let mut bytes = root_macaroon().to_bytes();
-        bytes.push(0);
+        bytes.extend_from_slice(&[40, 0]);
 
         assert_eq!(
             Err(Error::InvalidEncoding {
-                what: "1 trailing bytes".to_owned(),
+                what: "2 trailing bytes".to_owned(),
+            }),
+            Macaroon::from_bytes(&bytes)
+        );
+    }
+
+    #[test]
+    fn macaroon_from_bytes_rejects_short_caveat_payload() {
+        let bytes = [34, 2, 26, 1];
+
+        assert_eq!(
+            Err(Error::InvalidEncoding {
+                what: "(error (phase prototk) (code buffer-too-short) (message \"buffer too short\") (required 1) (had 0))".to_owned(),
             }),
             Macaroon::from_bytes(&bytes)
         );
@@ -2610,11 +2622,11 @@ signature: [redacted]
     #[test]
     fn prepared_request_from_bytes_rejects_trailing_bytes() {
         let mut bytes = PreparedRequest::new(root_macaroon(), Vec::new()).to_bytes();
-        bytes.push(0);
+        bytes.extend_from_slice(&[24, 0]);
 
         assert_eq!(
             Err(Error::InvalidEncoding {
-                what: "1 trailing bytes".to_owned(),
+                what: "2 trailing bytes".to_owned(),
             }),
             PreparedRequest::from_bytes(&bytes)
         );

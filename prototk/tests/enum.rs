@@ -65,6 +65,30 @@ fn three_kinds_of_enum() {
     assert_eq!(exp, rem, "unpack should not have remaining buffer");
 }
 
+#[test]
+fn enum_named_variant_rejects_short_payload() {
+    let mut up = buffertk::Unpacker::new(&[18, 1]);
+    let got: Result<Error, prototk::SError> = up.unpack();
+
+    assert_eq!(Err(prototk::buffer_too_short(1, 0)), got);
+}
+
+#[test]
+fn enum_named_variant_rejects_truncated_field_inside_payload() {
+    let mut up = buffertk::Unpacker::new(&[18, 3, 10, 3, 1]);
+    let got: Result<Error, prototk::SError> = up.unpack();
+
+    assert_eq!(Err(prototk::buffer_too_short(3, 1)), got);
+}
+
+#[test]
+fn enum_unit_variant_rejects_short_payload() {
+    let mut up = buffertk::Unpacker::new(&[10, 1]);
+    let got: Result<Error, prototk::SError> = up.unpack();
+
+    assert_eq!(Err(prototk::buffer_too_short(1, 0)), got);
+}
+
 ////////////////////////////////////////// EnumWithOption //////////////////////////////////////////
 
 #[derive(Debug, Default, Eq, Message, PartialEq)]

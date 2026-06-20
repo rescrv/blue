@@ -148,6 +148,16 @@ pub fn error_code(err: &SError) -> Option<&str> {
     }
 }
 
+/// Take a length-delimited payload from an unpacker.
+pub fn take_length_prefixed<'a>(up: &mut Unpacker<'a>) -> Result<&'a [u8], SError> {
+    let length: v64 = up.unpack()?;
+    let length: usize = length.into();
+    if up.remain().len() < length {
+        return Err(buffer_too_short(length, up.remain().len()));
+    }
+    up.take(length)
+}
+
 ///////////////////////////////////////////// WireType /////////////////////////////////////////////
 
 /// WireType represents the different protocol buffers wire types.
@@ -634,8 +644,8 @@ impl<'a> Iterator for FieldIterator<'a, '_> {
                     }
                 };
                 let sz: usize = x.into();
-                if buf.len() < x.pack_sz() + sz {
-                    *self.err = Some(buffer_too_short(sz, buf.len()));
+                if self.up.remain().len() < sz {
+                    *self.err = Some(buffer_too_short(sz, self.up.remain().len()));
                     return None;
                 }
                 self.up.advance(sz);
