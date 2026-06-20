@@ -10,7 +10,7 @@
 //!      **SMT-LIB2 text-emission** implementation of it that maintains
 //!      `(push 1)`/`(pop 1)` parity with `push_scope`/`pop_scope` (§10.9); and
 //!   2. the **path-condition plumbing** over the shadow stack: for
-//!      `cond [ then ] [ else ] if`, recover `cond`'s proposition `P` from the
+//!      `cond [ then ] [ else ] IF`, recover `cond`'s proposition `P` from the
 //!      M7 shadow stack and verify `[ then ]` with `P` asserted in a pushed
 //!      scope and `[ else ]` with `¬P` (§10.4).
 //!
@@ -31,26 +31,27 @@
 //! before M8, not be retrofitted," because path conditions (§10.4) are built on
 //! it.
 //!
-//! ## Why no `z3` crate here (recorded — `docs/typing.md` is read-only)
+//! ## Two backends behind the seam
 //!
-//! §10.8 says to use the `z3` crate (bundled feature) and §10.9 wants an
-//! SMT-LIB text-emission mode from day one. The `z3` crate is a heavy,
-//! C++-built dependency and a likely build-breakage source, so its introduction
-//! needs a version-compatibility check **first** (the `check-for-version-
-//! incompatibility` discipline). In this workspace that check **fails up front**:
-//! the crate registry is unreachable offline, so `cargo add z3` cannot even
-//! resolve the crate, let alone build its bundled C++ Z3. Adding it would break
-//! the workspace build outright. Per §10.9 the **mandatory, day-one** deliverable
-//! is the **SMT-LIB2 text-emission** seam, which is what this module provides;
-//! the `z3`-crate implementation is the *optional* "if wired" path (M9/M13) and
-//! is **not** wired here. This keeps the invariant that a **checked program
-//! links no solver** trivially true (invariants 14/20): there is no solver in
-//! the dependency graph at all, and the seam is compile-time-only Rust.
+//! §10.8 says to use the `z3` crate and §10.9 wants an SMT-LIB text-emission
+//! mode from day one. This module provides **both**, interchangeable behind the
+//! four-method [`Solver`] trait:
 //!
-//! The seam is solver-agnostic precisely so this substitution is mechanical: the
-//! day a registry/Z3 toolchain is available, a `Z3Solver` implementing the same
-//! four-method [`Solver`] trait drops in beside [`SmtLibSolver`] with no change
-//! to the path-condition plumbing (M13 will then assert text-mode/native parity).
+//!   * [`SmtLibSolver`] — the day-one, always-built backend: it records the exact
+//!     SMT-LIB2 script (the debugging window / parity reference) and decides
+//!     satisfiability with a **minimal embedded linear-arithmetic reasoner**
+//!     ([`check_sat`]). This is the backend `caternary check` uses by default.
+//!   * [`Z3Solver`] — the native backend, compiled only under the **optional
+//!     `z3` feature** (`--features z3`). It renders the same predicates to
+//!     SMT-LIB2 and discharges them through the `z3` crate's `check-sat`. It
+//!     drops in beside [`SmtLibSolver`] with **no change** to the path-condition
+//!     plumbing, exactly because the generator core routes every decision through
+//!     the trait (invariant 10).
+//!
+//! The `z3` feature is **off by default**: a default build links no solver, so
+//! the invariant that a **checked program links no solver** holds trivially
+//! (invariants 14/20) — z3 is a build-time-only, opt-in *check* backend, never
+//! linked into the Caternary runtime.
 //!
 //! # M13 — SMT-LIB emission parity (§10.9 / §14.8)
 //!
@@ -69,7 +70,7 @@
 //!      by a test that reads this module's source and confirms no
 //!      generator-core symbol names a concrete solver entry point.
 //!   2. **Comprehensive emission parity (§10.9).** For **every** M8–M12 scenario
-//!      type — the path-condition `if`, a first-order VC discharge, subsumption's
+//!      type — the path-condition `IF`, a first-order VC discharge, subsumption's
 //!      **two** directional implications (covariant guarantee + contravariant
 //!      demand), gradual-interop `where true`, and the `assume` drop-and-re-run —
 //!      the emitted SMT-LIB2 script has correctly nested `(push 1)`/`(pop 1)`
@@ -78,16 +79,16 @@
 //!      `(check-sat)`, declares every constant it references, and its **text-mode
 //!      verdict agrees with the seam's [`Solver::check`] verdict** for that
 //!      scenario.
-//!   3. **Native parity is the deferred "if wired" path** ([`M13_NATIVE_PARITY_NOTE`]).
-//!      §10.9's literal bar — "text mode agrees with the native `z3`-crate result"
-//!      — is unachievable offline (the registry is unreachable; the `z3` crate
-//!      cannot resolve, let alone build its bundled C++ Z3 — recorded since M8).
-//!      The **achievable, spec-aligned** M13 deliverable is therefore
-//!      text-faithfulness + verdict self-consistency: the emitted SMT-LIB2 script
-//!      is the **parity reference** a future `Z3Solver` (same four-method trait)
-//!      asserts its native verdict against. Wiring that backend is a one-line
-//!      drop-in beside [`SmtLibSolver`] once a registry/Z3 toolchain exists; no
-//!      change to the generator core is needed because of property (1).
+//!   3. **Native parity is the optional `z3`-feature path** ([`M13_NATIVE_PARITY_NOTE`]).
+//!      §10.9's literal bar — "text mode agrees with the native `z3`-crate
+//!      result" — is met by [`Z3Solver`], compiled under the optional `z3`
+//!      feature: it renders the **same** predicates to SMT-LIB2 and discharges
+//!      them through the `z3` crate's `check-sat`, so its verdict is checked
+//!      against [`SmtLibSolver`]'s on the shared parity reference (the emitted
+//!      SMT-LIB2 script). Even without the feature, text-faithfulness + verdict
+//!      self-consistency stand on their own; the native backend is a drop-in
+//!      beside [`SmtLibSolver`] with no change to the generator core because of
+//!      property (1).
 //!
 //! # Immutability barrier (§3 invariant 1 / 18)
 //!
@@ -134,26 +135,26 @@ use crate::shadow::bind_positional;
 // The verdict and the seam
 // ===========================================================================
 
-/// **Recorded M13 deferral (§10.9 / invariant 10).** `docs/typing.md` is
-/// read-only; this is the in-code statement of why M13's literal "agrees with the
-/// native `z3`-crate result" is deferred and what stands in for it.
+/// **Recorded M13 parity statement (§10.9 / invariant 10).** `docs/typing.md` is
+/// read-only; this is the in-code statement of how M13's literal "agrees with the
+/// native `z3`-crate result" is met and what stands in when the native backend is
+/// not compiled.
 ///
-/// The `z3` crate cannot be resolved offline (the registry is unreachable, and it
-/// could not build its bundled C++ Z3 even if it resolved — recorded since M8), so
-/// **no native backend is wired in this workspace.** The achievable, spec-aligned
-/// M13 deliverable is therefore **text-faithfulness + verdict self-consistency**:
-/// the SMT-LIB2 script emitted by [`SmtLibSolver`] is the **parity reference** a
-/// future `Z3Solver` — implementing the *same* four-method [`Solver`] trait —
-/// asserts its native verdict against. Because the VC generator core routes every
-/// decision through the trait (invariant 10, locked structurally by M13), wiring
-/// that native backend is a one-line drop-in beside [`SmtLibSolver`]; no
-/// generator-core code changes.
-pub const M13_NATIVE_PARITY_NOTE: &str = "native z3-crate parity is the deferred \
-\"if wired\" path: the z3 crate cannot resolve/build offline, so the emitted \
-SMT-LIB2 script is the parity reference a future Z3Solver (same four-method Solver \
-trait) asserts its native verdict against; wiring it is a one-line drop-in beside \
-SmtLibSolver with no change to the solver-agnostic generator core (§10.9 / \
-invariant 10).";
+/// The native backend is [`Z3Solver`], compiled under the **optional `z3`
+/// feature**. It implements the *same* four-method [`Solver`] trait and renders
+/// the *same* predicates to SMT-LIB2, so its `check-sat` verdict is checked
+/// against [`SmtLibSolver`]'s on the shared parity reference (the emitted SMT-LIB2
+/// script). When the feature is off, the achievable, spec-aligned M13 deliverable
+/// — **text-faithfulness + verdict self-consistency** — stands on its own.
+/// Because the VC generator core routes every decision through the trait
+/// (invariant 10, locked structurally by M13), the native backend is a drop-in
+/// beside [`SmtLibSolver`]; no generator-core code changes.
+pub const M13_NATIVE_PARITY_NOTE: &str = "native z3-crate parity is the optional \
+\"z3\" feature path: Z3Solver (same four-method Solver trait) renders the same \
+predicates to SMT-LIB2 and discharges them through the z3 crate's check-sat, so \
+its verdict is checked against SmtLibSolver's on the shared parity reference; the \
+native backend is a drop-in beside SmtLibSolver with no change to the \
+solver-agnostic generator core (§10.9 / invariant 10).";
 
 /// The result of a solver [`Solver::check`]: the three SMT outcomes.
 ///
@@ -415,6 +416,131 @@ impl FactSnapshot for SmtLibSolver {
 }
 
 // ===========================================================================
+// The native z3 backend (the optional `z3`-feature implementation, §10.8/§10.9)
+// ===========================================================================
+
+/// A native **z3-crate** implementation of the [`Solver`] seam (§10.8/§10.9),
+/// compiled only under the optional **`z3` feature** (`cargo … --features z3`).
+///
+/// This is the "use the `z3` crate" backend §10.8 calls for. It drops in beside
+/// [`SmtLibSolver`] behind the *same* four-method [`Solver`] trait — the VC
+/// generator core never names it directly (invariant 10) — so `caternary check`
+/// can discharge verification conditions through native z3 instead of the
+/// embedded reasoner when the feature is enabled.
+///
+/// It tracks the live scopes exactly as [`SmtLibSolver`] does and, on
+/// [`Solver::check`], renders the live formulas to the **same** SMT-LIB2 the
+/// text backend emits (`render_smtlib`) — the M13 parity reference — and hands
+/// that script to a fresh `z3::Solver` via `from_string`, then reads its
+/// `check-sat` verdict. Rebuilding from the shared rendering on each check keeps
+/// the two backends bit-for-bit aligned on what they reason over and sidesteps
+/// any incremental push/pop bookkeeping divergence.
+///
+/// **Compile-time only (§10.10, invariant 14/20).** Like [`SmtLibSolver`] this is
+/// a build-time analysis artifact: z3 is invoked while `caternary check` runs,
+/// never in a checked program's runtime. The seam is never a field of
+/// [`crate::Evaluator`].
+#[cfg(feature = "z3")]
+#[derive(Debug, Clone, Default)]
+pub struct Z3Solver {
+    /// One `Vec<Pred>` per live scope; index 0 is the base scope. Mirrors
+    /// [`SmtLibSolver`]'s scope structure so the two backends reason over an
+    /// identical formula set.
+    scopes: Vec<Vec<Pred>>,
+}
+
+#[cfg(feature = "z3")]
+impl Z3Solver {
+    /// A fresh solver with a single base scope.
+    pub fn new() -> Self {
+        Z3Solver {
+            scopes: vec![Vec::new()],
+        }
+    }
+
+    /// The current scope nesting depth (base scope included). One base scope ⇒
+    /// depth 1.
+    pub fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// The conjunction of every formula asserted across all live scopes — the
+    /// exact set [`Solver::check`] reasons over.
+    fn live_formulas(&self) -> Vec<Pred> {
+        self.scopes.iter().flatten().cloned().collect()
+    }
+
+    /// Render the live formula set as a self-contained SMT-LIB2 script: the
+    /// `QF_LRA` logic header, a `(declare-const v Real)` for every free variable,
+    /// and an `(assert …)` per formula. This is the same text [`SmtLibSolver`]
+    /// emits (minus the trailing `(check-sat)`, which the native call issues
+    /// directly), so the two backends share one parity reference (§10.9).
+    fn render_script(&self) -> String {
+        let formulas = self.live_formulas();
+        let mut vars = BTreeSet::new();
+        for f in &formulas {
+            collect_vars(f, &mut vars);
+        }
+        let mut script = String::from("(set-logic QF_LRA)\n");
+        for v in &vars {
+            script.push_str(&format!("(declare-const {v} Real)\n"));
+        }
+        for f in &formulas {
+            script.push_str(&format!("(assert {})\n", render_smtlib(f)));
+        }
+        script
+    }
+}
+
+#[cfg(feature = "z3")]
+impl Solver for Z3Solver {
+    fn assert(&mut self, formula: &Pred) {
+        self.scopes.last_mut().unwrap().push(formula.clone());
+    }
+
+    fn check(&mut self) -> Verdict {
+        let z3_solver = z3::Solver::new();
+        z3_solver.from_string(self.render_script());
+        match z3_solver.check() {
+            z3::SatResult::Sat => Verdict::Sat,
+            z3::SatResult::Unsat => Verdict::Unsat,
+            z3::SatResult::Unknown => Verdict::Unknown,
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Vec::new());
+    }
+
+    fn pop_scope(&mut self) {
+        debug_assert!(
+            self.scopes.len() > 1,
+            "pop_scope underflow: cannot pop the base scope"
+        );
+        self.scopes.pop();
+    }
+}
+
+#[cfg(feature = "z3")]
+impl CounterModel for Z3Solver {
+    fn model(&self) -> Option<Model> {
+        // Counterexample surfacing reuses the embedded reasoner's decidable model
+        // recovery so the rendered witness format (`-1`, `1/2`) matches what M9's
+        // diagnostics expect; extracting the rational assignment directly from z3's
+        // `get_model` is the next step in the move. As with `SmtLibSolver`, an
+        // opaque/`Unknown` set yields `None` — no fabricated model (§10.5).
+        check_sat_model(&self.live_formulas()).1
+    }
+}
+
+#[cfg(feature = "z3")]
+impl FactSnapshot for Z3Solver {
+    fn live_facts(&self) -> Vec<Pred> {
+        self.live_formulas()
+    }
+}
+
+// ===========================================================================
 // SMT-LIB2 rendering of a refinement predicate
 // ===========================================================================
 
@@ -643,10 +769,10 @@ impl Obligation {
 }
 
 /// The verifier's resolver: maps a word name to its [`VerifyWord`]. The word
-/// `if` is intercepted by the verifier itself (path conditions) and is **not**
+/// `IF` is intercepted by the verifier itself (path conditions) and is **not**
 /// resolved here.
 pub trait VerifyResolve {
-    /// Resolve a non-`if` word to its verification action.
+    /// Resolve a non-`IF` word to its verification action.
     fn resolve(&self, word: &str) -> VerifyWord;
 
     /// The full refinement signature of a word, when it has one.
@@ -710,12 +836,12 @@ where
 
 /// Is this word the `IF` combinator?
 fn is_if(word: &str) -> bool {
-    word.eq_ignore_ascii_case("if")
+    word == "IF"
 }
 
 /// Apply a word's data-movement effect to the shadow stack, mirroring the M7
 /// [`ShadowStack`] dispatch. A [`VerifyWord::Call`] moves data per its Tier 0
-/// arrow (opaque for M8). `resolve` is threaded so `dip`/`call` can run inner
+/// arrow (opaque for M8). `resolve` is threaded so `DIP`/`CALL` can run inner
 /// bodies.
 fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
@@ -903,7 +1029,7 @@ fn record_subsumption(word: &str, param: &str, result: &SubsumptionResult, ctx: 
 }
 
 /// Apply a core [`ShadowWord`] to the shadow stack, threading the verifier so
-/// `dip`/`call` recurse through [`verify`] (and so an `if` *inside* a quotation
+/// `DIP`/`CALL` recurse through [`verify`] (and so an `IF` *inside* a quotation
 /// still gets path conditions).
 fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
@@ -948,7 +1074,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
 }
 
 /// Verify a token sequence with **path conditions** (§10.4): execute the shadow
-/// stack, and on every `cond [ then ] [ else ] if` recover `cond`'s proposition
+/// stack, and on every `cond [ then ] [ else ] IF` recover `cond`'s proposition
 /// `P` from the shadow stack, verify `[ then ]` with `P` asserted in a pushed
 /// scope and `[ else ]` with `¬P` in a pushed scope — `push_scope` before each
 /// branch and `pop_scope` after.
@@ -1008,7 +1134,7 @@ pub fn verify_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     Ok(())
 }
 
-/// The path-condition core (§10.4) for `cond [ then ] [ else ] if`.
+/// The path-condition core (§10.4) for `cond [ then ] [ else ] IF`.
 ///
 /// Stack on entry (top last): `… P [then] [else]`. Recover `P`, then:
 ///
@@ -1031,7 +1157,7 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
 
     // then-branch under P. Keep its resulting stack to advance the real stack:
     // both branches have the same Tier 0 effect, so the then-branch's post-state
-    // *is* the if's post-state. Reusing it (rather than re-running a body) means
+    // *is* the IF's post-state. Reusing it (rather than re-running a body) means
     // each obligation is discharged exactly once, under its branch's path
     // condition.
     let then_stack = {
@@ -1716,7 +1842,7 @@ where
 
 /// Collect the words a body **calls** (referenced word tokens, recursing into
 /// quotations) — the edges of the call graph used for upward modulo propagation.
-/// `assume( … )` surfaces and the `if` combinator are not call edges.
+/// `assume( … )` surfaces and the `IF` combinator are not call edges.
 fn collect_called_words(tokens: &[Token], out: &mut BTreeSet<String>) {
     for t in tokens {
         match t {
@@ -2223,38 +2349,38 @@ pub fn check_subsumption<S: Solver + CounterModel>(
 // Operator refinement axioms for the language-core combinators (M10, §10.6/§8)
 // ===========================================================================
 //
-// The primitive combinators `dip` / `call` / `if` are **language-core operator
+// The primitive combinators `DIP` / `CALL` / `IF` are **language-core operator
 // registrations** (§8): they have no Caternary body, and carry an authored Tier 0
 // scheme (§2) *and* an authored **Tier 1 refinement axiom** here. These axioms
 // are what let a refined quotation's guarantee survive a combinator boundary;
-// without them the contract would evaporate at `dip` exactly as at an
+// without them the contract would evaporate at `DIP` exactly as at an
 // unaxiomatized foreign call.
 //
 // The axioms are the §2 schemes **lifted to predicates** (the relay rule —
 // invariant 8: a combinator's contract uses only the *declared* arrow of its
 // quotation argument; the body is never expanded into the caller's contract):
 //
-//   * **`dip` — relay + identity (`dip q = q ⊗ id_a`, lifted).** `dip` sets aside
+//   * **`DIP` — relay + identity (`DIP q = q ⊗ id_a`, lifted).** `DIP` sets aside
 //     the top value `a`, runs the quotation `q` on the rest, then restores `a`.
 //     Lifted: (1) the set-aside value's predicate is **preserved unchanged** (it
 //     is literally the same term by identity — any fact about it stays asserted),
 //     and (2) the quotation's `post` holds on the rest (the values `q` produced).
-//   * **`call` — relay.** `call q` runs `q` on the whole stack; its axiom is just
-//     `q`'s post holding on the result (the `dip` rule with no set-aside value).
-//   * **`if` — relay both branches.** Each branch quotation's post holds under its
-//     branch's path condition (§10.4); the post-`if` facts are the branches'
+//   * **`CALL` — relay.** `CALL q` runs `q` on the whole stack; its axiom is just
+//     `q`'s post holding on the result (the `DIP` rule with no set-aside value).
+//   * **`IF` — relay both branches.** Each branch quotation's post holds under its
+//     branch's path condition (§10.4); the post-`IF` facts are the branches'
 //     relayed guarantees.
 //
 // In this verifier quotations are token bodies and the relay is realized by the
 // shadow recursion in [`apply_core`] (`Dip`/`Call`) and [`verify_if`]: running a
 // refined word inside the body **publishes its guarantee as a live fact** on the
-// far side, and the set-aside `dip` value is restored by identity so its fact
+// far side, and the set-aside `DIP` value is restored by identity so its fact
 // persists. [`relay_quote_post`] is the same axiom expressed at the **declared
 // contract** level — used when a quotation arrives carrying a *declared*
 // refinement (rather than an inline body) so the contract is relayed without
 // expanding any body.
 
-/// The `dip`/`call` refinement axiom expressed at the **declared contract** level
+/// The `DIP`/`CALL` refinement axiom expressed at the **declared contract** level
 /// (§10.6): relay a quotation's declared `post` (guarantee) onto the result slots
 /// it produced, asserting it as a live fact so a downstream obligation can use it.
 ///
@@ -2266,7 +2392,7 @@ pub fn check_subsumption<S: Solver + CounterModel>(
 ///
 /// This is the **relay** (invariant 8): only the quotation's *declared* arrow /
 /// contract is used — its body is never expanded into the combinator's contract.
-/// `dip`'s extra clause (the set-aside value's predicate is preserved unchanged)
+/// `DIP`'s extra clause (the set-aside value's predicate is preserved unchanged)
 /// needs no work here: that value is the same term by identity, so any fact about
 /// it already stands in the solver scope.
 pub fn relay_quote_post<S: Solver>(quote: &RefinementSig, result_terms: &[Pred], solver: &mut S) {
@@ -2900,6 +3026,72 @@ mod tests {
 
     const S: Span = Span { start: 0, end: 0 };
 
+    // The native z3 backend is exercised only under `--features z3` (it needs a
+    // linkable libz3). These lock that `Z3Solver` answers the same seam verdicts
+    // as the embedded reasoner on the shared SMT-LIB2 parity reference (§10.9).
+    #[cfg(feature = "z3")]
+    #[test]
+    fn z3_backend_decides_contradiction_and_feasible() {
+        // x > 0 and x < 0 is unsatisfiable; x >= 1 is satisfiable. The native
+        // backend must agree with SmtLibSolver's verdict on both.
+        let gt0 = Pred::Bin(
+            BinOp::Gt,
+            Box::new(Pred::Var("x".into())),
+            Box::new(Pred::Num("0".into())),
+        );
+        let lt0 = Pred::Bin(
+            BinOp::Lt,
+            Box::new(Pred::Var("x".into())),
+            Box::new(Pred::Num("0".into())),
+        );
+        let ge1 = Pred::Bin(
+            BinOp::Ge,
+            Box::new(Pred::Var("x".into())),
+            Box::new(Pred::Num("1".into())),
+        );
+
+        let mut z3 = Z3Solver::new();
+        z3.assert(&gt0);
+        z3.assert(&lt0);
+        assert_eq!(z3.check(), Verdict::Unsat);
+
+        let mut z3 = Z3Solver::new();
+        z3.assert(&ge1);
+        assert_eq!(z3.check(), Verdict::Sat);
+
+        // The shared parity reference the seam-agnostic check is asserted against.
+        let mut sl = SmtLibSolver::new();
+        sl.assert(&ge1);
+        assert_eq!(sl.check(), Verdict::Sat);
+    }
+
+    #[cfg(feature = "z3")]
+    #[test]
+    fn z3_backend_scopes_match_smtlib() {
+        // A path-condition style scope: assert x >= 1 in a pushed scope, then pop
+        // it — the contradiction with x < 0 must vanish after the pop.
+        let ge1 = Pred::Bin(
+            BinOp::Ge,
+            Box::new(Pred::Var("x".into())),
+            Box::new(Pred::Num("1".into())),
+        );
+        let lt0 = Pred::Bin(
+            BinOp::Lt,
+            Box::new(Pred::Var("x".into())),
+            Box::new(Pred::Num("0".into())),
+        );
+        let mut z3 = Z3Solver::new();
+        assert_eq!(z3.depth(), 1);
+        z3.assert(&lt0);
+        z3.push_scope();
+        assert_eq!(z3.depth(), 2);
+        z3.assert(&ge1);
+        assert_eq!(z3.check(), Verdict::Unsat);
+        z3.pop_scope();
+        assert_eq!(z3.depth(), 1);
+        assert_eq!(z3.check(), Verdict::Sat);
+    }
+
     fn rspan() -> RefineSpan {
         RefineSpan { start: 0, end: 0 }
     }
@@ -2938,7 +3130,7 @@ mod tests {
 
     // The verification resolver for the M8 demo: core shuffles + interpreted
     // operators + the `sqrt` call site; `x` is a free variable, numbers are
-    // literals. `if` is intercepted by the verifier and never reaches here.
+    // literals. `IF` is intercepted by the verifier and never reaches here.
     fn demo_resolver(w: &str) -> VerifyWord {
         if w == "sqrt" {
             return sqrt_call();
@@ -3120,14 +3312,14 @@ mod tests {
     }
 
     // =======================================================================
-    // §12 M8 acceptance: path conditions on `x 0 > [ x sqrt ] [ 0 ] if`
+    // §12 M8 acceptance: path conditions on `x 0 > [ x sqrt ] [ 0 ] IF`
     // =======================================================================
 
     #[test]
     fn m8_path_condition_discharges_sqrt_demand_in_true_branch() {
         // WITH the path condition: inside the true branch `x > 0` is in scope, so
         // `x sqrt`'s demand `x >= 0` discharges (Unsat).
-        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
         let mut stack = ShadowStack::new();
         let mut solver = SmtLibSolver::new();
         let mut obligations = Vec::new();
@@ -3188,11 +3380,11 @@ mod tests {
     fn m8_else_branch_asserts_negated_condition() {
         // The else-branch is verified under ¬P. With an obligation in the else
         // branch we can observe ¬(x > 0) is the governing hypothesis.
-        // Program: x 0 > [ 0 ] [ x sqrt ] if  — sqrt now in the ELSE branch.
+        // Program: x 0 > [ 0 ] [ x sqrt ] IF  — sqrt now in the ELSE branch.
         // Under ¬(x>0) i.e. x<=0, x>=0 does NOT discharge (only x=0 works; x<0 is
         // a counterexample) ⇒ Sat. This shows the else-branch hypothesis is ¬P,
         // not P.
-        let toks = parse("x 0 > [ 0 ] [ x sqrt ] if").unwrap();
+        let toks = parse("x 0 > [ 0 ] [ x sqrt ] IF").unwrap();
         let mut stack = ShadowStack::new();
         let mut solver = SmtLibSolver::new();
         let mut obligations = Vec::new();
@@ -3234,7 +3426,7 @@ mod tests {
         subst.bind_row(0, StackTy::empty(1, S));
         let before = format!("{subst:?}");
 
-        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
         let mut stack = ShadowStack::new();
         let mut solver = SmtLibSolver::new();
         let mut obligations = Vec::new();
@@ -3456,7 +3648,7 @@ mod tests {
     fn m9_path_condition_plus_vc_generation_end_to_end() {
         // The M8 path condition and the M9 VC generation compose: inside the
         // x > 0 branch, the refinement-derived demand for `x sqrt` discharges.
-        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
         let sig = sqrt_sig();
         let lookup = |w: &str| (w == "sqrt").then(|| sig.clone());
         let mut solver = SmtLibSolver::new();
@@ -3748,7 +3940,7 @@ mod tests {
         assert_eq!(
             obs[0].verdict,
             Verdict::Unsat,
-            "the quotation's guarantee must survive dip and discharge sqrt's demand"
+            "the quotation's guarantee must survive DIP and discharge sqrt's demand"
         );
         assert!(obs[0].is_discharged());
     }
@@ -3788,7 +3980,7 @@ mod tests {
         assert_eq!(
             obs[0].verdict,
             Verdict::Unsat,
-            "the set-aside value's predicate (g>10) must survive dip by identity"
+            "the set-aside value's predicate (g>10) must survive DIP by identity"
         );
     }
 
@@ -3812,7 +4004,7 @@ mod tests {
         assert_eq!(
             obs[0].verdict,
             Verdict::Unsat,
-            "the quotation's guarantee must survive call and discharge sqrt's demand"
+            "the quotation's guarantee must survive CALL and discharge sqrt's demand"
         );
     }
 
@@ -4062,8 +4254,8 @@ mod tests {
         // result is dropped; the only obligation (`sqrt`) is discharged by a
         // DIFFERENT, properly-contracted fact (`db_count`'s guarantee). The opaque
         // value never appears in any obligation goal.
-        //   opaque drop db_count sqrt
-        let toks = parse("opaque drop db_count sqrt").unwrap();
+        //   opaque DROP db_count sqrt
+        let toks = parse("opaque DROP db_count sqrt").unwrap();
         let db_count = crate::parse_signature("db_count : ( -- c: Num where c >= 0 )").unwrap();
         let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
         let lookup = |w: &str| match w {
@@ -4164,7 +4356,7 @@ mod tests {
 
     // Resolver: `sqrt` (demand n>=0), `pos` (guarantee r>0); everything else is a
     // core word, with an uncontracted word like `opaque` falling through to a
-    // free-variable term (the genuinely-opaque case). `if`/`assume(...)` never
+    // free-variable term (the genuinely-opaque case). `IF`/`assume(...)` never
     // reach here (the verifier intercepts them).
     fn m12_resolver(w: &str) -> VerifyWord {
         match w {
@@ -4509,12 +4701,16 @@ mod tests {
             .next()
             .expect("tests module present");
         let core = strip_line_comments(core);
-        // Mask the seam's own implementation: the embedded reasoner definitions
-        // and the two `SmtLibSolver` trait impls.
+        // Mask the seam's own implementation: the embedded reasoner definitions,
+        // the `SmtLibSolver` trait impls, and the optional native `Z3Solver`'s
+        // `CounterModel` impl (it delegates model recovery to the embedded
+        // reasoner). `include_str!` reads raw text regardless of the `z3` cfg, so
+        // the masking must cover it whether or not the feature is compiled.
         let masked = mask_block(&core, "pub fn check_sat_model(");
         let masked = mask_block(&masked, "pub fn check_sat(");
         let masked = mask_block(&masked, "impl Solver for SmtLibSolver");
         let masked = mask_block(&masked, "impl CounterModel for SmtLibSolver");
+        let masked = mask_block(&masked, "impl CounterModel for Z3Solver");
         assert!(
             !masked.contains("check_sat"),
             "a VC-generator-core symbol calls check_sat/check_sat_model directly; \
@@ -4632,12 +4828,12 @@ mod tests {
 
     #[test]
     fn m13_parity_path_condition_if() {
-        // (§12 M13) Path-condition `if` (M8): the emitted script pushes a scope and
+        // (§12 M13) Path-condition `IF` (M8): the emitted script pushes a scope and
         // asserts P for the then-branch, pushes a scope and asserts ¬P for the
         // else-branch, with matching pops; the inner sqrt demand discharges under
         // P. Text-mode verdict (the `; =>` comment) agrees with the obligation's
         // check() verdict.
-        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
         let mut solver = SmtLibSolver::new();
         let mut stack = ShadowStack::new();
         let mut obligations = Vec::new();
@@ -4837,16 +5033,16 @@ mod tests {
     }
 
     #[test]
-    fn m13_native_parity_is_recorded_as_deferred() {
+    fn m13_native_parity_is_recorded() {
         // (§12 M13 / required) A recorded, in-code note states native z3-crate
-        // parity is the deferred "if wired" path (offline registry) with the
-        // emitted SMT-LIB2 script as the parity reference.
-        assert!(M13_NATIVE_PARITY_NOTE.contains("deferred"));
+        // parity is met by the optional `z3`-feature `Z3Solver`, checked against
+        // the emitted SMT-LIB2 script as the shared parity reference.
+        assert!(M13_NATIVE_PARITY_NOTE.contains("optional"));
         assert!(M13_NATIVE_PARITY_NOTE.contains("parity reference"));
         assert!(M13_NATIVE_PARITY_NOTE.contains("Z3Solver"));
         assert!(
-            M13_NATIVE_PARITY_NOTE.contains("offline"),
-            "the note records the offline reason"
+            M13_NATIVE_PARITY_NOTE.contains("z3 crate's check-sat"),
+            "the note records how native parity is discharged"
         );
     }
 }

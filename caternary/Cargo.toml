@@ -11,10 +11,13 @@ repository = "https://github.com/rescrv/blue"
 default = ["binaries"]
 
 binaries = []
+# The native solver backend is build-time-only and opt-in.
+z3 = ["dep:z3"]
 
 [dependencies]
 handled = { workspace = true }
 shvar = { workspace = true }
+z3 = { version = "0.20.0", optional = true }
 
 [[example]]
 name = "m8_script"
