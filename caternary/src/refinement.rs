@@ -823,6 +823,51 @@ pub fn parse_signature(src: &str) -> Result<RefinementSig, RefineParseError> {
     p.parse_signature()
 }
 
+// ===========================================================================
+// The `assume` surface (§10.7 / M12)
+// ===========================================================================
+//
+// **Where the user writes it.** `assume` is a **word in the program token
+// stream**, written as `assume( PRED )` where PRED is the §10.1 `where`-language
+// predicate. It is *near-vestigial* (§10.7): the foreign frontier is the
+// operator table (embedder-attested contracts), so the user reaches for
+// `assume` only for the rare local assertion about a *Caternary* construct the
+// solver cannot reach.
+//
+// Tokenization note (reconciled with the real shell tokenizer): the postfix
+// tokenizer (`parser::parse`) splits on whitespace, so a *spaced* predicate
+// (`assume(result > 0)`) must be written quoted — `"assume(result > 0)"` — to
+// arrive as one word, while a tight predicate (`assume(result>0)`) needs no
+// quotes. Both reach this parser as the single string `assume( … )`; this is the
+// recorded assume source surface (the spec text in typing.md is read-only, so the
+// concrete surface convention lives here in code).
+
+/// The `assume` surface prefix. A program word is an `assume` clause iff it
+/// starts with this and ends with `)` (§10.7 / M12).
+pub const ASSUME_PREFIX: &str = "assume(";
+
+/// Recognize and parse an `assume( PRED )` surface word (§10.7 / M12).
+///
+/// Returns `None` if `word` is not an `assume` clause at all (an ordinary
+/// program word). Returns `Some(Ok(pred))` for a well-formed clause and
+/// `Some(Err(_))` for a malformed one (an `assume(` opener whose body is not a
+/// valid §10.1 predicate, or which is missing its closing `)`), so a malformed
+/// `assume` is a **located** error rather than being silently treated as an
+/// ordinary word.
+pub fn parse_assume(word: &str) -> Option<Result<Pred, RefineParseError>> {
+    let rest = word.strip_prefix(ASSUME_PREFIX)?;
+    let Some(inner) = rest.strip_suffix(')') else {
+        return Some(Err(RefineParseError::new(
+            "`assume(` is missing its closing `)`",
+            RefineSpan {
+                start: word.len(),
+                end: word.len(),
+            },
+        )));
+    };
+    Some(parse_predicate(inner))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
