@@ -19,13 +19,13 @@ getopts = { workspace = true, optional = true }
 arrrg = { workspace = true, optional = true }
 arrrg_derive = { workspace = true, optional = true }
 busyrpc = { workspace = true }
+handled = { workspace = true }
 indicio = { workspace = true }
 minimal_signals = { workspace = true }
 prototk = { workspace = true }
 rpc_pb = { workspace = true }
 tuple_key = { workspace = true }
 tuple_routing = { workspace = true }
-zerror_core = { workspace = true }
 
 [[bin]]
 name = "busyrpc-service-discovery-server"

@@ -23,18 +23,18 @@ pub fn register_biometrics(_collector: &mut Collector) {
 }
 
 pub trait Pollster: Send + Sync + 'static {
-    fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::Error>;
-    fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::Error>;
-    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::Error>;
+    fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::SError>;
+    fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::SError>;
+    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::SError>;
 }
 
 #[cfg(target_os = "linux")]
-pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::Error> {
+pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::SError> {
     let poll = epoll::Epollster::new()?;
     Ok(Box::new(poll))
 }
 
 #[cfg(target_os = "macos")]
-pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::Error> {
+pub fn default_pollster() -> Result<Box<dyn Pollster>, rpc_pb::SError> {
     todo!();
 }

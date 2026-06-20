@@ -4,7 +4,7 @@ use guacamole::{FromGuacamole, Guacamole};
 
 use sst::block::{Block, BlockBuilder, BlockCursor};
 use sst::reference::ReferenceBuilder;
-use sst::{Builder, Cursor, Error, Sst, SstBuilder, SstCursor};
+use sst::{Builder, Cursor, SError, Sst, SstBuilder, SstCursor};
 
 ////////////////////////////////////////// BufferGuacamole /////////////////////////////////////////
 
@@ -129,7 +129,7 @@ pub trait TableTrait<'a> {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error>;
+    ) -> Result<Option<Vec<u8>>, SError>;
 }
 
 ///////////////////////////////////////// TableBuilderTrait ////////////////////////////////////////
@@ -153,7 +153,7 @@ impl TableTrait<'_> for Block {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         Block::load(self, key, timestamp, is_tombstone)
     }
 }
@@ -177,7 +177,7 @@ impl TableTrait<'_> for Sst {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         Sst::load(self, key, timestamp, is_tombstone)
     }
 }

@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::{
-    Cursor, Error, KeyRef, KeyValuePair, check_key_len, check_table_size, check_value_len,
+    Cursor, KeyRef, KeyValuePair, SError, check_key_len, check_table_size, check_value_len,
 };
 
 ////////////////////////////////////////// ReferenceTable //////////////////////////////////////////
@@ -40,7 +40,7 @@ impl ReferenceBuilder {
     }
 
     /// Put a key in the reference builder.
-    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         check_key_len(key)?;
         check_value_len(value)?;
         self.approximate_size += key.len() + 8 + value.len();
@@ -55,7 +55,7 @@ impl ReferenceBuilder {
     }
 
     /// Delete a key from the reference builder.
-    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         check_key_len(key)?;
         self.approximate_size += key.len() + 8;
         check_table_size(self.approximate_size)?;
@@ -69,7 +69,7 @@ impl ReferenceBuilder {
     }
 
     /// Seal the reference builder and get a ReferenceTable.
-    pub fn seal(self) -> Result<ReferenceTable, Error> {
+    pub fn seal(self) -> Result<ReferenceTable, SError> {
         let mut entries = self.entries;
         entries.sort();
         Ok(ReferenceTable {
@@ -88,17 +88,17 @@ pub struct ReferenceCursor {
 }
 
 impl Cursor for ReferenceCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.index = -1;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.index = self.entries.len() as isize;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         let target = KeyValuePair {
             key: key.into(),
             timestamp: u64::MAX,
@@ -111,7 +111,7 @@ impl Cursor for ReferenceCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         self.index -= 1;
         if self.index < 0 {
             self.seek_to_first()
@@ -120,7 +120,7 @@ impl Cursor for ReferenceCursor {
         }
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         self.index += 1;
         if self.index as usize >= self.entries.len() {
             self.seek_to_last()

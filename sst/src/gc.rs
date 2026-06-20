@@ -38,7 +38,7 @@ use nom::{
     sequence::{terminated, tuple},
 };
 
-use super::{Cursor, Error, KeyRef, KeyValuePair};
+use super::{Cursor, KeyRef, KeyValuePair, SError};
 
 ////////////////////////////////////// GarbageCollectionPolicy /////////////////////////////////////
 
@@ -86,7 +86,7 @@ impl GarbageCollectionPolicy {
         &self,
         cursor: C,
         now_micros: u64,
-    ) -> Result<GarbageCollector, Error> {
+    ) -> Result<GarbageCollector, SError> {
         let cursor: Box<dyn Cursor> = Box::new(cursor) as _;
         let determiner = self.determiner(now_micros);
         let key_backing = if let Some(key) = cursor.key() {
@@ -191,7 +191,7 @@ pub struct GarbageCollector {
 impl GarbageCollector {
     /// Return the next key to be retained from garbage collection.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<KeyRef<'_>>, Error> {
+    pub fn next(&mut self) -> Result<Option<KeyRef<'_>>, SError> {
         if let Some(ts) = self.key_return.take() {
             return Ok(Some(KeyRef {
                 key: &self.key_backing,
@@ -238,7 +238,7 @@ impl GarbageCollector {
         &mut self,
         kvp: KeyValuePair,
         tombstones: Vec<u64>,
-    ) -> Result<Option<KeyRef<'_>>, Error> {
+    ) -> Result<Option<KeyRef<'_>>, SError> {
         if !tombstones.is_empty() {
             // TODO(rescrv):  Possibly set key_backing?
             self.key_return = Some(kvp.timestamp);
@@ -748,7 +748,7 @@ mod tests {
     }
 
     impl Cursor for SampleCursor {
-        fn next(&mut self) -> Result<(), Error> {
+        fn next(&mut self) -> Result<(), SError> {
             if self.index < self.entries.len() {
                 self.index += 1;
             }
@@ -771,19 +771,19 @@ mod tests {
             }
         }
 
-        fn seek_to_first(&mut self) -> Result<(), Error> {
+        fn seek_to_first(&mut self) -> Result<(), SError> {
             unimplemented!()
         }
 
-        fn seek_to_last(&mut self) -> Result<(), Error> {
+        fn seek_to_last(&mut self) -> Result<(), SError> {
             unimplemented!()
         }
 
-        fn seek(&mut self, _: &[u8]) -> Result<(), Error> {
+        fn seek(&mut self, _: &[u8]) -> Result<(), SError> {
             unimplemented!()
         }
 
-        fn prev(&mut self) -> Result<(), Error> {
+        fn prev(&mut self) -> Result<(), SError> {
             unimplemented!()
         }
     }

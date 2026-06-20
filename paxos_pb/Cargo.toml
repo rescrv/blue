@@ -10,10 +10,8 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 buffertk = { workspace = true }
 guacamole = { workspace = true }
+handled = { workspace = true }
 one_two_eight = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 rpc_pb = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
-zerror_derive = { workspace = true }

@@ -5,10 +5,8 @@ use prototk::field_types::*;
 use prototk::{FieldNumber, Tag, WireType};
 use sst::KeyValueRef;
 use tuple_key::{Element, KeyDataType, TupleKey, TupleKeyIterator};
-use zerror::Z;
-use zerror_core::ErrorCore;
 
-use super::{DataType, Error, IoToZ, Schema, SchemaEntry};
+use super::{DataType, SError, Schema, SchemaEntry, corruption, logic_error};
 
 /////////////////////////////////////////// MessageFrame ///////////////////////////////////////////
 
@@ -111,26 +109,18 @@ impl ProtoBuilder {
         in_progress_offset: usize,
         msg_sz: usize,
         bytes_dropped: usize,
-    ) -> Result<usize, Error> {
+    ) -> Result<usize, SError> {
         let post_u64_offset = offset_of_u64 + 8;
         if post_u64_offset > in_progress_offset {
-            return Err(Error::LogicError {
-                core: ErrorCore::default(),
-                what: "offset_too_small".to_owned(),
-            })
-            .as_z()
-            .with_info("post_u64_offset", post_u64_offset)
-            .with_info("in_progress_offset", in_progress_offset);
+            return Err(logic_error("offset_too_small")
+                .with_atom_field("post_u64_offset", post_u64_offset)
+                .with_atom_field("in_progress_offset", in_progress_offset));
         }
         let msg_sz_v64 = v64::from(msg_sz);
         let msg_sz_v64_pack_sz = msg_sz_v64.pack_sz();
         if msg_sz_v64_pack_sz > 8 {
-            return Err(Error::LogicError {
-                core: ErrorCore::default(),
-                what: "offset_too_small".to_owned(),
-            })
-            .as_z()
-            .with_info("msg_sz_v64_pack_sz", msg_sz_v64_pack_sz);
+            return Err(logic_error("offset_too_small")
+                .with_atom_field("msg_sz_v64_pack_sz", msg_sz_v64_pack_sz));
         }
         let newly_dropped_bytes = 8 - msg_sz_v64_pack_sz;
         for src in (post_u64_offset..in_progress_offset).rev() {
@@ -143,7 +133,7 @@ impl ProtoBuilder {
         Ok(newly_dropped_bytes)
     }
 
-    fn seal(mut self) -> Result<Vec<u8>, Error> {
+    fn seal(mut self) -> Result<Vec<u8>, SError> {
         let mut in_progress = Vec::new();
         let mut bytes_dropped = 0;
         while !self.frames.is_empty() {
@@ -155,20 +145,13 @@ impl ProtoBuilder {
                     tag_sz,
                 } => {
                     if in_progress.is_empty() {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            what: "in_progress was empty".to_owned(),
-                        });
+                        return Err(logic_error("in_progress was empty"));
                     }
                     let (in_progress_offset, in_progress_idx) = in_progress.pop().unwrap();
                     if in_progress_idx != frame_idx {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            what: "index miscalculation".to_owned(),
-                        })
-                        .as_z()
-                        .with_info("in_progress_idx", in_progress_idx)
-                        .with_info("frame_idx", frame_idx);
+                        return Err(logic_error("index miscalculation")
+                            .with_atom_field("in_progress_idx", in_progress_idx)
+                            .with_atom_field("frame_idx", frame_idx));
                     }
                     let msg_sz = in_progress_offset - begin_offset - tag_sz - 8;
                     let newly_dropped_bytes = self.shift_frame(
@@ -189,20 +172,13 @@ impl ProtoBuilder {
                     key_offset,
                 } => {
                     if in_progress.is_empty() {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            what: "in_progress was empty".to_owned(),
-                        });
+                        return Err(logic_error("in_progress was empty"));
                     }
                     let (in_progress_offset, in_progress_idx) = in_progress.pop().unwrap();
                     if in_progress_idx != frame_idx {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            what: "index miscalculation".to_owned(),
-                        })
-                        .as_z()
-                        .with_info("in_progress_idx", in_progress_idx)
-                        .with_info("frame_idx", frame_idx);
+                        return Err(logic_error("index miscalculation")
+                            .with_atom_field("in_progress_idx", in_progress_idx)
+                            .with_atom_field("frame_idx", frame_idx));
                     }
                     let msg_sz = in_progress_offset - key_offset - 8;
                     let first_dropped_bytes =
@@ -280,7 +256,7 @@ impl ObjectBuilder {
         }
     }
 
-    pub fn next(&mut self, kvr: KeyValueRef) -> Result<(), Error> {
+    pub fn next(&mut self, kvr: KeyValueRef) -> Result<(), SError> {
         if kvr.value.is_none() {
             // NOTE(rescrv): deletes have no place in protoql; drop them silently.
             return Ok(());
@@ -315,10 +291,8 @@ impl ObjectBuilder {
         // We'll go until we add everything necessary to extend.
         let mut tki = TupleKeyIterator::from(kvr.key);
         for _ in 0..2 * self.current_type.key().elements().len() {
-            tki.next().ok_or(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "tuple key exhausted".to_owned(),
-            })?;
+            tki.next()
+                .ok_or_else(|| corruption("tuple key exhausted"))?;
         }
         while !schema_entry.is_extendable_by(&self.current_type) {
             // We know the current type should be extensible by construction.
@@ -333,19 +307,13 @@ impl ObjectBuilder {
             } else {
                 (DataType::message, false)
             };
-            let _ = tki.next().ok_or(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "tuple key exhausted".to_owned(),
-            })?;
-            let tk_key = tki.next().ok_or(Error::Corruption {
-                core: ErrorCore::default(),
-                what: "tuple key exhausted".to_owned(),
-            })?;
-            let tk_key =
-                parse_as_prototk(tk_key, next_field.ty()).map_err(|err| Error::Corruption {
-                    core: ErrorCore::default(),
-                    what: err.to_string(),
-                })?;
+            let _ = tki
+                .next()
+                .ok_or_else(|| corruption("tuple key exhausted"))?;
+            let tk_key = tki
+                .next()
+                .ok_or_else(|| corruption("tuple key exhausted"))?;
+            let tk_key = parse_as_prototk(tk_key, next_field.ty()).map_err(corruption)?;
             self.current_type.push_field(next_field.clone(), value_ty);
             match (next_field.ty(), value_ty) {
                 (KeyDataType::unit, DataType::message) => {
@@ -397,7 +365,7 @@ impl ObjectBuilder {
         Ok(())
     }
 
-    pub fn seal(mut self) -> Result<Vec<u8>, Error> {
+    pub fn seal(mut self) -> Result<Vec<u8>, SError> {
         while !self.frame_stack.is_empty() {
             // SAFETY(rescrv): We're popping from a non-empty stack.
             if let Some(frame) = self.frame_stack.pop().unwrap() {

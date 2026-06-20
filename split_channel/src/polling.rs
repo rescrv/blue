@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use biometrics::{Collector, Counter};
 
-use rpc_pb::Error;
+use rpc_pb::SError;
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -103,8 +103,8 @@ pub struct ThreadState {
 
 pub trait OsPoll: Send + Sync {
     fn new_thread(&self) -> ThreadState;
-    fn insert(&self, fd: RawFd) -> Result<(), Error>;
-    fn poll(&self, ts: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, Error>;
+    fn insert(&self, fd: RawFd) -> Result<(), SError>;
+    fn poll(&self, ts: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, SError>;
 }
 
 /////////////////////////////////////////////// Poll ///////////////////////////////////////////////
@@ -122,7 +122,7 @@ pub struct Epoll {
 }
 
 impl Epoll {
-    fn new() -> Result<Self, Error> {
+    fn new() -> Result<Self, SError> {
         #[cfg(target_os = "macos")]
         {
             Err(std::io::Error::other("MacOS not supported").into())
@@ -155,7 +155,7 @@ impl OsPoll for Epoll {
         ThreadState { ratio, offset: 0 }
     }
 
-    fn insert(&self, fd: RawFd) -> Result<(), Error> {
+    fn insert(&self, fd: RawFd) -> Result<(), SError> {
         #[cfg(target_os = "macos")]
         {
             let _ = fd;
@@ -175,7 +175,7 @@ impl OsPoll for Epoll {
         }
     }
 
-    fn poll(&self, _: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, Error> {
+    fn poll(&self, _: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, SError> {
         #[cfg(target_os = "macos")]
         {
             let _ = timeout_ms;
@@ -225,11 +225,11 @@ impl<P: OsPoll> OsPoll for ConservingWrapper<P> {
         self.os_poll.new_thread()
     }
 
-    fn insert(&self, fd: RawFd) -> Result<(), Error> {
+    fn insert(&self, fd: RawFd) -> Result<(), SError> {
         self.os_poll.insert(fd)
     }
 
-    fn poll(&self, ts: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, Error> {
+    fn poll(&self, ts: &mut ThreadState, timeout_ms: i32) -> Result<Option<(RawFd, u32)>, SError> {
         if ts.offset < ts.ratio {
             let conserved = self.conserved.lock().unwrap().pop_front();
             if let Some((fd, events)) = conserved {
@@ -264,6 +264,6 @@ impl<P: OsPoll> Poll for ConservingWrapper<P> {
 
 /////////////////////////////////////////// default_poll ///////////////////////////////////////////
 
-pub fn default_poll() -> Result<Box<dyn Poll>, Error> {
+pub fn default_poll() -> Result<Box<dyn Poll>, SError> {
     Ok(Box::new(ConservingWrapper::new(Epoll::new()?)))
 }

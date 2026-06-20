@@ -1,7 +1,9 @@
 use tag_index::Tags;
-use zerror_core::ErrorCore;
 
-use super::{BiometricsStore, Error, FetchCountersRequest, Point, Series, Time, Window};
+use super::{
+    BiometricsStore, FetchCountersRequest, Point, SError, Series, Time, Window, internal_error,
+    lookback_too_large, nested_lookback, non_multiple_parameter,
+};
 
 //////////////////////////////////////////// QueryParams ///////////////////////////////////////////
 
@@ -61,11 +63,9 @@ impl QueryParams {
     }
 
     /// Create a QueryParams with a new time step that's an even divisor of the current time step.
-    pub fn with_step(&self, step: Time) -> Result<QueryParams, Error> {
+    pub fn with_step(&self, step: Time) -> Result<QueryParams, SError> {
         if !self.step.can_be_divided_by(step) {
-            Err(Error::NonMultipleParameter {
-                core: ErrorCore::default(),
-            })
+            Err(non_multiple_parameter())
         } else {
             let mut this = *self;
             this.step = step;
@@ -74,19 +74,13 @@ impl QueryParams {
     }
 
     /// Create a new QueryParams with lookback.
-    pub fn with_lookback(&self, lookback: Time) -> Result<QueryParams, Error> {
+    pub fn with_lookback(&self, lookback: Time) -> Result<QueryParams, SError> {
         if self.lookback.is_some() {
-            Err(Error::NestedLookback {
-                core: ErrorCore::default(),
-            })
+            Err(nested_lookback())
         } else if !lookback.can_be_divided_by(self.step) {
-            Err(Error::NonMultipleParameter {
-                core: ErrorCore::default(),
-            })
+            Err(non_multiple_parameter())
         } else if lookback > self.window.start {
-            Err(Error::LookbackTooLarge {
-                core: ErrorCore::default(),
-            })
+            Err(lookback_too_large())
         } else {
             let window = self.window;
             let step = self.step;
@@ -126,7 +120,7 @@ impl QueryParams {
 
 pub fn counters<'a>(
     tags: &'a Tags<'a>,
-) -> impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> + 'a
+) -> impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> + 'a
 {
     move |ctx, store, params| {
         let mut results = vec![];
@@ -156,25 +150,25 @@ pub fn counters<'a>(
 ///
 /// This will use the merge function on a point-wise basis to create the new series's points.
 pub fn aggregate(
-    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
+    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
     merge: impl Fn(&[Point]) -> Point,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let series = query(store, params)?;
         if series.is_empty() {
             return Ok(vec![]);
         }
         if !series.iter().all(|s| s.start == series[0].start) {
-            return Err(Error::internal("series have irregular start"));
+            return Err(internal_error("series have irregular start"));
         }
         if !series
             .iter()
             .all(|s| s.points.len() == series[0].points.len())
         {
-            return Err(Error::internal("series have irregular limit"));
+            return Err(internal_error("series have irregular limit"));
         }
         if !series.iter().all(|s| s.step == series[0].step) {
-            return Err(Error::internal("series have irregular step"));
+            return Err(internal_error("series have irregular step"));
         }
         let mut points = Vec::with_capacity(series[0].points.len());
         let mut scratch = Vec::with_capacity(series.len());
@@ -256,28 +250,26 @@ fn rollup_helper(
     params: &QueryParams,
     series: &Series,
     rollup: impl Fn(&[Point]) -> Point,
-) -> Result<Series, Error> {
+) -> Result<Series, SError> {
     let Some(lookback) = params.lookback.as_ref().copied() else {
-        return Err(Error::internal("rollup_helper called without lookback"));
+        return Err(internal_error("rollup_helper called without lookback"));
     };
     if series.start + lookback != params.window.start {
-        return Err(Error::internal(
+        return Err(internal_error(
             "rollup_helper called without appropriate lookback",
         ));
     }
     if !lookback.can_be_divided_by(params.step) {
-        return Err(Error::internal(
+        return Err(internal_error(
             "rollup_helper called with lookback that's not a multiple of step",
         ));
     }
     let steps_per_lookback = lookback.0 / params.step.0;
     let Ok(steps_per_lookback): Result<usize, _> = steps_per_lookback.try_into() else {
-        return Err(Error::internal(
-            "number of steps per lookback exceeds usize",
-        ));
+        return Err(internal_error("number of steps per lookback exceeds usize"));
     };
     if steps_per_lookback == 0 {
-        return Err(Error::internal("rollup_helper called with lookback of 0."));
+        return Err(internal_error("rollup_helper called with lookback of 0."));
     }
     let mut points = Vec::with_capacity(series.points.len());
     for window in series.points.windows(steps_per_lookback + 1) {
@@ -297,10 +289,10 @@ fn rollup_helper(
 /// Rollup the provided query using a roll-up function and lookback time.  The rollup function will
 /// be given a window of points corresponding to the lookback time.
 pub fn rollup(
-    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
+    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
     rollup: impl Fn(&[Point]) -> Point,
     lookback: Time,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let params = params.with_lookback(lookback)?;
         let series = query(store, &params)?;
@@ -392,9 +384,9 @@ pub mod over_time {
 
 /// Calculate a point-wise transform for every point in the provided series set.
 pub fn pointwise(
-    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
+    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
     transform: impl Fn(f64) -> f64,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let mut series = query(store, params)?;
         for series in series.iter_mut() {
@@ -407,13 +399,13 @@ pub fn pointwise(
 }
 
 pub mod point {
-    use super::{BiometricsStore, Error, QueryParams, Series, pointwise};
+    use super::{BiometricsStore, QueryParams, SError, Series, pointwise};
 
     macro_rules! pointwise_f64 {
         ($name:ident) => {
             pub fn $name(
-                query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
-            ) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+                query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
+            ) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
                 pointwise(query, f64::$name)
             }
         };
@@ -451,8 +443,8 @@ pub mod point {
     pointwise_f64!(trunc);
 
     pub fn sign(
-        query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
-    ) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+        query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
+    ) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
         pointwise(query, |x| {
             if x > 0.0 {
                 1.0
@@ -469,9 +461,9 @@ pub mod point {
 
 /// Convert the series in the query to a single, uniform value provided by the range function.
 pub fn uniform(
-    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
+    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
     range: impl Fn(&[Point]) -> Point,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let series = query(store, params)?;
         let mut result = Vec::with_capacity(series.len());
@@ -570,7 +562,7 @@ pub mod range {
 
 pub fn function_of_time(
     func: impl Fn(Time) -> Point,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |_, params| {
         let label = None;
         let start = params.window.start;
@@ -678,8 +670,8 @@ pub mod time {
 /// Return the union of several queries of the same type.
 #[allow(clippy::type_complexity)]
 pub fn union(
-    queries: Vec<Box<dyn Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>>>,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+    queries: Vec<Box<dyn Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>>>,
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let mut result = vec![];
         for query in queries.iter() {
@@ -691,9 +683,9 @@ pub fn union(
 
 /// Relabel the series.
 pub fn relabel(
-    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error>,
+    query: impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError>,
     label: Option<Tags<'static>>,
-) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, Error> {
+) -> impl Fn(&dyn BiometricsStore, &QueryParams) -> Result<Vec<Series>, SError> {
     move |store, params| {
         let mut series = query(store, params)?;
         for series in series.iter_mut() {
@@ -731,7 +723,7 @@ fn median_absolute_deviation(points: &[Point]) -> Point {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Error, Series, Time};
+    use crate::{SError, Series, Time};
 
     const PI: Point = Point(std::f64::consts::PI);
     const E: Point = Point(std::f64::consts::E);
@@ -859,7 +851,7 @@ mod tests {
             let series2 = series! {"2024-03-29T08:55:00Z", 60, E, PI, PI};
             assert_eq!(params.window, series1.window());
             assert_eq!(params.window, series2.window());
-            Ok::<_, Error>(vec![series1, series2])
+            Ok::<_, SError>(vec![series1, series2])
         };
         let params = three_minute_query_params();
         assert_eq!(
@@ -1183,7 +1175,7 @@ mod tests {
                 series.points.push(fib);
             }
             assert_eq!(params.window_including_lookback(), series.window());
-            Ok::<_, Error>(vec![series])
+            Ok::<_, SError>(vec![series])
         };
         let step = Time::from_secs(1).expect("1 seconds should always fit a time");
         let start =
@@ -1268,7 +1260,7 @@ mod tests {
         let query = |_: &dyn BiometricsStore, params: &QueryParams| {
             let series = series! {"2024-03-29T08:55:00Z", 20, -1.0, 2.0, -3.0, 4.0, -5.0, 6.0, -7.0, 8.0, -9.0};
             assert_eq!(params.window, series.window());
-            Ok::<_, Error>(vec![series])
+            Ok::<_, SError>(vec![series])
         };
         let params = three_minute_query_params();
         assert_eq!(
@@ -1476,7 +1468,7 @@ mod tests {
             let series =
                 series! {"2024-03-29T08:55:00Z", 20, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
             assert_eq!(params.window, series.window());
-            Ok::<_, Error>(vec![series])
+            Ok::<_, SError>(vec![series])
         };
         let params = three_minute_query_params();
         assert_eq!(

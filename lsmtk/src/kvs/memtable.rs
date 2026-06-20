@@ -7,7 +7,7 @@ use sst::pruning_cursor::PruningCursor;
 use sst::{Cursor, Key, KeyRef};
 
 use super::WriteBatch;
-use crate::Error;
+use crate::SError;
 
 ///////////////////////////////////////////// MemTable /////////////////////////////////////////////
 
@@ -27,7 +27,7 @@ impl MemTable {
         SkipListIteratorWrapper { iter }
     }
 
-    pub fn write(&self, write_batch: &mut WriteBatch) -> Result<(), Error> {
+    pub fn write(&self, write_batch: &mut WriteBatch) -> Result<(), SError> {
         for entry in write_batch.entries.iter() {
             self.approximate_size.fetch_add(
                 entry.key.len() + entry.value.as_ref().map(|x| x.len()).unwrap_or_default() + 16,
@@ -45,7 +45,7 @@ impl MemTable {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, sst::Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         let mut cursor = self.skiplist.iter();
         // TODO(rescrv): Make it so I can use a KeyRef on the iterator.
         cursor.seek(&Key {
@@ -65,7 +65,7 @@ impl MemTable {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<MemTableCursor, sst::Error> {
+    ) -> Result<MemTableCursor, SError> {
         let iter = self.skiplist.iter();
         let wrapper = SkipListIteratorWrapper { iter };
         let cursor = PruningCursor::new(wrapper, timestamp)?;
@@ -81,17 +81,17 @@ pub struct SkipListIteratorWrapper {
 }
 
 impl Cursor for SkipListIteratorWrapper {
-    fn seek_to_first(&mut self) -> Result<(), sst::Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.iter.seek_to_first();
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), sst::Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.iter.seek_to_last();
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), sst::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         self.iter.seek(&Key {
             key: key.into(),
             timestamp: u64::MAX,
@@ -99,12 +99,12 @@ impl Cursor for SkipListIteratorWrapper {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), sst::Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         self.iter.prev();
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), sst::Error> {
+    fn next(&mut self) -> Result<(), SError> {
         self.iter.next();
         Ok(())
     }
@@ -133,23 +133,23 @@ pub struct MemTableCursor {
 }
 
 impl Cursor for MemTableCursor {
-    fn seek_to_first(&mut self) -> Result<(), sst::Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), sst::Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), sst::Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         self.cursor.seek(key)
     }
 
-    fn prev(&mut self) -> Result<(), sst::Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         self.cursor.prev()
     }
 
-    fn next(&mut self) -> Result<(), sst::Error> {
+    fn next(&mut self) -> Result<(), SError> {
         self.cursor.next()
     }
 

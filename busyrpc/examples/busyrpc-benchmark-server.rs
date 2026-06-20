@@ -8,8 +8,6 @@ use biometrics::{Collector, PlainTextEmitter};
 
 use busyrpc::{Server, ServerOptions, ServiceRegistry, SslOptions};
 
-use rpc_pb::IoToZ;
-
 #[derive(CommandLine, Debug, Default, Eq, PartialEq)]
 struct BenchmarkOptions {
     #[arrrg(nested)]
@@ -44,8 +42,7 @@ fn main() {
         }
     });
     let services = ServiceRegistry::new();
-    let (server, _) = Server::new(options.ssl, options.server, services)
-        .as_z()
-        .pretty_unwrap();
-    server.serve().as_z().pretty_unwrap();
+    let (server, _) =
+        Server::new(options.ssl, options.server, services).unwrap_or_else(|err| panic!("{err}"));
+    server.serve().unwrap_or_else(|err| panic!("{err}"));
 }

@@ -1,12 +1,10 @@
 #![doc = include_str!("../README.md")]
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 
+pub use handled::SError;
 use one_two_eight::{generate_id, generate_id_prototk};
 use prototk_derive::Message;
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
 
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
@@ -78,26 +76,19 @@ impl Host {
 }
 
 impl std::str::FromStr for Host {
-    type Err = Error;
+    type Err = SError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<String> = s.split('=').map(String::from).collect();
         if parts.len() != 2 {
-            return Err(Error::ResolveFailure {
-                core: ErrorCore::default(),
-                what: "could not parse string".to_owned(),
-            }
-            .with_info("parts", parts));
+            return Err(resolve_failure("could not parse string").with_debug_field("parts", parts));
         }
         let host_id: HostID = match parts[0].parse::<HostID>() {
             Ok(host_id) => host_id,
             Err(err) => {
-                return Err(Error::ResolveFailure {
-                    core: ErrorCore::default(),
-                    what: "could not parse HostID".to_owned(),
-                }
-                .with_info("err", err)
-                .with_info("host_id", parts[0].to_owned()));
+                return Err(resolve_failure("could not parse HostID")
+                    .with_debug_field("err", err)
+                    .with_string_field("host_id", &parts[0]));
             }
         };
         Ok(Host {
@@ -177,259 +168,110 @@ impl<'a> From<&Request<'a>> for Context {
     }
 }
 
-/////////////////////////////////////////////// Error //////////////////////////////////////////////
+/////////////////////////////////////////////// Errors /////////////////////////////////////////////
 
-/// RPC Error.
-#[derive(Clone, Message, zerror_derive::Z)]
-pub enum Error {
-    /// The default error type.  Necessary to support protobuf, but should otherwise not be
-    /// constructed.
-    #[prototk(278528, message)]
-    Success {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    /// An error was encountered while serializing or deserializing data.
-    #[prototk(278529, message)]
-    SerializationError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The error that was encountered.
-        #[prototk(2, message)]
-        err: prototk::Error,
-        /// Additional context for what was happening.
-        #[prototk(3, string)]
-        context: String,
-    },
-    /// The request asks for an unknown server.
-    #[prototk(278530, message)]
-    UnknownServerName {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The server name requested.
-        #[prototk(2, string)]
-        name: String,
-    },
-    /// The request asks for an unknown method.
-    #[prototk(278531, message)]
-    UnknownMethodName {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The method name requested.
-        #[prototk(2, string)]
-        name: String,
-    },
-    /// The request exceeds the allowable size.
-    #[prototk(278532, message)]
-    RequestTooLarge {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// the size requested.
-        #[prototk(2, uint64)]
-        size: u64,
-    },
-    /// There was an error at the transport layer.
-    #[prototk(278533, message)]
-    TransportFailure {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The string representation of the error.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Encryption is misconfigured.
-    #[prototk(278534, message)]
-    EncryptionMisconfiguration {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// It wasn't possible to probe ulimit -n.
-    #[prototk(278535, message)]
-    UlimitParseError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// An OS/IO error.
-    #[prototk(278536, message)]
-    OsError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// The string representation of the error.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// A logic error in the RPC implementation.
-    #[prototk(278537, message)]
-    LogicError {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Service discovery failed to find the host.
-    #[prototk(278538, message)]
-    NotFound {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
-    /// Resolution failure.
-    #[prototk(278539, message)]
-    ResolveFailure {
-        /// The error core.
-        #[prototk(1, message)]
-        core: ErrorCore,
-        /// A hint as to what went wrong.
-        #[prototk(2, string)]
-        what: String,
-    },
+const PHASE: &str = "rpc-pb";
+
+/// Serialization or deserialization failed.
+pub const CODE_SERIALIZATION_ERROR: &str = "serialization-error";
+/// A request named an unknown server.
+pub const CODE_UNKNOWN_SERVER_NAME: &str = "unknown-server-name";
+/// A request named an unknown method.
+pub const CODE_UNKNOWN_METHOD_NAME: &str = "unknown-method-name";
+/// The request is larger than the RPC limit.
+pub const CODE_REQUEST_TOO_LARGE: &str = "request-too-large";
+/// The transport failed.
+pub const CODE_TRANSPORT_FAILURE: &str = "transport-failure";
+/// Encryption setup is invalid.
+pub const CODE_ENCRYPTION_MISCONFIGURATION: &str = "encryption-misconfiguration";
+/// Parsing the process file descriptor limit failed.
+pub const CODE_ULIMIT_PARSE_ERROR: &str = "ulimit-parse-error";
+/// An operating system error occurred.
+pub const CODE_OS_ERROR: &str = "os-error";
+/// The RPC implementation hit an internal logic error.
+pub const CODE_LOGIC_ERROR: &str = "logic-error";
+/// A requested object was not found.
+pub const CODE_NOT_FOUND: &str = "not-found";
+/// Host or route resolution failed.
+pub const CODE_RESOLVE_FAILURE: &str = "resolve-failure";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Error {
-    pub fn resolve_failure(what: impl Into<String>) -> Self {
-        Self::ResolveFailure {
-            core: ErrorCore::default(),
-            what: what.into(),
-        }
-    }
+pub fn serialization_error(err: impl std::fmt::Debug, context: impl AsRef<str>) -> SError {
+    error(CODE_SERIALIZATION_ERROR)
+        .with_message("RPC serialization error")
+        .with_debug_field("cause", err)
+        .with_string_field("context", context.as_ref())
 }
 
-impl Default for Error {
-    fn default() -> Error {
-        Error::Success {
-            core: ErrorCore::default(),
-        }
-    }
+pub fn unknown_server_name(name: impl AsRef<str>) -> SError {
+    error(CODE_UNKNOWN_SERVER_NAME)
+        .with_message("unknown RPC server name")
+        .with_string_field("name", name.as_ref())
 }
 
-impl From<buffertk::Error> for Error {
-    fn from(err: buffertk::Error) -> Error {
-        Error::SerializationError {
-            core: ErrorCore::default(),
-            err: err.into(),
-            context: "buffertk unpack error".to_string(),
-        }
-    }
+pub fn unknown_method_name(name: impl AsRef<str>) -> SError {
+    error(CODE_UNKNOWN_METHOD_NAME)
+        .with_message("unknown RPC method name")
+        .with_string_field("name", name.as_ref())
 }
 
-impl From<prototk::Error> for Error {
-    fn from(err: prototk::Error) -> Error {
-        Error::SerializationError {
-            core: ErrorCore::default(),
-            err,
-            context: "prototk unpack error".to_string(),
-        }
-    }
+pub fn request_too_large(size: usize) -> SError {
+    error(CODE_REQUEST_TOO_LARGE)
+        .with_message("RPC request is too large")
+        .with_atom_field("size", size)
+        .with_atom_field("limit", MAX_REQUEST_SIZE)
 }
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Error {
-        Error::OsError {
-            core: ErrorCore::default(),
-            what: format!("{err}"),
-        }
-    }
+pub fn transport_failure(what: impl AsRef<str>) -> SError {
+    error(CODE_TRANSPORT_FAILURE)
+        .with_message("RPC transport failure")
+        .with_string_field("what", what.as_ref())
 }
 
-iotoz! {Error}
+pub fn encryption_misconfiguration(what: impl AsRef<str>) -> SError {
+    error(CODE_ENCRYPTION_MISCONFIGURATION)
+        .with_message("RPC encryption misconfiguration")
+        .with_string_field("what", what.as_ref())
+}
+
+pub fn ulimit_parse_error(what: impl AsRef<str>) -> SError {
+    error(CODE_ULIMIT_PARSE_ERROR)
+        .with_message("failed to parse process file descriptor limit")
+        .with_string_field("what", what.as_ref())
+}
+
+pub fn os_error(err: impl ToString) -> SError {
+    error(CODE_OS_ERROR)
+        .with_message("RPC operating system error")
+        .with_string_field("cause", &err.to_string())
+}
+
+pub fn logic_error(what: impl AsRef<str>) -> SError {
+    error(CODE_LOGIC_ERROR)
+        .with_message("RPC logic error")
+        .with_string_field("what", what.as_ref())
+}
+
+pub fn not_found(what: impl AsRef<str>) -> SError {
+    error(CODE_NOT_FOUND)
+        .with_message("RPC object not found")
+        .with_string_field("what", what.as_ref())
+}
+
+pub fn resolve_failure(what: impl AsRef<str>) -> SError {
+    error(CODE_RESOLVE_FAILURE)
+        .with_message("RPC resolution failure")
+        .with_string_field("what", what.as_ref())
+}
 
 #[cfg(feature = "indicio")]
-impl From<Error> for indicio::Value {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::Success { core: _ } => {
-                indicio::value!({
-                    success: true,
-                })
-            }
-            Error::SerializationError {
-                core: _,
-                err,
-                context,
-            } => {
-                indicio::value!({
-                    serialization: {
-                        // TODO(rescrv): implement indicio::Value for prototk::Error;
-                        what: format!("{:?}", err),
-                        context: context,
-                    },
-                })
-            }
-            Error::UnknownServerName { core: _, name } => {
-                indicio::value!({
-                    unknown_server: name,
-                })
-            }
-            Error::UnknownMethodName { core: _, name } => {
-                indicio::value!({
-                    unknown_method: name,
-                })
-            }
-            Error::RequestTooLarge { core: _, size } => {
-                indicio::value!({
-                    request_too_large: {
-                        size: size,
-                        limit: MAX_REQUEST_SIZE,
-                    },
-                })
-            }
-            Error::TransportFailure { core: _, what } => {
-                indicio::value!({
-                    transport_failure: what,
-                })
-            }
-            Error::EncryptionMisconfiguration { core: _, what } => {
-                indicio::value!({
-                    encryption_misconfiguration: what,
-                })
-            }
-            Error::UlimitParseError { core: _, what } => {
-                indicio::value!({
-                    ulimit_parse_error: what,
-                })
-            }
-            Error::OsError { core: _, what } => {
-                indicio::value!({
-                    os_error: what,
-                })
-            }
-            Error::LogicError { core: _, what } => {
-                indicio::value!({
-                    logic_error: what,
-                })
-            }
-            Error::NotFound { core: _, what } => {
-                indicio::value!({
-                    not_found: what,
-                })
-            }
-            Error::ResolveFailure { core: _, what } => {
-                indicio::value!({
-                    resolve_failure: what,
-                })
-            }
-        }
-    }
+pub fn error_to_indicio(err: &SError) -> indicio::Value {
+    indicio::value!({
+        error: err.to_string(),
+    })
 }
 
 ////////////////////////////////////////////// Status //////////////////////////////////////////////
@@ -440,7 +282,7 @@ impl From<Error> for indicio::Value {
 ///
 /// Inside the OK(_) branch of the outer-most level is a Result that switches over client requests.
 /// They are either OK(_) with a body or Err(_) with a serialized error type.
-pub type Status = Result<Result<Vec<u8>, Vec<u8>>, Error>;
+pub type Status = Result<Result<Vec<u8>, Vec<u8>>, SError>;
 
 ////////////////////////////////////////////// Server //////////////////////////////////////////////
 
@@ -630,10 +472,7 @@ macro_rules! server_methods {
                 }
                 ),*
                 _ => {
-                    Err($crate::Error::UnknownMethodName {
-                        core: zerror_core::ErrorCore::default(),
-                        name: method.to_string(),
-                    }.into())
+                    Err($crate::unknown_method_name(method).into())
                 },
             }
         }
@@ -665,7 +504,7 @@ impl ServerRegistry {
 /// A trait for resolving hosts.
 pub trait Resolver {
     /// Resolve one Host.
-    fn resolve(&mut self) -> Result<Host, Error>;
+    fn resolve(&mut self) -> Result<Host, SError>;
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -676,131 +515,59 @@ mod tests {
 
     use super::*;
 
-    fn do_test(s: &str, exp: Error) {
-        assert_eq!(s, exp.to_string());
+    fn do_test(exp: SError) {
         let buf = stack_pack(&exp).to_vec();
-        let got = Error::unpack(&buf).unwrap().0;
+        let got = SError::unpack(&buf).unwrap().0;
         assert_eq!(exp, got);
     }
 
     #[test]
-    fn success() {
-        do_test(
-            "Success",
-            Error::Success {
-                core: ErrorCore::default(),
-            },
-        );
+    fn serialization_error_round_trips() {
+        do_test(serialization_error(prototk::Error::Success, "Some context"));
     }
 
     #[test]
-    fn serialization_error() {
-        do_test(
-            "SerializationError { err: Success, context: \"Some context\" }",
-            Error::SerializationError {
-                core: ErrorCore::default(),
-                context: "Some context".to_owned(),
-                err: prototk::Error::Success,
-            },
-        );
+    fn unknown_server_name_round_trips() {
+        do_test(unknown_server_name("hostname"));
     }
 
     #[test]
-    fn unknown_server_name() {
-        do_test(
-            "UnknownServerName { name: \"hostname\" }",
-            Error::UnknownServerName {
-                core: ErrorCore::default(),
-                name: "hostname".to_owned(),
-            },
-        );
+    fn unknown_method_name_round_trips() {
+        do_test(unknown_method_name("method"));
     }
 
     #[test]
-    fn unknown_method_name() {
-        do_test(
-            "UnknownMethodName { name: \"method\" }",
-            Error::UnknownMethodName {
-                core: ErrorCore::default(),
-                name: "method".to_owned(),
-            },
-        );
+    fn request_too_large_round_trips() {
+        do_test(request_too_large(10));
     }
 
     #[test]
-    fn request_too_large() {
-        do_test(
-            "RequestTooLarge { size: 10 }",
-            Error::RequestTooLarge {
-                core: ErrorCore::default(),
-                size: 10,
-            },
-        );
+    fn transport_failure_round_trips() {
+        do_test(transport_failure("socket closed"));
     }
 
     #[test]
-    fn transport_failure() {
-        do_test(
-            "TransportFailure { what: \"socket closed\" }",
-            Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: "socket closed".to_owned(),
-            },
-        );
-    }
-
-    #[test]
-    fn encryption_misconfiguration() {
-        do_test(
-            "EncryptionMisconfiguration { what: \"ssl misconfig\" }",
-            Error::EncryptionMisconfiguration {
-                core: ErrorCore::default(),
-                what: "ssl misconfig".to_owned(),
-            },
-        );
+    fn encryption_misconfiguration_round_trips() {
+        do_test(encryption_misconfiguration("ssl misconfig"));
     }
 
     #[test]
     fn ulimit_parse_error() {
-        do_test(
-            "UlimitParseError { what: \"could not read\" }",
-            Error::UlimitParseError {
-                core: ErrorCore::default(),
-                what: "could not read".to_owned(),
-            },
-        );
+        do_test(super::ulimit_parse_error("could not read"));
     }
 
     #[test]
     fn os_error() {
-        do_test(
-            "OsError { what: \"some I/O error\" }",
-            Error::OsError {
-                core: ErrorCore::default(),
-                what: "some I/O error".to_owned(),
-            },
-        );
+        do_test(super::os_error("some I/O error"));
     }
 
     #[test]
     fn logic_error() {
-        do_test(
-            "LogicError { what: \"some logic error\" }",
-            Error::LogicError {
-                core: ErrorCore::default(),
-                what: "some logic error".to_owned(),
-            },
-        );
+        do_test(super::logic_error("some logic error"));
     }
 
     #[test]
     fn not_found_error() {
-        do_test(
-            "NotFound { what: \"deployment\" }",
-            Error::NotFound {
-                core: ErrorCore::default(),
-                what: "deployment".to_owned(),
-            },
-        );
+        do_test(not_found("deployment"));
     }
 }

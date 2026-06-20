@@ -1,7 +1,5 @@
 use buffertk::{Packable, StackPacker, Unpacker};
 
-use zerror_core::ErrorCore;
-
 ///////////////////////////////////////////// Constants ////////////////////////////////////////////
 
 pub const HEADER_MAX_SIZE: usize = 1 + 1 + 10 + 1 + 4;
@@ -115,7 +113,7 @@ impl RecvBuffer {
         &mut self,
         mut bytes: &[u8],
         mut receiver: F,
-    ) -> Result<usize, rpc_pb::Error> {
+    ) -> Result<usize, rpc_pb::SError> {
         let mut returned = 0;
         'reading_bytes: while !bytes.is_empty() {
             match self {
@@ -130,14 +128,13 @@ impl RecvBuffer {
                         continue 'reading_bytes;
                     }
                     if hdr[0] as usize > HEADER_MAX_SIZE - 1 {
-                        return Err(rpc_pb::Error::SerializationError {
-                            core: ErrorCore::default(),
-                            err: prototk::Error::BufferTooShort {
+                        return Err(rpc_pb::serialization_error(
+                            prototk::Error::BufferTooShort {
                                 required: hdr[*idx] as usize,
                                 had: *idx,
                             },
-                            context: "frame header size invalid".to_owned(),
-                        });
+                            "frame header size invalid",
+                        ));
                     }
                     let amt = std::cmp::min(hdr[0] as usize + 1 - *idx, bytes.len());
                     if amt > 0 {
@@ -151,10 +148,7 @@ impl RecvBuffer {
                         let mut up = Unpacker::new(&hdr[1..1 + hdr_sz]);
                         let frame: rpc_pb::Frame = up.unpack()?;
                         if frame.size > rpc_pb::MAX_BODY_SIZE as u64 {
-                            return Err(rpc_pb::Error::RequestTooLarge {
-                                core: ErrorCore::default(),
-                                size: frame.size,
-                            });
+                            return Err(rpc_pb::request_too_large(frame.size as usize));
                         }
                         let buf = vec![0u8; frame.size as usize];
                         *self = RecvBuffer::Body {
@@ -186,10 +180,9 @@ impl RecvBuffer {
                         {
                             let buf = buf.take().unwrap();
                             if crc32c::crc32c(buf.as_ref()) != crc {
-                                return Err(rpc_pb::Error::TransportFailure {
-                                    core: ErrorCore::default(),
-                                    what: format!("crc32c checksum failed: {crc}"),
-                                });
+                                return Err(rpc_pb::transport_failure(format!(
+                                    "crc32c checksum failed: {crc}"
+                                )));
                             }
                             receiver(buf);
                             returned += 1;

@@ -14,8 +14,6 @@ use sync42::monitor::{Monitor, MonitorCore};
 use sync42::spin_lock::SpinLock;
 use sync42::state_hash_table::{Handle, StateHashTable};
 
-use zerror_core::ErrorCore;
-
 use super::SslOptions;
 use super::channel::Channel;
 
@@ -107,7 +105,7 @@ mod sht_state {
     #[derive(Debug)]
     pub struct ShtState {
         response: SpinLock<Option<Vec<u8>>>,
-        error: SpinLock<Option<rpc_pb::Error>>,
+        error: SpinLock<Option<rpc_pb::SError>>,
     }
 
     impl ShtState {
@@ -132,12 +130,12 @@ mod sht_state {
             self.error.lock().is_some()
         }
 
-        pub fn set_error(&self, err: rpc_pb::Error) {
+        pub fn set_error(&self, err: rpc_pb::SError) {
             SET_ERROR.click();
             *self.error.lock() = Some(err);
         }
 
-        pub fn get_error(&self) -> Option<rpc_pb::Error> {
+        pub fn get_error(&self) -> Option<rpc_pb::SError> {
             self.error.lock().take()
         }
     }
@@ -289,10 +287,8 @@ impl MonitorCore<ChannelCoordination, ChannelCriticalSection, MonitorState<'_>>
             }
         }
         if crit.close {
-            ms.sht.set_error(rpc_pb::Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: "transport closed".to_owned(),
-            });
+            ms.sht
+                .set_error(rpc_pb::transport_failure("transport closed"));
             return;
         }
         let mut events = libc::POLLIN | libc::POLLOUT | libc::POLLERR | libc::POLLHUP;
@@ -398,9 +394,10 @@ trait ChannelManagerTrait<R: Resolver> {
     type MonitoredChannel;
 
     fn new(ssl: SslOptions, options: ClientOptions, resolver: R) -> Self;
-    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error>;
-    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
-    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error>;
+    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::SError>;
+    fn establish_channel(&self, host: &Host)
+    -> Result<Arc<Self::MonitoredChannel>, rpc_pb::SError>;
+    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::SError>;
     fn register_channel(&self, host: &Host, chan: Arc<Self::MonitoredChannel>);
 }
 
@@ -433,7 +430,7 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
         }
     }
 
-    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::Error> {
+    fn get_channel(&self) -> Result<Self::ChannelHandle<'_>, rpc_pb::SError> {
         loop {
             {
                 let channels = self.channels.lock().unwrap();
@@ -459,7 +456,10 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
         }
     }
 
-    fn establish_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
+    fn establish_channel(
+        &self,
+        host: &Host,
+    ) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::SError> {
         let establish = self
             .connecting
             .get_or_create_state(HostKey::from(host.host_id()));
@@ -491,30 +491,22 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
         Ok(ptr)
     }
 
-    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::Error> {
+    fn new_channel(&self, host: &Host) -> Result<Arc<Self::MonitoredChannel>, rpc_pb::SError> {
         let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|err| {
-            rpc_pb::Error::EncryptionMisconfiguration {
-                core: ErrorCore::default(),
-                what: format!("could not build connector builder: {err}"),
-            }
+            rpc_pb::encryption_misconfiguration(format!("could not build connector builder: {err}"))
         })?;
         builder.set_ca_file(&self.ssl.ca_file).map_err(|err| {
-            rpc_pb::Error::EncryptionMisconfiguration {
-                core: ErrorCore::default(),
-                what: format!("invalid CA file: {err}"),
-            }
+            rpc_pb::encryption_misconfiguration(format!("invalid CA file: {err}"))
         })?;
         builder
             .set_private_key_file(&self.ssl.private_key_file, SslFiletype::PEM)
-            .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
-                core: ErrorCore::default(),
-                what: format!("invalid private key file: {err}"),
+            .map_err(|err| {
+                rpc_pb::encryption_misconfiguration(format!("invalid private key file: {err}"))
             })?;
         builder
             .set_certificate_file(&self.ssl.certificate_file, SslFiletype::PEM)
-            .map_err(|err| rpc_pb::Error::EncryptionMisconfiguration {
-                core: ErrorCore::default(),
-                what: format!("invalid certificate file: {err}"),
+            .map_err(|err| {
+                rpc_pb::encryption_misconfiguration(format!("invalid certificate file: {err}"))
             })?;
         builder.set_verify(
             boring::ssl::SslVerifyMode::PEER | boring::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
@@ -523,10 +515,7 @@ impl<'a, 'b, R: Resolver> ChannelManagerTrait<R> for ChannelManager<'a, 'b, R> {
         let stream = TcpStream::connect(host.connect())?;
         let stream = connector
             .connect(host.hostname_or_ip(), stream)
-            .map_err(|err| rpc_pb::Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: format!("{err}"),
-            })?;
+            .map_err(|err| rpc_pb::transport_failure(format!("{err}")))?;
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let monitored_channel = MonitoredChannel {
             monitor: Monitor::new(
@@ -584,7 +573,7 @@ where
         })
     }
 
-    fn get_any_channel(&self) -> Result<ChannelHandle<'a, 'b, '_, R>, rpc_pb::Error> {
+    fn get_any_channel(&self) -> Result<ChannelHandle<'a, 'b, '_, R>, rpc_pb::SError> {
         self.channels.get_channel()
     }
 }
@@ -598,10 +587,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
         body: &[u8],
     ) -> rpc_pb::Status {
         if body.len() > rpc_pb::MAX_REQUEST_SIZE {
-            return Err(rpc_pb::Error::RequestTooLarge {
-                core: ErrorCore::default(),
-                size: body.len() as u64,
-            });
+            return Err(rpc_pb::request_too_large(body.len()));
         }
         let caller = ctx.clients().to_vec();
         let req = rpc_pb::Request {
@@ -640,7 +626,7 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
             };
             if let Some(rpc_error) = resp.rpc_error {
                 let mut up = Unpacker::new(rpc_error);
-                let rpc_error: rpc_pb::Error = match up.unpack() {
+                let rpc_error: rpc_pb::SError = match up.unpack() {
                     Ok(rpc_error) => rpc_error,
                     Err(unpack_error) => unpack_error.into(),
                 };
@@ -651,18 +637,13 @@ impl<R: Resolver + Send + Sync + 'static> rpc_pb::Client for Client<'_, '_, R> {
                 Ok(Ok(body.to_vec()))
             } else {
                 chandle.kill();
-                Err(rpc_pb::Error::LogicError {
-                    core: ErrorCore::default(),
-                    what: "missing rpc_error, service_error, and body; at least one should be set"
-                        .to_owned(),
-                })
+                Err(rpc_pb::logic_error(
+                    "missing rpc_error, service_error, and body; at least one should be set",
+                ))
             }
         } else {
             chandle.kill();
-            Err(rpc_pb::Error::LogicError {
-                core: ErrorCore::default(),
-                what: "dropped value in response".to_owned(),
-            })
+            Err(rpc_pb::logic_error("dropped value in response"))
         }
     }
 }

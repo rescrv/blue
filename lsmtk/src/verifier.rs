@@ -19,11 +19,10 @@ use mani::{Edit, Manifest, ManifestIterator};
 use setsum::Setsum;
 use sst::merging_cursor::MergingCursor;
 use sst::{Cursor, Sst, SstCursor};
-use zerror::Z;
-use zerror_core::ErrorCore;
 
 use super::{
-    Error, IoToZ, LsmtkOptions, MANI_ROOT, SST_FILE, TRASH_LOG, TRASH_ROOT, TRASH_SST, VERIFY_ROOT,
+    LsmtkOptions, MANI_ROOT, ResultSErrorExt, SError, SST_FILE, TRASH_LOG, TRASH_ROOT, TRASH_SST,
+    VERIFY_ROOT, backoff, corruption, logic_error,
 };
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -49,7 +48,7 @@ pub struct LsmVerifier {
 }
 
 impl LsmVerifier {
-    pub fn open(options: LsmtkOptions) -> Result<Self, Error> {
+    pub fn open(options: LsmtkOptions) -> Result<Self, SError> {
         let root: PathBuf = PathBuf::from(&options.path);
         let mani: Manifest = Manifest::open(options.mani.clone(), VERIFY_ROOT(&root))?;
         Ok(Self {
@@ -59,7 +58,7 @@ impl LsmVerifier {
         })
     }
 
-    pub fn verify(&mut self) -> Result<(), Error> {
+    pub fn verify(&mut self) -> Result<(), SError> {
         let mut entries = list_mani_fragments(&self.root)?;
         // Drop the last #'d entry and the main file.
         // We need to keep it around so that a crash/restart
@@ -76,7 +75,7 @@ impl LsmVerifier {
         Ok(())
     }
 
-    fn process_one(&mut self, entry: &PathBuf) -> Result<(), Error> {
+    fn process_one(&mut self, entry: &PathBuf) -> Result<(), SError> {
         // This will conditionally perform steps 6 and 7 if there's an unprocessed edit.
         self.possibly_complete_processing(entry)?;
         if let Some(last_entry_processed) = self.mani.info('M') {
@@ -97,20 +96,14 @@ impl LsmVerifier {
         for sst in ssts_to_rm.iter() {
             let path = TRASH_SST(&self.root, *sst);
             if !path.exists() {
-                return Err(Error::Backoff {
-                    core: ErrorCore::default(),
-                    path: basename_string(&path)?,
-                });
+                return Err(backoff(basename_string(&path)?));
             }
             edit.add(&basename_string(&path)?)?;
         }
         for log_num in logs_to_rm.iter() {
             let log_path = TRASH_LOG(&self.root, *log_num);
             if !log_path.exists() {
-                return Err(Error::Backoff {
-                    core: ErrorCore::default(),
-                    path: basename_string(&log_path)?,
-                });
+                return Err(backoff(basename_string(&log_path)?));
             }
             edit.add(&basename_string(log_path)?)?;
         }
@@ -121,30 +114,25 @@ impl LsmVerifier {
         Ok(())
     }
 
-    fn possibly_complete_processing(&mut self, entry: &PathBuf) -> Result<(), Error> {
+    fn possibly_complete_processing(&mut self, entry: &PathBuf) -> Result<(), SError> {
         if let Some(last_entry_processed) = self.mani.info('M') {
             let log_num_old = mani::extract_backup(last_entry_processed);
             let log_num_new = mani::extract_backup(entry);
             if log_num_old > log_num_new {
-                return Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "clean up saw log out of order".to_string(),
-                }
-                .with_info("old log num", log_num_old)
-                .with_info("new log num", log_num_new));
+                return Err(corruption("clean up saw log out of order")
+                    .with_debug_field("old log num", log_num_old)
+                    .with_debug_field("new log num", log_num_new));
             }
             if log_num_old == log_num_new && entry.exists() {
                 RM_MANI.click();
-                remove_file(entry).as_z().with_info("path", entry)?;
+                remove_file(entry).with_debug_field("path", entry)?;
             }
             let mut edit = Edit::default();
             for path in self.mani.strs() {
                 RM_FILE.click();
                 let full_path = TRASH_ROOT(&self.root).join(path);
                 if full_path.exists() {
-                    remove_file(&full_path)
-                        .as_z()
-                        .with_info("path", full_path)?;
+                    remove_file(&full_path).with_debug_field("path", full_path)?;
                 }
                 edit.rm(path)?;
             }
@@ -157,7 +145,7 @@ impl LsmVerifier {
         &self,
         entry: &PathBuf,
         mut acc: Setsum,
-    ) -> Result<(Setsum, Vec<Setsum>, Vec<u64>), Error> {
+    ) -> Result<(Setsum, Vec<Setsum>, Vec<u64>), SError> {
         let mani_iter = ManifestIterator::open(entry)?;
         let mut ssts_to_remove = vec![];
         let mut logs_to_remove = vec![];
@@ -174,69 +162,52 @@ impl LsmVerifier {
             //
             // Do a little dance with whether we compare against outputs or inputs.
             if first && outputs != acc {
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "manifest does not continue with accumulated setsum".to_string(),
-                }
-                .with_info("outputs", outputs.hexdigest())
-                .with_info("acc", acc.hexdigest())
-                .with_info("fragment", entry.to_string_lossy());
+                let err = corruption("manifest does not continue with accumulated setsum")
+                    .with_debug_field("outputs", outputs.hexdigest())
+                    .with_debug_field("acc", acc.hexdigest())
+                    .with_debug_field("fragment", entry.to_string_lossy());
                 return Err(err);
             }
             if !first && inputs != acc {
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "manifest does not continue with accumulated setsum".to_string(),
-                }
-                .with_info("inputs", inputs.hexdigest())
-                .with_info("acc", acc.hexdigest())
-                .with_info("fragment", entry.to_string_lossy());
+                let err = corruption("manifest does not continue with accumulated setsum")
+                    .with_debug_field("inputs", inputs.hexdigest())
+                    .with_debug_field("acc", acc.hexdigest())
+                    .with_debug_field("fragment", entry.to_string_lossy());
                 return Err(err);
             }
             if !first && inputs != outputs + discard {
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "manifest does not balance inputs == outputs + discard".to_string(),
-                }
-                .with_info("inputs", inputs.hexdigest())
-                .with_info("outputs", outputs.hexdigest())
-                .with_info("discard", discard.hexdigest())
-                .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
-                .with_info("inputs - outputs", (inputs - outputs).hexdigest());
+                let err = corruption("manifest does not balance inputs == outputs + discard")
+                    .with_debug_field("inputs", inputs.hexdigest())
+                    .with_debug_field("outputs", outputs.hexdigest())
+                    .with_debug_field("discard", discard.hexdigest())
+                    .with_debug_field("discard^-1", (Setsum::default() - discard).hexdigest())
+                    .with_debug_field("inputs - outputs", (inputs - outputs).hexdigest());
                 return Err(err);
             }
             last_outputs = Some(outputs);
             let mut computed_discard = Setsum::default();
             for added in edit.added() {
-                let setsum = Setsum::from_hexdigest(added).ok_or(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("manifest added has bad digest: {added}"),
-                })?;
+                let setsum = Setsum::from_hexdigest(added)
+                    .ok_or_else(|| corruption(format!("manifest added has bad digest: {added}")))?;
                 computed_discard -= setsum;
             }
             for rmed in edit.rmed() {
-                let setsum = Setsum::from_hexdigest(rmed).ok_or(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("manifest rmed has bad digest: {rmed}"),
-                })?;
+                let setsum = Setsum::from_hexdigest(rmed)
+                    .ok_or_else(|| corruption(format!("manifest rmed has bad digest: {rmed}")))?;
                 computed_discard += setsum;
                 ssts_to_remove.push(setsum);
             }
             if !first {
                 if let Some(log_num) = edit.get_info('L') {
-                    let log_num: u64 = log_num.parse().map_err(|_| Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: format!("manifest has bad L field: got {log_num:?}"),
+                    let log_num: u64 = log_num.parse().map_err(|_| {
+                        corruption(format!("manifest has bad L field: got {log_num:?}"))
                     })?;
                     logs_to_remove.push(log_num);
                 }
                 if discard != computed_discard {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: format!(
-                            "manifest has bad discard: expected {discard:?}, but got {computed_discard:?}"
-                        ),
-                    });
+                    return Err(corruption(format!(
+                        "manifest has bad discard: expected {discard:?}, but got {computed_discard:?}"
+                    )));
                 }
                 if discard != Setsum::default() && edit.rmed().count() > 0 {
                     self.verify_gc(&edit, discard)?;
@@ -248,22 +219,20 @@ impl LsmVerifier {
         }
         MANI_VERIFIED.click();
         if last_outputs != Some(acc) {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: format!("manifest has bad output setsum: expected {acc:?}"),
-            });
+            return Err(corruption(format!(
+                "manifest has bad output setsum: expected {acc:?}"
+            )));
         }
         Ok((acc, ssts_to_remove, logs_to_remove))
     }
 
-    fn verify_gc(&self, edit: &Edit, discard: Setsum) -> Result<(), Error> {
-        fn from_hexdigest(hex_digest: &str) -> Result<Setsum, Error> {
+    fn verify_gc(&self, edit: &Edit, discard: Setsum) -> Result<(), SError> {
+        fn from_hexdigest(hex_digest: &str) -> Result<Setsum, SError> {
             match Setsum::from_hexdigest(hex_digest) {
                 Some(setsum) => Ok(setsum),
-                None => Err(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("manifest field has bad digest: {hex_digest}"),
-                }),
+                None => Err(corruption(format!(
+                    "manifest field has bad digest: {hex_digest}"
+                ))),
             }
         }
         let mut input_cursors: Vec<SstCursor> = vec![];
@@ -294,12 +263,9 @@ impl LsmVerifier {
             if let Some(gc_next) = gc_next {
                 match gc_next.cmp(&i) {
                     Ordering::Less => {
-                        return Err(Error::LogicError {
-                            core: ErrorCore::default(),
-                            context: "gc key less than input".to_string(),
-                        })
-                        .with_info("gc", gc_next)
-                        .with_info("input", i);
+                        return Err(logic_error("gc key less than input")
+                            .with_debug_field("gc", gc_next)
+                            .with_debug_field("input", i));
                     }
                     Ordering::Equal => {
                         must_return = true;
@@ -310,11 +276,7 @@ impl LsmVerifier {
             match i.cmp(&o) {
                 Ordering::Less => {
                     if must_return {
-                        return Err(Error::Corruption {
-                            core: ErrorCore::default(),
-                            context: "data loss".to_string(),
-                        })
-                        .with_info("input", i);
+                        return Err(corruption("data loss").with_debug_field("input", i));
                     }
                     let mut setsum = sst::Setsum::default();
                     setsum.insert(input.key_value().unwrap());
@@ -326,11 +288,7 @@ impl LsmVerifier {
                     //
                     // It means a key was manufactured out of thin err,
                     // or maybe from a previous compaction.
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: "data construction".to_string(),
-                    })
-                    .with_info("output", o);
+                    return Err(corruption("data construction").with_debug_field("output", o));
                 }
                 Ordering::Equal => {
                     input.next()?;
@@ -342,11 +300,7 @@ impl LsmVerifier {
             }
         }
         if let Some(o) = output.key() {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "data construction".to_string(),
-            })
-            .with_info("output", o);
+            return Err(corruption("data construction").with_debug_field("output", o));
         }
         while let Some(i) = input.key_value() {
             let mut setsum = sst::Setsum::default();
@@ -355,22 +309,19 @@ impl LsmVerifier {
             input.next()?;
         }
         if computed_discard != discard {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "garbage collection has bad discard".to_string(),
-            })
-            .with_info("discard", discard.hexdigest())
-            .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
-            .with_info("computed_discard", computed_discard.hexdigest())
-            .with_info(
-                "computed_discard^-1",
-                (Setsum::default() - computed_discard).hexdigest(),
-            );
+            return Err(corruption("garbage collection has bad discard")
+                .with_debug_field("discard", discard.hexdigest())
+                .with_debug_field("discard^-1", (Setsum::default() - discard).hexdigest())
+                .with_debug_field("computed_discard", computed_discard.hexdigest())
+                .with_debug_field(
+                    "computed_discard^-1",
+                    (Setsum::default() - computed_discard).hexdigest(),
+                ));
         }
         Ok(())
     }
 
-    fn get_cursor(&self, setsum: Setsum) -> Result<sst::SstCursor, Error> {
+    fn get_cursor(&self, setsum: Setsum) -> Result<sst::SstCursor, SError> {
         let trash_path = TRASH_SST(&self.root, setsum);
         let sst_path = SST_FILE(&self.root, setsum);
         let file = match sst::file_manager::open_without_manager(&trash_path) {
@@ -390,11 +341,11 @@ impl LsmVerifier {
 pub struct ManifestVerifier {}
 
 impl ManifestVerifier {
-    pub fn open() -> Result<Self, Error> {
+    pub fn open() -> Result<Self, SError> {
         Ok(ManifestVerifier {})
     }
 
-    pub fn verify(&self, entry: &PathBuf) -> Result<Vec<(Setsum, Setsum, Setsum)>, Error> {
+    pub fn verify(&self, entry: &PathBuf) -> Result<Vec<(Setsum, Setsum, Setsum)>, SError> {
         let mani_iter = ManifestIterator::open(entry)?;
         let mut first = true;
         let mut acc = Setsum::default();
@@ -409,56 +360,42 @@ impl ManifestVerifier {
             } else {
                 ret.push((inputs, outputs, discard));
                 if inputs != acc {
-                    let err = Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: "manifest does not continue with accumulated setsum".to_string(),
-                    }
-                    .with_info("inputs", inputs.hexdigest())
-                    .with_info("acc", acc.hexdigest())
-                    .with_info("fragment", entry.to_string_lossy());
+                    let err = corruption("manifest does not continue with accumulated setsum")
+                        .with_debug_field("inputs", inputs.hexdigest())
+                        .with_debug_field("acc", acc.hexdigest())
+                        .with_debug_field("fragment", entry.to_string_lossy());
                     return Err(err);
                 }
                 if inputs != outputs + discard {
-                    let err = Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: "manifest does not balance inputs == outputs + discard"
-                            .to_string(),
-                    }
-                    .with_info("inputs", inputs.hexdigest())
-                    .with_info("outputs", outputs.hexdigest())
-                    .with_info("discard", discard.hexdigest())
-                    .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
-                    .with_info("inputs - outputs", (inputs - outputs).hexdigest());
+                    let err = corruption("manifest does not balance inputs == outputs + discard")
+                        .with_debug_field("inputs", inputs.hexdigest())
+                        .with_debug_field("outputs", outputs.hexdigest())
+                        .with_debug_field("discard", discard.hexdigest())
+                        .with_debug_field("discard^-1", (Setsum::default() - discard).hexdigest())
+                        .with_debug_field("inputs - outputs", (inputs - outputs).hexdigest());
                     return Err(err);
                 }
             }
             let mut computed_discard = Setsum::default();
             for added in edit.added() {
-                let setsum = Setsum::from_hexdigest(added).ok_or(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("manifest added has bad digest: {added}"),
-                })?;
+                let setsum = Setsum::from_hexdigest(added)
+                    .ok_or_else(|| corruption(format!("manifest added has bad digest: {added}")))?;
                 computed_discard -= setsum;
             }
             for rmed in edit.rmed() {
-                let setsum = Setsum::from_hexdigest(rmed).ok_or(Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: format!("manifest rmed has bad digest: {rmed}"),
-                })?;
+                let setsum = Setsum::from_hexdigest(rmed)
+                    .ok_or_else(|| corruption(format!("manifest rmed has bad digest: {rmed}")))?;
                 computed_discard += setsum;
             }
             if !first {
                 if discard != computed_discard {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        context: format!(
+                    return Err(corruption(format!(
                             "manifest has bad discard: expected {discard:?}, but got {computed_discard:?}"
-                        ),
-                    })
-                    .with_info("discard", discard.hexdigest())
-                    .with_info("discard^-1", (Setsum::default() - discard).hexdigest())
-                    .with_info("computed_discard", computed_discard.hexdigest())
-                    .with_info("computed_discard^-1", (Setsum::default() - computed_discard).hexdigest());
+                        ))
+                    .with_debug_field("discard", discard.hexdigest())
+                    .with_debug_field("discard^-1", (Setsum::default() - discard).hexdigest())
+                    .with_debug_field("computed_discard", computed_discard.hexdigest())
+                    .with_debug_field("computed_discard^-1", (Setsum::default() - computed_discard).hexdigest()));
                 }
                 acc -= computed_discard;
             }
@@ -470,47 +407,37 @@ impl ManifestVerifier {
 
 /////////////////////////////////////////////// utils //////////////////////////////////////////////
 
-fn basename_string<P: AsRef<Path>>(path: P) -> Result<String, Error> {
+fn basename_string<P: AsRef<Path>>(path: P) -> Result<String, SError> {
     if let Some(file_name) = path.as_ref().file_name() {
         let file_name_string = file_name.to_string_lossy().to_string();
         if PathBuf::from(&file_name_string) != file_name {
-            Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: "file name contains lossy characters".to_string(),
-            })
-            .with_info("path", path.as_ref().to_string_lossy())
+            Err(corruption("file name contains lossy characters"))
+                .with_debug_field("path", path.as_ref().to_string_lossy())
         } else {
             Ok(file_name_string)
         }
     } else {
-        Err(Error::Corruption {
-            core: ErrorCore::default(),
-            context: "file name has no basename".to_string(),
-        })
-        .with_info("path", path.as_ref().to_string_lossy())
+        Err(corruption("file name has no basename"))
+            .with_debug_field("path", path.as_ref().to_string_lossy())
     }
 }
 
-fn setsum_from_info(info: char, value: Option<&String>) -> Result<Setsum, Error> {
+fn setsum_from_info(info: char, value: Option<&String>) -> Result<Setsum, SError> {
     let hex_digest = match value {
         Some(hex_digest) => hex_digest,
         None => {
-            return Err(Error::Corruption {
-                core: ErrorCore::default(),
-                context: format!("manifest edit missing '{info}'"),
-            });
+            return Err(corruption(format!("manifest edit missing '{info}'")));
         }
     };
     match Setsum::from_hexdigest(hex_digest) {
         Some(setsum) => Ok(setsum),
-        None => Err(Error::Corruption {
-            core: ErrorCore::default(),
-            context: format!("manifest '{info}' field has bad digest: {hex_digest}"),
-        }),
+        None => Err(corruption(format!(
+            "manifest '{info}' field has bad digest: {hex_digest}"
+        ))),
     }
 }
 
-fn setsum_from_info_default(info: char, value: Option<&str>) -> Result<Setsum, Error> {
+fn setsum_from_info_default(info: char, value: Option<&str>) -> Result<Setsum, SError> {
     let hex_digest = match value {
         Some(hex_digest) => hex_digest,
         None => {
@@ -519,16 +446,15 @@ fn setsum_from_info_default(info: char, value: Option<&str>) -> Result<Setsum, E
     };
     match Setsum::from_hexdigest(hex_digest) {
         Some(setsum) => Ok(setsum),
-        None => Err(Error::Corruption {
-            core: ErrorCore::default(),
-            context: format!("manifest '{info}' field has bad digest: {hex_digest}"),
-        }),
+        None => Err(corruption(format!(
+            "manifest '{info}' field has bad digest: {hex_digest}"
+        ))),
     }
 }
 
 ////////////////////////////////////////// public helpers //////////////////////////////////////////
 
-pub fn list_mani_fragments<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>, Error> {
+pub fn list_mani_fragments<P: AsRef<Path>>(root: P) -> Result<Vec<PathBuf>, SError> {
     let mut entries = vec![];
     let mani_root = MANI_ROOT(root.as_ref());
     for entry in read_dir(&mani_root)? {

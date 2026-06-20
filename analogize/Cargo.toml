@@ -23,14 +23,12 @@ arrrg = { workspace = true }
 arrrg_derive = { workspace = true }
 buffertk = { workspace = true }
 guacamole = { workspace = true }
+handled = { workspace = true }
 indicio = { workspace = true, features = ["prototk"] }
 mani = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 scrunch = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
-zerror_derive = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

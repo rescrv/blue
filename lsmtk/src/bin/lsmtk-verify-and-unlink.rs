@@ -3,9 +3,8 @@ use std::time::SystemTime;
 
 use arrrg::CommandLine;
 use biometrics::{Collector, PlainTextEmitter};
-use zerror::Z;
 
-use lsmtk::{Error, IoToZ, LsmVerifier, LsmtkOptions};
+use lsmtk::{LsmVerifier, LsmtkOptions};
 
 fn main() {
     let (options, free) =
@@ -33,15 +32,17 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(249));
         }
     });
-    let mut verifier = LsmVerifier::open(options).as_z().pretty_unwrap();
+    let mut verifier = LsmVerifier::open(options).unwrap_or_else(|err| panic!("{err}"));
     loop {
         std::thread::sleep(std::time::Duration::from_millis(1_000));
         let ret = verifier.verify();
-        if let Err(Error::Backoff { path, .. }) = ret {
+        if let Err(err) = ret.as_ref()
+            && let Some(path) = lsmtk::backoff_path(err)
+        {
             // TODO(rescrv):  Output this error if we wait more than too many seconds.
             _ = path;
         } else if let Err(err) = ret {
-            eprintln!("error:\n{}", err.long_form());
+            eprintln!("error:\n{err}");
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Error, coding};
+use crate::{SError, coding, coding_error, internal_error};
 
 /////////////////////////////////////////// DeltaEncoder ///////////////////////////////////////////
 
@@ -13,10 +13,10 @@ impl DeltaEncoder {
         self.bits
     }
 
-    pub fn push(&mut self, q_word: u64) -> Result<(), Error> {
+    pub fn push(&mut self, q_word: u64) -> Result<(), SError> {
         let (mut encoded, mut encoded_sz) = coding::delta(q_word);
         if (self.bits + encoded_sz) >> 3 >= 1 << 16 {
-            return Err(Error::internal("encoder overrun:  too many bytes"));
+            return Err(internal_error("encoder overrun:  too many bytes"));
         }
         let bit_offset = self.bits & 7;
         let mut bytes_idx = 3 + (self.bits >> 3);
@@ -72,7 +72,7 @@ struct DeltaSliceDecoder<'a> {
 
 impl<'a> DeltaSliceDecoder<'a> {
     #[cfg(test)]
-    fn new(bytes: &'a [u8]) -> Result<Self, Error> {
+    fn new(bytes: &'a [u8]) -> Result<Self, SError> {
         let (bits, bytes_len) = Self::bits_and_bytes(bytes)?;
         let bytes = &bytes[..bytes_len];
         Ok(Self::from_bits_and_bytes(bits, bytes))
@@ -91,16 +91,16 @@ impl<'a> DeltaSliceDecoder<'a> {
         }
     }
 
-    fn bits_and_bytes(bytes: &[u8]) -> Result<(usize, usize), Error> {
+    fn bits_and_bytes(bytes: &[u8]) -> Result<(usize, usize), SError> {
         if bytes.len() < 3 {
-            return Err(Error::internal(format!(
+            return Err(internal_error(format!(
                 "expected at least three bytes in buffer; had: {}",
                 bytes.len()
             )));
         }
         let bytes_in_buffer = bytes[1] as usize | ((bytes[2] as usize) << 8);
         if bytes_in_buffer < 3 {
-            return Err(Error::internal(format!(
+            return Err(internal_error(format!(
                 "expected at buffer length to be at least 3; had: {bytes_in_buffer}"
             )));
         }
@@ -108,7 +108,7 @@ impl<'a> DeltaSliceDecoder<'a> {
         let bits = (bytes_in_buffer - 1) * 8 + bits_in_last_byte;
         assert_eq!(bits.div_ceil(8), bytes_in_buffer);
         if bytes.len() < bytes_in_buffer {
-            return Err(Error::internal(format!(
+            return Err(internal_error(format!(
                 "buffer length was {}, but only had {} bytes",
                 bytes_in_buffer,
                 bytes.len()
@@ -119,7 +119,7 @@ impl<'a> DeltaSliceDecoder<'a> {
 }
 
 impl Iterator for DeltaSliceDecoder<'_> {
-    type Item = Result<u64, Error>;
+    type Item = Result<u64, SError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -132,7 +132,7 @@ impl Iterator for DeltaSliceDecoder<'_> {
                 return None;
             } else if self.encoded_sz > coding::MAX_BITS_FOR_GAMMA {
                 self.next_offset_to_load = self.bits;
-                return Some(Err(Error::coding(format!(
+                return Some(Err(coding_error(format!(
                     "encoded_sz={:?} exceeds max bits for gamma at offset={}",
                     self.encoded_sz, self.next_offset_to_load
                 ))));
@@ -178,7 +178,7 @@ impl<'a> DeltaDecoder<'a> {
 }
 
 impl Iterator for DeltaDecoder<'_> {
-    type Item = Result<u64, Error>;
+    type Item = Result<u64, SError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

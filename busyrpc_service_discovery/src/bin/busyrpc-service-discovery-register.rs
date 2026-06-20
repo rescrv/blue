@@ -1,7 +1,7 @@
 use arrrg::CommandLine;
 use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
 use prototk::FieldNumber;
-use rpc_pb::{Host, IoToZ};
+use rpc_pb::Host;
 use tuple_key::{Direction, TupleKey};
 use tuple_routing::{Binding, RegisterRequest, ServiceDiscovery};
 
@@ -59,5 +59,5 @@ fn main() {
         });
     }
     let req = RegisterRequest { bindings };
-    sd.register(&ctx, req).as_z().pretty_unwrap();
+    sd.register(&ctx, req).unwrap_or_else(|err| panic!("{err}"));
 }

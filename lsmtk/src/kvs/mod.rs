@@ -11,14 +11,12 @@ use sst::merging_cursor::MergingCursor;
 use sst::pruning_cursor::PruningCursor;
 use sst::{Builder, Cursor, KeyValuePair, KeyValueRef, SstBuilder, check_key_len, check_value_len};
 use sync42::wait_list::WaitList;
-use zerror::Z;
-use zerror_core::ErrorCore;
 
 mod memtable;
 
 use crate::{
-    Error, LOG_FILE, LsmTree, LsmtkOptions, MANI_ROOT, SST_FILE, TEMP_FILE, TEMP_ROOT, TRASH_ROOT,
-    ensure_dir, make_all_dirs, parse_log_file,
+    LOG_FILE, LsmTree, LsmtkOptions, MANI_ROOT, SError, SST_FILE, TEMP_FILE, TEMP_ROOT, TRASH_ROOT,
+    corruption, ensure_dir, logic_error, make_all_dirs, parse_log_file,
 };
 use memtable::MemTable;
 
@@ -92,7 +90,7 @@ pub struct KeyValueStore {
 }
 
 impl KeyValueStore {
-    pub fn open(options: LsmtkOptions) -> Result<Self, Error> {
+    pub fn open(options: LsmtkOptions) -> Result<Self, SError> {
         let root: PathBuf = PathBuf::from(&options.path);
         ensure_dir(root.clone(), "root")?;
         make_all_dirs(&root)?;
@@ -139,7 +137,7 @@ impl KeyValueStore {
         })
     }
 
-    fn recover(options: &LsmtkOptions, mani: &mut Manifest) -> Result<u64, Error> {
+    fn recover(options: &LsmtkOptions, mani: &mut Manifest) -> Result<u64, SError> {
         let mut numbers = vec![];
         for entry in read_dir(&options.path)? {
             if let Some(number) = parse_log_file(entry?.file_name()) {
@@ -154,7 +152,11 @@ impl KeyValueStore {
         Ok(seq_no)
     }
 
-    fn recover_one(options: &LsmtkOptions, number: u64, mani: &mut Manifest) -> Result<u64, Error> {
+    fn recover_one(
+        options: &LsmtkOptions,
+        number: u64,
+        mani: &mut Manifest,
+    ) -> Result<u64, SError> {
         let log_path = LOG_FILE(&options.path, number);
         let out = TEMP_ROOT(&options.path).join(format!("log.{number}.sst"));
         if out.exists() {
@@ -198,15 +200,15 @@ impl KeyValueStore {
         Ok(md.biggest_timestamp)
     }
 
-    pub fn compaction_thread(&self) -> Result<(), Error> {
+    pub fn compaction_thread(&self) -> Result<(), SError> {
         self.poison(self.tree.compaction_thread())
     }
 
-    pub fn memtable_thread(&self) -> Result<(), Error> {
+    pub fn memtable_thread(&self) -> Result<(), SError> {
         self.poison(self._memtable_thread())
     }
 
-    pub fn _memtable_thread(&self) -> Result<(), Error> {
+    pub fn _memtable_thread(&self) -> Result<(), SError> {
         let _memtable_mutex = self.memtable_mutex.lock().unwrap();
         loop {
             let (imm, imm_log, imm_path, imm_trigger) = {
@@ -235,23 +237,18 @@ impl KeyValueStore {
                 self.wait_list.notify_head();
                 (imm, imm_log, imm_path, imm_trigger)
             };
-            self.poison::<(), Error>(Ok(()))?;
+            self.poison::<(), SError>(Ok(()))?;
             if Arc::strong_count(&imm_log) != 1 {
-                return Err(Error::LogicError {
-                    core: ErrorCore::default(),
-                    context:
-                        "ordering invariant violated; someone still holds a reference to mem_log"
-                            .to_string(),
-                });
+                return Err(logic_error(
+                    "ordering invariant violated; someone still holds a reference to mem_log",
+                ));
             }
             let imm_setsum = match Arc::try_unwrap(imm_log) {
                 Ok(log) => self.poison(log.seal())?.0.into_inner(),
                 Err(_) => {
-                    return Err(Error::LogicError {
-                        core: ErrorCore::default(),
-                        context: "Arc::try_unwrap failed after strong count was confirmed to be 1"
-                            .to_string(),
-                    });
+                    return Err(logic_error(
+                        "Arc::try_unwrap failed after strong count was confirmed to be 1",
+                    ));
                 }
             };
             let sst_path = TEMP_FILE(&self.root, imm_setsum);
@@ -267,12 +264,9 @@ impl KeyValueStore {
             }
             let got_setsum = builder.seal()?.fast_setsum().into_inner();
             if got_setsum != imm_setsum {
-                let err = Error::Corruption {
-                    core: ErrorCore::default(),
-                    context: "Memtable checksum inconsistent".to_string(),
-                }
-                .with_info("got", got_setsum.hexdigest())
-                .with_info("imm", imm_setsum.hexdigest());
+                let err = corruption("Memtable checksum inconsistent")
+                    .with_debug_field("got", got_setsum.hexdigest())
+                    .with_debug_field("imm", imm_setsum.hexdigest());
                 return Err(err);
             }
             self.tree._ingest(&sst_path, Some(imm_trigger))?;
@@ -290,7 +284,7 @@ impl KeyValueStore {
     fn start_new_log(
         log_path: &PathBuf,
         options: LogOptions,
-    ) -> Result<Arc<ConcurrentLogBuilder<File>>, Error> {
+    ) -> Result<Arc<ConcurrentLogBuilder<File>>, SError> {
         let log = ConcurrentLogBuilder::new(options, log_path)?;
         Ok(Arc::new(log))
     }
@@ -304,12 +298,12 @@ impl KeyValueStore {
         lock_guard
     }
 
-    fn poison<T, E: Into<Error>>(&self, res: Result<T, E>) -> Result<T, Error> {
+    fn poison<T, E: Into<SError>>(&self, res: Result<T, E>) -> Result<T, SError> {
         // TODO(rescrv): Actually poison here.
         res.map_err(|e| e.into())
     }
 
-    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), Error> {
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<(), SError> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         check_value_len(value)?;
@@ -324,7 +318,7 @@ impl KeyValueStore {
         self.write(wb)
     }
 
-    pub fn del(&self, key: &[u8]) -> Result<(), Error> {
+    pub fn del(&self, key: &[u8]) -> Result<(), SError> {
         let mut wb = WriteBatch::with_capacity(1);
         check_key_len(key)?;
         let key = key.to_vec();
@@ -338,7 +332,7 @@ impl KeyValueStore {
         self.write(wb)
     }
 
-    pub fn write(&self, mut batch: WriteBatch) -> Result<(), Error> {
+    pub fn write(&self, mut batch: WriteBatch) -> Result<(), SError> {
         let (mut wait_guard, memtable, log) = {
             let mut state = self.state.lock().unwrap();
             let wait_guard = self.wait_list.link(());
@@ -373,7 +367,7 @@ impl KeyValueStore {
         Ok(())
     }
 
-    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, Error> {
+    pub fn load(&self, key: &[u8], is_tombstone: &mut bool) -> Result<Option<Vec<u8>>, SError> {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);
@@ -400,7 +394,7 @@ impl KeyValueStore {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<impl Cursor, Error> {
+    ) -> Result<impl Cursor, SError> {
         let (mem, imm, version, timestamp) = {
             let state = self.state.lock().unwrap();
             let mem = Arc::clone(&state.mem);

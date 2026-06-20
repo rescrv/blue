@@ -3,8 +3,10 @@
 use std::hash::Hash;
 
 use buffertk::{Unpackable, v64};
-use zerror::{Z, iotoz};
-use zerror_core::ErrorCore;
+pub use handled::SError;
+use handled::SExpr;
+#[cfg(test)]
+use handled::extract_string;
 
 pub use prototk::{FieldNumber, WireType};
 pub use tuple_key::{Direction, KeyDataType, TupleKey, TupleKeyIterator};
@@ -18,145 +20,172 @@ pub use parser::ParseError;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
-#[derive(Clone, prototk_derive::Message, zerror_derive::Z)]
-pub enum Error {
-    #[prototk(507904, message)]
-    Success {
-        #[prototk(1, message)]
-        core: ErrorCore,
-    },
-    #[prototk(507905, message)]
-    TupleKeyError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        error: tuple_key::Error,
-    },
-    #[prototk(507906, message)]
-    LogicError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507907, message)]
-    Corruption {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507908, message)]
-    DuplicateIdentifier {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        ident: String,
-    },
-    #[prototk(507909, message)]
-    DuplicateFieldNumber {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, uint32)]
-        number: u32,
-    },
-    #[prototk(507910, message)]
-    InvalidKeyType {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, message)]
-        data_type: DataType,
-    },
-    #[prototk(507911, message)]
-    BreakoutKey {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        ident: String,
-    },
-    #[prototk(507912, message)]
-    ParseError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        err: String,
-    },
-    #[prototk(507913, message)]
-    InvalidNumberLiteral {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        as_str: String,
-    },
-    #[prototk(507914, message)]
-    SchemaIncompatibility {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507915, message)]
-    UnknownTable {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        ident: String,
-    },
-    #[prototk(507916, message)]
-    UnknownField {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        ident: String,
-    },
-    #[prototk(507917, message)]
-    InvalidSchema {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507918, message)]
-    InvalidQuery {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507919, message)]
-    InvalidKey {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
-    #[prototk(507920, message)]
-    ExecutionError {
-        #[prototk(1, message)]
-        core: ErrorCore,
-        #[prototk(2, string)]
-        what: String,
-    },
+const PHASE: &str = "protoql";
+
+/// A tuple-key operation failed.
+pub const CODE_TUPLE_KEY_ERROR: &str = "tuple-key-error";
+/// An internal invariant was violated.
+pub const CODE_LOGIC_ERROR: &str = "logic-error";
+/// Encoded data is corrupt or not representable in a schema.
+pub const CODE_CORRUPTION: &str = "corruption";
+/// An identifier is duplicated within a schema scope.
+pub const CODE_DUPLICATE_IDENTIFIER: &str = "duplicate-identifier";
+/// A field number is duplicated within a schema scope.
+pub const CODE_DUPLICATE_FIELD_NUMBER: &str = "duplicate-field-number";
+/// A key type is not valid in the current context.
+pub const CODE_INVALID_KEY_TYPE: &str = "invalid-key-type";
+/// A breakout key is invalid.
+pub const CODE_BREAKOUT_KEY: &str = "breakout-key";
+/// ProtoQL text failed to parse.
+pub const CODE_PARSE_ERROR: &str = "parse-error";
+/// A numeric literal could not be parsed.
+pub const CODE_INVALID_NUMBER_LITERAL: &str = "invalid-number-literal";
+/// Two schema entries are incompatible.
+pub const CODE_SCHEMA_INCOMPATIBILITY: &str = "schema-incompatibility";
+/// A table identifier was not found.
+pub const CODE_UNKNOWN_TABLE: &str = "unknown-table";
+/// A field identifier was not found.
+pub const CODE_UNKNOWN_FIELD: &str = "unknown-field";
+/// The schema is invalid.
+pub const CODE_INVALID_SCHEMA: &str = "invalid-schema";
+/// The query is invalid.
+pub const CODE_INVALID_QUERY: &str = "invalid-query";
+/// A key is invalid.
+pub const CODE_INVALID_KEY: &str = "invalid-key";
+/// Query execution failed.
+pub const CODE_EXECUTION_ERROR: &str = "execution-error";
+
+fn error(code: &str) -> SError {
+    SError::new(PHASE).with_code(code)
 }
 
-impl Default for Error {
-    fn default() -> Self {
-        Self::Success {
-            core: ErrorCore::default(),
-        }
+#[allow(dead_code)]
+fn tuple_key_error(err: SError) -> SError {
+    error(CODE_TUPLE_KEY_ERROR)
+        .with_message("tuple key error")
+        .with_string_field("cause", &err.to_string())
+}
+
+fn logic_error(what: impl AsRef<str>) -> SError {
+    error(CODE_LOGIC_ERROR)
+        .with_message("protoql logic error")
+        .with_string_field("what", what.as_ref())
+}
+
+fn corruption(what: impl AsRef<str>) -> SError {
+    error(CODE_CORRUPTION)
+        .with_message("protoql corruption")
+        .with_string_field("what", what.as_ref())
+}
+
+fn duplicate_identifier(ident: impl AsRef<str>) -> SError {
+    error(CODE_DUPLICATE_IDENTIFIER)
+        .with_message("duplicate identifier")
+        .with_string_field("ident", ident.as_ref())
+}
+
+fn duplicate_field_number(number: u32) -> SError {
+    error(CODE_DUPLICATE_FIELD_NUMBER)
+        .with_message("duplicate field number")
+        .with_atom_field("number", number)
+}
+
+#[allow(dead_code)]
+fn invalid_key_type(data_type: DataType) -> SError {
+    error(CODE_INVALID_KEY_TYPE)
+        .with_message("invalid key type")
+        .with_debug_field("data_type", data_type)
+}
+
+#[allow(dead_code)]
+fn breakout_key(ident: impl AsRef<str>) -> SError {
+    error(CODE_BREAKOUT_KEY)
+        .with_message("invalid breakout key")
+        .with_string_field("ident", ident.as_ref())
+}
+
+fn parse_error(err: ParseError) -> SError {
+    error(CODE_PARSE_ERROR)
+        .with_message("protoql parse error")
+        .with_string_field("err", &err.to_string())
+}
+
+fn invalid_number_literal(as_str: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_NUMBER_LITERAL)
+        .with_message("invalid number literal")
+        .with_string_field("as_str", as_str.as_ref())
+}
+
+fn schema_incompatibility(what: impl AsRef<str>) -> SError {
+    error(CODE_SCHEMA_INCOMPATIBILITY)
+        .with_message("schema incompatibility")
+        .with_string_field("what", what.as_ref())
+}
+
+fn error_field<'a>(err: &'a SError, name: &str) -> Option<&'a SExpr> {
+    match err.detail() {
+        SExpr::List(fields) => fields.iter().find_map(|field| match field {
+            SExpr::List(pair) if pair.len() == 2 => match &pair[0] {
+                SExpr::Atom(field_name) if field_name == name => Some(&pair[1]),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
-impl From<ParseError> for Error {
-    fn from(err: ParseError) -> Self {
-        Self::ParseError {
-            core: ErrorCore::default(),
-            err: err.to_string(),
-        }
+pub fn error_code(err: &SError) -> Option<&str> {
+    match error_field(err, "code") {
+        Some(SExpr::Atom(code)) => Some(code.as_str()),
+        _ => None,
     }
 }
 
-iotoz! {Error}
+#[cfg(test)]
+fn error_string_field(err: &SError, name: &str) -> Option<String> {
+    error_field(err, name).map(extract_string)
+}
+
+fn unknown_table(ident: impl AsRef<str>) -> SError {
+    error(CODE_UNKNOWN_TABLE)
+        .with_message("unknown table")
+        .with_string_field("ident", ident.as_ref())
+}
+
+fn unknown_field(ident: impl AsRef<str>) -> SError {
+    error(CODE_UNKNOWN_FIELD)
+        .with_message("unknown field")
+        .with_string_field("ident", ident.as_ref())
+}
+
+#[allow(dead_code)]
+fn invalid_schema(what: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_SCHEMA)
+        .with_message("invalid schema")
+        .with_string_field("what", what.as_ref())
+}
+
+#[allow(dead_code)]
+fn invalid_query(what: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_QUERY)
+        .with_message("invalid query")
+        .with_string_field("what", what.as_ref())
+}
+
+#[allow(dead_code)]
+fn invalid_key(what: impl AsRef<str>) -> SError {
+    error(CODE_INVALID_KEY)
+        .with_message("invalid key")
+        .with_string_field("what", what.as_ref())
+}
+
+#[allow(dead_code)]
+fn execution_error(what: impl AsRef<str>) -> SError {
+    error(CODE_EXECUTION_ERROR)
+        .with_message("execution error")
+        .with_string_field("what", what.as_ref())
+}
 
 ///////////////////////////////////////////// DataType /////////////////////////////////////////////
 
@@ -386,8 +415,8 @@ impl Identifier {
         Identifier::parse(ident).expect("parse to always succeed")
     }
 
-    pub fn parse<S: AsRef<str>>(ident: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::identifier)(ident.as_ref())?)
+    pub fn parse<S: AsRef<str>>(ident: S) -> Result<Self, SError> {
+        parser::parse_all(parser::identifier)(ident.as_ref()).map_err(parse_error)
     }
 
     pub fn to_camel_case(&self) -> String {
@@ -438,7 +467,7 @@ impl Key {
         number: FieldNumber,
         ty: KeyDataType,
         dir: Direction,
-    ) -> Result<Key, Error> {
+    ) -> Result<Key, SError> {
         Ok(Self {
             ident,
             number,
@@ -447,8 +476,8 @@ impl Key {
         })
     }
 
-    pub fn parse<S: AsRef<str>>(key: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::key)(key.as_ref())?)
+    pub fn parse<S: AsRef<str>>(key: S) -> Result<Self, SError> {
+        parser::parse_all(parser::key)(key.as_ref()).map_err(parse_error)
     }
 
     pub fn to_protoql(&self) -> String {
@@ -483,7 +512,7 @@ impl Field {
         number: FieldNumber,
         ty: DataType,
         breakout: bool,
-    ) -> Result<Field, Error> {
+    ) -> Result<Field, SError> {
         Ok(Self {
             ident,
             number,
@@ -496,8 +525,8 @@ impl Field {
         self.breakout
     }
 
-    pub fn parse<S: AsRef<str>>(field: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::field)(field.as_ref())?)
+    pub fn parse<S: AsRef<str>>(field: S) -> Result<Self, SError> {
+        parser::parse_all(parser::field)(field.as_ref()).map_err(parse_error)
     }
 
     pub fn to_protoql(&self) -> String {
@@ -555,7 +584,7 @@ impl Object {
         ident: Identifier,
         number: FieldNumber,
         fields: Vec<FieldDefinition>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         check_fields(&fields)?;
         Ok(Self {
             ident,
@@ -564,20 +593,17 @@ impl Object {
         })
     }
 
-    pub fn parse<S: AsRef<str>>(object: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::object)(object.as_ref())?)
+    pub fn parse<S: AsRef<str>>(object: S) -> Result<Self, SError> {
+        parser::parse_all(parser::object)(object.as_ref()).map_err(parse_error)
     }
 
-    pub fn lookup_field(&self, ident: &Identifier) -> Result<&FieldDefinition, Error> {
+    pub fn lookup_field(&self, ident: &Identifier) -> Result<&FieldDefinition, SError> {
         for field in self.fields.iter() {
             if field.ident() == ident {
                 return Ok(field);
             }
         }
-        Err(Error::UnknownField {
-            core: ErrorCore::default(),
-            ident: ident.to_string(),
-        })
+        Err(unknown_field(ident.to_string()))
     }
 
     pub fn to_protoql(&self) -> String {
@@ -642,25 +668,22 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(key: Key, fields: Vec<FieldDefinition>) -> Result<Self, Error> {
+    pub fn new(key: Key, fields: Vec<FieldDefinition>) -> Result<Self, SError> {
         check_fields(&fields)?;
         Ok(Self { key, fields })
     }
 
-    pub fn parse<S: AsRef<str>>(map: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::map_field)(map.as_ref())?)
+    pub fn parse<S: AsRef<str>>(map: S) -> Result<Self, SError> {
+        parser::parse_all(parser::map_field)(map.as_ref()).map_err(parse_error)
     }
 
-    pub fn lookup_field(&self, ident: &Identifier) -> Result<&FieldDefinition, Error> {
+    pub fn lookup_field(&self, ident: &Identifier) -> Result<&FieldDefinition, SError> {
         for field in self.fields.iter() {
             if field.ident() == ident {
                 return Ok(field);
             }
         }
-        Err(Error::UnknownField {
-            core: ErrorCore::default(),
-            ident: ident.to_string(),
-        })
+        Err(unknown_field(ident.to_string()))
     }
 
     pub fn to_protoql(&self) -> String {
@@ -735,7 +758,7 @@ impl Join {
         number: FieldNumber,
         join_table: Identifier,
         join_keys: Vec<Identifier>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         Ok(Self {
             ident,
             number,
@@ -744,8 +767,8 @@ impl Join {
         })
     }
 
-    pub fn parse<S: AsRef<str>>(join: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::join)(join.as_ref())?)
+    pub fn parse<S: AsRef<str>>(join: S) -> Result<Self, SError> {
+        parser::parse_all(parser::join)(join.as_ref()).map_err(parse_error)
     }
 
     pub fn to_protoql(&self) -> String {
@@ -784,8 +807,8 @@ pub enum FieldDefinition {
 }
 
 impl FieldDefinition {
-    pub fn parse<S: AsRef<str>>(fd: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::field_definition)(fd.as_ref())?)
+    pub fn parse<S: AsRef<str>>(fd: S) -> Result<Self, SError> {
+        parser::parse_all(parser::field_definition)(fd.as_ref()).map_err(parse_error)
     }
 
     pub fn ident(&self) -> &Identifier {
@@ -850,22 +873,16 @@ impl Table {
         number: FieldNumber,
         key: Vec<Key>,
         fields: Vec<FieldDefinition>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         check_key(&key)?;
         check_fields(&fields)?;
         for k in key.iter() {
             for f in fields.iter() {
                 if k.ident == *f.ident() {
-                    return Err(Error::DuplicateIdentifier {
-                        core: ErrorCore::default(),
-                        ident: k.ident.to_string(),
-                    });
+                    return Err(duplicate_identifier(k.ident.to_string()));
                 }
                 if k.number == f.field_number() {
-                    return Err(Error::DuplicateFieldNumber {
-                        core: ErrorCore::default(),
-                        number: k.number.get(),
-                    });
+                    return Err(duplicate_field_number(k.number.get()));
                 }
             }
         }
@@ -877,11 +894,11 @@ impl Table {
         })
     }
 
-    pub fn parse<S: AsRef<str>>(table: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::table)(table.as_ref())?)
+    pub fn parse<S: AsRef<str>>(table: S) -> Result<Self, SError> {
+        parser::parse_all(parser::table)(table.as_ref()).map_err(parse_error)
     }
 
-    pub fn lookup_field(&self, ident: &Identifier) -> Result<FieldDefinition, Error> {
+    pub fn lookup_field(&self, ident: &Identifier) -> Result<FieldDefinition, SError> {
         for k in self.key.iter() {
             if k.ident == *ident {
                 return Ok(FieldDefinition::Field(k.into()));
@@ -892,10 +909,7 @@ impl Table {
                 return Ok(f.clone());
             }
         }
-        Err(Error::UnknownField {
-            core: ErrorCore::default(),
-            ident: ident.to_string(),
-        })
+        Err(unknown_field(ident.to_string()))
     }
 
     pub fn to_protoql(&self) -> String {
@@ -973,25 +987,22 @@ pub struct TableSet {
 }
 
 impl TableSet {
-    pub fn new(tables: Vec<Table>) -> Result<Self, Error> {
+    pub fn new(tables: Vec<Table>) -> Result<Self, SError> {
         check_tables(&tables)?;
         Ok(Self { tables })
     }
 
-    pub fn parse<S: AsRef<str>>(table_set: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::table_set)(table_set.as_ref())?)
+    pub fn parse<S: AsRef<str>>(table_set: S) -> Result<Self, SError> {
+        parser::parse_all(parser::table_set)(table_set.as_ref()).map_err(parse_error)
     }
 
-    pub fn lookup_table(&self, ident: &Identifier) -> Result<&Table, Error> {
+    pub fn lookup_table(&self, ident: &Identifier) -> Result<&Table, SError> {
         for table in self.tables.iter() {
             if table.ident == *ident {
                 return Ok(table);
             }
         }
-        Err(Error::UnknownTable {
-            core: ErrorCore::default(),
-            ident: ident.to_string(),
-        })
+        Err(unknown_table(ident.to_string()))
     }
 
     pub fn to_protoql(&self) -> String {
@@ -1050,7 +1061,7 @@ impl Schema {
     }
 
     #[allow(dead_code)]
-    fn add_to_schema(&mut self, entry: SchemaEntry) -> Result<(), Error> {
+    fn add_to_schema(&mut self, entry: SchemaEntry) -> Result<(), SError> {
         let mut prefixes = Vec::new();
         prefixes.push(entry.clone());
         while let Some(back) = prefixes[prefixes.len() - 1].prefix() {
@@ -1075,7 +1086,7 @@ impl Schema {
         Ok(())
     }
 
-    fn lookup_schema_for_key(&self, key: &[u8]) -> Result<Option<&SchemaEntry>, Error> {
+    fn lookup_schema_for_key(&self, key: &[u8]) -> Result<Option<&SchemaEntry>, SError> {
         let mut tki = TupleKeyIterator::from(key);
         let mut fields = Vec::new();
         'looping: loop {
@@ -1088,51 +1099,36 @@ impl Schema {
             let _ = match tki.next() {
                 Some(value) => value,
                 None => {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: "tuple key should always have fields in pairs".to_owned(),
-                    });
+                    return Err(corruption("tuple key should always have fields in pairs"));
                 }
             };
-            fn to_field_number(buf: &[u8]) -> Result<(FieldNumber, KeyDataType, Direction), Error> {
+            fn to_field_number(
+                buf: &[u8],
+            ) -> Result<(FieldNumber, KeyDataType, Direction), SError> {
                 let mut copy = [0u8; 10];
                 let sz = std::cmp::min(buf.len(), copy.len());
                 for (c, b) in std::iter::zip(&mut copy[..sz], &buf[..sz]) {
                     *c = b.rotate_right(1);
                 }
                 let x: v64 = v64::unpack(&copy[..sz])
-                    .map_err(|err| Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("unparseable field number: {err}"),
-                    })
-                    .as_z()
-                    .with_info("bytes", &copy[..sz])?
+                    .map_err(|err| {
+                        corruption(format!("unparseable field number: {err}"))
+                            .with_debug_field("bytes", &copy[..sz])
+                    })?
                     .0;
                 let x: u64 = x.into();
                 if x >> 4 >= u32::MAX as u64 {
-                    return Err(Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: "invalid field number".to_owned(),
-                    })
-                    .as_z()
-                    .with_info("x", x);
+                    return Err(corruption("invalid field number").with_atom_field("x", x));
                 }
-                let f = FieldNumber::new((x >> 4) as u32)
-                    .map_err(|err| Error::Corruption {
-                        core: ErrorCore::default(),
-                        what: format!("invalid field number: {err}"),
-                    })
-                    .as_z()
-                    .with_info("field number", x >> 4)?;
+                let f = FieldNumber::new((x >> 4) as u32).map_err(|err| {
+                    corruption(format!("invalid field number: {err}"))
+                        .with_atom_field("field_number", x >> 4)
+                })?;
                 let (v, d) = match tuple_key::from_discriminant(x as u8 & 15) {
                     Some((v, d)) => (v, d),
                     None => {
-                        return Err(Error::Corruption {
-                            core: ErrorCore::default(),
-                            what: "invalid discriminant".to_owned(),
-                        })
-                        .as_z()
-                        .with_info("discriminant", x & 15);
+                        return Err(corruption("invalid discriminant")
+                            .with_atom_field("discriminant", x & 15));
                     }
                 };
                 Ok((f, v, d))
@@ -1148,7 +1144,7 @@ impl Schema {
         Ok(None)
     }
 
-    fn check_self_compatible(&self) -> Result<(), Error> {
+    fn check_self_compatible(&self) -> Result<(), SError> {
         for entry_lhs in self.entries.iter() {
             for entry_rhs in self.entries.iter() {
                 entry_lhs.check_compatibility(entry_rhs)?;
@@ -1157,7 +1153,7 @@ impl Schema {
         Ok(())
     }
 
-    pub fn check_compatibility(&self, other: &Self) -> Result<(), Error> {
+    pub fn check_compatibility(&self, other: &Self) -> Result<(), SError> {
         self.check_self_compatible()?;
         other.check_self_compatible()?;
         for entry_lhs in self.entries.iter() {
@@ -1223,22 +1219,18 @@ impl SchemaEntry {
         self.value = value;
     }
 
-    fn check_compatibility(&self, other: &Self) -> Result<(), Error> {
+    fn check_compatibility(&self, other: &Self) -> Result<(), SError> {
         let mut breaked = false;
         for (idx, (lhs, rhs)) in
             std::iter::zip(self.key.elements.iter(), other.key.elements.iter()).enumerate()
         {
             if lhs.number == rhs.number && lhs.ty != rhs.ty {
-                return Err(Error::SchemaIncompatibility {
-                    core: ErrorCore::default(),
-                    what: "field number same; type different".to_owned(),
-                })
-                .as_z()
-                .with_info("index", idx)
-                .with_info("lhs.number", lhs.number)
-                .with_info("rhs.number", rhs.number)
-                .with_info("lhs.ty", lhs.ty)
-                .with_info("rhs.ty", rhs.ty);
+                return Err(schema_incompatibility("field number same; type different")
+                    .with_atom_field("index", idx)
+                    .with_atom_field("lhs.number", lhs.number)
+                    .with_atom_field("rhs.number", rhs.number)
+                    .with_debug_field("lhs.ty", lhs.ty)
+                    .with_debug_field("rhs.ty", rhs.ty));
             }
             if lhs.number != rhs.number {
                 breaked = true;
@@ -1248,31 +1240,25 @@ impl SchemaEntry {
         if !breaked {
             if self.key.elements.len() < other.key.elements.len() && self.value != DataType::message
             {
-                return Err(Error::SchemaIncompatibility {
-                    core: ErrorCore::default(),
-                    what: "lhs has non-message type and is prefix of rhs".to_owned(),
-                })
-                .as_z()
-                .with_info("lhs.ty", self.value);
+                return Err(schema_incompatibility(
+                    "lhs has non-message type and is prefix of rhs",
+                )
+                .with_debug_field("lhs.ty", self.value));
             }
             if self.key.elements.len() > other.key.elements.len()
                 && other.value != DataType::message
             {
-                return Err(Error::SchemaIncompatibility {
-                    core: ErrorCore::default(),
-                    what: "rhs has non-message type and is prefix of lhs".to_owned(),
-                })
-                .as_z()
-                .with_info("rhs.ty", other.value);
+                return Err(schema_incompatibility(
+                    "rhs has non-message type and is prefix of lhs",
+                )
+                .with_debug_field("rhs.ty", other.value));
             }
             if self.key.elements == other.key.elements && self.value != other.value {
-                return Err(Error::SchemaIncompatibility {
-                    core: ErrorCore::default(),
-                    what: "lhs and rhs have same fields, but different values".to_owned(),
-                })
-                .as_z()
-                .with_info("lhs.value", self.value)
-                .with_info("rhs.value", other.value);
+                return Err(schema_incompatibility(
+                    "lhs and rhs have same fields, but different values",
+                )
+                .with_debug_field("lhs.value", self.value)
+                .with_debug_field("rhs.value", other.value));
             }
         }
         Ok(())
@@ -1406,7 +1392,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn new(ident: Identifier) -> Result<Self, Error> {
+    pub fn new(ident: Identifier) -> Result<Self, SError> {
         Ok(Query {
             ident,
             filter: None,
@@ -1414,7 +1400,7 @@ impl Query {
         })
     }
 
-    pub fn from_exprs(ident: Identifier, exprs: Vec<Query>) -> Result<Self, Error> {
+    pub fn from_exprs(ident: Identifier, exprs: Vec<Query>) -> Result<Self, SError> {
         Ok(Query {
             ident,
             filter: None,
@@ -1422,7 +1408,7 @@ impl Query {
         })
     }
 
-    pub fn from_filter(ident: Identifier, filter: QueryFilter) -> Result<Self, Error> {
+    pub fn from_filter(ident: Identifier, filter: QueryFilter) -> Result<Self, SError> {
         Ok(Query {
             ident,
             filter: Some(filter),
@@ -1434,7 +1420,7 @@ impl Query {
         ident: Identifier,
         filter: QueryFilter,
         exprs: Vec<Query>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         Ok(Query {
             ident,
             filter: Some(filter),
@@ -1442,8 +1428,8 @@ impl Query {
         })
     }
 
-    pub fn parse<S: AsRef<str>>(query: S) -> Result<Self, Error> {
-        Ok(parser::parse_all(parser::query)(query.as_ref())?)
+    pub fn parse<S: AsRef<str>>(query: S) -> Result<Self, SError> {
+        parser::parse_all(parser::query)(query.as_ref()).map_err(parse_error)
     }
 }
 
@@ -1456,48 +1442,36 @@ pub enum QueryFilter {
 
 /////////////////////////////////////////////// utils //////////////////////////////////////////////
 
-pub fn check_key(_: &[Key]) -> Result<(), Error> {
+pub fn check_key(_: &[Key]) -> Result<(), SError> {
     Ok(())
 }
 
-pub fn check_fields(fields: &[FieldDefinition]) -> Result<(), Error> {
+pub fn check_fields(fields: &[FieldDefinition]) -> Result<(), SError> {
     for i in 0..fields.len() {
         for j in i + 1..fields.len() {
             if fields[i].ident() == fields[j].ident() {
-                return Err(Error::DuplicateIdentifier {
-                    core: ErrorCore::default(),
-                    ident: fields[i].ident().to_string(),
-                });
+                return Err(duplicate_identifier(fields[i].ident().to_string()));
             }
             if fields[i].field_number() == fields[j].field_number() {
-                return Err(Error::DuplicateFieldNumber {
-                    core: ErrorCore::default(),
-                    number: fields[i].field_number().get(),
-                });
+                return Err(duplicate_field_number(fields[i].field_number().get()));
             }
         }
     }
     Ok(())
 }
 
-pub fn check_table(_: &Table) -> Result<(), Error> {
+pub fn check_table(_: &Table) -> Result<(), SError> {
     Ok(())
 }
 
-pub fn check_tables(tables: &[Table]) -> Result<(), Error> {
+pub fn check_tables(tables: &[Table]) -> Result<(), SError> {
     for i in 0..tables.len() {
         for j in i + 1..tables.len() {
             if tables[i].ident == tables[j].ident {
-                return Err(Error::DuplicateIdentifier {
-                    core: ErrorCore::default(),
-                    ident: tables[i].ident.to_string(),
-                });
+                return Err(duplicate_identifier(tables[i].ident.to_string()));
             }
             if tables[i].number == tables[j].number {
-                return Err(Error::DuplicateFieldNumber {
-                    core: ErrorCore::default(),
-                    number: tables[i].number.get(),
-                });
+                return Err(duplicate_field_number(tables[i].number.get()));
             }
         }
     }
@@ -1803,9 +1777,10 @@ mod test {
                 })
                 .unwrap();
             if let Err(err) = schema1.check_compatibility(&schema2) {
+                assert_eq!(Some(CODE_SCHEMA_INCOMPATIBILITY), error_code(&err));
                 assert_eq!(
-                    "SchemaIncompatibility { what: \"field number same; type different\" }",
-                    err.to_string()
+                    Some("field number same; type different".to_string()),
+                    error_string_field(&err, "what")
                 );
             } else {
                 panic!();
@@ -1865,9 +1840,10 @@ mod test {
                 })
                 .unwrap();
             if let Err(err) = schema1.check_compatibility(&schema2) {
+                assert_eq!(Some(CODE_SCHEMA_INCOMPATIBILITY), error_code(&err));
                 assert_eq!(
-                    "SchemaIncompatibility { what: \"lhs and rhs have same fields, but different values\" }",
-                    err.to_string()
+                    Some("lhs and rhs have same fields, but different values".to_string()),
+                    error_string_field(&err, "what")
                 );
             } else {
                 panic!();

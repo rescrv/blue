@@ -1,6 +1,5 @@
 use arrrg::CommandLine;
 use busyrpc::{ClientOptions, SslOptions, StringResolver, new_client};
-use rpc_pb::IoToZ;
 use tuple_routing::{ResolveRequest, ServiceDiscovery};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, arrrg_derive::CommandLine)]
@@ -47,7 +46,7 @@ fn main() {
                 service_key: &service_key,
                 limit: 1,
             };
-            let resp = sd.resolve(&ctx, req).as_z().pretty_unwrap();
+            let resp = sd.resolve(&ctx, req).unwrap_or_else(|err| panic!("{err}"));
             if resp.hosts.is_empty() {
                 break;
             }

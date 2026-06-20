@@ -759,8 +759,7 @@ mod tests {
     fn dependency_names_include_all_dependency_kinds() {
         let manifest = r#"
 [dependencies]
-handled = "0.7"
-renamed = { package = "zerror", version = "0.9" }
+handled = { workspace = true }
 
 [dev-dependencies]
 arrrg = "0.9"
@@ -784,7 +783,6 @@ sync42 = "0.16"
                 "handled".to_string(),
                 "prototk".to_string(),
                 "sync42".to_string(),
-                "zerror".to_string(),
             ])
         );
     }

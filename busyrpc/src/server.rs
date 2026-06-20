@@ -7,8 +7,7 @@ use biometrics::{Collector, Counter};
 use boring::ssl::{SslAcceptor, SslFiletype, SslMethod, SslStream};
 use buffertk::{Unpackable, stack_pack};
 use indicio::{ERROR, INFO, TRACING, clue};
-use rpc_pb::{Context, Error, Host, Request, Response, Status};
-use zerror_core::ErrorCore;
+use rpc_pb::{Context, Host, Request, Response, SError, Status};
 
 use super::builtins;
 use super::channel::Channel;
@@ -78,7 +77,7 @@ pub struct ServerOptions {
 
 impl ServerOptions {
     /// Get the pollster.
-    pub fn pollster(&self) -> Result<Box<dyn Pollster>, rpc_pb::Error> {
+    pub fn pollster(&self) -> Result<Box<dyn Pollster>, rpc_pb::SError> {
         default_pollster()
     }
 
@@ -142,7 +141,7 @@ impl Internals {
                     clue!(COLLECTOR, ERROR, {
                         busyrpc: {
                             poll: {
-                                error: indicio::Value::from(err),
+                                error: indicio::value!({ error: err.to_string() }),
                             }
                         }
                     });
@@ -174,7 +173,7 @@ impl Internals {
                     clue!(COLLECTOR, TRACING, {
                         busyrpc: {
                             send: {
-                                error: indicio::Value::from(err),
+                                error: indicio::value!({ error: err.to_string() }),
                             },
                         },
                     });
@@ -201,7 +200,7 @@ impl Internals {
                 clue!(COLLECTOR, ERROR, {
                     busyrpc: {
                         poll: {
-                            error: indicio::Value::from(err),
+                            error: indicio::value!({ error: err.to_string() }),
                         }
                     }
                 });
@@ -220,7 +219,7 @@ impl Internals {
             clue!(COLLECTOR, ERROR, {
                 busyrpc: {
                     poll: {
-                        error: indicio::Value::from(err),
+                        error: indicio::value!({ error: err.to_string() }),
                     }
                 }
             });
@@ -233,7 +232,7 @@ impl Internals {
             clue!(COLLECTOR, ERROR, {
                 busyrpc: {
                     poll: {
-                        error: indicio::Value::from(err),
+                        error: indicio::value!({ error: err.to_string() }),
                     }
                 }
             });
@@ -263,7 +262,7 @@ impl Internals {
                 clue!(COLLECTOR, TRACING, {
                     busyrpc: {
                         recv: {
-                            error: indicio::Value::from(err),
+                            error: indicio::value!({ error: err.to_string() }),
                         },
                     },
                 });
@@ -276,7 +275,7 @@ impl Internals {
                 clue!(COLLECTOR, TRACING, {
                     busyrpc: {
                         rpc: {
-                            error: indicio::Value::from(err),
+                            error: indicio::value!({ error: err.to_string() }),
                         },
                     },
                 });
@@ -286,7 +285,7 @@ impl Internals {
         error
     }
 
-    fn handle_rpc(&self, chan: &mut Channel, msg: Vec<u8>) -> Result<(), Error> {
+    fn handle_rpc(&self, chan: &mut Channel, msg: Vec<u8>) -> Result<(), SError> {
         HANDLE_RPC.click();
         let req = Request::unpack(&msg)?.0;
         let ctx = Context::from(&req);
@@ -294,10 +293,7 @@ impl Internals {
             Some(server) => server,
             None => {
                 UNKNOWN_SERVER_NAME.click();
-                let err = Error::UnknownServerName {
-                    core: ErrorCore::default(),
-                    name: req.service.to_string(),
-                };
+                let err = rpc_pb::unknown_server_name(req.service);
                 return self.handle_error(chan, req, err);
             }
         };
@@ -305,12 +301,17 @@ impl Internals {
         self.handle_status(chan, req, resp)
     }
 
-    fn handle_error(&self, chan: &mut Channel, req: Request, err: Error) -> Result<(), Error> {
+    fn handle_error(&self, chan: &mut Channel, req: Request, err: SError) -> Result<(), SError> {
         let status = Err(err);
         self.handle_status(chan, req, status)
     }
 
-    fn handle_status(&self, chan: &mut Channel, req: Request, status: Status) -> Result<(), Error> {
+    fn handle_status(
+        &self,
+        chan: &mut Channel,
+        req: Request,
+        status: Status,
+    ) -> Result<(), SError> {
         let err_buf: Vec<u8>;
         let (body, service_error, rpc_error) = match &status {
             Ok(Ok(body)) => {
@@ -399,7 +400,7 @@ impl Server {
         ssl: SslOptions,
         options: ServerOptions,
         services: ServiceRegistry,
-    ) -> Result<(Self, impl FnOnce()), rpc_pb::Error> {
+    ) -> Result<(Self, impl FnOnce()), rpc_pb::SError> {
         let pollster = options.pollster()?;
         let mut fds: [libc::c_int; 2] = [-1; 2];
         // SAFETY(rescrv):  We are passing a suitably-sized array of ints.
@@ -435,7 +436,7 @@ impl Server {
     }
 
     /// Serve the server forever.
-    pub fn serve(&self) -> Result<(), Error> {
+    pub fn serve(&self) -> Result<(), SError> {
         // Spawn threads to serve the thread pool.
         let mut threads = Vec::new();
         for _ in 0..self.options.thread_pool_size {
@@ -447,12 +448,8 @@ impl Server {
         // SSL/TLS acceptor
         let acceptor = Arc::new(must_build_acceptor(&self.ssl));
         // Listen for incoming connections.
-        let listener = TcpListener::bind(self.options.bind_to.connect()).map_err(|err| {
-            rpc_pb::Error::TransportFailure {
-                core: ErrorCore::default(),
-                what: err.to_string(),
-            }
-        })?;
+        let listener = TcpListener::bind(self.options.bind_to.connect())
+            .map_err(|err| rpc_pb::transport_failure(err.to_string()))?;
         'listening: loop {
             let break_fd = self.internals.canceled.as_raw_fd();
             let mut pfd = [
@@ -490,14 +487,11 @@ impl Server {
                     let stream = match acceptor.accept(stream) {
                         Ok(stream) => stream,
                         Err(err) => {
-                            let err = rpc_pb::Error::TransportFailure {
-                                core: ErrorCore::default(),
-                                what: err.to_string(),
-                            };
+                            let err = rpc_pb::transport_failure(err.to_string());
                             clue!(COLLECTOR, ERROR, {
                                 busyrpc: {
                                     accept: {
-                                        error: indicio::Value::from(err),
+                                        error: indicio::value!({ error: err.to_string() }),
                                     },
                                 },
                             });
@@ -511,7 +505,7 @@ impl Server {
                             clue!(COLLECTOR, ERROR, {
                                 busyrpc: {
                                     add_channel: {
-                                        error: indicio::Value::from(err),
+                                        error: indicio::value!({ error: err.to_string() }),
                                     },
                                 },
                             });
@@ -536,7 +530,7 @@ impl Server {
         Ok(())
     }
 
-    fn add_channel(&self, stream: SslStream<TcpStream>) -> Result<(), rpc_pb::Error> {
+    fn add_channel(&self, stream: SslStream<TcpStream>) -> Result<(), rpc_pb::SError> {
         let channel = Channel::new(stream, self.options.user_send_buffer_size)?;
         let internals = Arc::clone(&self.internals);
         internals.add_channel(channel);

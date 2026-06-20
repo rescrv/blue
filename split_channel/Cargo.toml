@@ -21,12 +21,11 @@ getopts = { workspace = true, optional = true }
 
 biometrics = { workspace = true }
 buffertk = { workspace = true }
+handled = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 rpc_pb = { workspace = true }
 utilz = { workspace = true }
-zerror = { workspace = true }
-zerror_core = { workspace = true }
 arrrg = { workspace = true, optional = true }
 arrrg_derive = { workspace = true, optional = true }
 

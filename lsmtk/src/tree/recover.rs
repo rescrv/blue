@@ -5,10 +5,6 @@ use std::ops::{Bound, Deref, DerefMut};
 
 use sst::SstMetadata;
 
-use zerror::Z;
-
-use zerror_core::ErrorCore;
-
 use super::*;
 
 ///////////////////////////////////////// key_range_overlap ////////////////////////////////////////
@@ -54,7 +50,7 @@ impl From<BTreeSet<(usize, usize)>> for AdjacencyList {
 
 ////////////////////////////////////////////// recover /////////////////////////////////////////////
 
-pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Version, Error> {
+pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Version, SError> {
     // Create a forward adjacency list.
     let forward_adj_list = construct_adj_list(&metadata)?;
     // Create a list of vertices.
@@ -163,18 +159,15 @@ pub fn recover(options: LsmtkOptions, metadata: Vec<SstMetadata>) -> Result<Vers
     })
 }
 
-fn construct_adj_list(metadata: &[SstMetadata]) -> Result<AdjacencyList, Error> {
+fn construct_adj_list(metadata: &[SstMetadata]) -> Result<AdjacencyList, SError> {
     // Create the adjacency lists.
     let mut forward_adj_list = AdjacencyList::default();
     for i in 0..metadata.len() {
         if metadata[i].smallest_timestamp > metadata[i].biggest_timestamp {
-            let err = Error::Corruption {
-                core: ErrorCore::default(),
-                context: "metadata timestamps not in order".to_string(),
-            }
-            .with_info("SST", metadata[i].setsum)
-            .with_info("smallest_timestamp", metadata[i].smallest_timestamp)
-            .with_info("biggest_timestamp", metadata[i].biggest_timestamp);
+            let err = corruption("metadata timestamps not in order")
+                .with_debug_field("SST", metadata[i].setsum)
+                .with_debug_field("smallest_timestamp", metadata[i].smallest_timestamp)
+                .with_debug_field("biggest_timestamp", metadata[i].biggest_timestamp);
             return Err(err);
         }
         for j in i + 1..metadata.len() {

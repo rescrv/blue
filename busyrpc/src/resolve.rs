@@ -13,7 +13,7 @@ pub struct StringResolver {
 
 impl StringResolver {
     /// Create a new string resolver from the connect string.
-    pub fn new(connect_str: &str) -> Result<Self, rpc_pb::Error> {
+    pub fn new(connect_str: &str) -> Result<Self, rpc_pb::SError> {
         let mut hosts = Vec::new();
         for host in connect_str.split(',') {
             hosts.push(host.parse::<Host>()?);
@@ -24,15 +24,15 @@ impl StringResolver {
 }
 
 impl FromStr for StringResolver {
-    type Err = rpc_pb::Error;
+    type Err = rpc_pb::SError;
 
-    fn from_str(s: &str) -> Result<StringResolver, rpc_pb::Error> {
+    fn from_str(s: &str) -> Result<StringResolver, rpc_pb::SError> {
         Self::new(s)
     }
 }
 
 impl Resolver for StringResolver {
-    fn resolve(&mut self) -> Result<Host, rpc_pb::Error> {
+    fn resolve(&mut self) -> Result<Host, rpc_pb::SError> {
         self.index += 1;
         if self.index >= self.hosts.len() {
             self.index = 0;

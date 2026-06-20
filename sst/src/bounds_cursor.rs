@@ -2,7 +2,7 @@
 
 use std::ops::Bound;
 
-use super::{Cursor, Error, KeyRef};
+use super::{Cursor, KeyRef, SError};
 
 ////////////////////////////////////////////// Bounds //////////////////////////////////////////////
 
@@ -30,7 +30,7 @@ impl<C: Cursor> BoundsCursor<C> {
         cursor: C,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, SError> {
         fn as_ref_to_vec<U: AsRef<[u8]>>(b: &Bound<U>) -> Bound<Vec<u8>> {
             match b {
                 Bound::Included(key) => Bound::Included(key.as_ref().to_vec()),
@@ -88,7 +88,7 @@ impl<C: Cursor> BoundsCursor<C> {
 }
 
 impl<C: Cursor> Cursor for BoundsCursor<C> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         match &self.start_bound {
             Bound::Unbounded => {
                 self.bounds = Bounds::BeforeStart;
@@ -116,7 +116,7 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         match &self.end_bound {
             Bound::Unbounded => {
                 self.bounds = Bounds::AfterEnd;
@@ -142,7 +142,7 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         self.bounds = Bounds::Positioned;
         self.cursor.seek(key)?;
         self.check_for_end_bound_exceeded();
@@ -154,7 +154,7 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         if self.bounds != Bounds::BeforeStart {
             self.cursor.prev()?;
             self.bounds = Bounds::Positioned;
@@ -163,7 +163,7 @@ impl<C: Cursor> Cursor for BoundsCursor<C> {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         while self.bounds != Bounds::AfterEnd {
             self.cursor.next()?;
             self.bounds = Bounds::Positioned;

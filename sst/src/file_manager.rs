@@ -15,7 +15,7 @@ use biometrics::Counter;
 use tatl::{HeyListen, Stationary};
 
 use super::{
-    Error, LOGIC_ERROR, Sst, SstMetadata, error_with_path, io_result,
+    LOGIC_ERROR, SError, Sst, SstMetadata, error_with_path, io_result,
     logic_error_file_descriptor_negative, logic_error_file_manager_broken_pointer,
     system_error_with_context, system_error_with_path_and_context, too_many_open_files,
 };
@@ -55,7 +55,7 @@ pub struct FileHandle {
 
 impl FileHandle {
     /// Return the path associated with the file handle.
-    pub fn path(&self) -> Result<PathBuf, Error> {
+    pub fn path(&self) -> Result<PathBuf, SError> {
         let fd = check_fd(self.file.as_raw_fd())?;
         let state = self.state.lock().unwrap();
         if let Some((path, _)) = &state.files[fd] {
@@ -67,7 +67,7 @@ impl FileHandle {
     }
 
     /// Perform a read_exact_at on the file.
-    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), Error> {
+    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SError> {
         self.file.read_exact_at(buf, offset).map_err(|e| {
             let context = format!(
                 "read_exact_at failed: fd={}, offset={}, amount={}",
@@ -84,7 +84,7 @@ impl FileHandle {
     }
 
     /// return the size of the file.
-    pub fn size(&self) -> Result<u64, Error> {
+    pub fn size(&self) -> Result<u64, SError> {
         Ok(io_result(self.file.metadata())?.len())
     }
 }
@@ -179,13 +179,13 @@ impl FileManager {
     }
 
     /// Open the given path, if allocation limits allow.
-    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<FileHandle, Error> {
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<FileHandle, SError> {
         // TODO(rescrv): Use utf8path to avoid lossy path conversions.
         self.open_inner(path.as_ref())
             .map_err(|err| error_with_path(err, path.as_ref().to_string_lossy()))
     }
 
-    fn open_inner(&self, path: &Path) -> Result<FileHandle, Error> {
+    fn open_inner(&self, path: &Path) -> Result<FileHandle, SError> {
         // Check if the file is opened or opening.
         {
             let mut state = self.state.lock().unwrap();
@@ -255,7 +255,7 @@ impl FileManager {
     }
 
     /// Stat the provided path, if allocation limits allow.
-    pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, Error> {
+    pub fn stat<P: AsRef<Path>>(&self, path: P) -> Result<SstMetadata, SError> {
         // TODO(rescrv): Use utf8path to avoid lossy path conversions.
         let handle = self
             .open(path.as_ref())
@@ -270,7 +270,7 @@ impl FileManager {
 ///////////////////////////////////////////// check_fd /////////////////////////////////////////////
 
 // Check that the file descriptor is [0, usize::max_value).
-fn check_fd(fd: c_int) -> Result<usize, Error> {
+fn check_fd(fd: c_int) -> Result<usize, SError> {
     if fd < 0 {
         LOGIC_ERROR.click();
         return Err(logic_error_file_descriptor_negative(fd));
@@ -280,7 +280,7 @@ fn check_fd(fd: c_int) -> Result<usize, Error> {
 
 /////////////////////////////////////////////// open ///////////////////////////////////////////////
 
-fn open(path: PathBuf) -> Result<File, Error> {
+fn open(path: PathBuf) -> Result<File, SError> {
     // Open the file
     FILE_MANAGER_OPEN.click();
     let file = match File::open(path.clone()) {
@@ -300,7 +300,7 @@ fn open(path: PathBuf) -> Result<File, Error> {
 /////////////////////////////////////// open_without_manager ///////////////////////////////////////
 
 /// Open a file handle without caring about the number of open files.
-pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, Error> {
+pub fn open_without_manager<P: AsRef<Path>>(path: P) -> Result<FileHandle, SError> {
     let path = path.as_ref().to_path_buf();
     FILE_MANAGER_OPEN_WITHOUT_MANAGER.click();
     // TODO(rescrv): Use utf8path to avoid lossy path conversions.

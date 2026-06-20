@@ -3,7 +3,7 @@
 //! working on a static sst.  Other cursors will assume a pruning cursor gets applied beneath them
 //! to create a cursor over an immutable data set.
 
-use super::{Cursor, Error, KeyRef, LOGIC_ERROR, logic_error_prev_not_positioned};
+use super::{Cursor, KeyRef, LOGIC_ERROR, SError, logic_error_prev_not_positioned};
 
 /////////////////////////////////////////// PruningCursor //////////////////////////////////////////
 
@@ -16,7 +16,7 @@ pub struct PruningCursor<C: Cursor> {
 
 impl<C: Cursor> PruningCursor<C> {
     /// Create a new pruning cursor.
-    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, Error> {
+    pub fn new(mut cursor: C, timestamp: u64) -> Result<Self, SError> {
         cursor.seek_to_first()?;
         Ok(Self {
             cursor,
@@ -38,17 +38,17 @@ impl<C: Cursor> PruningCursor<C> {
 }
 
 impl<C: Cursor> Cursor for PruningCursor<C> {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.skip_key = None;
         self.cursor.seek_to_first()
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.skip_key = None;
         self.cursor.seek_to_last()
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         self.skip_key = None;
         self.cursor.seek(key)?;
         loop {
@@ -70,7 +70,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
         }
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         if self.key().is_none() {
             self.skip_key = None;
         }
@@ -167,7 +167,7 @@ impl<C: Cursor> Cursor for PruningCursor<C> {
         }
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         loop {
             self.cursor.next()?;
             let kr = match self.key() {

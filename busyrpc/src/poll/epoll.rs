@@ -61,7 +61,7 @@ pub struct Epollster {
 }
 
 impl Epollster {
-    pub fn new() -> Result<Self, rpc_pb::Error> {
+    pub fn new() -> Result<Self, rpc_pb::SError> {
         let ret = unsafe { libc::epoll_create(1) };
         if ret < 1 {
             return Err(std::io::Error::last_os_error().into());
@@ -71,7 +71,7 @@ impl Epollster {
 }
 
 impl Pollster for Epollster {
-    fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::Error> {
+    fn poll(&self, millis: i32) -> Result<Option<(RawFd, Events)>, rpc_pb::SError> {
         let mut ep_event = libc::epoll_event { events: 0, u64: 0 };
         let ret = unsafe { libc::epoll_wait(self.epoll_inst, &mut ep_event, 1, millis) };
         if ret < 0 && unsafe { *libc::__errno_location() } == libc::EINTR {
@@ -88,7 +88,7 @@ impl Pollster for Epollster {
         }
     }
 
-    fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::Error> {
+    fn arm(&self, fd: RawFd, send: bool) -> Result<(), rpc_pb::SError> {
         let mut ev = POLLIN | POLLERR | POLLHUP;
         if send {
             ev |= POLLOUT;
@@ -116,7 +116,7 @@ impl Pollster for Epollster {
         Ok(())
     }
 
-    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::Error> {
+    fn arm_forever(&self, fd: RawFd) -> Result<(), rpc_pb::SError> {
         let ev = POLLIN | POLLERR | POLLHUP;
         let mut ep_event = libc::epoll_event {
             events: map_events_to_ep(ev),

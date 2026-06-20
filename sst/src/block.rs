@@ -9,8 +9,8 @@ use std::sync::Arc;
 use buffertk::{Packable, Unpacker, length_free, stack_pack, v64};
 
 use super::{
-    Builder, CORRUPTION, Cursor, Error, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut,
-    LOGIC_ERROR, block_too_small, check_key_len, check_table_size, check_value_len,
+    Builder, CORRUPTION, Cursor, KeyRef, KeyValueDel, KeyValueEntry, KeyValuePut, LOGIC_ERROR,
+    SError, block_too_small, check_key_len, check_table_size, check_value_len,
     corruption_binary_search_left_ne_right, corruption_block_with_zero_restarts,
     corruption_offset_exceeds_restarts_boundary, corruption_restart_point_no_key_value_pair,
     logic_error_next_not_positioned, logic_error_restart_idx_exceeds_num_restarts,
@@ -82,7 +82,7 @@ pub struct Block {
 
 impl Block {
     /// Create a new block from the provided bytes.
-    pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, SError> {
         // Load num_restarts.
         let bytes = Arc::new(bytes);
         if bytes.len() < 4 {
@@ -175,7 +175,7 @@ impl Block {
         key: &[u8],
         timestamp: u64,
         is_tombstone: &mut bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    ) -> Result<Option<Vec<u8>>, SError> {
         *is_tombstone = false;
         let mut cursor = self.cursor();
         cursor.seek(key)?;
@@ -204,7 +204,7 @@ impl Block {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<BlockCursor>>, Error> {
+    ) -> Result<BoundsCursor<PruningCursor<BlockCursor>>, SError> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -265,7 +265,7 @@ impl BlockBuilder {
     }
 
     // TODO(rescrv):  Make sure to sort secondary by timestamp
-    fn append(&mut self, be: KeyValueEntry<'_>) -> Result<(), Error> {
+    fn append(&mut self, be: KeyValueEntry<'_>) -> Result<(), SError> {
         // Update the last key.
         self.last_key.truncate(be.shared());
         self.last_key.extend_from_slice(be.key_frag());
@@ -284,7 +284,7 @@ impl BlockBuilder {
         Ok(())
     }
 
-    fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn enforce_sort_order(&self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         if KeyRef::new(&self.last_key, self.last_timestamp).cmp(&KeyRef::new(key, timestamp))
             != Ordering::Less
         {
@@ -307,7 +307,7 @@ impl Builder for BlockBuilder {
         self.buffer.len() + 16 + self.restarts.len() * 4
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), Error> {
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         check_key_len(key)?;
         check_value_len(value)?;
         check_table_size(self.approximate_size())?;
@@ -323,7 +323,7 @@ impl Builder for BlockBuilder {
         self.append(be)
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), Error> {
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
         self.enforce_sort_order(key, timestamp)?;
@@ -337,7 +337,7 @@ impl Builder for BlockBuilder {
         self.append(be)
     }
 
-    fn seal(self) -> Result<Block, Error> {
+    fn seal(self) -> Result<Block, SError> {
         // Append each restart.
         // NOTE(rescrv):  If this changes, change approximate_size above.
         let restarts = length_free(&self.restarts);
@@ -467,7 +467,7 @@ impl BlockCursor {
     }
 
     // Make self.position be of type CursorPosition::Positioned and fill in the fields.
-    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef<'_>>, Error> {
+    fn seek_restart(&mut self, restart_idx: usize) -> Result<Option<KeyRef<'_>>, SError> {
         if restart_idx >= self.block.num_restarts {
             LOGIC_ERROR.click();
             return Err(logic_error_restart_idx_exceeds_num_restarts(
@@ -508,7 +508,7 @@ impl BlockCursor {
         self.key_ref()
     }
 
-    fn key_ref(&self) -> Result<Option<KeyRef<'_>>, Error> {
+    fn key_ref(&self) -> Result<Option<KeyRef<'_>>, SError> {
         match &self.position {
             CursorPosition::First => Ok(None),
             CursorPosition::Last => Ok(None),
@@ -529,7 +529,7 @@ impl BlockCursor {
         block: &Block,
         offset: usize,
         mut key: Vec<u8>,
-    ) -> Result<CursorPosition, Error> {
+    ) -> Result<CursorPosition, SError> {
         // Check for overrun.
         if offset >= block.restarts_boundary {
             return Ok(CursorPosition::Last);
@@ -554,17 +554,17 @@ impl BlockCursor {
 }
 
 impl Cursor for BlockCursor {
-    fn seek_to_first(&mut self) -> Result<(), Error> {
+    fn seek_to_first(&mut self) -> Result<(), SError> {
         self.position = CursorPosition::First;
         Ok(())
     }
 
-    fn seek_to_last(&mut self) -> Result<(), Error> {
+    fn seek_to_last(&mut self) -> Result<(), SError> {
         self.position = CursorPosition::Last;
         Ok(())
     }
 
-    fn seek(&mut self, key: &[u8]) -> Result<(), Error> {
+    fn seek(&mut self, key: &[u8]) -> Result<(), SError> {
         // Make sure there are restarts.
         if self.block.num_restarts == 0 {
             CORRUPTION.click();
@@ -638,7 +638,7 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn prev(&mut self) -> Result<(), Error> {
+    fn prev(&mut self) -> Result<(), SError> {
         // We won't go past here.
         let target_next_offset = match self.position {
             CursorPosition::First => {
@@ -683,7 +683,7 @@ impl Cursor for BlockCursor {
         Ok(())
     }
 
-    fn next(&mut self) -> Result<(), Error> {
+    fn next(&mut self) -> Result<(), SError> {
         // We start with the first block.
         if let CursorPosition::First = self.position {
             self.seek_restart(0)?;

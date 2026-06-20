@@ -15,7 +15,7 @@ use tag_index::Tags;
 
 use crate::query;
 use crate::support_nom::{ParseError, ParseResult, ws0};
-use crate::{BiometricsStore, Error, Point, Series, Time};
+use crate::{BiometricsStore, Point, SError, Series, Time, text_error};
 
 ////////////////////////////////////////////// parsers /////////////////////////////////////////////
 
@@ -68,7 +68,7 @@ pub fn counters(
     input: &str,
 ) -> ParseResult<
     '_,
-    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
+    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, SError>,
 > {
     context(
         "counters",
@@ -90,21 +90,21 @@ pub fn counters(
                         tags.push(
                             Tags::new(counter)
                                 .to_owned()
-                                .ok_or(Error::text("tag did not parse"))?,
+                                .ok_or(text_error("tag did not parse"))?,
                         );
                     } else {
                         tags.push(
                             Tags::new(format!(":__name__={counter}:"))
                                 .to_owned()
-                                .ok_or(Error::text("tag did not construct"))?,
+                                .ok_or(text_error("tag did not construct"))?,
                         );
                     }
                 }
-                Ok::<_, Error>(
+                Ok::<_, SError>(
                     move |ctx: &rpc_pb::Context,
                           store: &dyn BiometricsStore,
                           params: &query::QueryParams|
-                          -> Result<Vec<Series>, Error> {
+                          -> Result<Vec<Series>, SError> {
                         let mut serieses = vec![];
                         for tags in tags.iter() {
                             serieses.extend(query::counters(tags)(ctx, store, params)?);
@@ -139,7 +139,7 @@ pub fn aggregate(
     input: &str,
 ) -> ParseResult<
     '_,
-    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
+    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, SError>,
 > {
     context(
         "aggregate",
@@ -160,7 +160,7 @@ pub fn aggregate(
                 move |ctx: &rpc_pb::Context,
                       store: &dyn BiometricsStore,
                       params: &query::QueryParams|
-                      -> Result<Vec<Series>, Error> {
+                      -> Result<Vec<Series>, SError> {
                     query::aggregate(|store, params| e(ctx, store, params), |p| func(p))(
                         store, params,
                     )
@@ -197,7 +197,7 @@ pub fn rollup(
     input: &str,
 ) -> ParseResult<
     '_,
-    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
+    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, SError>,
 > {
     context(
         "rollup",
@@ -223,7 +223,7 @@ pub fn rollup(
                 move |ctx: &rpc_pb::Context,
                       store: &dyn BiometricsStore,
                       params: &query::QueryParams|
-                      -> Result<Vec<Series>, Error> {
+                      -> Result<Vec<Series>, SError> {
                     query::rollup(
                         |store, params| e(ctx, store, params),
                         |p| func(p),
@@ -254,7 +254,7 @@ macro_rules! pointwise_helper {
                     move |ctx: &rpc_pb::Context,
                           store: &dyn BiometricsStore,
                           params: &query::QueryParams|
-                          -> Result<Vec<Series>, Error> {
+                          -> Result<Vec<Series>, SError> {
                         query::point::$name(|store, params| e(ctx, store, params))(store, params)
                     },
                 ) as _
@@ -273,7 +273,7 @@ pub fn pointwise(
                 &rpc_pb::Context,
                 &dyn BiometricsStore,
                 &query::QueryParams,
-            ) -> Result<Vec<Series>, Error>
+            ) -> Result<Vec<Series>, SError>
             + '_,
     >,
 > {
@@ -345,7 +345,7 @@ pub fn uniform(
     input: &str,
 ) -> ParseResult<
     '_,
-    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
+    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, SError>,
 > {
     context(
         "uniform",
@@ -365,7 +365,7 @@ pub fn uniform(
                 move |ctx: &rpc_pb::Context,
                       store: &dyn BiometricsStore,
                       params: &query::QueryParams|
-                      -> Result<Vec<Series>, Error> {
+                      -> Result<Vec<Series>, SError> {
                     query::uniform(|store, params| e(ctx, store, params), |p| func(p))(
                         store, params,
                     )
@@ -407,7 +407,7 @@ pub fn time(
     input: &str,
 ) -> ParseResult<
     '_,
-    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, Error>,
+    impl Fn(&rpc_pb::Context, &dyn BiometricsStore, &query::QueryParams) -> Result<Vec<Series>, SError>,
 > {
     context(
         "uniform",
@@ -425,7 +425,7 @@ pub fn time(
                 move |_: &rpc_pb::Context,
                       store: &dyn BiometricsStore,
                       params: &query::QueryParams|
-                      -> Result<Vec<Series>, Error> {
+                      -> Result<Vec<Series>, SError> {
                     query::function_of_time(&func)(store, params)
                 }
             },
@@ -443,7 +443,7 @@ pub fn expr(
                 &rpc_pb::Context,
                 &dyn BiometricsStore,
                 &query::QueryParams,
-            ) -> Result<Vec<Series>, Error>
+            ) -> Result<Vec<Series>, SError>
             + '_,
     >,
 > {
@@ -469,7 +469,7 @@ pub fn parse(
                 &rpc_pb::Context,
                 &dyn BiometricsStore,
                 &query::QueryParams,
-            ) -> Result<Vec<Series>, Error>
+            ) -> Result<Vec<Series>, SError>
             + '_,
     >,
     ParseError,
