@@ -72,11 +72,15 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use crate::Span;
+use crate::StackTy;
 use crate::Token;
+use crate::Ty;
 use crate::WordTy;
 use crate::refinement::BinOp;
 use crate::refinement::Binder;
 use crate::refinement::Pred;
+use crate::refinement::RefinementSig;
 use crate::refinement::UnOp;
 use crate::shadow::NamedBinding;
 use crate::shadow::ShadowError;
@@ -101,6 +105,74 @@ pub enum Verdict {
     Unsat,
     /// The solver could not decide.
     Unknown,
+}
+
+/// A **counterexample model** (§10.5): a concrete satisfying assignment over the
+/// named binders of a VC whose negated-goal encoding came back `Sat`.
+///
+/// The model is the witness the solver hands back — for `x sqrt` with no fact
+/// bounding `x`, the negated goal `¬(x >= 0)` is satisfiable and the model is a
+/// concrete point such as `x = -1`. It is surfaced on the failing [`Obligation`]
+/// so a diagnostic can show *why* the demand could not be discharged, rather than
+/// a bare `Sat` (§10.5 / §12 M9).
+///
+/// A model is produced **only** when the satisfiability is fully decidable
+/// (linear, no opaque conjunct): an `Unknown`/opaque result does **not**
+/// fabricate a model — it degrades (§10.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Model {
+    /// The assignment: each named binder mapped to its concrete value, rendered
+    /// (`-1`, `3`, `1/2`). Sorted by name for determinism.
+    assignments: Vec<(String, String)>,
+}
+
+impl Model {
+    /// The value assigned to `name`, rendered (e.g. `-1`, `1/2`), if the model
+    /// constrains it.
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.assignments
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The assignments as `(name, rendered-value)` pairs, sorted by name.
+    pub fn assignments(&self) -> &[(String, String)] {
+        &self.assignments
+    }
+
+    /// Whether the model constrains no variable (a trivially-`Sat` VC with no
+    /// free variables).
+    pub fn is_empty(&self) -> bool {
+        self.assignments.is_empty()
+    }
+}
+
+impl std::fmt::Display for Model {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let body = self
+            .assignments
+            .iter()
+            .map(|(n, v)| format!("{n} = {v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(f, "{{ {body} }}")
+    }
+}
+
+/// The capability of producing a **counterexample model** for a `Sat` check
+/// (§10.5). It is deliberately a **separate** trait from [`Solver`] so the core
+/// seam keeps its **exactly four** methods (`assert`/`check`/`push_scope`/
+/// `pop_scope`); model extraction is the backend-specific sibling capability
+/// (the embedded reasoner does Fourier–Motzkin back-substitution; a future
+/// `Z3Solver` would call `get_model`).
+pub trait CounterModel {
+    /// Produce a satisfying model for the current (live) assertion set, or `None`
+    /// if no decidable model is available (degrade — never fabricate one for an
+    /// opaque/`Unknown` result). Call this **after** a [`Solver::check`] that
+    /// returned [`Verdict::Sat`] and **before** popping the scope that holds the
+    /// negated goal.
+    fn model(&self) -> Option<Model>;
 }
 
 /// The **solver seam** (§10.8): the trait every path-condition / VC consumer
@@ -177,6 +249,13 @@ impl SmtLibSolver {
         self.scopes.len()
     }
 
+    /// The conjunction of every formula asserted across all live scopes — the
+    /// exact set [`Solver::check`] reasons over. Used by [`CounterModel::model`]
+    /// to recover a witness point from the same constraint set.
+    fn live_formulas(&self) -> Vec<Pred> {
+        self.scopes.iter().flatten().cloned().collect()
+    }
+
     fn line(&mut self, s: &str) {
         self.script.push_str(s);
         self.script.push('\n');
@@ -237,6 +316,16 @@ impl Solver for SmtLibSolver {
         self.line("(pop 1)");
         self.scopes.pop();
         self.declared.pop();
+    }
+}
+
+impl CounterModel for SmtLibSolver {
+    fn model(&self) -> Option<Model> {
+        // Recover a witness point from the same live constraint set the embedded
+        // reasoner judged. Returns `Some(model)` only when the set is fully
+        // decidable + feasible (a genuine `Sat`); an opaque/`Unknown` set yields
+        // `None` — no fabricated model (§10.5).
+        check_sat_model(&self.live_formulas()).1
     }
 }
 
@@ -357,14 +446,40 @@ pub fn substitute(pred: &Pred, bindings: &[NamedBinding]) -> Pred {
 /// `check()`, then pop. `Unsat` ⇒ the goal is **valid** under the current path
 /// conditions (no counterexample); `Sat`/`Unknown` ⇒ not discharged.
 ///
-/// This is the *minimal* M8 form: it returns the bare [`Verdict`] only — no model
-/// extraction / counterexample surfacing, which is M9 (§10.5).
+/// This is the bare-[`Verdict`] form (the M8 shape). For the M9 counterexample,
+/// use [`discharge_with_model`], which additionally pulls the model on a `Sat`.
 pub fn discharge<S: Solver>(solver: &mut S, goal: &Pred) -> Verdict {
     solver.push_scope();
     solver.assert(&negate(goal));
     let verdict = solver.check();
     solver.pop_scope();
     verdict
+}
+
+/// Discharge a goal under the live facts + path conditions, **with
+/// counterexample extraction** (§10.5 / M9): assert `¬goal` in a fresh scope,
+/// `check()`, and — on `Sat` — pull the satisfying [`Model`] (the counterexample)
+/// **before** popping the scope. `Unsat` ⇒ valid (no model); `Unknown` ⇒ degrade
+/// (no fabricated model).
+///
+/// The model is read through the [`CounterModel`] seam-sibling, so it works for
+/// any backend that can produce one (the embedded reasoner today, `z3` later).
+pub fn discharge_with_model<S: Solver + CounterModel>(
+    solver: &mut S,
+    goal: &Pred,
+) -> (Verdict, Option<Model>) {
+    solver.push_scope();
+    solver.assert(&negate(goal));
+    let verdict = solver.check();
+    // The model lives in the just-pushed scope (hypotheses ∧ ¬goal); read it
+    // BEFORE popping. Only a genuine `Sat` carries a model — §10.5.
+    let model = if verdict == Verdict::Sat {
+        solver.model()
+    } else {
+        None
+    };
+    solver.pop_scope();
+    (verdict, model)
 }
 
 // ===========================================================================
@@ -382,27 +497,53 @@ pub fn discharge<S: Solver>(solver: &mut S, goal: &Pred) -> Verdict {
 pub enum VerifyWord {
     /// Pure data movement, resolved exactly as the M7 shadow stack would.
     Core(ShadowWord),
-    /// A call site carrying a refinement demand to discharge.
+    /// A call site carrying a refinement contract: a **demand** to discharge at
+    /// the call site (a precondition VC) and/or a **guarantee** to publish as a
+    /// fact for downstream words (a postcondition gift, §10.1).
     Call {
-        /// The demand's parameter binders (source order), zipped right-to-left
+        /// The demand's input binders (source order), zipped right-to-left
         /// against the stack top by [`crate::bind_positional`] (§10.2).
         binders: Vec<Binder>,
-        /// The demand predicate over those binders (an obligation on the caller).
-        demand: Pred,
+        /// The demand predicate over the input binders (an obligation on the
+        /// caller). `None` is an absent refinement — `where true`, no VC (§10.7).
+        demand: Option<Pred>,
+        /// The guarantee's output binders (source order), zipped right-to-left
+        /// against the **post-call** stack top (the freshly pushed outputs).
+        out_binders: Vec<Binder>,
+        /// The guarantee predicate over the output binders, asserted as a live
+        /// fact after the call so downstream demands can use it. `None` is an
+        /// absent refinement — `where true`, nothing published (§10.7).
+        guarantee: Option<Pred>,
         /// The Tier 0 arrow: how many terms the word pops/pushes.
         arrow: WordTy,
     },
 }
 
 /// One discharged obligation recorded during verification: the (substituted) VC
-/// goal and the verdict the solver returned for it under the live path
-/// conditions.
+/// goal, the verdict the solver returned for it under the live facts + path
+/// conditions, and — on a `Sat` (failing) verdict — the surfaced counterexample
+/// [`Model`] (§10.5 / M9).
 #[derive(Debug, Clone)]
 pub struct Obligation {
+    /// The call-site word that raised this obligation (for diagnostics).
+    pub word: String,
     /// The VC goal, with binders substituted to the actual shadow terms.
     pub goal: Pred,
-    /// The verdict: `Unsat` ⇒ discharged/valid.
+    /// The verdict: `Unsat` ⇒ discharged/valid; `Sat` ⇒ refuted (see `model`);
+    /// `Unknown` ⇒ undecided (degrade; never accepted as discharged — §10.5).
     pub verdict: Verdict,
+    /// The counterexample model, present **iff** `verdict == Sat` and the VC was
+    /// fully decidable (§10.5). An `Unknown` never carries a (fabricated) model.
+    pub model: Option<Model>,
+}
+
+impl Obligation {
+    /// Whether this obligation is **discharged** (proven valid): the negated-goal
+    /// encoding came back `Unsat`. `Sat` (refuted) and `Unknown` (undecided) are
+    /// **not** discharged — an `Unknown` is never silently accepted (§10.5).
+    pub fn is_discharged(&self) -> bool {
+        self.verdict == Verdict::Unsat
+    }
 }
 
 /// The verifier's resolver: maps a word name to its [`VerifyWord`]. The word
@@ -432,7 +573,7 @@ fn is_if(word: &str) -> bool {
 /// [`ShadowStack`] dispatch. A [`VerifyWord::Call`] moves data per its Tier 0
 /// arrow (opaque for M8). `resolve` is threaded so `dip`/`call` can run inner
 /// bodies.
-fn apply_effect<R: VerifyResolve, S: Solver>(
+fn apply_effect<R: VerifyResolve, S: Solver + CounterModel>(
     stack: &mut ShadowStack,
     word: &str,
     resolve: &R,
@@ -444,17 +585,38 @@ fn apply_effect<R: VerifyResolve, S: Solver>(
         VerifyWord::Call {
             binders,
             demand,
+            out_binders,
+            guarantee,
             arrow,
         } => {
-            // VC at the call site: bind the demand's parameters to the actual
-            // shadow terms (§10.2), substitute, discharge under the live path
-            // conditions (§10.4/§10.5).
-            let bindings = bind_positional(&binders, stack)?;
-            let goal = substitute(&demand, &bindings);
-            let verdict = discharge(solver, &goal);
-            obligations.push(Obligation { goal, verdict });
-            // Then move the data per the Tier 0 arrow (opaque for M8).
-            stack.apply_opaque(&arrow)
+            // (1) Demand → VC at the call site: bind the demand's parameters to
+            // the actual shadow terms (§10.2), substitute, discharge under the
+            // live facts + path conditions via the negated-goal encoding, pulling
+            // the counterexample model on a `Sat` (§10.4/§10.5).
+            if let Some(demand) = demand {
+                let bindings = bind_positional(&binders, stack)?;
+                let goal = substitute(&demand, &bindings);
+                let (verdict, model) = discharge_with_model(solver, &goal);
+                obligations.push(Obligation {
+                    word: word.to_string(),
+                    goal,
+                    verdict,
+                    model,
+                });
+            }
+            // (2) Move the data per the Tier 0 arrow (opaque: outputs are fresh
+            // literals).
+            stack.apply_opaque(&arrow)?;
+            // (3) Guarantee → publish as a live fact: bind the output binders to
+            // the freshly pushed output terms, substitute, and assert into the
+            // current scope so downstream demands (and the rest of this scope)
+            // can use it (§10.1 — output predicates are gifts to the next word).
+            if let Some(guarantee) = guarantee {
+                let bindings = bind_positional(&out_binders, stack)?;
+                let fact = substitute(&guarantee, &bindings);
+                solver.assert(&fact);
+            }
+            Ok(())
         }
     }
 }
@@ -462,7 +624,7 @@ fn apply_effect<R: VerifyResolve, S: Solver>(
 /// Apply a core [`ShadowWord`] to the shadow stack, threading the verifier so
 /// `dip`/`call` recurse through [`verify`] (and so an `if` *inside* a quotation
 /// still gets path conditions).
-fn apply_core<R: VerifyResolve, S: Solver>(
+fn apply_core<R: VerifyResolve, S: Solver + CounterModel>(
     stack: &mut ShadowStack,
     core: ShadowWord,
     resolve: &R,
@@ -514,7 +676,7 @@ fn apply_core<R: VerifyResolve, S: Solver>(
 /// branch's path condition) is recorded in `obligations`. The scopes live
 /// entirely in `solver` and this function's `stack`; nothing here touches the
 /// Tier 0 substitution (immutability barrier — module docs / invariant 18).
-pub fn verify<R: VerifyResolve, S: Solver>(
+pub fn verify<R: VerifyResolve, S: Solver + CounterModel>(
     tokens: &[Token],
     stack: &mut ShadowStack,
     solver: &mut S,
@@ -546,7 +708,7 @@ pub fn verify<R: VerifyResolve, S: Solver>(
 /// Both branches have the same Tier 0 effect, so after verifying both the actual
 /// shadow stack is advanced by running the then-body once (Tier 0 already proved
 /// the branches agree on shape).
-fn verify_if<R: VerifyResolve, S: Solver>(
+fn verify_if<R: VerifyResolve, S: Solver + CounterModel>(
     stack: &mut ShadowStack,
     solver: &mut S,
     resolve: &R,
@@ -585,6 +747,87 @@ fn verify_if<R: VerifyResolve, S: Solver>(
 }
 
 // ===========================================================================
+// First-order VC generation from refinement signatures (M9, §10.5 / §14.8)
+// ===========================================================================
+
+/// A neutral Tier-1 arrow over `Num` of the given pop/push counts.
+///
+/// The shadow stack only reads element **counts** from an arrow
+/// ([`ShadowStack::apply_opaque`]); the element *types* never matter at Tier 1
+/// (Tier 0 already proved the shape). This builds an arrow with `pops`/`pushes`
+/// `Num` slots so a refinement signature — which records only binder counts and
+/// names, not Tier 0 shapes — can drive the shadow stack.
+fn num_arrow(pops: usize, pushes: usize) -> WordTy {
+    const S: Span = Span { start: 0, end: 0 };
+    let ins = (0..pops).map(|_| Ty::num(S)).collect();
+    let outs = (0..pushes).map(|_| Ty::num(S)).collect();
+    WordTy::new(StackTy::new(ins, 0, S), StackTy::new(outs, 0, S))
+}
+
+/// Resolve a word to its [`VerifyWord`] from its **attached refinement
+/// signature** (§10.5). A word with a signature becomes a [`VerifyWord::Call`]
+/// carrying its demand (the input-side `where` — discharged at the call site) and
+/// its guarantee (the output-side `where` — published as a downstream fact); a
+/// word with no signature falls back to a core shadow word / interpreted op /
+/// literal / free variable.
+///
+/// The arrow is synthesized from the signature's binder counts (`num_arrow`):
+/// the demand binders are the pops, the guarantee binders the pushes. An absent
+/// `where` on either side is `where true` — no VC / no published fact (§10.7).
+pub fn refinement_verify_word(word: &str, sig: Option<&RefinementSig>) -> VerifyWord {
+    if let Some(sig) = sig {
+        return VerifyWord::Call {
+            binders: sig.demands.binders.clone(),
+            demand: sig.demands.predicate.clone(),
+            out_binders: sig.guarantees.binders.clone(),
+            guarantee: sig.guarantees.predicate.clone(),
+            arrow: num_arrow(sig.demands.binders.len(), sig.guarantees.binders.len()),
+        };
+    }
+    if let Some(core) = crate::shadow::core_shadow_word(word) {
+        return VerifyWord::Core(core);
+    }
+    if let Some(op) = crate::shadow::interpreted_op(word) {
+        return VerifyWord::Core(op);
+    }
+    if crate::types::is_numeric_literal(word) {
+        return VerifyWord::Core(ShadowWord::Num(word.to_string()));
+    }
+    VerifyWord::Core(ShadowWord::Var(word.to_string()))
+}
+
+/// The **public Tier-1 check entry** (§10.5 / M9): run first-order VC generation
+/// over `tokens`, deriving each call site's demands/guarantees from its attached
+/// refinement signature via `lookup`.
+///
+/// For every word, `lookup(word)` supplies its [`RefinementSig`] (or `None` for
+/// an unrefined word). At each call site the callee's demand binders are zipped
+/// against the inferred shadow stack (§10.2), the known facts (preceding words'
+/// published guarantees + live path conditions) are already in the solver scope,
+/// and the demand is discharged through the negated-goal encoding — surfacing a
+/// counterexample model on failure (§10.5). The returned [`Obligation`]s are the
+/// VC verdicts in call order.
+///
+/// Tier 0 is untouched: this builds its own [`ShadowStack`] and drives the
+/// supplied `solver`; nothing here takes a Tier 0 inference handle (the
+/// immutability barrier — module docs / invariant 18).
+pub fn check_refinements<L, S>(
+    tokens: &[Token],
+    lookup: &L,
+    solver: &mut S,
+) -> Result<Vec<Obligation>, ShadowError>
+where
+    L: Fn(&str) -> Option<RefinementSig>,
+    S: Solver + CounterModel,
+{
+    let resolve = |w: &str| refinement_verify_word(w, lookup(w).as_ref());
+    let mut stack = ShadowStack::new();
+    let mut obligations = Vec::new();
+    verify(tokens, &mut stack, solver, &resolve, &mut obligations)?;
+    Ok(obligations)
+}
+
+// ===========================================================================
 // Minimal embedded reasoner — the M8 stand-in for z3's check-sat
 // ===========================================================================
 //
@@ -605,6 +848,22 @@ fn verify_if<R: VerifyResolve, S: Solver>(
 /// Check satisfiability of the conjunction of `formulas` over linear rational
 /// arithmetic (the minimal M8 reasoner — see the module-level note).
 pub fn check_sat(formulas: &[Pred]) -> Verdict {
+    check_sat_model(formulas).0
+}
+
+/// Like [`check_sat`], but on a decidable `Sat` it **also** returns a concrete
+/// satisfying [`Model`] over the named binders — the counterexample (§10.5 / M9).
+///
+/// The model is extracted by Fourier–Motzkin **back-substitution** over the
+/// feasible linear system: the same elimination that decides feasibility records
+/// each variable's bounds, then a value is chosen for each variable in reverse
+/// elimination order (every variable a bound mentions is already assigned).
+///
+/// Soundness of the *verdict* is unchanged from [`check_sat`]; the model is a
+/// witness, supplied **only** for a fully-decidable `Sat`. An opaque conjunct
+/// (`Unknown`) yields **no model** (`None`) — the spec forbids fabricating one
+/// (§10.5).
+pub fn check_sat_model(formulas: &[Pred]) -> (Verdict, Option<Model>) {
     let mut constraints: Vec<Constraint> = Vec::new();
     let mut opaque = false;
     for f in formulas {
@@ -612,11 +871,21 @@ pub fn check_sat(formulas: &[Pred]) -> Verdict {
             opaque = true;
         }
     }
-    let feasible = fourier_motzkin_feasible(constraints);
+    let (feasible, assignment) = fourier_motzkin_solve(constraints);
     match (feasible, opaque) {
-        (false, _) => Verdict::Unsat, // decidable subset already infeasible ⇒ Unsat
-        (true, false) => Verdict::Sat,
-        (true, true) => Verdict::Unknown, // can't rule out a hidden contradiction
+        (false, _) => (Verdict::Unsat, None), // decidable subset already infeasible ⇒ Unsat
+        (true, false) => {
+            let model = Model {
+                assignments: assignment
+                    .into_iter()
+                    .map(|(name, val)| (name, val.render()))
+                    .collect(),
+            };
+            (Verdict::Sat, Some(model))
+        }
+        // Feasible decidable subset, but an opaque conjunct could hide a
+        // contradiction: degrade to Unknown and fabricate no model (§10.5).
+        (true, true) => (Verdict::Unknown, None),
     }
 }
 
@@ -832,9 +1101,21 @@ fn linearize(pred: &Pred) -> Option<LinExpr> {
     }
 }
 
-/// Fourier–Motzkin feasibility over the rationals: returns `true` if the
-/// constraint set `{ expr <= 0 | expr < 0 }` is satisfiable.
-fn fourier_motzkin_feasible(mut constraints: Vec<Constraint>) -> bool {
+/// Fourier–Motzkin over the rationals with **back-substitution**: decides
+/// feasibility of `{ expr <= 0 | expr < 0 }` and, when feasible, returns a
+/// concrete satisfying assignment.
+///
+/// The forward pass eliminates one variable at a time, recording — for each
+/// eliminated variable — the constraints that mentioned it (its bounds, in terms
+/// of the *still-live* variables). The backward pass then assigns a value to each
+/// variable in **reverse** elimination order: every variable a recorded bound
+/// references was eliminated *later*, hence is already assigned, so each bound
+/// evaluates to a concrete rational and a value can be picked between the tightest
+/// lower and upper bounds.
+fn fourier_motzkin_solve(mut constraints: Vec<Constraint>) -> (bool, Vec<(String, Rat)>) {
+    // Each step: (eliminated var, the constraints that mentioned it at that time).
+    let mut steps: Vec<(String, Vec<Constraint>)> = Vec::new();
+
     loop {
         // Discharge any constant-only constraints first.
         let mut remaining = Vec::new();
@@ -849,7 +1130,7 @@ fn fourier_motzkin_feasible(mut constraints: Vec<Constraint>) -> bool {
                     k.is_positive()
                 };
                 if bad {
-                    return false;
+                    return (false, Vec::new());
                 }
                 // else trivially satisfied; drop it.
             } else {
@@ -858,7 +1139,7 @@ fn fourier_motzkin_feasible(mut constraints: Vec<Constraint>) -> bool {
         }
         constraints = remaining;
         if constraints.is_empty() {
-            return true;
+            break;
         }
 
         // Pick a variable to eliminate.
@@ -878,6 +1159,10 @@ fn fourier_motzkin_feasible(mut constraints: Vec<Constraint>) -> bool {
             }
         }
 
+        // Record the constraints that bound `var` for back-substitution.
+        let mut involving = pos.clone();
+        involving.extend(neg.iter().cloned());
+
         let mut next = zero;
         for p in &pos {
             let a = *p.expr.coeffs.get(&var).unwrap(); // > 0
@@ -896,7 +1181,105 @@ fn fourier_motzkin_feasible(mut constraints: Vec<Constraint>) -> bool {
             }
         }
 
+        steps.push((var, involving));
         constraints = next;
+    }
+
+    // Feasible: back-substitute to a concrete witness point.
+    let mut model: BTreeMap<String, Rat> = BTreeMap::new();
+    for (var, involving) in steps.iter().rev() {
+        // For each bounding constraint `c_v * var + rest {<=,<} 0`, evaluate
+        // `rest` (over the already-assigned variables) to a concrete value and
+        // derive a bound on `var`:
+        //   c_v > 0 ⇒ var {<=,<} -rest/c_v   (an upper bound)
+        //   c_v < 0 ⇒ var {>=,>} -rest/c_v   (a lower bound)
+        let mut lower: Option<(Rat, bool)> = None; // (value, strict)
+        let mut upper: Option<(Rat, bool)> = None;
+        for c in involving {
+            let c_v = *c.expr.coeffs.get(var).unwrap();
+            // rest = expr with `var` removed, evaluated under `model`.
+            let mut rest = c.expr.constant;
+            for (name, coeff) in &c.expr.coeffs {
+                if name == var {
+                    continue;
+                }
+                let val = model
+                    .get(name)
+                    .copied()
+                    .expect("back-substitution: referenced variable must be assigned");
+                rest = rest.add(&coeff.mul(&val));
+            }
+            // bound = -rest / c_v
+            let bound = rest.neg().div(&c_v);
+            if c_v.is_positive() {
+                // var <= bound (strict ⇒ var < bound): an upper bound.
+                upper = Some(match upper {
+                    None => (bound, c.strict),
+                    Some((u, us)) => {
+                        if bound.lt(&u) {
+                            (bound, c.strict)
+                        } else if u.lt(&bound) {
+                            (u, us)
+                        } else {
+                            (u, us || c.strict)
+                        }
+                    }
+                });
+            } else {
+                // var >= bound (strict ⇒ var > bound): a lower bound.
+                lower = Some(match lower {
+                    None => (bound, c.strict),
+                    Some((l, ls)) => {
+                        if l.lt(&bound) {
+                            (bound, c.strict)
+                        } else if bound.lt(&l) {
+                            (l, ls)
+                        } else {
+                            (l, ls || c.strict)
+                        }
+                    }
+                });
+            }
+        }
+
+        let value = pick_value(lower, upper);
+        model.insert(var.clone(), value);
+    }
+
+    (true, model.into_iter().collect())
+}
+
+/// Choose a concrete rational satisfying the (optional) lower and upper bounds.
+/// Feasibility is already established (the forward pass would have failed
+/// otherwise), so a satisfying value always exists.
+fn pick_value(lower: Option<(Rat, bool)>, upper: Option<(Rat, bool)>) -> Rat {
+    match (lower, upper) {
+        (None, None) => Rat::int(0),
+        (Some((l, strict)), None) => {
+            if strict {
+                l.add(&Rat::int(1)) // any value > l
+            } else {
+                l
+            }
+        }
+        (None, Some((u, strict))) => {
+            if strict {
+                u.sub(&Rat::int(1)) // any value < u
+            } else {
+                u
+            }
+        }
+        (Some((l, ls)), Some((u, us))) => {
+            if l.lt(&u) {
+                // A strict midpoint satisfies both strict and non-strict bounds.
+                l.add(&u).div(&Rat::int(2))
+            } else {
+                // l == u (the forward pass ruled out l > u); both must be
+                // non-strict for feasibility, so the shared endpoint works.
+                debug_assert!(!ls && !us, "infeasible point bound should have been caught");
+                l
+            }
+        }
     }
 }
 
@@ -1012,6 +1395,29 @@ impl Rat {
         assert!(self.num != 0, "reciprocal of zero");
         Rat::new(self.den, self.num)
     }
+
+    fn div(&self, other: &Rat) -> Rat {
+        self.mul(&other.recip())
+    }
+
+    /// `self < other`.
+    fn lt(&self, other: &Rat) -> bool {
+        self.sub(other).is_negative()
+    }
+
+    fn sub(&self, other: &Rat) -> Rat {
+        self.add(&other.neg())
+    }
+
+    /// Render the rational for a surfaced counterexample: an integer prints
+    /// bare (`-1`, `3`), a true fraction prints `num/den` (`1/2`).
+    fn render(&self) -> String {
+        if self.den == 1 {
+            format!("{}", self.num)
+        } else {
+            format!("{}/{}", self.num, self.den)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1055,7 +1461,9 @@ mod tests {
     fn sqrt_call() -> VerifyWord {
         VerifyWord::Call {
             binders: vec![binder("n", "Num")],
-            demand: Pred::Bin(BinOp::Ge, Box::new(var("n")), Box::new(num("0"))),
+            demand: Some(Pred::Bin(BinOp::Ge, Box::new(var("n")), Box::new(num("0")))),
+            out_binders: vec![binder("r", "Num")],
+            guarantee: None,
             arrow: WordTy::new(
                 StackTy::new(vec![Ty::num(S)], 0, S),
                 StackTy::new(vec![Ty::num(S)], 0, S),
@@ -1396,6 +1804,207 @@ mod tests {
     // =======================================================================
     // Compile-time only (§10.10 / invariant 14/20)
     // =======================================================================
+
+    // =======================================================================
+    // M9 — counterexample/model extraction (§10.5)
+    // =======================================================================
+
+    #[test]
+    fn check_sat_model_single_bound_yields_negative_witness() {
+        // x < 0 alone is Sat; the witness must be a concrete negative value.
+        let f = vec![Pred::Bin(BinOp::Lt, Box::new(var("x")), Box::new(num("0")))];
+        let (verdict, model) = check_sat_model(&f);
+        assert_eq!(verdict, Verdict::Sat);
+        let model = model.expect("a decidable Sat must carry a model");
+        assert_eq!(model.get("x"), Some("-1"));
+    }
+
+    #[test]
+    fn check_sat_model_midpoint_between_bounds() {
+        // 0 <= x ∧ x <= 4  ⇒ Sat; the witness is the midpoint 2 (a value strictly
+        // satisfying both bounds, chosen by back-substitution).
+        let f = vec![
+            Pred::Bin(BinOp::Ge, Box::new(var("x")), Box::new(num("0"))),
+            Pred::Bin(BinOp::Le, Box::new(var("x")), Box::new(num("4"))),
+        ];
+        let (verdict, model) = check_sat_model(&f);
+        assert_eq!(verdict, Verdict::Sat);
+        assert_eq!(model.unwrap().get("x"), Some("2"));
+    }
+
+    #[test]
+    fn check_sat_model_unsat_has_no_model() {
+        // x > 0 ∧ x < 0 ⇒ Unsat: no counterexample, no model.
+        let f = vec![
+            Pred::Bin(BinOp::Gt, Box::new(var("x")), Box::new(num("0"))),
+            Pred::Bin(BinOp::Lt, Box::new(var("x")), Box::new(num("0"))),
+        ];
+        let (verdict, model) = check_sat_model(&f);
+        assert_eq!(verdict, Verdict::Unsat);
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn check_sat_model_unknown_does_not_fabricate_a_model() {
+        // An opaque conjunct degrades to Unknown; §10.5 forbids fabricating a
+        // model for it.
+        let f = vec![Pred::App("length".into(), vec![var("xs")])];
+        let (verdict, model) = check_sat_model(&f);
+        assert_eq!(verdict, Verdict::Unknown);
+        assert!(model.is_none(), "Unknown must not fabricate a model");
+    }
+
+    // =======================================================================
+    // M9 — the negated-goal encoding verified at unit level (§10.5 / §12 M9)
+    // =======================================================================
+
+    #[test]
+    fn negated_goal_known_valid_is_unsat_no_model() {
+        // Known-VALID implication: under x > 0, the goal x >= 0 holds. The
+        // negated-goal encoding (assert ¬goal, check) ⇒ Unsat, and no model.
+        let mut s = SmtLibSolver::new();
+        s.push_scope();
+        s.assert(&Pred::Bin(
+            BinOp::Gt,
+            Box::new(var("x")),
+            Box::new(num("0")),
+        ));
+        let goal = Pred::Bin(BinOp::Ge, Box::new(var("x")), Box::new(num("0")));
+        let (verdict, model) = discharge_with_model(&mut s, &goal);
+        s.pop_scope();
+        assert_eq!(verdict, Verdict::Unsat, "known-valid ⇒ Unsat");
+        assert!(model.is_none(), "a valid VC has no counterexample");
+    }
+
+    #[test]
+    fn negated_goal_known_invalid_is_sat_with_model() {
+        // Known-INVALID implication: with no hypothesis, the goal x >= 0 is not
+        // valid. The negated-goal encoding ⇒ Sat, with a concrete counterexample
+        // (x = -1) surfaced.
+        let mut s = SmtLibSolver::new();
+        let goal = Pred::Bin(BinOp::Ge, Box::new(var("x")), Box::new(num("0")));
+        let (verdict, model) = discharge_with_model(&mut s, &goal);
+        assert_eq!(verdict, Verdict::Sat, "known-invalid ⇒ Sat");
+        let model = model.expect("a Sat VC must surface its counterexample");
+        assert_eq!(model.get("x"), Some("-1"));
+    }
+
+    // =======================================================================
+    // M9 — first-order VC generation from refinement signatures, end-to-end
+    // (§10.5 / §12 M9): `x sqrt`.
+    // =======================================================================
+
+    fn sqrt_sig() -> RefinementSig {
+        crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num where r >= 0 )").unwrap()
+    }
+
+    #[test]
+    fn m9_x_sqrt_insufficient_facts_is_sat_with_counterexample() {
+        // `x sqrt` with NO fact bounding x: the demand x >= 0 cannot be
+        // discharged. The VC is Sat and a concrete counterexample (a negative x)
+        // is surfaced — not a bare Sat.
+        let toks = parse("x sqrt").unwrap();
+        let sig = sqrt_sig();
+        let lookup = |w: &str| (w == "sqrt").then(|| sig.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+
+        assert_eq!(obs.len(), 1, "exactly one demand (x sqrt): {obs:?}");
+        assert_eq!(
+            obs[0].goal,
+            Pred::Bin(BinOp::Ge, Box::new(var("x")), Box::new(num("0")))
+        );
+        assert_eq!(obs[0].verdict, Verdict::Sat);
+        assert!(!obs[0].is_discharged());
+        let model = obs[0]
+            .model
+            .as_ref()
+            .expect("Sat ⇒ counterexample surfaced");
+        let xval = model.get("x").expect("model constrains x");
+        assert!(
+            xval.starts_with('-'),
+            "counterexample x must be negative, got {xval}"
+        );
+    }
+
+    #[test]
+    fn m9_x_sqrt_sufficient_facts_is_unsat_accepted() {
+        // A word `nonneg` guaranteeing its result >= 0 publishes that fact; then
+        // `nonneg sqrt` discharges sqrt's demand (Unsat, accepted) — no model.
+        // This exercises facts coming from a *preceding word's guarantee*.
+        let toks = parse("nonneg sqrt").unwrap();
+        let sqrt = sqrt_sig();
+        let nonneg = crate::parse_signature("nonneg : ( -- r: Num where r >= 0 )").unwrap();
+        let lookup = |w: &str| match w {
+            "sqrt" => Some(sqrt.clone()),
+            "nonneg" => Some(nonneg.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+
+        // `nonneg` has no demand (only a guarantee) ⇒ no obligation; `sqrt` has
+        // exactly one.
+        assert_eq!(obs.len(), 1, "only sqrt raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "demand discharges under guarantee"
+        );
+        assert!(obs[0].is_discharged());
+        assert!(
+            obs[0].model.is_none(),
+            "a discharged VC has no counterexample"
+        );
+
+        // The published guarantee really was asserted as a fact in the script.
+        let script = solver.script();
+        assert!(
+            script.contains(">= $t0 0") || script.contains("(>= $t0 0)"),
+            "guarantee fact must be asserted\nscript:\n{script}"
+        );
+    }
+
+    #[test]
+    fn m9_unknown_demand_is_not_accepted_as_discharged() {
+        // A demand the reasoner cannot decide (opaque, nonlinear) degrades to
+        // Unknown and is NOT accepted as discharged — no silent pass, no
+        // fabricated model (§10.5; staging for M10/M12).
+        let toks = parse("x foo").unwrap();
+        // foo demands `length n >= 0` over an uninterpreted `length` — opaque.
+        let sig =
+            crate::parse_signature("foo : ( n: Num where length n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| (w == "foo").then(|| sig.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].verdict, Verdict::Unknown);
+        assert!(
+            !obs[0].is_discharged(),
+            "Unknown must never count as discharged"
+        );
+        assert!(obs[0].model.is_none(), "Unknown must not fabricate a model");
+    }
+
+    #[test]
+    fn m9_path_condition_plus_vc_generation_end_to_end() {
+        // The M8 path condition and the M9 VC generation compose: inside the
+        // x > 0 branch, the refinement-derived demand for `x sqrt` discharges.
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let sig = sqrt_sig();
+        let lookup = |w: &str| (w == "sqrt").then(|| sig.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+
+        assert_eq!(obs.len(), 1);
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "x sqrt's demand discharges under the x>0 path condition"
+        );
+        assert!(obs[0].model.is_none());
+    }
 
     #[test]
     fn solver_seam_is_compile_time_only() {

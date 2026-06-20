@@ -370,6 +370,29 @@ impl<T> Evaluator<T> {
         self.refinements.get(name)
     }
 
+    /// Run **first-order Tier-1 verification** (M9, §10.5) over `tokens`,
+    /// deriving every call site's demands and guarantees from the **attached
+    /// refinement signatures** in this evaluator's refinement table
+    /// ([`Evaluator::attach_refinement`]).
+    ///
+    /// This is the public Tier-1 check entry: it builds a fresh
+    /// [`crate::SmtLibSolver`] and a fresh shadow stack, walks `tokens`, and at
+    /// each call site zips the callee's demand binders against the inferred stack
+    /// (§10.2), gathers the known facts (preceding words' published guarantees +
+    /// live path conditions), and discharges each demand through the negated-goal
+    /// encoding — surfacing a counterexample model on failure (§10.5). It returns
+    /// one [`crate::Obligation`] per discharged demand, in call order.
+    ///
+    /// Tier 0 is untouched: this is a compile-time analysis over the frozen AST
+    /// and reads the refinement table read-only (the §3 immutability barrier).
+    pub fn check_refinements(
+        &self,
+        tokens: &[crate::Token],
+    ) -> Result<Vec<crate::Obligation>, crate::ShadowError> {
+        let mut solver = crate::SmtLibSolver::new();
+        crate::check_refinements(tokens, &|w| self.refinement(w).cloned(), &mut solver)
+    }
+
     /// Loads function definitions from a top-level token stream.
     ///
     /// This is a static pre-pass: it walks `tokens` and collects every
