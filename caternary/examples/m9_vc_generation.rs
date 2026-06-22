@@ -53,13 +53,13 @@ fn main() {
         report("nonneg sqrt  (guarantee supplies the fact)", &obs);
     }
 
-    // (3) `x 0 > [ x sqrt ] [ 0 ] if`: the M8 path condition composes with M9 VC
+    // (3) `x 0 > [ x sqrt ] [ 0 ] IF`: the M8 path condition composes with M9 VC
     // generation — inside the x > 0 branch, the demand discharges.
     {
-        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
         let lookup = |w: &str| (w == "sqrt").then(|| sqrt.clone());
         let mut solver = SmtLibSolver::new();
         let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
-        report("x 0 > [ x sqrt ] [ 0 ] if  (path condition)", &obs);
+        report("x 0 > [ x sqrt ] [ 0 ] IF  (path condition)", &obs);
     }
 }
