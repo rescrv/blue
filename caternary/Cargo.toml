@@ -8,7 +8,11 @@ license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
 [dependencies]
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+getopts = { workspace = true, optional = true }
 handled = { workspace = true }
+rustyline = { workspace = true, optional = true }
 shvar = { workspace = true }
 z3 = { version = "0.20.0", optional = true }
 
@@ -19,5 +23,11 @@ z3 = { version = "0.20.0", optional = true }
 # drops a native `Z3Solver` in behind the same seam. It is OFF by default so the
 # default build (and a *checked program* at runtime) links no solver — z3 is a
 # build-time-only, opt-in check backend.
-default = []
+default = ["binaries"]
+binaries = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts", "dep:rustyline"]
 z3 = ["dep:z3"]
+
+[[bin]]
+name = "caternary"
+path = "src/bin/caternary.rs"
+required-features = ["binaries"]
