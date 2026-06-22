@@ -859,13 +859,13 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             guarantee,
             arrow,
         } => {
+            let input_bindings = bind_positional(&binders, stack)?;
             // (1) Demand → VC at the call site: bind the demand's parameters to
             // the actual shadow terms (§10.2), substitute, discharge under the
             // live facts + path conditions via the negated-goal encoding, pulling
             // the counterexample model on a `Sat` (§10.4/§10.5).
             if let Some(demand) = demand {
-                let bindings = bind_positional(&binders, stack)?;
-                let goal = substitute(&demand, &bindings);
+                let goal = substitute(&demand, &input_bindings);
                 let (verdict, model) = discharge_with_model(solver, &goal);
                 ctx.obligations.push(Obligation {
                     word: word.to_string(),
@@ -888,11 +888,16 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             // literals).
             stack.apply_opaque(&arrow)?;
             // (3) Guarantee → publish as a live fact: bind the output binders to
-            // the freshly pushed output terms, substitute, and assert into the
-            // current scope so downstream demands (and the rest of this scope)
-            // can use it (§10.1 — output predicates are gifts to the next word).
+            // the freshly pushed output terms, combine those with the input
+            // bindings captured before the effect, substitute, and assert into
+            // the current scope so downstream demands (and the rest of this
+            // scope) can use it (§10.1 — output predicates are gifts to the next
+            // word). Output predicates may relate results back to inputs (`sqrt`
+            // documents `r * r = n`; arithmetic builtins use `c = a + b`), so
+            // both sides must be in scope for substitution.
             if let Some(guarantee) = guarantee {
-                let bindings = bind_positional(&out_binders, stack)?;
+                let mut bindings = input_bindings;
+                bindings.extend(bind_positional(&out_binders, stack)?);
                 let fact = substitute(&guarantee, &bindings);
                 solver.assert(&fact);
             }
@@ -2793,10 +2798,19 @@ fn fourier_motzkin_solve(mut constraints: Vec<Constraint>) -> (bool, Vec<(String
                 if name == var {
                     continue;
                 }
-                let val = model
-                    .get(name)
-                    .copied()
-                    .expect("back-substitution: referenced variable must be assigned");
+                let val = match model.get(name).copied() {
+                    Some(val) => val,
+                    None => {
+                        // A bound may mention a variable that was never
+                        // eliminated because it became unconstrained in the
+                        // forward pass. It is genuinely free at this point; pick
+                        // a neutral witness value so model construction remains
+                        // total.
+                        let val = Rat::int(0);
+                        model.insert(name.clone(), val);
+                        val
+                    }
+                };
                 rest = rest.add(&coeff.mul(&val));
             }
             // bound = -rest / c_v
