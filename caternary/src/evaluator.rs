@@ -20,10 +20,21 @@ const PHASE: &str = "caternary-eval";
 /// Error code for operator failures.
 pub const CODE_OPERATOR_ERROR: &str = "operator-error";
 
+/// Error code for malformed or misplaced function definitions (load-time).
+pub const CODE_DEFINITION_ERROR: &str = "definition-error";
+
 /// Construct an operator error with a structured message.
 pub(crate) fn operator_error(message: impl AsRef<str>) -> EvalError {
     SError::new(PHASE)
         .with_code(CODE_OPERATOR_ERROR)
+        .with_message(message.as_ref())
+}
+
+/// Construct a definition error with a structured message. Raised only by the
+/// `load` pre-pass when a `:name` binder is malformed or out of position.
+pub(crate) fn definition_error(message: impl AsRef<str>) -> EvalError {
+    SError::new(PHASE)
+        .with_code(CODE_DEFINITION_ERROR)
         .with_message(message.as_ref())
 }
 
@@ -37,6 +48,28 @@ fn bind_target(w: &str) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// Returns `Some(name)` if `w` is a well-formed definition binder `:name` whose
+/// name is a valid identifier (the same grammar as locals). A `:`-prefixed word
+/// with a malformed suffix returns `None` here; the `load` pre-pass detects the
+/// `:` prefix separately (see [`has_def_prefix`]) so it can reject malformed
+/// binders rather than silently treating them as ordinary words.
+fn def_target(w: &str) -> Option<&str> {
+    let rest = w.strip_prefix(':')?;
+    if is_local_name(rest) {
+        Some(rest)
+    } else {
+        None
+    }
+}
+
+/// True for any word beginning with `:`. The `load` pre-pass uses this to give a
+/// strict error for every `:`-prefixed word that is not a valid top-level
+/// `[ body ] :name` definition, and `eval_scope` uses it as a backstop so a
+/// stray binder can never be mistaken for a literal during evaluation.
+fn has_def_prefix(w: &str) -> bool {
+    w.starts_with(':')
 }
 
 fn is_local_name(name: &str) -> bool {
@@ -104,8 +137,15 @@ pub type Operator<T> = fn(&mut Vec<T>, &Evaluator<T>) -> Result<(), EvalError>;
 /// The evaluator is generic over the stack element type `T`. Operators are registered
 /// by name and invoked when the corresponding word is encountered. Non-operator tokens
 /// are converted to `T` via `From<Token>` and pushed onto the stack.
+///
+/// User functions defined with `[ body ] :name` are collected by [`Evaluator::load`]
+/// into the `definitions` table, which is a sibling of `operators` and shares its
+/// lifetime: load once, evaluate many programs against the result. Definition names
+/// are resolved ahead of operators (so a definition may shadow a builtin) and after
+/// locals (so a `>name` local shadows a definition of the same name).
 pub struct Evaluator<T> {
     operators: HashMap<String, Operator<T>>,
+    definitions: HashMap<String, Vec<Token>>,
 }
 
 impl<T> Default for Evaluator<T>
@@ -118,16 +158,95 @@ where
 }
 
 impl<T> Evaluator<T> {
-    /// Creates a new evaluator with no operators defined.
+    /// Creates a new evaluator with no operators and no definitions.
     pub fn new() -> Self {
         Self {
             operators: HashMap::new(),
+            definitions: HashMap::new(),
         }
     }
 
     /// Defines an operator by name.
     pub fn define(&mut self, name: &str, op: Operator<T>) {
         self.operators.insert(name.to_string(), op);
+    }
+
+    /// Loads function definitions from a top-level token stream.
+    ///
+    /// This is a static pre-pass: it walks `tokens` and collects every
+    /// `[ body ] :name` definition into the `definitions` table *before* any
+    /// evaluation. Because the whole stream is seen before execution,
+    /// references resolve regardless of textual order (forward references are
+    /// fine) and regardless of runtime control flow; recursion works because a
+    /// body resolves its own name at call time against the fully populated
+    /// table. Load is additive and may be called multiple times to assemble a
+    /// library; a redefinition is rejected across calls as well as within one.
+    ///
+    /// A `:`-prefixed word is legal only as the second half of a top-level
+    /// `[ body ] :name` pair. Every other occurrence is a static
+    /// [`definition_error`]: a binder nested inside a quotation, a binder with
+    /// no preceding quotation, a binder following a non-quotation, a malformed
+    /// name (e.g. `:2x` or a bare `:`), or a redefinition.
+    ///
+    /// Definitions are stored verbatim: at top level the locals environment is
+    /// empty, so there are no enclosing locals to capture and no token
+    /// expansion occurs.
+    pub fn load(&mut self, tokens: &[Token]) -> Result<(), EvalError> {
+        // A `:`-prefixed binder is only ever legal at the top level. Reject any
+        // that appear (at any depth) inside a quotation before pairing the rest.
+        fn reject_nested(tokens: &[Token]) -> Result<(), EvalError> {
+            for tok in tokens {
+                if let Token::Bracket(inner) = tok {
+                    for t in inner {
+                        if let Token::Word(w) = t
+                            && has_def_prefix(w)
+                        {
+                            return Err(definition_error(format!(
+                                "definition `{w}` must appear at top level, not inside a quotation"
+                            )));
+                        }
+                    }
+                    reject_nested(inner)?;
+                }
+            }
+            Ok(())
+        }
+        reject_nested(tokens)?;
+
+        // Walk the top level, pairing each binder with the quotation before it.
+        let mut i = 0;
+        while i < tokens.len() {
+            if let Token::Word(w) = &tokens[i]
+                && has_def_prefix(w)
+            {
+                let name = def_target(w).ok_or_else(|| {
+                    definition_error(format!(
+                        "malformed definition binder `{w}`: expected `:name`"
+                    ))
+                })?;
+                if i == 0 {
+                    return Err(definition_error(format!(
+                        "definition `:{name}` has no preceding quotation to bind"
+                    )));
+                }
+                let body = match &tokens[i - 1] {
+                    Token::Bracket(body) => body.clone(),
+                    Token::Word(prev) => {
+                        return Err(definition_error(format!(
+                            "definition `:{name}` must follow a quotation, found word `{prev}`"
+                        )));
+                    }
+                };
+                if self.definitions.contains_key(name) {
+                    return Err(definition_error(format!(
+                        "redefinition: `:{name}` is already defined"
+                    )));
+                }
+                self.definitions.insert(name.to_string(), body);
+            }
+            i += 1;
+        }
+        Ok(())
     }
 }
 
@@ -177,9 +296,26 @@ where
                             ))
                         })?;
                         env.insert(name.to_string(), value);
+                    } else if has_def_prefix(w) {
+                        // A `:`-binder reached evaluation. `load` consumes every
+                        // valid binder and rejects malformed ones, so reaching
+                        // here means definitions were not loaded (or a binder
+                        // was smuggled into a quotation body, which `load` also
+                        // rejects). Fail loudly rather than push it as a literal.
+                        return Err(definition_error(format!(
+                            "definition binder `{w}` encountered during evaluation; \
+                             definitions must be loaded with `Evaluator::load`, not evaluated"
+                        )));
                     } else if let Some(value) = env.get(w) {
-                        // reference: resolved scope-first, ahead of operator lookup
+                        // reference: resolved scope-first, ahead of definitions and operators
                         stack.push(value.clone());
+                    } else if let Some(body) = self.definitions.get(w) {
+                        // function call: re-enter in a fresh scope. Resolved at
+                        // call time against the populated table, so a definition
+                        // may call itself (recursion) or any sibling definition,
+                        // in any textual order.
+                        let body = body.clone();
+                        self.eval_with_stack(&body, stack)?;
                     } else if let Some(op) = self.operators.get(w) {
                         op(stack, self)?;
                     } else {
@@ -799,6 +935,142 @@ mod tests {
 
     fn word(s: &str) -> Value {
         Value::Word(s.to_string())
+    }
+
+    fn load_definitions(eval: &mut Evaluator<Value>, source: &str) {
+        let tokens = parse(source).unwrap();
+        eval.load(&tokens).unwrap();
+    }
+
+    fn assert_load_error(source: &str, expected: &str) {
+        let mut eval = locals_eval();
+        let tokens = parse(source).unwrap();
+        let err = eval.load(&tokens).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "expected error to contain {expected:?}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_registers_definition_and_evaluates_later() {
+        let mut eval = locals_eval();
+        load_definitions(&mut eval, "[1 ADD] :inc");
+
+        let tokens = parse("5 inc").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("6")]);
+    }
+
+    #[test]
+    fn load_allows_forward_references_between_definitions() {
+        let mut eval = locals_eval();
+        load_definitions(&mut eval, "[inc inc] :twice [1 ADD] :inc");
+
+        let tokens = parse("3 twice").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("5")]);
+    }
+
+    #[test]
+    fn load_is_additive_across_calls() {
+        let mut eval = locals_eval();
+        load_definitions(&mut eval, "[1 ADD] :inc");
+        load_definitions(&mut eval, "[inc inc] :twice");
+
+        let tokens = parse("4 twice").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("6")]);
+    }
+
+    #[test]
+    fn definition_names_shadow_operators() {
+        let mut eval = locals_eval();
+        eval.define("MARK", |stack: &mut Vec<Value>, _eval| {
+            stack.push(word("operator"));
+            Ok(())
+        });
+        load_definitions(&mut eval, "[definition] :MARK");
+
+        let tokens = parse("MARK").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("definition")]);
+    }
+
+    #[test]
+    fn locals_shadow_definitions() {
+        let mut eval = locals_eval();
+        load_definitions(&mut eval, "[definition] :x");
+
+        let tokens = parse("local >x x").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("local")]);
+    }
+
+    #[test]
+    fn definitions_are_visible_inside_quotations() {
+        let mut eval = locals_eval();
+        crate::register_combinators(&mut eval);
+        load_definitions(&mut eval, "[1 ADD] :inc");
+
+        let tokens = parse("5 [inc] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("6")]);
+    }
+
+    #[test]
+    fn evaluating_definition_binder_without_load_is_an_error() {
+        let eval = locals_eval();
+        let tokens = parse("[1 ADD] :inc").unwrap();
+        let err = eval.eval(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("definition binder `:inc` encountered during evaluation")
+        );
+    }
+
+    #[test]
+    fn load_rejects_malformed_definition_binder() {
+        assert_load_error(
+            "[body] :2x",
+            "malformed definition binder `:2x`: expected `:name`",
+        );
+    }
+
+    #[test]
+    fn load_rejects_definition_without_preceding_quotation() {
+        assert_load_error(":x", "definition `:x` has no preceding quotation to bind");
+    }
+
+    #[test]
+    fn load_rejects_definition_after_word() {
+        assert_load_error(
+            "not_a_quotation :x",
+            "definition `:x` must follow a quotation, found word `not_a_quotation`",
+        );
+    }
+
+    #[test]
+    fn load_rejects_nested_definition_binder() {
+        assert_load_error(
+            "[[inner] :x] :outer",
+            "definition `:x` must appear at top level, not inside a quotation",
+        );
+    }
+
+    #[test]
+    fn load_rejects_redefinition_within_one_call() {
+        assert_load_error(
+            "[first] :x [second] :x",
+            "redefinition: `:x` is already defined",
+        );
+    }
+
+    #[test]
+    fn load_rejects_redefinition_across_calls() {
+        let mut eval = locals_eval();
+        load_definitions(&mut eval, "[first] :x");
+
+        let tokens = parse("[second] :x").unwrap();
+        let err = eval.load(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("redefinition: `:x` is already defined")
+        );
     }
 
     #[test]
