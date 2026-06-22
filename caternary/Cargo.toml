@@ -7,17 +7,30 @@ description = "Caternary is a stack-based language and runtime."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
-[features]
-default = ["binaries"]
-
-binaries = []
-# The native solver backend is build-time-only and opt-in.
-z3 = ["dep:z3"]
-
 [dependencies]
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+getopts = { workspace = true, optional = true }
 handled = { workspace = true }
+rustyline = { workspace = true, optional = true }
 shvar = { workspace = true }
 z3 = { version = "0.20.0", optional = true }
+
+[features]
+# `caternary check` discharges verification conditions through the solver seam
+# (`Solver`/`CounterModel`/`FactSnapshot`, src/solver.rs). The day-one backend is
+# the SMT-LIB2 text-emission + embedded reasoner (`SmtLibSolver`); enabling `z3`
+# drops a native `Z3Solver` in behind the same seam. It is OFF by default so the
+# default build (and a *checked program* at runtime) links no solver — z3 is a
+# build-time-only, opt-in check backend.
+default = ["binaries"]
+binaries = ["dep:arrrg", "dep:arrrg_derive", "dep:getopts", "dep:rustyline"]
+z3 = ["dep:z3"]
+
+[[bin]]
+name = "caternary"
+path = "src/bin/caternary.rs"
+required-features = ["binaries"]
 
 [[example]]
 name = "m8_script"
