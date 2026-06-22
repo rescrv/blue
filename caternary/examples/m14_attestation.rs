@@ -100,7 +100,7 @@ fn main() {
     //          `assume` the solver cannot otherwise discharge), and feeds it to
     //          the refined `sqrt` (which demands `n >= 0`);
     //   `main` runs `foo` and closes against the empty stack.
-    let src = "[ mk \"assume(result >= 0)\" sqrt drop ] :foo [ foo ] :main";
+    let src = "[ mk \"assume(result >= 0)\" sqrt DROP ] :foo [ foo ] :main";
     let eval = build(src);
 
     // (1) The CI gate — a SINGLE build-time act (§10.10, invariant 19/20): one

@@ -8,7 +8,7 @@ fn span() -> Span {
 }
 
 fn main() {
-    let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+    let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
     let mut stack = ShadowStack::new();
     let mut solver = SmtLibSolver::new();
     let mut obligations = Vec::new();

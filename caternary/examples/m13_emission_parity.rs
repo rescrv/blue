@@ -41,7 +41,7 @@ fn main() {
 
     // ---- Scenario 1: path condition + an `assume` boundary -----------------
     //
-    // `x 0 > [ x sqrt ] [ 0 ] if` exercises the M8 path-condition `if` (the
+    // `x 0 > [ x sqrt ] [ 0 ] IF` exercises the M8 path-condition `IF` (the
     // sqrt demand discharges under x > 0), and `opaque assume(x>=0) sqrt`
     // exercises the M12 strict drop-and-re-run plus the dependent obligation.
     let span = || Span { start: 0, end: 0 };
@@ -73,12 +73,12 @@ fn main() {
         }
     };
 
-    let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+    let toks = parse("x 0 > [ x sqrt ] [ 0 ] IF").unwrap();
     let mut solver = SmtLibSolver::new();
     let mut stack = ShadowStack::new();
     let mut obligations = Vec::new();
     verify(&toks, &mut stack, &mut solver, &sqrt, &mut obligations).unwrap();
-    print_script("path-condition `if` (M8)", solver.script());
+    print_script("path-condition `IF` (M8)", solver.script());
     for o in &obligations {
         println!("  obligation {:?} => {:?}", o.goal, o.verdict);
     }
