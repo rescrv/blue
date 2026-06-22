@@ -724,29 +724,14 @@ impl<'a> Parser<'a> {
 
     // ---- signature grammar ----
     //
-    //   sig   := IDENT ':' '(' side '--' side ')'
+    //   sig   := head ':' '(' side '--' side ')'
+    //   head  := IDENT | operator-token
     //   side  := binder* ('where' pred)?
     //   binder:= IDENT ':' IDENT
 
     fn parse_signature(&mut self) -> Result<RefinementSig, RefineParseError> {
-        // Head identifier: the definition name.
-        let name = match self.peek() {
-            Some(Tok::Ident(_)) => {
-                let Some(Spanned {
-                    tok: Tok::Ident(n), ..
-                }) = self.bump()
-                else {
-                    unreachable!("peeked Ident")
-                };
-                n.clone()
-            }
-            _ => {
-                return Err(RefineParseError::new(
-                    "expected the definition name a refinement signature attaches to",
-                    self.peek_span(),
-                ));
-            }
-        };
+        // Head: the definition/operator name this signature attaches to.
+        let name = self.parse_signature_head()?;
         self.expect(&Tok::Colon, "`:` after the definition name")?;
         self.expect(&Tok::LParen, "`(` to open the refinement signature")?;
         let demands = self.parse_side(SideEnd::Arrow)?;
@@ -764,6 +749,34 @@ impl<'a> Parser<'a> {
             demands,
             guarantees,
         })
+    }
+
+    fn parse_signature_head(&mut self) -> Result<String, RefineParseError> {
+        let Some(spanned) = self.bump() else {
+            return Err(RefineParseError::new(
+                "expected the definition or operator name a refinement signature attaches to",
+                self.peek_span(),
+            ));
+        };
+        let name = match &spanned.tok {
+            Tok::Ident(n) => n.clone(),
+            Tok::Plus => "+".to_string(),
+            Tok::Minus => "-".to_string(),
+            Tok::Star => "*".to_string(),
+            Tok::Slash => "/".to_string(),
+            Tok::Ge => ">=".to_string(),
+            Tok::Le => "<=".to_string(),
+            Tok::Gt => ">".to_string(),
+            Tok::Lt => "<".to_string(),
+            Tok::Eq => "=".to_string(),
+            _ => {
+                return Err(RefineParseError::new(
+                    "expected the definition or operator name a refinement signature attaches to",
+                    spanned.span,
+                ));
+            }
+        };
+        Ok(name)
     }
 
     fn parse_side(&mut self, end: SideEnd) -> Result<RefinementSide, RefineParseError> {
@@ -981,6 +994,21 @@ mod tests {
             bin(BinOp::Eq, bin(BinOp::Mul, v("r"), v("r")), v("n")),
         );
         assert_eq!(sig.guarantees.predicate, Some(expected_guarantee));
+    }
+
+    #[test]
+    fn operator_symbol_parses_as_signature_head() {
+        let sig = parse_signature("+ : ( a: Num b: Num -- c: Num where c = a + b )")
+            .expect("operator-headed signature parses");
+
+        assert_eq!(sig.name, "+");
+        assert_eq!(sig.demands.binders[0].name, "a");
+        assert_eq!(sig.demands.binders[1].name, "b");
+        assert_eq!(sig.guarantees.binders[0].name, "c");
+        assert_eq!(
+            sig.guarantees.predicate,
+            Some(bin(BinOp::Eq, v("c"), bin(BinOp::Add, v("a"), v("b")))),
+        );
     }
 
     // --- §12 M6: push parses; uninterpreted `length`, no input `where` ---

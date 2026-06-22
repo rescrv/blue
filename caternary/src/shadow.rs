@@ -217,9 +217,13 @@ pub fn interpreted_op(name: &str) -> Option<ShadowWord> {
         ">" => ShadowWord::Bin(BinOp::Gt),
         "<" => ShadowWord::Bin(BinOp::Lt),
         "=" => ShadowWord::Bin(BinOp::Eq),
+        "==" => ShadowWord::Bin(BinOp::Eq),
         "and" => ShadowWord::Bin(BinOp::And),
+        "&&" => ShadowWord::Bin(BinOp::And),
         "or" => ShadowWord::Bin(BinOp::Or),
+        "||" => ShadowWord::Bin(BinOp::Or),
         "not" => ShadowWord::Un(UnOp::Not),
+        "!" => ShadowWord::Un(UnOp::Not),
         _ => return None,
     };
     Some(word)
