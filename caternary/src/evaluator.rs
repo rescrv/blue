@@ -5,9 +5,11 @@
 //! Different evaluator instances can define different operators for the same program.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use handled::SError;
 
+use crate::Quotable;
 use crate::Token;
 
 /// Evaluation error type.
@@ -23,6 +25,71 @@ pub(crate) fn operator_error(message: impl AsRef<str>) -> EvalError {
     SError::new(PHASE)
         .with_code(CODE_OPERATOR_ERROR)
         .with_message(message.as_ref())
+}
+
+/// Returns `Some(name)` if `w` is a binding word `>name` whose name is a valid
+/// local identifier: a leading ASCII letter or `_`, then ASCII alphanumerics or
+/// `_` (the same grammar the optimizer uses for pattern variables).
+fn bind_target(w: &str) -> Option<&str> {
+    let rest = w.strip_prefix('>')?;
+    if is_local_name(rest) {
+        Some(rest)
+    } else {
+        None
+    }
+}
+
+fn is_local_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Bake enclosing locals into a quotation by value (lexical capture at
+/// construction time). A bare-word reference is replaced by the tokens of its
+/// bound value only when it is *free* in the quotation -- not shadowed by a
+/// binder (`>name`) lexically preceding it -- and bound in the enclosing `env`.
+/// References that are not bound here are left untouched so they resolve when
+/// (and where) the quotation eventually runs.
+fn capture_body<T: Quotable>(body: &[Token], env: &HashMap<String, T>) -> Vec<Token> {
+    let mut local: HashSet<&str> = HashSet::new();
+    let mut out: Vec<Token> = Vec::with_capacity(body.len());
+    for tok in body {
+        match tok {
+            Token::Word(w) => {
+                if let Some(name) = bind_target(w) {
+                    local.insert(name);
+                    out.push(tok.clone());
+                } else if !local.contains(w.as_str()) {
+                    if let Some(value) = env.get(w) {
+                        out.extend(value.to_tokens());
+                    } else {
+                        out.push(tok.clone());
+                    }
+                } else {
+                    out.push(tok.clone());
+                }
+            }
+            Token::Bracket(inner) => {
+                if local.is_empty() {
+                    out.push(Token::Bracket(capture_body(inner, env)));
+                } else {
+                    let shadowed: HashMap<String, T> = env
+                        .iter()
+                        .filter(|(k, _)| !local.contains(k.as_str()))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    out.push(Token::Bracket(capture_body(inner, &shadowed)));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// An operator function that manipulates the stack.
@@ -43,17 +110,14 @@ pub struct Evaluator<T> {
 
 impl<T> Default for Evaluator<T>
 where
-    T: From<Token>,
+    T: Quotable,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> Evaluator<T>
-where
-    T: From<Token>,
-{
+impl<T> Evaluator<T> {
     /// Creates a new evaluator with no operators defined.
     pub fn new() -> Self {
         Self {
@@ -65,7 +129,12 @@ where
     pub fn define(&mut self, name: &str, op: Operator<T>) {
         self.operators.insert(name.to_string(), op);
     }
+}
 
+impl<T> Evaluator<T>
+where
+    T: Quotable,
+{
     /// Evaluates a program, returning the final stack.
     pub fn eval(&self, tokens: &[Token]) -> Result<Vec<T>, EvalError> {
         let mut stack = Vec::new();
@@ -74,15 +143,58 @@ where
     }
 
     /// Evaluates tokens using an existing stack.
+    ///
+    /// Each call evaluates `tokens` in a single fresh lexical scope. Locals
+    /// bound with `>name` live in a per-call environment and do not persist
+    /// across calls (top-level reset). A quotation captures the locals in scope
+    /// by value at the point it is pushed, so a quotation that escapes its
+    /// defining scope still resolves its references. Re-entrant combinators call
+    /// back through this method, so each quotation body runs in its own scope.
     pub fn eval_with_stack(&self, tokens: &[Token], stack: &mut Vec<T>) -> Result<(), EvalError> {
+        let mut env: HashMap<String, T> = HashMap::new();
+        self.eval_scope(tokens, stack, &mut env)
+    }
+
+    fn eval_scope(
+        &self,
+        tokens: &[Token],
+        stack: &mut Vec<T>,
+        env: &mut HashMap<String, T>,
+    ) -> Result<(), EvalError> {
         for token in tokens {
             match token {
-                Token::Word(name) if self.operators.contains_key(name) => {
-                    let op = self.operators.get(name).unwrap();
-                    op(stack, self)?;
+                Token::Word(w) => {
+                    if let Some(name) = bind_target(w) {
+                        // bind: pop the top of stack into a single-assignment local
+                        if env.contains_key(name) {
+                            return Err(operator_error(format!(
+                                "single-assignment violation: `{name}` is already bound in this scope"
+                            )));
+                        }
+                        let value = stack.pop().ok_or_else(|| {
+                            operator_error(format!(
+                                "stack underflow: `>{name}` needs a value to bind"
+                            ))
+                        })?;
+                        env.insert(name.to_string(), value);
+                    } else if let Some(value) = env.get(w) {
+                        // reference: resolved scope-first, ahead of operator lookup
+                        stack.push(value.clone());
+                    } else if let Some(op) = self.operators.get(w) {
+                        op(stack, self)?;
+                    } else {
+                        stack.push(T::from(token.clone()));
+                    }
                 }
-                _ => {
-                    stack.push(T::from(token.clone()));
+                Token::Bracket(body) => {
+                    // A quotation value captures the locals in scope by value.
+                    // The empty-env fast path is byte-for-byte the original
+                    // behavior, so programs without locals are unaffected.
+                    if env.is_empty() {
+                        stack.push(T::from(token.clone()));
+                    } else {
+                        stack.push(T::from(Token::Bracket(capture_body(body, env))));
+                    }
                 }
             }
         }
@@ -93,6 +205,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Quotable;
     use crate::parse;
 
     #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +229,55 @@ mod tests {
                 Token::Word(w) => w.parse().unwrap_or(0),
                 Token::Bracket(_) => 0,
             }
+        }
+    }
+
+    impl Quotable for Value {
+        fn as_quotation(&self) -> Option<&[Token]> {
+            match self {
+                Value::Bracket(b) => Some(b),
+                Value::Word(_) => None,
+            }
+        }
+
+        fn to_tokens(&self) -> Vec<Token> {
+            match self {
+                Value::Word(w) => vec![Token::Word(w.clone())],
+                Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+            }
+        }
+
+        fn as_sequence(&self) -> Option<Vec<Self>> {
+            match self {
+                Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+                Value::Word(_) => None,
+            }
+        }
+
+        fn from_sequence(elements: Vec<Self>) -> Self {
+            Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+        }
+    }
+
+    impl Quotable for i32 {
+        fn as_quotation(&self) -> Option<&[Token]> {
+            None
+        }
+
+        fn to_tokens(&self) -> Vec<Token> {
+            vec![Token::Word(self.to_string())]
+        }
+
+        fn is_truthy(&self) -> bool {
+            *self != 0
+        }
+
+        fn as_sequence(&self) -> Option<Vec<Self>> {
+            None
+        }
+
+        fn from_sequence(_elements: Vec<Self>) -> Self {
+            0
         }
     }
 
@@ -601,5 +763,166 @@ mod tests {
             ]
         );
         println!("Stack: {result:?}");
+    }
+    fn locals_eval() -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_combinators(&mut eval);
+
+        eval.define("SWAP", |stack: &mut Vec<Value>, _eval| {
+            let b = stack.pop().ok_or_else(underflow)?;
+            let a = stack.pop().ok_or_else(underflow)?;
+            stack.push(b);
+            stack.push(a);
+            Ok(())
+        });
+
+        eval.define("ADD", |stack: &mut Vec<Value>, _eval| {
+            let b = stack.pop().ok_or_else(underflow)?;
+            let a = stack.pop().ok_or_else(underflow)?;
+            match (a, b) {
+                (Value::Word(a), Value::Word(b)) => {
+                    let x: i64 = a
+                        .parse()
+                        .map_err(|_| operator_error("ADD needs integers"))?;
+                    let y: i64 = b
+                        .parse()
+                        .map_err(|_| operator_error("ADD needs integers"))?;
+                    stack.push(Value::Word((x + y).to_string()));
+                    Ok(())
+                }
+                _ => Err(operator_error("ADD needs integers")),
+            }
+        });
+
+        eval
+    }
+
+    fn word(s: &str) -> Value {
+        Value::Word(s.to_string())
+    }
+
+    #[test]
+    fn local_binds_and_references() {
+        let eval = locals_eval();
+        let tokens = parse("5 >x x x ADD").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("10")]);
+    }
+
+    #[test]
+    fn local_set_aside_and_reintroduce() {
+        let eval = locals_eval();
+        let tokens = parse("5 >x 3 x ADD").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("8")]);
+    }
+
+    #[test]
+    fn local_names_allow_underscore_and_digits_after_first_character() {
+        let eval = locals_eval();
+        let tokens = parse("11 >_x1 _x1 4 ADD").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("15")]);
+    }
+
+    #[test]
+    fn invalid_binding_words_remain_literals() {
+        let eval = locals_eval();
+        let tokens = parse("5 >1x > >x-y").unwrap();
+        assert_eq!(
+            eval.eval(&tokens).unwrap(),
+            vec![word("5"), word(">1x"), word(">"), word(">x-y")]
+        );
+    }
+
+    #[test]
+    fn closure_captures_local_by_value_inline() {
+        let eval = locals_eval();
+        let tokens = parse("5 10 >n [n ADD] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("15")]);
+    }
+
+    #[test]
+    fn nested_quotation_captures_outer_local() {
+        let eval = locals_eval();
+        let tokens = parse("5 10 >n [[n ADD] CALL] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("15")]);
+    }
+
+    #[test]
+    fn closure_capture_survives_scope_exit() {
+        // [n ADD] is built where n = 10, then escapes that scope before CALL.
+        // By-value capture must keep n = 10.
+        let eval = locals_eval();
+        let tokens = parse("[ 10 >n [n ADD] ] CALL 20 SWAP CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("30")]);
+    }
+
+    #[test]
+    fn inner_binder_shadows_captured_name() {
+        // Inner >n rebinds n to 7; the outer n = 99 must not leak in (would be 198).
+        let eval = locals_eval();
+        let tokens = parse("99 >n [ 7 >n n n ADD ] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("14")]);
+    }
+
+    #[test]
+    fn nested_quotation_after_inner_binder_uses_inner_scope() {
+        let eval = locals_eval();
+        let tokens = parse("1 99 >n [ 7 >n [n ADD] CALL ] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("8")]);
+    }
+
+    #[test]
+    fn local_can_hold_and_call_quotation_value() {
+        let eval = locals_eval();
+        let tokens = parse("[2 ADD] >q 3 q CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("5")]);
+    }
+
+    #[test]
+    fn reference_resolves_before_operator() {
+        // A local named ADD shadows the ADD operator within its scope.
+        let eval = locals_eval();
+        let tokens = parse("7 >ADD ADD").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("7")]);
+    }
+
+    #[test]
+    fn rebinding_in_same_scope_is_an_error() {
+        let eval = locals_eval();
+        let tokens = parse("5 >x 6 >x").unwrap();
+        let err = eval.eval(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("single-assignment violation: `x` is already bound in this scope")
+        );
+    }
+
+    #[test]
+    fn binding_with_empty_stack_is_an_error() {
+        let eval = locals_eval();
+        let tokens = parse(">x").unwrap();
+        let err = eval.eval(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("stack underflow: `>x` needs a value to bind")
+        );
+    }
+
+    #[test]
+    fn locals_do_not_persist_across_calls() {
+        let eval = locals_eval();
+        let mut stack = Vec::new();
+        eval.eval_with_stack(&parse("5 >x").unwrap(), &mut stack)
+            .unwrap();
+        // x is gone on the next call; `x` is now an undefined word, pushed as a literal.
+        eval.eval_with_stack(&parse("x").unwrap(), &mut stack)
+            .unwrap();
+        assert_eq!(stack, vec![word("x")]);
+    }
+
+    #[test]
+    fn locals_do_not_leak_between_quotation_calls() {
+        let eval = locals_eval();
+        let tokens = parse("[5 >x] CALL [x] CALL").unwrap();
+        assert_eq!(eval.eval(&tokens).unwrap(), vec![word("x")]);
     }
 }

@@ -125,7 +125,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Evaluator, Token, parse};
+    use crate::{Evaluator, Quotable, Token, parse};
 
     use super::register_stack_builtins;
 
@@ -138,6 +138,28 @@ mod tests {
                 Token::Word(w) => Number(w.parse().unwrap_or(0)),
                 Token::Bracket(_) => Number(0),
             }
+        }
+    }
+
+    impl Quotable for Number {
+        fn as_quotation(&self) -> Option<&[Token]> {
+            None
+        }
+
+        fn to_tokens(&self) -> Vec<Token> {
+            vec![Token::Word(self.0.to_string())]
+        }
+
+        fn is_truthy(&self) -> bool {
+            self.0 != 0
+        }
+
+        fn as_sequence(&self) -> Option<Vec<Self>> {
+            None
+        }
+
+        fn from_sequence(_elements: Vec<Self>) -> Self {
+            Number(0)
         }
     }
 
