@@ -198,12 +198,12 @@ impl<T> Evaluator<T> {
             for tok in tokens {
                 if let Token::Bracket(inner) = tok {
                     for t in inner {
-                        if let Token::Word(w) = t {
-                            if has_def_prefix(w) {
-                                return Err(definition_error(format!(
-                                    "definition `{w}` must appear at top level, not inside a quotation"
-                                )));
-                            }
+                        if let Token::Word(w) = t
+                            && has_def_prefix(w)
+                        {
+                            return Err(definition_error(format!(
+                                "definition `{w}` must appear at top level, not inside a quotation"
+                            )));
                         }
                     }
                     reject_nested(inner)?;
@@ -216,33 +216,33 @@ impl<T> Evaluator<T> {
         // Walk the top level, pairing each binder with the quotation before it.
         let mut i = 0;
         while i < tokens.len() {
-            if let Token::Word(w) = &tokens[i] {
-                if has_def_prefix(w) {
-                    let name = def_target(w).ok_or_else(|| {
-                        definition_error(format!(
-                            "malformed definition binder `{w}`: expected `:name`"
-                        ))
-                    })?;
-                    if i == 0 {
-                        return Err(definition_error(format!(
-                            "definition `:{name}` has no preceding quotation to bind"
-                        )));
-                    }
-                    let body = match &tokens[i - 1] {
-                        Token::Bracket(body) => body.clone(),
-                        Token::Word(prev) => {
-                            return Err(definition_error(format!(
-                                "definition `:{name}` must follow a quotation, found word `{prev}`"
-                            )));
-                        }
-                    };
-                    if self.definitions.contains_key(name) {
-                        return Err(definition_error(format!(
-                            "redefinition: `:{name}` is already defined"
-                        )));
-                    }
-                    self.definitions.insert(name.to_string(), body);
+            if let Token::Word(w) = &tokens[i]
+                && has_def_prefix(w)
+            {
+                let name = def_target(w).ok_or_else(|| {
+                    definition_error(format!(
+                        "malformed definition binder `{w}`: expected `:name`"
+                    ))
+                })?;
+                if i == 0 {
+                    return Err(definition_error(format!(
+                        "definition `:{name}` has no preceding quotation to bind"
+                    )));
                 }
+                let body = match &tokens[i - 1] {
+                    Token::Bracket(body) => body.clone(),
+                    Token::Word(prev) => {
+                        return Err(definition_error(format!(
+                            "definition `:{name}` must follow a quotation, found word `{prev}`"
+                        )));
+                    }
+                };
+                if self.definitions.contains_key(name) {
+                    return Err(definition_error(format!(
+                        "redefinition: `:{name}` is already defined"
+                    )));
+                }
+                self.definitions.insert(name.to_string(), body);
             }
             i += 1;
         }
