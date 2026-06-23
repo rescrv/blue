@@ -155,15 +155,43 @@ pub enum ShadowWord {
     Over,
     /// `ROT` — rotate the top three terms left.
     Rot,
+    /// `-ROT` — rotate the top three terms right.
+    MinusRot,
     /// `NIP` — discard the second term.
     Nip,
     /// `TUCK` — copy the top term below the second.
     Tuck,
+    /// `2DUP` — duplicate the top pair.
+    TwoDup,
+    /// `2DROP` — discard the top pair.
+    TwoDrop,
+    /// `2SWAP` — exchange the top two pairs.
+    TwoSwap,
+    /// `2OVER` — copy the second pair over the top pair.
+    TwoOver,
+    /// `2ROT` — rotate the top three pairs left.
+    TwoRot,
     /// `DIP` — pop the quotation, set aside the next term, run the quotation on
     /// the rest, restore the set-aside term (the real shuffle, §10.3).
     Dip,
     /// `CALL` — pop the quotation and run it on the whole stack.
     Call,
+    /// `KEEP` — run a quotation and restore a copy of its input value.
+    Keep,
+    /// `BI` — run two quotations against one copied value.
+    Bi,
+    /// `BI*` — run two quotations against two corresponding values.
+    BiStar,
+    /// `BI@` — run one quotation against two corresponding values.
+    BiAt,
+    /// `TRI` — run three quotations against one copied value.
+    Tri,
+    /// `TRI*` — run three quotations against three corresponding values.
+    TriStar,
+    /// `TRI@` — run one quotation against three corresponding values.
+    TriAt,
+    /// `COMPOSE` — concatenate two quotation bodies into one quotation value.
+    Compose,
     /// An interpreted binary operator (arithmetic/comparison/connective): pops
     /// two terms `a b` and pushes the proposition/term `Bin(op, a, b)`.
     Bin(BinOp),
@@ -194,10 +222,24 @@ pub fn core_shadow_word(name: &str) -> Option<ShadowWord> {
         "SWAP" => ShadowWord::Swap,
         "OVER" => ShadowWord::Over,
         "ROT" => ShadowWord::Rot,
+        "-ROT" => ShadowWord::MinusRot,
         "NIP" => ShadowWord::Nip,
         "TUCK" => ShadowWord::Tuck,
+        "2DUP" => ShadowWord::TwoDup,
+        "2DROP" => ShadowWord::TwoDrop,
+        "2SWAP" => ShadowWord::TwoSwap,
+        "2OVER" => ShadowWord::TwoOver,
+        "2ROT" => ShadowWord::TwoRot,
         "DIP" => ShadowWord::Dip,
         "CALL" => ShadowWord::Call,
+        "KEEP" => ShadowWord::Keep,
+        "BI" => ShadowWord::Bi,
+        "BI*" => ShadowWord::BiStar,
+        "BI@" => ShadowWord::BiAt,
+        "TRI" => ShadowWord::Tri,
+        "TRI*" => ShadowWord::TriStar,
+        "TRI@" => ShadowWord::TriAt,
+        "COMPOSE" => ShadowWord::Compose,
         _ => return None,
     };
     Some(word)
@@ -326,7 +368,7 @@ impl ShadowStack {
         p
     }
 
-    fn require(&self, need: usize) -> Result<(), ShadowError> {
+    pub(crate) fn require(&self, need: usize) -> Result<(), ShadowError> {
         if self.slots.len() < need {
             return Err(underflow(need, self.slots.len()));
         }
@@ -378,6 +420,14 @@ impl ShadowStack {
         Ok(())
     }
 
+    /// `-ROT`: rotate the top three terms right. Mirrors `builtins.rs::minus_rot`.
+    pub fn minus_rot(&mut self) -> Result<(), ShadowError> {
+        self.require(3)?;
+        let len = self.slots.len();
+        self.slots[len - 3..].rotate_right(1);
+        Ok(())
+    }
+
     /// `NIP`: discard the second term. Mirrors `builtins.rs::nip`.
     pub fn nip(&mut self) -> Result<(), ShadowError> {
         self.require(2)?;
@@ -392,6 +442,52 @@ impl ShadowStack {
         let len = self.slots.len();
         let top = self.slots[len - 1].clone();
         self.slots.insert(len - 2, top);
+        Ok(())
+    }
+
+    /// `2DUP`: duplicate the top pair. Mirrors `builtins.rs::two_dup`.
+    pub fn two_dup(&mut self) -> Result<(), ShadowError> {
+        self.require(2)?;
+        let len = self.slots.len();
+        let a = self.slots[len - 2].clone();
+        let b = self.slots[len - 1].clone();
+        self.slots.push(a);
+        self.slots.push(b);
+        Ok(())
+    }
+
+    /// `2DROP`: discard the top pair. Mirrors `builtins.rs::two_drop`.
+    pub fn two_drop(&mut self) -> Result<(), ShadowError> {
+        self.require(2)?;
+        self.slots.pop();
+        self.slots.pop();
+        Ok(())
+    }
+
+    /// `2SWAP`: exchange the top two pairs. Mirrors `builtins.rs::two_swap`.
+    pub fn two_swap(&mut self) -> Result<(), ShadowError> {
+        self.require(4)?;
+        let len = self.slots.len();
+        self.slots[len - 4..].rotate_left(2);
+        Ok(())
+    }
+
+    /// `2OVER`: copy the second pair over the top pair. Mirrors `builtins.rs::two_over`.
+    pub fn two_over(&mut self) -> Result<(), ShadowError> {
+        self.require(4)?;
+        let len = self.slots.len();
+        let a = self.slots[len - 4].clone();
+        let b = self.slots[len - 3].clone();
+        self.slots.push(a);
+        self.slots.push(b);
+        Ok(())
+    }
+
+    /// `2ROT`: rotate the top three pairs left. Mirrors `builtins.rs::two_rot`.
+    pub fn two_rot(&mut self) -> Result<(), ShadowError> {
+        self.require(6)?;
+        let len = self.slots.len();
+        self.slots[len - 6..].rotate_left(2);
         Ok(())
     }
 
@@ -465,8 +561,14 @@ impl ShadowStack {
                     ShadowWord::Swap => self.swap()?,
                     ShadowWord::Over => self.over()?,
                     ShadowWord::Rot => self.rot()?,
+                    ShadowWord::MinusRot => self.minus_rot()?,
                     ShadowWord::Nip => self.nip()?,
                     ShadowWord::Tuck => self.tuck()?,
+                    ShadowWord::TwoDup => self.two_dup()?,
+                    ShadowWord::TwoDrop => self.two_drop()?,
+                    ShadowWord::TwoSwap => self.two_swap()?,
+                    ShadowWord::TwoOver => self.two_over()?,
+                    ShadowWord::TwoRot => self.two_rot()?,
                     ShadowWord::Dip => {
                         // Mirror combinators.rs::dip EXACTLY: pop the quotation
                         // (top), set aside the next term, run the quotation on
@@ -482,6 +584,92 @@ impl ShadowStack {
                         // it on the whole stack.
                         let body = self.pop_quote()?;
                         self.exec(&body, resolve)?;
+                    }
+                    ShadowWord::Keep => {
+                        self.require(2)?;
+                        let body = self.pop_quote()?;
+                        let kept = self.slots.last().unwrap().clone();
+                        self.exec(&body, resolve)?;
+                        self.push_slot(kept);
+                    }
+                    ShadowWord::Bi => {
+                        self.require(3)?;
+                        let q = self.pop_quote()?;
+                        let p = self.pop_quote()?;
+                        let x = self.pop()?;
+                        self.push_slot(x.clone());
+                        self.exec(&p, resolve)?;
+                        self.push_slot(x);
+                        self.exec(&q, resolve)?;
+                    }
+                    ShadowWord::BiStar => {
+                        self.require(4)?;
+                        let q = self.pop_quote()?;
+                        let p = self.pop_quote()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.push_slot(x);
+                        self.exec(&p, resolve)?;
+                        self.push_slot(y);
+                        self.exec(&q, resolve)?;
+                    }
+                    ShadowWord::BiAt => {
+                        self.require(3)?;
+                        let q = self.pop_quote()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.push_slot(x);
+                        self.exec(&q, resolve)?;
+                        self.push_slot(y);
+                        self.exec(&q, resolve)?;
+                    }
+                    ShadowWord::Tri => {
+                        self.require(4)?;
+                        let r = self.pop_quote()?;
+                        let q = self.pop_quote()?;
+                        let p = self.pop_quote()?;
+                        let x = self.pop()?;
+                        self.push_slot(x.clone());
+                        self.exec(&p, resolve)?;
+                        self.push_slot(x.clone());
+                        self.exec(&q, resolve)?;
+                        self.push_slot(x);
+                        self.exec(&r, resolve)?;
+                    }
+                    ShadowWord::TriStar => {
+                        self.require(6)?;
+                        let r = self.pop_quote()?;
+                        let q = self.pop_quote()?;
+                        let p = self.pop_quote()?;
+                        let z = self.pop()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.push_slot(x);
+                        self.exec(&p, resolve)?;
+                        self.push_slot(y);
+                        self.exec(&q, resolve)?;
+                        self.push_slot(z);
+                        self.exec(&r, resolve)?;
+                    }
+                    ShadowWord::TriAt => {
+                        self.require(4)?;
+                        let q = self.pop_quote()?;
+                        let z = self.pop()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.push_slot(x);
+                        self.exec(&q, resolve)?;
+                        self.push_slot(y);
+                        self.exec(&q, resolve)?;
+                        self.push_slot(z);
+                        self.exec(&q, resolve)?;
+                    }
+                    ShadowWord::Compose => {
+                        self.require(2)?;
+                        let q = self.pop_quote()?;
+                        let mut p = self.pop_quote()?;
+                        p.extend(q);
+                        self.push_quote(p);
                     }
                     ShadowWord::Bin(op) => self.bin(op)?,
                     ShadowWord::Un(op) => self.un(op)?,
@@ -611,6 +799,8 @@ mod tests {
     fn core_shadow_word_requires_runtime_spelling() {
         assert_eq!(core_shadow_word("DUP"), Some(ShadowWord::Dup));
         assert_eq!(core_shadow_word("DIP"), Some(ShadowWord::Dip));
+        assert_eq!(core_shadow_word("2ROT"), Some(ShadowWord::TwoRot));
+        assert_eq!(core_shadow_word("TRI"), Some(ShadowWord::Tri));
         assert_eq!(core_shadow_word("dup"), None);
         assert_eq!(core_shadow_word("dip"), None);
     }
@@ -923,8 +1113,14 @@ mod tests {
         assert_conformance("SWAP", 2);
         assert_conformance("OVER", 2);
         assert_conformance("ROT", 3);
+        assert_conformance("-ROT", 3);
         assert_conformance("NIP", 2);
         assert_conformance("TUCK", 2);
+        assert_conformance("2DUP", 2);
+        assert_conformance("2DROP", 2);
+        assert_conformance("2SWAP", 4);
+        assert_conformance("2OVER", 4);
+        assert_conformance("2ROT", 6);
         assert_conformance("DUP SWAP DROP", 3);
         assert_conformance("OVER OVER ROT", 3);
         assert_conformance("[ SWAP ] DIP", 3);
@@ -934,6 +1130,14 @@ mod tests {
         assert_conformance("[ ROT ] DIP", 4);
         assert_conformance("[ [ SWAP ] DIP ] DIP", 4);
         assert_conformance("[ SWAP ] CALL", 2);
+        assert_conformance("[ DUP ] KEEP", 1);
+        assert_conformance("[ DUP ] [ DROP ] BI", 1);
+        assert_conformance("[ DUP ] [ DROP ] BI*", 2);
+        assert_conformance("[ DUP ] BI@", 2);
+        assert_conformance("[ DUP ] [ DROP ] [ SWAP ] TRI", 2);
+        assert_conformance("[ DUP ] [ DROP ] [ SWAP ] TRI*", 3);
+        assert_conformance("[ DUP ] TRI@", 3);
+        assert_conformance("[ SWAP ] [ DUP ] COMPOSE CALL", 2);
     }
 
     #[test]
@@ -955,7 +1159,7 @@ mod tests {
         // Words requiring at least N values present (excluding the quotation for
         // DIP/CALL). Track an abstract height so generated programs are valid.
         for _ in 0..2000 {
-            let depth = 2 + (next() % 4); // 2..=5 seeded values
+            let depth = 2 + (next() % 5); // 2..=6 seeded values
             let mut height = depth as i64;
             let mut program = String::new();
             let steps = 1 + next() % 8;
@@ -969,8 +1173,14 @@ mod tests {
                     ("SWAP", 2, 0),
                     ("OVER", 2, 1),
                     ("ROT", 3, 0),
+                    ("-ROT", 3, 0),
                     ("NIP", 2, -1),
                     ("TUCK", 2, 1),
+                    ("2DUP", 2, 2),
+                    ("2DROP", 2, -2),
+                    ("2SWAP", 4, 0),
+                    ("2OVER", 4, 2),
+                    ("2ROT", 6, 0),
                 ];
                 let pick = &choices[(next() as usize) % choices.len()];
                 if height < pick.1 {

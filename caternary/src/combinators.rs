@@ -180,6 +180,80 @@ fn bi_at<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eva
     Ok(())
 }
 
+/// `TRI`: Apply three quotations to a single value.
+///
+/// Stack effect: `( x [P] [Q] [R] -- P(x) Q(x) R(x) )`
+///
+/// Pops three quotations and a value, applies each quotation to a copy of the value.
+fn tri<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 4)?;
+    let r = pop_quotation(stack)?;
+    let q = pop_quotation(stack)?;
+    let p = pop_quotation(stack)?;
+    let x = stack.pop().unwrap();
+
+    stack.push(x.clone());
+    eval.eval_with_stack(&p, stack)?;
+
+    stack.push(x.clone());
+    eval.eval_with_stack(&q, stack)?;
+
+    stack.push(x);
+    eval.eval_with_stack(&r, stack)?;
+
+    Ok(())
+}
+
+/// `TRI*`: Apply three quotations to three values respectively.
+///
+/// Stack effect: `( x y z [P] [Q] [R] -- P(x) Q(y) R(z) )`
+///
+/// Pops three quotations and three values, applies P to x, Q to y, and R to z.
+fn tri_star<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 6)?;
+    let r = pop_quotation(stack)?;
+    let q = pop_quotation(stack)?;
+    let p = pop_quotation(stack)?;
+    let z = stack.pop().unwrap();
+    let y = stack.pop().unwrap();
+    let x = stack.pop().unwrap();
+
+    stack.push(x);
+    eval.eval_with_stack(&p, stack)?;
+
+    stack.push(y);
+    eval.eval_with_stack(&q, stack)?;
+
+    stack.push(z);
+    eval.eval_with_stack(&r, stack)?;
+
+    Ok(())
+}
+
+/// `TRI@`: Apply one quotation to three values.
+///
+/// Stack effect: `( x y z [Q] -- Q(x) Q(y) Q(z) )`
+///
+/// Pops a quotation and three values, applies the quotation to each.
+fn tri_at<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 4)?;
+    let q = pop_quotation(stack)?;
+    let z = stack.pop().unwrap();
+    let y = stack.pop().unwrap();
+    let x = stack.pop().unwrap();
+
+    stack.push(x);
+    eval.eval_with_stack(&q, stack)?;
+
+    stack.push(y);
+    eval.eval_with_stack(&q, stack)?;
+
+    stack.push(z);
+    eval.eval_with_stack(&q, stack)?;
+
+    Ok(())
+}
+
 /// `CLEAVE`: Apply multiple quotations to a single value.
 ///
 /// Stack effect: `( x [[P] [Q] ...] -- P(x) Q(x) ... )`
@@ -459,7 +533,7 @@ fn each<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
 /// Register quotation combinators on an evaluator.
 ///
 /// This registers the core combinators: `CALL`, `DIP`, `KEEP`, `BI`, `BI*`, `BI@`,
-/// `CLEAVE`, `SPREAD`, `COMPOSE`, `CURRY`.
+/// `TRI`, `TRI*`, `TRI@`, `CLEAVE`, `SPREAD`, `COMPOSE`, `CURRY`.
 pub fn register_combinators<T>(evaluator: &mut Evaluator<T>)
 where
     T: Quotable,
@@ -470,6 +544,9 @@ where
     evaluator.define("BI", bi::<T>);
     evaluator.define("BI*", bi_star::<T>);
     evaluator.define("BI@", bi_at::<T>);
+    evaluator.define("TRI", tri::<T>);
+    evaluator.define("TRI*", tri_star::<T>);
+    evaluator.define("TRI@", tri_at::<T>);
     evaluator.define("CLEAVE", cleave::<T>);
     evaluator.define("SPREAD", spread::<T>);
     evaluator.define("COMPOSE", compose::<T>);
@@ -753,6 +830,45 @@ mod tests {
         let tokens = parse("3 4 [DUP MUL] BI@").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(9), Value::Int(16)]);
+        println!("Stack: {result:?}");
+    }
+
+    // ========================================================================
+    // TRI tests
+    // ========================================================================
+
+    #[test]
+    fn tri_applies_three_quotations() {
+        let eval = make_eval();
+        let tokens = parse("5 [DUP ADD] [DUP MUL] [1 ADD] TRI").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(10), Value::Int(25), Value::Int(6)]);
+        println!("Stack: {result:?}");
+    }
+
+    // ========================================================================
+    // TRI* tests
+    // ========================================================================
+
+    #[test]
+    fn tri_star_applies_to_three_values() {
+        let eval = make_eval();
+        let tokens = parse("3 4 5 [DUP MUL] [DUP ADD] [1 ADD] TRI*").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(9), Value::Int(8), Value::Int(6)]);
+        println!("Stack: {result:?}");
+    }
+
+    // ========================================================================
+    // TRI@ tests
+    // ========================================================================
+
+    #[test]
+    fn tri_at_applies_same_quotation() {
+        let eval = make_eval();
+        let tokens = parse("3 4 5 [DUP MUL] TRI@").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(9), Value::Int(16), Value::Int(25)]);
         println!("Stack: {result:?}");
     }
 

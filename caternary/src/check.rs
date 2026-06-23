@@ -2309,6 +2309,50 @@ mod tests {
     }
 
     #[test]
+    fn m4_core_schemes_cover_fixed_stack_combinators() {
+        for word in [
+            "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP", "2OVER", "2ROT",
+        ] {
+            assert!(
+                core_scheme(word).is_some(),
+                "missing core scheme for {word}"
+            );
+        }
+
+        let arrow = infer_snippet(
+            "1 2 3 -ROT DROP DROP DROP \
+             1 2 3 4 5 6 2ROT 2DROP 2DROP 2DROP",
+        )
+        .unwrap();
+        assert!(arrow.input.elems.is_empty());
+        assert!(arrow.output.elems.is_empty());
+    }
+
+    #[test]
+    fn m4_core_schemes_cover_fixed_quotation_combinators() {
+        for word in ["KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE"] {
+            assert!(
+                core_scheme(word).is_some(),
+                "missing core scheme for {word}"
+            );
+        }
+
+        let arrow = infer_snippet(
+            "5 [ 1 + ] KEEP DROP DROP \
+             5 [ 1 + ] [ 2 + ] BI DROP DROP \
+             5 6 [ 1 + ] [ 2 + ] BI* DROP DROP \
+             5 6 [ 1 + ] BI@ DROP DROP \
+             5 [ 1 + ] [ 2 + ] [ 3 + ] TRI DROP DROP DROP \
+             5 6 7 [ 1 + ] [ 2 + ] [ 3 + ] TRI* DROP DROP DROP \
+             5 6 7 [ 1 + ] TRI@ DROP DROP DROP \
+             [ 1 + ] [ 2 + ] COMPOSE 5 SWAP CALL DROP",
+        )
+        .unwrap();
+        assert!(arrow.input.elems.is_empty());
+        assert!(arrow.output.elems.is_empty());
+    }
+
+    #[test]
     fn m4_dip_relays_quotation_and_carries_the_set_aside_value() {
         // §12 M4: `xs total [ 99 push ] DIP` type-checks; result shape `… List
         // Num`; DIP contributes ONLY that `total` is carried through. `DIP` is
