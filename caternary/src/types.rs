@@ -354,6 +354,94 @@ impl WordTy {
     }
 }
 
+/// Render a word stack-effect type in Caternary surface notation.
+///
+/// Internal variable ids are renamed to stable, user-facing names in first-use
+/// order: row variables render as `'S`, `'T`, ... and element variables as
+/// `a`, `b`, ... . The rendered form is intended for diagnostics and shell
+/// inspection, for example `( 'S Num -- 'S Num )`.
+pub fn format_word_type(word: &WordTy) -> String {
+    let mut renderer = TypeRenderer::default();
+    renderer.render_word(word)
+}
+
+#[derive(Default)]
+struct TypeRenderer {
+    rows: Vec<RowVar>,
+    tys: Vec<TyVar>,
+}
+
+impl TypeRenderer {
+    fn render_word(&mut self, word: &WordTy) -> String {
+        format!(
+            "( {} -- {} )",
+            self.render_stack(&word.input),
+            self.render_stack(&word.output)
+        )
+    }
+
+    fn render_stack(&mut self, stack: &StackTy) -> String {
+        let mut parts = Vec::with_capacity(stack.elems.len() + 1);
+        parts.push(self.row_name(stack.row));
+        parts.extend(stack.elems.iter().map(|ty| self.render_ty(ty)));
+        parts.join(" ")
+    }
+
+    fn render_ty(&mut self, ty: &Ty) -> String {
+        match &ty.kind {
+            TyKind::Var(v) => self.ty_name(*v),
+            TyKind::Con(name) => name.clone(),
+            TyKind::App(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let args: Vec<String> = args.iter().map(|arg| self.render_ty(arg)).collect();
+                    format!("{name} {}", args.join(" "))
+                }
+            }
+            TyKind::Quote(word) => self.render_word(word),
+        }
+    }
+
+    fn row_name(&mut self, row: RowVar) -> String {
+        let idx = match self.rows.iter().position(|&r| r == row) {
+            Some(idx) => idx,
+            None => {
+                self.rows.push(row);
+                self.rows.len() - 1
+            }
+        };
+        const ROW_NAMES: &[&str] = &["'S", "'T", "'U", "'V", "'W", "'X", "'Y", "'Z"];
+        ROW_NAMES
+            .get(idx)
+            .map(|name| (*name).to_string())
+            .unwrap_or_else(|| format!("'R{}", idx - ROW_NAMES.len() + 1))
+    }
+
+    fn ty_name(&mut self, ty: TyVar) -> String {
+        let idx = match self.tys.iter().position(|&t| t == ty) {
+            Some(idx) => idx,
+            None => {
+                self.tys.push(ty);
+                self.tys.len() - 1
+            }
+        };
+        alpha_name(idx)
+    }
+}
+
+fn alpha_name(mut idx: usize) -> String {
+    let mut chars = Vec::new();
+    loop {
+        chars.push((b'a' + (idx % 26) as u8) as char);
+        if idx < 26 {
+            break;
+        }
+        idx = idx / 26 - 1;
+    }
+    chars.iter().rev().collect()
+}
+
 /// A polymorphic type scheme: a [`WordTy`] generalized over type and row
 /// variables (§3). Operators are registered with a `Scheme`; definitions are
 /// generalized into one by the SCC pass (M3, later).

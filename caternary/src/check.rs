@@ -42,6 +42,7 @@ use crate::Quotable;
 use crate::Span;
 use crate::SpannedToken;
 use crate::SpannedTokenKind;
+use crate::Token;
 use crate::evaluator::bind_target;
 use crate::types::InferCtx;
 use crate::types::MAIN;
@@ -615,6 +616,59 @@ where
     Ok(ctx.resolve_word_deep(&effect))
 }
 
+/// Infer the stack-effect type of a quotation body against an evaluator's
+/// current definition and operator environment.
+///
+/// This is the shell/introspection counterpart to [`type_check_entry`]: it does
+/// not require a `main` definition and it does not impose the empty top-level
+/// stack floor. The supplied tokens are treated as the body of a quotation, so
+/// the returned [`WordTy`] is the quotation's own arrow `( before -- after )`.
+///
+/// Definitions referenced by the quotation are resolved through the same SCC
+/// generalization pass used by whole-program checking. If the evaluator contains
+/// definitions, they should have been loaded with
+/// [`Evaluator::load_with_spans`] so diagnostics can retain source locations.
+pub fn infer_quote_type<T>(evaluator: &Evaluator<T>, tokens: &[Token]) -> Result<WordTy, TypeError>
+where
+    T: Quotable,
+{
+    let mut ctx = InferCtx::new();
+    let schemes = infer_definition_schemes(evaluator, &mut ctx)?;
+    let def_env = DefEnv {
+        schemes,
+        mono: HashMap::new(),
+    };
+    let spanned = synthetic_spanned_tokens(tokens, SYNTH_SPAN);
+    let mut locals: Vec<Local> = Vec::new();
+    let no_poly: HashMap<String, Scheme> = HashMap::new();
+    let arrow = infer_seq(
+        evaluator,
+        &spanned,
+        &mut ctx,
+        &mut locals,
+        &def_env,
+        &no_poly,
+        false,
+    )?;
+    Ok(ctx.resolve_word_deep(&arrow))
+}
+
+fn synthetic_spanned_tokens(tokens: &[Token], span: Span) -> Vec<SpannedToken> {
+    tokens
+        .iter()
+        .map(|token| match token {
+            Token::Word(word) => SpannedToken {
+                span,
+                kind: SpannedTokenKind::Word(word.clone()),
+            },
+            Token::Bracket(inner) => SpannedToken {
+                span,
+                kind: SpannedTokenKind::Bracket(synthetic_spanned_tokens(inner, span)),
+            },
+        })
+        .collect()
+}
+
 /// The definition environment threaded through inference (§6). A definition word
 /// resolves either to a **monomorphic in-SCC assumption** (`mono`) — used for
 /// recursive calls within the strongly-connected component currently being
@@ -994,9 +1048,10 @@ where
 // annotation (`TypeError::Rank2`), not a raw mismatch. If the probe still fails,
 // the original `Mismatch` is the honest diagnostic and is returned unchanged.
 
-/// The neutral span carried by synthesized annotation/probe nodes that have no
-/// single source byte of their own; real diagnostics re-anchor at the offending
-/// call site, exactly as the language-core schemes do.
+/// The neutral span carried by synthesized annotation/probe nodes or spanless
+/// shell quotations that have no single source byte of their own; real
+/// diagnostics re-anchor at the offending call site, exactly as the
+/// language-core schemes do.
 const SYNTH_SPAN: Span = Span { start: 0, end: 0 };
 
 /// True if `w` is an application combinator — `CALL` or `DIP` — i.e. a word
