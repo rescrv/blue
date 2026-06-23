@@ -4,9 +4,11 @@ use std::io::Read;
 
 use arrrg::CommandLine;
 use caternary::{
-    Evaluator, Quotable, SmtLibSolver, SpannedToken, SpannedTokenKind, Token, check_whole_program,
-    parse_with_spans, register_all_builtins,
+    CODE_OPERATOR_ERROR, EvalError, Evaluator, Quotable, Scheme, SmtLibSolver, Span, SpannedToken,
+    SpannedTokenKind, StackTy, Token, Ty, WordTy, check_whole_program, format_word_type,
+    infer_quote_type, parse_with_spans, register_all_builtins,
 };
+use handled::SError;
 use rustyline::error::ReadlineError;
 use rustyline::history::MemHistory;
 use rustyline::{Config, Editor};
@@ -192,7 +194,56 @@ fn shell_eval_line(
 fn new_evaluator() -> Evaluator<Value> {
     let mut evaluator = Evaluator::new();
     register_all_builtins(&mut evaluator);
+    register_shell_builtins(&mut evaluator);
     evaluator
+}
+
+fn register_shell_builtins(evaluator: &mut Evaluator<Value>) {
+    evaluator.define("TYPEOF", shell_typeof);
+    evaluator.register_operator_with_contract("TYPEOF", typeof_scheme());
+}
+
+fn typeof_scheme() -> Scheme {
+    let s = Span { start: 0, end: 0 };
+    Scheme::new(
+        vec![0],
+        vec![0],
+        WordTy::new(
+            StackTy::new(vec![Ty::var(0, s)], 0, s),
+            StackTy::new(vec![Ty::var(0, s)], 0, s),
+        ),
+    )
+}
+
+fn shell_typeof(
+    stack: &mut Vec<Value>,
+    evaluator: &Evaluator<Value>,
+) -> std::result::Result<(), EvalError> {
+    let value = stack
+        .last()
+        .ok_or_else(|| shell_operator_error("stack underflow: need at least 1 values, found 0"))?;
+    println!("{}", typeof_value(evaluator, value)?);
+    Ok(())
+}
+
+fn typeof_value(
+    evaluator: &Evaluator<Value>,
+    value: &Value,
+) -> std::result::Result<String, EvalError> {
+    match value {
+        Value::Quotation(tokens) => infer_quote_type(evaluator, tokens)
+            .map(|word| format_word_type(&word))
+            .map_err(|err| shell_operator_error(err.to_string())),
+        _ => Err(shell_operator_error(
+            "TYPEOF expects a quotation on top of the stack",
+        )),
+    }
+}
+
+fn shell_operator_error(message: impl AsRef<str>) -> EvalError {
+    SError::new("caternary-eval")
+        .with_code(CODE_OPERATOR_ERROR)
+        .with_message(message.as_ref())
 }
 
 fn expect_no_positionals(command: &str, free: &[String]) -> Result<()> {
@@ -306,5 +357,37 @@ mod tests {
             caternary::parse(&format_word("")).unwrap(),
             vec![Token::Word(String::new())],
         );
+    }
+
+    #[test]
+    fn typeof_renders_inferred_quote_type() {
+        let evaluator = new_evaluator();
+        let value = Value::Quotation(caternary::parse("1 +").unwrap());
+
+        let rendered = typeof_value(&evaluator, &value).unwrap();
+
+        assert_eq!("( 'S Num -- 'S Num )", rendered);
+    }
+
+    #[test]
+    fn shell_typeof_preserves_the_stack() {
+        let mut evaluator = new_evaluator();
+        let mut stack = Vec::new();
+
+        shell_eval_line(&mut evaluator, &mut stack, "[ 1 + ] TYPEOF").unwrap();
+
+        assert_eq!(format_stack(&stack), "[[1 +]]");
+    }
+
+    #[test]
+    fn typeof_resolves_shell_definitions() {
+        let mut evaluator = new_evaluator();
+        let mut stack = Vec::new();
+        shell_eval_line(&mut evaluator, &mut stack, "[ 1 + ] :inc").unwrap();
+        shell_eval_line(&mut evaluator, &mut stack, "[ inc ]").unwrap();
+
+        let rendered = typeof_value(&evaluator, stack.last().unwrap()).unwrap();
+
+        assert_eq!("( 'S Num -- 'S Num )", rendered);
     }
 }
