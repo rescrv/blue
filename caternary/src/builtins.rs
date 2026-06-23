@@ -62,6 +62,13 @@ fn rot<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     Ok(())
 }
 
+fn minus_rot<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 3)?;
+    let len = stack.len();
+    stack[len - 3..].rotate_right(1);
+    Ok(())
+}
+
 fn nip<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let len = stack.len();
@@ -108,6 +115,13 @@ fn two_over<T: Clone>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), Ev
     let b = stack[len - 3].clone();
     stack.push(a);
     stack.push(b);
+    Ok(())
+}
+
+fn two_rot<T>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 6)?;
+    let len = stack.len();
+    stack[len - 6..].rotate_left(2);
     Ok(())
 }
 
@@ -399,12 +413,14 @@ where
     evaluator.define("SWAP", swap::<T>);
     evaluator.define("OVER", over::<T>);
     evaluator.define("ROT", rot::<T>);
+    evaluator.define("-ROT", minus_rot::<T>);
     evaluator.define("NIP", nip::<T>);
     evaluator.define("TUCK", tuck::<T>);
     evaluator.define("2DUP", two_dup::<T>);
     evaluator.define("2DROP", two_drop::<T>);
     evaluator.define("2SWAP", two_swap::<T>);
     evaluator.define("2OVER", two_over::<T>);
+    evaluator.define("2ROT", two_rot::<T>);
 }
 
 /// Register scalar arithmetic, comparison, boolean, and integer bitwise builtins.
@@ -589,6 +605,27 @@ mod tests {
         let stack = eval.eval(&tokens).unwrap();
 
         assert_eq!(stack, vec![Number(1), Number(2), Number(2), Number(2)]);
+    }
+
+    #[test]
+    fn forth_rotations_run() {
+        let mut eval: Evaluator<Number> = Evaluator::new();
+        register_stack_builtins(&mut eval);
+
+        let tokens = parse("1 2 3 -ROT 4 5 6 2ROT").unwrap();
+        let stack = eval.eval(&tokens).unwrap();
+
+        assert_eq!(
+            stack,
+            vec![
+                Number(2),
+                Number(4),
+                Number(5),
+                Number(6),
+                Number(3),
+                Number(1)
+            ]
+        );
     }
 
     #[test]

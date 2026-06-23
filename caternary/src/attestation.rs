@@ -49,7 +49,10 @@ use crate::types::TyKind;
 use crate::types::WordTy;
 use crate::types::core_scheme;
 
-const CORE_PRIMITIVES: &[&str] = &["DUP", "DROP", "SWAP", "OVER", "CALL", "DIP", "IF"];
+const CORE_PRIMITIVES: &[&str] = &[
+    "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP", "2OVER",
+    "2ROT", "CALL", "DIP", "IF", "KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE",
+];
 
 // ===========================================================================
 // The operator table — the modulo of every proof (invariants 16/17)
@@ -62,7 +65,7 @@ const CORE_PRIMITIVES: &[&str] = &["DUP", "DROP", "SWAP", "OVER", "CALL", "DIP",
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OperatorOrigin {
     /// The **language core** registered this irreducible primitive
-    /// (`DUP`/`DROP`/`SWAP`/`OVER`/`CALL`/`DIP`/`IF`), baked into
+    /// (fixed stack shuffles plus fixed-arity quotation combinators), baked into
     /// [`crate::core_scheme`] with its Tier-0 scheme (and Tier-1 axiom, §10.6).
     LanguageCore,
     /// The **embedder** registered this host operator at embed time via
