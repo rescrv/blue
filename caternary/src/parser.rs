@@ -58,13 +58,22 @@ pub enum SpannedTokenKind {
 }
 
 impl SpannedToken {
-    fn into_token(self) -> Token {
+    /// Drop the span information, recovering the plain [`Token`] this spanned
+    /// token wraps. Brackets are converted recursively.
+    pub fn into_token(self) -> Token {
         match self.kind {
             SpannedTokenKind::Word(word) => Token::Word(word),
             SpannedTokenKind::Bracket(inner) => {
                 Token::Bracket(inner.into_iter().map(SpannedToken::into_token).collect())
             }
         }
+    }
+
+    /// Borrow the plain [`Token`] shape without consuming the span tree. Returns
+    /// an owned [`Token`] (a clone of the payload) for callers that need the
+    /// spanless view alongside the spanned one.
+    pub fn to_token(&self) -> Token {
+        self.clone().into_token()
     }
 }
 
