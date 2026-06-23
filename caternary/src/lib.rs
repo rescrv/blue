@@ -47,7 +47,10 @@ pub use types::TyVar;
 pub use types::TypingFrame;
 pub use types::UnifyError;
 pub use types::WordTy;
+pub use types::core_scheme;
+pub use types::is_bool_literal;
 pub use types::is_numeric_literal;
+pub use types::respan_word;
 
 /// Register all builtins and combinators on an evaluator.
 pub fn register_all_builtins<T>(evaluator: &mut Evaluator<T>)

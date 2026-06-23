@@ -60,6 +60,146 @@ pub fn is_numeric_literal(word: &str) -> bool {
     !word.is_empty() && word.parse::<f64>().is_ok()
 }
 
+/// The Tier-0 decision for what counts as a boolean literal.
+///
+/// `docs/typing.md` §5 spells out the numeric-literal rule but the `IF`
+/// combinator's §2 scheme demands a `Bool` on top, and the M2 acceptance snippet
+/// `true [ 1 ] [ 2 ] IF` (§12) feeds a `true`. The runtime already treats the
+/// bare words `true`/`false` as boolean values (see `combinators.rs`); this is
+/// the typing counterpart, recorded here so the reconciliation cannot drift: a
+/// boolean literal is the word `true` or `false`, with Tier-0 type
+/// `( 'a -- 'a Bool )`.
+pub fn is_bool_literal(word: &str) -> bool {
+    word == "true" || word == "false"
+}
+
+/// The synthetic span carried by a language-core scheme's nodes. Core schemes
+/// (`DUP`/`DROP`/`SWAP`/`OVER`/`CALL`/`IF`) have no *source* location — they
+/// are authored contracts, not parsed text — so their nodes are born at this
+/// neutral span and [`respan_word`] re-anchors them at the call-site token
+/// whenever a use is instantiated, so diagnostics point at the user's word
+/// rather than byte 0.
+const CORE_SPAN: Span = Span { start: 0, end: 0 };
+
+/// The Tier-0 scheme for a **language-core primitive**, keyed by its *runtime*
+/// (uppercase) name (§2, §8). These are the irreducible words the language core
+/// registers — they have no Caternary body — authored once here, never
+/// user-registrable (the capability wall is the embedding API; §13 invariant 16).
+///
+/// This is the language-core counterpart to the embedder's
+/// [`crate::Evaluator::register_operator_with_contract`]: both contribute schemes
+/// to inference (§5 `lookup`), but core schemes are baked in rather than attested
+/// at embed time. The schemes are exactly §2:
+///
+/// ```text
+/// DUP   : ( 'S a        -- 'S a a )
+/// DROP  : ( 'S a        -- 'S )
+/// SWAP  : ( 'S a b       -- 'S b a )
+/// OVER  : ( 'S a b       -- 'S a b a )
+/// CALL  : ( 'S ('S -- 'T) -- 'T )
+/// IF    : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
+/// ```
+///
+/// `DIP` is intentionally deferred to M4 (combinators); M2 needs only the words
+/// its acceptance snippets use.
+pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
+    let s = CORE_SPAN;
+    // The quotation argument's arrow ( 'S -- 'T ): rowvar 0 = 'S, rowvar 1 = 'T.
+    let arrow_st = || WordTy::new(StackTy::empty(0, s), StackTy::empty(1, s));
+    let scheme = match runtime_name {
+        "DUP" => Scheme::new(
+            vec![0],
+            vec![0],
+            WordTy::new(
+                StackTy::new(vec![Ty::var(0, s)], 0, s),
+                StackTy::new(vec![Ty::var(0, s), Ty::var(0, s)], 0, s),
+            ),
+        ),
+        "DROP" => Scheme::new(
+            vec![0],
+            vec![0],
+            WordTy::new(
+                StackTy::new(vec![Ty::var(0, s)], 0, s),
+                StackTy::empty(0, s),
+            ),
+        ),
+        "SWAP" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(
+                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s)], 0, s),
+                StackTy::new(vec![Ty::var(1, s), Ty::var(0, s)], 0, s),
+            ),
+        ),
+        "OVER" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(
+                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s)], 0, s),
+                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s), Ty::var(0, s)], 0, s),
+            ),
+        ),
+        "CALL" => Scheme::new(
+            vec![],
+            vec![0, 1],
+            WordTy::new(
+                StackTy::new(vec![Ty::quote(arrow_st(), s)], 0, s),
+                StackTy::empty(1, s),
+            ),
+        ),
+        "IF" => Scheme::new(
+            vec![],
+            vec![0, 1],
+            WordTy::new(
+                StackTy::new(
+                    vec![
+                        Ty::bool(s),
+                        Ty::quote(arrow_st(), s),
+                        Ty::quote(arrow_st(), s),
+                    ],
+                    0,
+                    s,
+                ),
+                StackTy::empty(1, s),
+            ),
+        ),
+        _ => return None,
+    };
+    Some(scheme)
+}
+
+/// Re-anchor every origin span inside a [`WordTy`] to `span`. Used after
+/// instantiating a registered or language-core scheme so the freshly minted
+/// nodes report the **call-site** word's location in a diagnostic instead of the
+/// scheme's authoring span (§7: every conflicting type carries a real birth
+/// span; a core scheme's `CORE_SPAN` would otherwise surface as byte 0).
+pub fn respan_word(word: &WordTy, span: Span) -> WordTy {
+    WordTy::new(
+        respan_stack(&word.input, span),
+        respan_stack(&word.output, span),
+    )
+}
+
+fn respan_stack(stack: &StackTy, span: Span) -> StackTy {
+    StackTy {
+        elems: stack.elems.iter().map(|e| respan_ty(e, span)).collect(),
+        row: stack.row,
+        span,
+    }
+}
+
+fn respan_ty(ty: &Ty, span: Span) -> Ty {
+    let kind = match &ty.kind {
+        TyKind::Var(v) => TyKind::Var(*v),
+        TyKind::Con(n) => TyKind::Con(n.clone()),
+        TyKind::App(n, args) => {
+            TyKind::App(n.clone(), args.iter().map(|a| respan_ty(a, span)).collect())
+        }
+        TyKind::Quote(w) => TyKind::Quote(Box::new(respan_word(w, span))),
+    };
+    Ty { kind, span }
+}
+
 /// The shape of a Tier-0 element type (§3). Variant set is exactly the spec's:
 /// `Var`/`Con`/`App`/`Quote`. The origin span lives on the enclosing [`Ty`].
 #[derive(Clone, Debug, PartialEq)]
@@ -561,6 +701,50 @@ impl InferCtx {
             }
         }
         StackTy { elems, row, span }
+    }
+
+    /// Fully resolve an element type: chase the top-level variable binding *and*
+    /// recurse into every interior (`App` arguments, `Quote` arrows) so the
+    /// result carries no further-resolvable variables. This is the read path the
+    /// inference driver and its tests use to inspect a *final* inferred type;
+    /// [`InferCtx::resolve_ty`] is the shallow one-step chase the unifier uses.
+    pub fn resolve_ty_deep(&self, ty: &Ty) -> Ty {
+        let t = self.resolve_ty(ty);
+        match &t.kind {
+            TyKind::Var(_) | TyKind::Con(_) => t,
+            TyKind::App(name, args) => Ty {
+                kind: TyKind::App(
+                    name.clone(),
+                    args.iter().map(|a| self.resolve_ty_deep(a)).collect(),
+                ),
+                span: t.span,
+            },
+            TyKind::Quote(w) => Ty {
+                kind: TyKind::Quote(Box::new(self.resolve_word_deep(w))),
+                span: t.span,
+            },
+        }
+    }
+
+    /// Fully resolve a stack type: chase the row to an unbound representative and
+    /// deep-resolve every element (see [`InferCtx::resolve_ty_deep`]).
+    pub fn resolve_stack_deep(&self, s: &StackTy) -> StackTy {
+        let r = self.resolve_stack(s);
+        StackTy {
+            elems: r.elems.iter().map(|e| self.resolve_ty_deep(e)).collect(),
+            row: r.row,
+            span: r.span,
+        }
+    }
+
+    /// Fully resolve both stacks of a word arrow (see
+    /// [`InferCtx::resolve_stack_deep`]). The canonical form of an inferred
+    /// effect, used to report and assert a sequence's principal type.
+    pub fn resolve_word_deep(&self, w: &WordTy) -> WordTy {
+        WordTy::new(
+            self.resolve_stack_deep(&w.input),
+            self.resolve_stack_deep(&w.output),
+        )
     }
 
     /// Occurs check for a **type** variable: does `v` appear anywhere in `term`,
