@@ -2330,7 +2330,10 @@ mod tests {
 
     #[test]
     fn m4_core_schemes_cover_fixed_quotation_combinators() {
-        for word in ["KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE"] {
+        for word in [
+            "2DIP", "3DIP", "KEEP", "2KEEP", "3KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@",
+            "COMPOSE",
+        ] {
             assert!(
                 core_scheme(word).is_some(),
                 "missing core scheme for {word}"
@@ -2338,7 +2341,11 @@ mod tests {
         }
 
         let arrow = infer_snippet(
-            "5 [ 1 + ] KEEP DROP DROP \
+            "1 2 3 4 [ + ] 2DIP DROP DROP DROP \
+             1 2 3 4 5 [ + ] 3DIP DROP DROP DROP DROP \
+             5 [ 1 + ] KEEP DROP DROP \
+             1 2 [ + ] 2KEEP DROP DROP DROP \
+             1 2 3 [ + + ] 3KEEP DROP DROP DROP DROP \
              5 [ 1 + ] [ 2 + ] BI DROP DROP \
              5 6 [ 1 + ] [ 2 + ] BI* DROP DROP \
              5 6 [ 1 + ] BI@ DROP DROP \
