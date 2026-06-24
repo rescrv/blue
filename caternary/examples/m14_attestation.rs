@@ -17,7 +17,7 @@ use caternary::*;
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Word(String),
-    Bracket(Vec<Token>),
+    Bracket(Vec<QuoteItem<Value>>),
     Num(f64),
 }
 
@@ -28,33 +28,36 @@ impl From<Token> for Value {
                 Ok(n) => Value::Num(n),
                 Err(_) => Value::Word(w),
             },
-            Token::Bracket(b) => Value::Bracket(b),
+            Token::Bracket(b) => Value::Bracket(quote_items_from_tokens(&b)),
         }
     }
 }
 
 impl Quotable for Value {
-    fn as_quotation(&self) -> Option<&[Token]> {
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
         match self {
             Value::Bracket(b) => Some(b),
             _ => None,
         }
     }
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+        Value::Bracket(items)
+    }
     fn to_tokens(&self) -> Vec<Token> {
         match self {
             Value::Word(w) => vec![Token::Word(w.clone())],
-            Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+            Value::Bracket(b) => vec![Token::Bracket(quote_items_to_tokens(b))],
             Value::Num(n) => vec![Token::Word(n.to_string())],
         }
     }
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
-            Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+            Value::Bracket(b) => Some(quote_items_to_values(b)),
             _ => None,
         }
     }
     fn from_sequence(elements: Vec<Self>) -> Self {
-        Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+        Value::Bracket(elements.into_iter().map(QuoteItem::Push).collect())
     }
 }
 

@@ -10,6 +10,7 @@ use crate::Definition;
 use crate::Evaluator;
 use crate::ExploratoryCache;
 use crate::Pred;
+use crate::QuoteItem;
 use crate::SmtLibSolver;
 use crate::Solver;
 use crate::Span;
@@ -30,39 +31,42 @@ use crate::types::WordTy;
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Word(String),
-    Bracket(Vec<Token>),
+    Bracket(Vec<QuoteItem<Value>>),
 }
 
 impl From<Token> for Value {
     fn from(token: Token) -> Self {
         match token {
             Token::Word(w) => Value::Word(w),
-            Token::Bracket(b) => Value::Bracket(b),
+            Token::Bracket(b) => Value::Bracket(crate::quote_items_from_tokens(&b)),
         }
     }
 }
 
 impl Quotable for Value {
-    fn as_quotation(&self) -> Option<&[Token]> {
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
         match self {
             Value::Bracket(b) => Some(b),
             Value::Word(_) => None,
         }
     }
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+        Value::Bracket(items)
+    }
     fn to_tokens(&self) -> Vec<Token> {
         match self {
             Value::Word(w) => vec![Token::Word(w.clone())],
-            Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+            Value::Bracket(b) => vec![Token::Bracket(crate::quote_items_to_tokens(b))],
         }
     }
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
-            Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+            Value::Bracket(b) => Some(crate::quote_items_to_values(b)),
             Value::Word(_) => None,
         }
     }
     fn from_sequence(elements: Vec<Self>) -> Self {
-        Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+        Value::Bracket(elements.into_iter().map(QuoteItem::Push).collect())
     }
 }
 
@@ -192,8 +196,8 @@ fn operator_table_enumerates_the_modulo() {
     let expected_core = [
         "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP",
         "2OVER", "2ROT", "CALL", "DIP", "2DIP", "3DIP", "IF", "KEEP", "2KEEP", "3KEEP", "BI",
-        "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE", "CURRY", "WHEN", "UNLESS", "MAP", "FILTER",
-        "FOLD", "EACH",
+        "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE", "CURRY", "2CURRY", "3CURRY", "WHEN",
+        "UNLESS", "MAP", "FILTER", "FOLD", "EACH",
     ];
     for p in expected_core.iter().copied() {
         assert!(
