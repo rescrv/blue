@@ -2426,6 +2426,285 @@ mod tests {
         assert_eq!(arrow.output.elems[1].kind, TyKind::Con(NUM.into()));
     }
 
+    /// `List a` element type with element `elem` (the higher-order MAP/FILTER
+    /// signatures track the element type, unlike the nullary `list_ty` above).
+    fn list_of(elem: Ty, s: Span) -> Ty {
+        Ty::app("List", vec![elem], s)
+    }
+
+    /// Seed an evaluator with a `List Num` source and the element words the
+    /// MAP/FILTER acceptance tests apply through a quotation.
+    fn eval_with_list_words(s: Span) -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        // nums : ( 'S -- 'S (List Num) )
+        eval.register_operator_with_contract(
+            "nums",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(
+                    StackTy::empty(0, s),
+                    StackTy::new(vec![list_of(Ty::num(s), s)], 0, s),
+                ),
+            ),
+        );
+        // inc : ( 'S Num -- 'S Num ) — an element transform Num -> Num.
+        eval.register_operator_with_contract(
+            "inc",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(
+                    StackTy::new(vec![Ty::num(s)], 0, s),
+                    StackTy::new(vec![Ty::num(s)], 0, s),
+                ),
+            ),
+        );
+        // is_pos : ( 'S Num -- 'S Bool ) — a predicate Num -> Bool.
+        eval.register_operator_with_contract(
+            "is_pos",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(
+                    StackTy::new(vec![Ty::num(s)], 0, s),
+                    StackTy::new(vec![Ty::bool(s)], 0, s),
+                ),
+            ),
+        );
+        eval
+    }
+
+    /// Infer a token sequence's whole effect under `eval`, fully resolved.
+    fn infer_effect(eval: &Evaluator<Value>, src: &str) -> Result<WordTy, TypeError> {
+        let tokens = parse_with_spans(src).unwrap();
+        let mut ctx = InferCtx::new();
+        let mut locals: Vec<Local> = Vec::new();
+        let def_env = DefEnv::empty();
+        let no_poly: HashMap<String, Scheme> = HashMap::new();
+        infer_seq(eval, &tokens, &mut ctx, &mut locals, &def_env, &no_poly, false)
+            .map(|arrow| ctx.resolve_word_deep(&arrow))
+    }
+
+    #[test]
+    fn map_is_a_core_scheme_not_an_unresolved_word() {
+        // Before the fix `MAP` had no checker scheme and failed as UNDEFINED
+        // (effect lookup absent). It must now resolve as a language-core
+        // primitive.
+        assert!(core_scheme("MAP").is_some(), "MAP must have a core scheme");
+        assert!(core_scheme("FILTER").is_some(), "FILTER must have a core scheme");
+    }
+
+    #[test]
+    fn map_relays_the_quotation_and_preserves_the_list() {
+        // `nums [ inc ] MAP` : ( 'S -- 'S (List Num) ). The Num->Num element
+        // transform relays through; the result is a `List Num`.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "nums [ inc ] MAP").expect("MAP must type-check");
+        assert!(arrow.input.elems.is_empty(), "consumes nothing from below");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(args.len(), 1, "List carries its element type");
+                assert_eq!(args[0].kind, TyKind::Con(NUM.into()), "element is Num");
+            }
+            other => panic!("expected `List Num`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_changes_the_element_type_through_the_quotation() {
+        // `nums [ is_pos ] MAP` : the Num->Bool quotation makes the output a
+        // `List Bool` — the quotation's output element `b` becomes the result
+        // list's element (the §8 higher-order relay).
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "nums [ is_pos ] MAP").expect("MAP must type-check");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(args[0].kind, TyKind::Con(BOOL.into()), "element became Bool");
+            }
+            other => panic!("expected `List Bool`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn filter_keeps_the_element_type_and_takes_a_predicate() {
+        // `nums [ is_pos ] FILTER` : ( 'S -- 'S (List Num) ). The Num->Bool
+        // predicate relays; the element type is unchanged (List Num in, List Num
+        // out) — no post-filter length claim.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "nums [ is_pos ] FILTER").expect("FILTER must type-check");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(args[0].kind, TyKind::Con(NUM.into()), "element stays Num");
+            }
+            other => panic!("expected `List Num`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_rejects_an_element_transform_of_the_wrong_input_type() {
+        // The input list's element relays into the quotation's input: a Num->Bool
+        // quotation cannot map a `List Bool` source whose element a = Bool against
+        // `inc : Num -> Num`. Build a `List Bool` source and apply `inc`.
+        let s = sp();
+        let mut eval = eval_with_list_words(s);
+        // bools : ( 'S -- 'S (List Bool) )
+        eval.register_operator_with_contract(
+            "bools",
+            Scheme::new(
+                vec![],
+                vec![0],
+                WordTy::new(
+                    StackTy::empty(0, s),
+                    StackTy::new(vec![list_of(Ty::bool(s), s)], 0, s),
+                ),
+            ),
+        );
+        let err = infer_effect(&eval, "bools [ inc ] MAP")
+            .expect_err("element type must relay: Bool list vs Num transform is a mismatch");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "wrong element type is a typed mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn filter_rejects_a_non_boolean_predicate() {
+        // FILTER's quotation must produce Bool. An `inc : Num -> Num` quotation is
+        // not a predicate and must be rejected.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "nums [ inc ] FILTER")
+            .expect_err("a non-Bool-producing quotation is not a predicate");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "non-predicate quotation is a typed mismatch, got {err:?}"
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // The remaining runtime builtins given Tier-0 contracts (mirrors MAP/FILTER):
+    // the applicative relays KEEP/BI/BI*/BI@, the quotation-builders
+    // COMPOSE/CURRY, the one-armed conditionals WHEN/UNLESS, and the sequence
+    // relays FOLD/EACH.
+    // ----------------------------------------------------------------------
+
+    /// Assert the whole effect of `src` lands `outs` `Num`s on top of an
+    /// otherwise-untouched base stack ( 'S -- 'S Num^outs ).
+    fn assert_pushes_nums(eval: &Evaluator<Value>, src: &str, outs: usize) {
+        let arrow = infer_effect(eval, src).unwrap_or_else(|e| panic!("{src:?} must check: {e:?}"));
+        assert!(
+            arrow.input.elems.is_empty(),
+            "{src:?} consumes nothing from below, got {:?}",
+            arrow.input.elems
+        );
+        assert_eq!(
+            arrow.output.elems.len(),
+            outs,
+            "{src:?} should leave {outs} values"
+        );
+        for (i, e) in arrow.output.elems.iter().enumerate() {
+            assert_eq!(
+                e.kind,
+                TyKind::Con(NUM.into()),
+                "{src:?} output {i} should be Num"
+            );
+        }
+    }
+
+    #[test]
+    fn newly_typed_builtins_have_a_core_scheme() {
+        for name in [
+            "KEEP", "BI", "BI*", "BI@", "COMPOSE", "CURRY", "WHEN", "UNLESS", "FOLD", "EACH",
+        ] {
+            assert!(
+                core_scheme(name).is_some(),
+                "{name} must resolve as a language-core primitive"
+            );
+        }
+    }
+
+    #[test]
+    fn applicative_relays_thread_their_quotations() {
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        // KEEP runs `inc` on the value and restores a copy: ( Num -- Num Num ).
+        assert_pushes_nums(&eval, "5 [ inc ] KEEP", 2);
+        // BI applies two quotations to one value; BI* to two values; both relay.
+        assert_pushes_nums(&eval, "5 [ inc ] [ inc ] BI", 2);
+        assert_pushes_nums(&eval, "5 6 [ inc ] [ inc ] BI*", 2);
+        // BI@ applies one element-transform to two same-typed values: ( -- b b ).
+        assert_pushes_nums(&eval, "5 6 [ inc ] BI@", 2);
+    }
+
+    #[test]
+    fn quotation_builders_compose_and_curry() {
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        // COMPOSE chains [inc] then [inc]; CALL runs the composite: ( -- Num ).
+        assert_pushes_nums(&eval, "5 [ inc ] [ inc ] COMPOSE CALL", 1);
+        // CURRY bakes 5 into [inc]; CALL runs the closed quotation: ( -- Num ).
+        assert_pushes_nums(&eval, "5 [ inc ] CURRY CALL", 1);
+    }
+
+    #[test]
+    fn one_armed_conditionals_require_a_stack_neutral_quotation() {
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        // An empty (identity) quotation is `'S -- 'S`; both paths agree.
+        assert_pushes_nums(&eval, "5 true [ ] WHEN", 1);
+        assert_pushes_nums(&eval, "5 false [ ] UNLESS", 1);
+    }
+
+    #[test]
+    fn when_rejects_a_shape_changing_quotation() {
+        // The absent branch is the identity, so a quotation that changes the
+        // stack shape (here `[ DROP ]` shrinks it) cannot agree with the
+        // do-nothing path.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "5 true [ DROP ] WHEN")
+            .expect_err("a stack-shrinking quotation is not `'S -- 'S`");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "non-neutral WHEN quotation is a typed rejection, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn fold_threads_an_accumulator_and_each_consumes_for_effect() {
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        // FOLD: `[ DROP ]` is a valid step ( 'r b a -- 'r b ) (drops the element,
+        // keeps the accumulator). Result is the final accumulator: ( -- Num ).
+        assert_pushes_nums(&eval, "nums 0 [ DROP ] FOLD", 1);
+        // EACH: `[ DROP ]` is a stack-neutral consumer ( 'r a -- 'r ). The list
+        // is consumed and the base stack returns unchanged: ( -- ).
+        assert_pushes_nums(&eval, "nums [ DROP ] EACH", 0);
+    }
+
+    #[test]
+    fn fold_rejects_a_step_that_does_not_preserve_the_accumulator() {
+        // An identity step `[ ]` ( 'R -- 'R ) cannot be a fold step, which must
+        // consume one element while preserving the accumulator ( 'r b a -- 'r b ).
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "nums 0 [ ] FOLD")
+            .expect_err("an identity step does not consume the element");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "a non-consuming FOLD step is a typed rejection, got {err:?}"
+        );
+    }
+
     #[test]
     fn m4_rank2_without_annotation_yields_the_section8_diagnostic() {
         // `>f` binds a quotation parameter applied at TWO distinct types (to a
