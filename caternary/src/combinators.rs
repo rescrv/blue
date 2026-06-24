@@ -105,6 +105,36 @@ fn dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalE
     Ok(())
 }
 
+/// `2DIP`: Execute a quotation while hiding the top two elements.
+///
+/// Stack effect: `( x y [Q] -- ... x y )`
+///
+/// Pops a quotation and the two elements below it, executes the quotation,
+/// then restores the hidden pair in order.
+fn two_dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 3)?;
+    let quotation = pop_quotation(stack)?;
+    let hidden = stack.split_off(stack.len() - 2);
+    eval.eval_with_stack(&quotation, stack)?;
+    stack.extend(hidden);
+    Ok(())
+}
+
+/// `3DIP`: Execute a quotation while hiding the top three elements.
+///
+/// Stack effect: `( x y z [Q] -- ... x y z )`
+///
+/// Pops a quotation and the three elements below it, executes the quotation,
+/// then restores the hidden triple in order.
+fn three_dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 4)?;
+    let quotation = pop_quotation(stack)?;
+    let hidden = stack.split_off(stack.len() - 3);
+    eval.eval_with_stack(&quotation, stack)?;
+    stack.extend(hidden);
+    Ok(())
+}
+
 /// `KEEP`: Execute a quotation on a value, keeping the original value.
 ///
 /// Stack effect: `( x [Q] -- ... x )`
@@ -116,6 +146,34 @@ fn keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     let x = stack.last().unwrap().clone();
     eval.eval_with_stack(&quotation, stack)?;
     stack.push(x);
+    Ok(())
+}
+
+/// `2KEEP`: Execute a quotation on two values, keeping the original pair.
+///
+/// Stack effect: `( x y [Q] -- ... x y )`
+///
+/// Like `KEEP`, but preserves the top two values after the quotation runs.
+fn two_keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 3)?;
+    let quotation = pop_quotation(stack)?;
+    let kept = stack[stack.len() - 2..].to_vec();
+    eval.eval_with_stack(&quotation, stack)?;
+    stack.extend(kept);
+    Ok(())
+}
+
+/// `3KEEP`: Execute a quotation on three values, keeping the original triple.
+///
+/// Stack effect: `( x y z [Q] -- ... x y z )`
+///
+/// Like `KEEP`, but preserves the top three values after the quotation runs.
+fn three_keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 4)?;
+    let quotation = pop_quotation(stack)?;
+    let kept = stack[stack.len() - 3..].to_vec();
+    eval.eval_with_stack(&quotation, stack)?;
+    stack.extend(kept);
     Ok(())
 }
 
@@ -349,6 +407,46 @@ fn curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), Ev
     Ok(())
 }
 
+/// `2CURRY`: Partially apply two values to a quotation.
+///
+/// Stack effect: `( x y [Q] -- [x y Q] )`
+///
+/// Creates a new quotation that pushes x and y, then executes Q.
+fn two_curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 3)?;
+    let q = pop_quotation(stack)?;
+    let values = stack.split_off(stack.len() - 2);
+
+    let mut combined = Vec::new();
+    for value in values {
+        combined.extend(value.to_tokens());
+    }
+    combined.extend(q);
+
+    stack.push(T::from(Token::Bracket(combined)));
+    Ok(())
+}
+
+/// `3CURRY`: Partially apply three values to a quotation.
+///
+/// Stack effect: `( x y z [Q] -- [x y z Q] )`
+///
+/// Creates a new quotation that pushes x, y, and z, then executes Q.
+fn three_curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
+    require_len(stack, 4)?;
+    let q = pop_quotation(stack)?;
+    let values = stack.split_off(stack.len() - 3);
+
+    let mut combined = Vec::new();
+    for value in values {
+        combined.extend(value.to_tokens());
+    }
+    combined.extend(q);
+
+    stack.push(T::from(Token::Bracket(combined)));
+    Ok(())
+}
+
 // ============================================================================
 // Conditional Combinators
 // ============================================================================
@@ -532,15 +630,20 @@ fn each<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
 
 /// Register quotation combinators on an evaluator.
 ///
-/// This registers the core combinators: `CALL`, `DIP`, `KEEP`, `BI`, `BI*`, `BI@`,
-/// `TRI`, `TRI*`, `TRI@`, `CLEAVE`, `SPREAD`, `COMPOSE`, `CURRY`.
+/// This registers: `CALL`, `DIP`, `2DIP`, `3DIP`, `KEEP`, `2KEEP`, `3KEEP`,
+/// `BI`, `BI*`, `BI@`, `TRI`, `TRI*`, `TRI@`, `CLEAVE`, `SPREAD`, `COMPOSE`,
+/// `CURRY`, `2CURRY`, `3CURRY`.
 pub fn register_combinators<T>(evaluator: &mut Evaluator<T>)
 where
     T: Quotable,
 {
     evaluator.define("CALL", call::<T>);
     evaluator.define("DIP", dip::<T>);
+    evaluator.define("2DIP", two_dip::<T>);
+    evaluator.define("3DIP", three_dip::<T>);
     evaluator.define("KEEP", keep::<T>);
+    evaluator.define("2KEEP", two_keep::<T>);
+    evaluator.define("3KEEP", three_keep::<T>);
     evaluator.define("BI", bi::<T>);
     evaluator.define("BI*", bi_star::<T>);
     evaluator.define("BI@", bi_at::<T>);
@@ -551,6 +654,8 @@ where
     evaluator.define("SPREAD", spread::<T>);
     evaluator.define("COMPOSE", compose::<T>);
     evaluator.define("CURRY", curry::<T>);
+    evaluator.define("2CURRY", two_curry::<T>);
+    evaluator.define("3CURRY", three_curry::<T>);
 }
 
 /// Register conditional combinators on an evaluator.
@@ -781,6 +886,27 @@ mod tests {
         println!("Stack: {result:?}");
     }
 
+    #[test]
+    fn two_dip_hides_top_pair() {
+        let eval = make_eval();
+        let tokens = parse("1 2 3 4 [ADD] 2DIP").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(3), Value::Int(3), Value::Int(4)]);
+        println!("Stack: {result:?}");
+    }
+
+    #[test]
+    fn three_dip_hides_top_triple() {
+        let eval = make_eval();
+        let tokens = parse("1 2 3 4 5 [ADD] 3DIP").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(
+            result,
+            vec![Value::Int(3), Value::Int(3), Value::Int(4), Value::Int(5)]
+        );
+        println!("Stack: {result:?}");
+    }
+
     // ========================================================================
     // KEEP tests
     // ========================================================================
@@ -791,6 +917,27 @@ mod tests {
         let tokens = parse("5 [DUP MUL] KEEP").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(25), Value::Int(5)]);
+        println!("Stack: {result:?}");
+    }
+
+    #[test]
+    fn two_keep_preserves_pair() {
+        let eval = make_eval();
+        let tokens = parse("3 4 [ADD] 2KEEP").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(7), Value::Int(3), Value::Int(4)]);
+        println!("Stack: {result:?}");
+    }
+
+    #[test]
+    fn three_keep_preserves_triple() {
+        let eval = make_eval();
+        let tokens = parse("2 3 4 [ADD ADD] 3KEEP").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(
+            result,
+            vec![Value::Int(9), Value::Int(2), Value::Int(3), Value::Int(4)]
+        );
         println!("Stack: {result:?}");
     }
 
@@ -921,6 +1068,24 @@ mod tests {
         let tokens = parse("10 [ADD] CURRY 5 SWAP CALL").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(15)]);
+        println!("Stack: {result:?}");
+    }
+
+    #[test]
+    fn two_curry_partial_application() {
+        let eval = make_eval();
+        let tokens = parse("10 20 [ADD ADD] 2CURRY 5 SWAP CALL").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(35)]);
+        println!("Stack: {result:?}");
+    }
+
+    #[test]
+    fn three_curry_partial_application() {
+        let eval = make_eval();
+        let tokens = parse("1 2 3 [ADD ADD ADD] 3CURRY 4 SWAP CALL").unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Int(10)]);
         println!("Stack: {result:?}");
     }
 

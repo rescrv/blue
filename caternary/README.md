@@ -179,7 +179,11 @@ a host predicate with that name is also registered.
 |---|---|---|
 | `CALL` | `1 2 [+] CALL` | `3` |
 | `DIP` | `1 2 3 [+] DIP` | `3 3` |
+| `2DIP` | `1 2 3 4 [+] 2DIP` | `3 3 4` |
+| `3DIP` | `1 2 3 4 5 [+] 3DIP` | `3 3 4 5` |
 | `KEEP` | `5 [DUP *] KEEP` | `25 5` |
+| `2KEEP` | `3 4 [+] 2KEEP` | `7 3 4` |
+| `3KEEP` | `2 3 4 [+ +] 3KEEP` | `9 2 3 4` |
 | `BI` | `5 [DUP +] [DUP *] BI` | `10 25` |
 | `BI*` | `3 4 [DUP *] [DUP +] BI*` | `9 8` |
 | `BI@` | `3 4 [DUP *] BI@` | `9 16` |
@@ -190,6 +194,8 @@ a host predicate with that name is also registered.
 | `SPREAD` | `1 2 3 [[DUP +] [DUP *] [1 +]] SPREAD` | `2 4 4` |
 | `COMPOSE` | `[1 +] [2 *] COMPOSE` | `[1 + 2 *]` |
 | `CURRY` | `10 [+] CURRY` | `[10 +]` |
+| `2CURRY` | `10 20 [+ +] 2CURRY` | `[10 20 + +]` |
+| `3CURRY` | `1 2 3 [+ + +] 3CURRY` | `[1 2 3 + + +]` |
 
 ### Conditionals
 
