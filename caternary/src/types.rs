@@ -109,6 +109,13 @@ const CORE_SPAN: Span = Span { start: 0, end: 0 };
 /// 2ROT   : ( 'S a b c d e f -- 'S c d e f a b )
 /// CALL   : ( 'S ('S -- 'T) -- 'T )
 /// IF     : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
+/// CURRY  : ( 'R a ('S a -- 'T)             -- 'R ('S -- 'T) )
+/// WHEN   : ( 'S Bool ('S -- 'S)            -- 'S )
+/// UNLESS : ( 'S Bool ('S -- 'S)            -- 'S )
+/// MAP    : ( 'S (List a) ( 'r a -- 'r b )    -- 'S (List b) )
+/// FILTER : ( 'S (List a) ( 'r a -- 'r Bool ) -- 'S (List a) )
+/// FOLD   : ( 'S (List a) b ( 'r b a -- 'r b ) -- 'S b )
+/// EACH   : ( 'S (List a) ( 'r a -- 'r )    -- 'S )
 /// ```
 ///
 /// `DIP` is the M4 §8 **relay** combinator: its scheme alone states the only
@@ -116,12 +123,29 @@ const CORE_SPAN: Span = Span { start: 0, end: 0 };
 /// quotation runs on the rest. The quotation's **declared** arrow `( 'S -- 'T )`
 /// is relayed verbatim; the body is never expanded into the caller's contract
 /// (§13 invariant 8).
+///
+/// `MAP` / `FILTER` / `FOLD` / `EACH` are the **higher-order sequence relays**:
+/// their quotation argument's two arrow ends share a row (`'r`), forcing an
+/// element-to-element shape, and the element type relays through the `List`
+/// constructor. `MAP` turns `List a` into `List b` via the element transform
+/// `a -> b`; `FILTER` keeps `List a` via the predicate `a -> Bool` (no
+/// post-filter length claim); `FOLD` threads an accumulator `b` through a step
+/// `( 'r b a -- 'r b )` and returns the final accumulator; `EACH` runs a
+/// stack-neutral consumer `( 'r a -- 'r )` per element for effect. Like `DIP`,
+/// only the declared quotation arrow is relayed, never expanded (§13 inv 8).
+///
+/// `CURRY` is a **quotation-builder**: it bakes a value into a quotation's input,
+/// producing a quotation whose arrow drops that value (`a ( 'S a -- 'T ) -- ( 'S
+/// -- 'T )`). `WHEN` / `UNLESS` are the **one-armed conditionals**: the absent
+/// branch is the identity, so the single quotation must be stack-shape-preserving
+/// (`'S -- 'S`) for both control paths to agree.
 pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
     let s = CORE_SPAN;
     let v = |idx| Ty::var(idx, s);
     let stack = |row, elems| StackTy::new(elems, row, s);
     let empty = |row| StackTy::empty(row, s);
     let quote = |input, output| Ty::quote(WordTy::new(input, output), s);
+    let list = |elem| Ty::app("List", vec![elem], s);
     // The quotation argument's arrow ( 'S -- 'T ): rowvar 0 = 'S, rowvar 1 = 'T.
     let arrow_st = || WordTy::new(empty(0), empty(1));
     let scheme = match runtime_name {
@@ -351,6 +375,126 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
                 WordTy::new(stack(0, vec![p, q]), stack(0, vec![composed])),
             )
         }
+        // CURRY : ( 'R a ( 'S a -- 'T ) -- 'R ( 'S -- 'T ) ). Bake the value `a`
+        // (tyvar 0) into the quotation's input: the input quotation expects `a`
+        // on top of 'S, the result quotation supplies it itself, so its arrow
+        // drops the `a` ( 'S -- 'T ). rowvar 0='R (the outer base), 1='S, 2='T.
+        "CURRY" => Scheme::new(
+            vec![0],
+            vec![0, 1, 2],
+            WordTy::new(
+                stack(
+                    0,
+                    vec![v(0), quote(stack(1, vec![v(0)]), empty(2))],
+                ),
+                stack(0, vec![quote(empty(1), empty(2))]),
+            ),
+        ),
+        // WHEN : ( 'S Bool ( 'S -- 'S ) -- 'S ). The absent (false) branch is the
+        // identity, so for both control paths to agree the quotation must be
+        // stack-shape-preserving: both ends share row 0 ('S -- 'S). Unlike IF,
+        // there is no 'T — the result is always 'S.
+        "WHEN" => Scheme::new(
+            vec![],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![Ty::bool(s), quote(empty(0), empty(0))]),
+                empty(0),
+            ),
+        ),
+        // UNLESS : ( 'S Bool ( 'S -- 'S ) -- 'S ). As WHEN, but the quotation runs
+        // on the false branch; the typing constraint (stack-shape-preserving
+        // quotation, 'S -- 'S) is identical.
+        "UNLESS" => Scheme::new(
+            vec![],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![Ty::bool(s), quote(empty(0), empty(0))]),
+                empty(0),
+            ),
+        ),
+        // MAP : ( 'S (List a) ( 'r a -- 'r b ) -- 'S (List b) ) (§8 relay,
+        // higher-order). The quotation argument is the **element transform**: it
+        // pops one `a` and pushes one `b`, leaving the rest of the stack ('r)
+        // untouched — so both ends of its arrow share row 1 ('r), forcing an
+        // element-to-element shape. The element type relays through the lists:
+        // the input list's element (tyvar 0 = a) is the quotation's input, the
+        // quotation's output (tyvar 1 = b) is the output list's element. Only the
+        // declared quotation arrow is relayed — no body expansion (§13 inv 8).
+        "MAP" => Scheme::new(
+            vec![0, 1],
+            vec![0, 1],
+            WordTy::new(
+                stack(
+                    0,
+                    vec![
+                        list(v(0)),
+                        quote(stack(1, vec![v(0)]), stack(1, vec![v(1)])),
+                    ],
+                ),
+                stack(0, vec![list(v(1))]),
+            ),
+        ),
+        // FILTER : ( 'S (List a) ( 'r a -- 'r Bool ) -- 'S (List a) ) (§8 relay,
+        // higher-order). The quotation is the **predicate**: it pops one `a` and
+        // pushes a Bool, leaving the rest of the stack ('r) untouched — both ends
+        // of its arrow share row 1 ('r). The element type (tyvar 0 = a) is
+        // unchanged across the call: the result is `List a`, same element as the
+        // input — no length claim is made. Only the declared quotation arrow is
+        // relayed — no body expansion (§13 inv 8).
+        "FILTER" => Scheme::new(
+            vec![0],
+            vec![0, 1],
+            WordTy::new(
+                stack(
+                    0,
+                    vec![
+                        list(v(0)),
+                        quote(stack(1, vec![v(0)]), stack(1, vec![Ty::bool(s)])),
+                    ],
+                ),
+                stack(0, vec![list(v(0))]),
+            ),
+        ),
+        // FOLD : ( 'S (List a) b ( 'r b a -- 'r b ) -- 'S b ). Thread an
+        // accumulator `b` (tyvar 1) through a step quotation that consumes the
+        // accumulator and one element `a` (tyvar 0) and leaves the new
+        // accumulator, sharing row 'r (rowvar 1) across both ends. The result is
+        // the final accumulator `b`. Relay only — the step arrow is never
+        // expanded (§13 inv 8).
+        "FOLD" => Scheme::new(
+            vec![0, 1],
+            vec![0, 1],
+            WordTy::new(
+                stack(
+                    0,
+                    vec![
+                        list(v(0)),
+                        v(1),
+                        quote(stack(1, vec![v(1), v(0)]), stack(1, vec![v(1)])),
+                    ],
+                ),
+                stack(0, vec![v(1)]),
+            ),
+        ),
+        // EACH : ( 'S (List a) ( 'r a -- 'r ) -- 'S ). Run a stack-neutral
+        // consumer (pops one element `a` (tyvar 0), leaves the rest of the stack
+        // 'r untouched — both ends share row 1) once per element, for effect. The
+        // list is consumed and the base stack 'S returns unchanged. Relay only.
+        "EACH" => Scheme::new(
+            vec![0],
+            vec![0, 1],
+            WordTy::new(
+                stack(
+                    0,
+                    vec![
+                        list(v(0)),
+                        quote(stack(1, vec![v(0)]), empty(1)),
+                    ],
+                ),
+                empty(0),
+            ),
+        ),
         _ => return None,
     };
     Some(scheme)
@@ -441,6 +585,14 @@ impl Ty {
     /// The `Bool` base type born at `span`.
     pub fn bool(span: Span) -> Self {
         Ty::con(BOOL, span)
+    }
+
+    /// A parameterized type `name args…` born at `span`, e.g. `List a`.
+    pub fn app(name: impl Into<String>, args: Vec<Ty>, span: Span) -> Self {
+        Ty {
+            kind: TyKind::App(name.into(), args),
+            span,
+        }
     }
 
     /// A quotation value carrying `arrow`, born at `span`.
