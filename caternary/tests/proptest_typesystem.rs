@@ -42,39 +42,42 @@ use proptest::prelude::*;
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Word(String),
-    Bracket(Vec<Token>),
+    Bracket(Vec<QuoteItem<Value>>),
 }
 
 impl From<Token> for Value {
     fn from(token: Token) -> Self {
         match token {
             Token::Word(w) => Value::Word(w),
-            Token::Bracket(b) => Value::Bracket(b),
+            Token::Bracket(b) => Value::Bracket(quote_items_from_tokens(&b)),
         }
     }
 }
 
 impl Quotable for Value {
-    fn as_quotation(&self) -> Option<&[Token]> {
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
         match self {
             Value::Bracket(b) => Some(b),
             Value::Word(_) => None,
         }
     }
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+        Value::Bracket(items)
+    }
     fn to_tokens(&self) -> Vec<Token> {
         match self {
             Value::Word(w) => vec![Token::Word(w.clone())],
-            Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+            Value::Bracket(b) => vec![Token::Bracket(quote_items_to_tokens(b))],
         }
     }
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
-            Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+            Value::Bracket(b) => Some(quote_items_to_values(b)),
             Value::Word(_) => None,
         }
     }
     fn from_sequence(elements: Vec<Self>) -> Self {
-        Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+        Value::Bracket(elements.into_iter().map(QuoteItem::Push).collect())
     }
 }
 
@@ -241,9 +244,10 @@ fn elems_match(elems: &[Ty], expected: &[Base]) -> bool {
     if elems.len() != expected.len() {
         return false;
     }
-    elems.iter().zip(expected).all(|(e, b)| {
-        matches!(&e.kind, TyKind::Con(name) if name == base_con(*b))
-    })
+    elems
+        .iter()
+        .zip(expected)
+        .all(|(e, b)| matches!(&e.kind, TyKind::Con(name) if name == base_con(*b)))
 }
 
 /// A bounded choice script.
@@ -549,7 +553,10 @@ fn norm_ty(t: &Ty) -> Ty {
         TyKind::App(n, args) => TyKind::App(n.clone(), args.iter().map(norm_ty).collect()),
         TyKind::Quote(w) => TyKind::Quote(Box::new(norm_word(w))),
     };
-    Ty { kind, span: ZERO_SPAN }
+    Ty {
+        kind,
+        span: ZERO_SPAN,
+    }
 }
 fn norm_stack(s: &StackTy) -> StackTy {
     StackTy {

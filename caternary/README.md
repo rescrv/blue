@@ -43,14 +43,17 @@ assert_eq!(tokens[1].span.start, 3);
 ## Minimal Evaluator Setup
 
 ```rust
-use caternary::{Evaluator, Quotable, Token, parse, register_all_builtins};
+use caternary::{
+    Evaluator, Quotable, QuoteItem, Token, parse, quote_items_from_tokens,
+    quote_items_to_tokens, quote_items_to_values, register_all_builtins,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Int(i64),
     Bool(bool),
     Word(String),
-    Quotation(Vec<Token>),
+    Quotation(Vec<QuoteItem<Value>>),
     Sequence(Vec<Value>),
 }
 
@@ -63,14 +66,18 @@ impl From<Token> for Value {
                 else if w == "false" { Value::Bool(false) }
                 else { Value::Word(w) }
             }
-            Token::Bracket(q) => Value::Quotation(q),
+            Token::Bracket(q) => Value::Quotation(quote_items_from_tokens(&q)),
         }
     }
 }
 
 impl Quotable for Value {
-    fn as_quotation(&self) -> Option<&[Token]> {
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
         match self { Value::Quotation(q) => Some(q), _ => None }
+    }
+
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+        Value::Quotation(items)
     }
 
     fn to_tokens(&self) -> Vec<Token> {
@@ -78,7 +85,7 @@ impl Quotable for Value {
             Value::Int(n) => vec![Token::Word(n.to_string())],
             Value::Bool(b) => vec![Token::Word(b.to_string())],
             Value::Word(w) => vec![Token::Word(w.clone())],
-            Value::Quotation(q) => vec![Token::Bracket(q.clone())],
+            Value::Quotation(q) => vec![Token::Bracket(quote_items_to_tokens(q))],
             Value::Sequence(xs) => vec![Token::Bracket(xs.iter().flat_map(|x| x.to_tokens()).collect())],
         }
     }
@@ -94,7 +101,7 @@ impl Quotable for Value {
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
             Value::Sequence(xs) => Some(xs.clone()),
-            Value::Quotation(q) => Some(q.iter().cloned().map(Value::from).collect()),
+            Value::Quotation(q) => Some(quote_items_to_values(q)),
             _ => None,
         }
     }
