@@ -60,7 +60,7 @@ use crate::types::is_numeric_literal;
 use crate::types::respan_word;
 
 /// A Tier-0 type-check error.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {
     /// The distinguished entry point was not found among loaded definitions.
     MissingEntry {
@@ -90,9 +90,27 @@ pub enum TypeError {
         found: usize,
     },
     /// Two types failed to unify during inference, or a cyclic type was formed.
-    /// Wraps the unifier's [`UnifyError`], which already carries the provenance
-    /// pair (both origin spans) and never leaks internal variable names (§7).
-    Mismatch(UnifyError),
+    ///
+    /// `error` is the unifier's [`UnifyError`], which already carries the
+    /// **provenance pair** (both origin spans, §7.1) and never leaks internal
+    /// variable names (§7). `frames` is the typing-frame **breadcrumb** (§7.2)
+    /// captured at the checker's failing unify call site: the live
+    /// [`crate::types::FrameStack`] snapshot, outermost first. It is empty for a
+    /// failure that occurs outside any quotation (e.g. directly in the top-level
+    /// program body).
+    ///
+    /// Rendering composes the three §7 requirements: the provenance pair, the
+    /// nested-quotation backtrace, and **localize-inward** anchoring — the
+    /// diagnostic points at the *innermost* frame whose span still encloses both
+    /// conflicting birth spans (the deepest frame carrying the contradiction,
+    /// §7.3), which is almost always the user's actual mistake.
+    Mismatch {
+        /// The underlying unification failure (provenance pair, §7.1).
+        error: UnifyError,
+        /// The typing-frame breadcrumb captured at the failing unify call site
+        /// (§7.2), outermost first; empty outside any quotation.
+        frames: Vec<TypingFrame>,
+    },
     /// Reserved for a recursion shape Tier-0 genuinely cannot represent and that
     /// is not already covered by [`TypeError::PolymorphicRecursion`].
     ///
@@ -175,7 +193,7 @@ impl std::fmt::Display for TypeError {
                     span.start
                 )
             }
-            TypeError::Mismatch(err) => write!(f, "{err}"),
+            TypeError::Mismatch { error, frames } => render_mismatch(f, error, frames),
             TypeError::RecursiveDefinition { name, span } => {
                 write!(
                     f,
@@ -210,13 +228,124 @@ impl std::fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+/// Build a [`TypeError::Mismatch`] enriched with the live typing-frame
+/// breadcrumb (§7.2). Called at every checker unify call site so a unification
+/// failure raised deep inside nested quotations carries the durable provenance
+/// spine ([`crate::types::FrameStack`]) it needs to render a backtrace and to
+/// localize inward (§7.3). The unifier (`types.rs`) raises a span-only
+/// [`UnifyError`]; this is where the checker, which holds the live frame stack,
+/// attaches the breadcrumb the unifier cannot see.
+fn mismatch(ctx: &InferCtx, error: UnifyError) -> TypeError {
+    TypeError::Mismatch {
+        error,
+        frames: ctx.frames.breadcrumb(),
+    }
+}
+
+/// Does `outer` enclose `inner` (a frame span containing a birth span)?
+fn span_contains(outer: Span, inner: Span) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
+
+/// **Localize inward** (§7.3): from a breadcrumb (outermost first) and the two
+/// conflicting birth spans, choose the *innermost* frame whose span still
+/// encloses **both** spans — the deepest frame carrying the contradiction, which
+/// is almost always the user's real mistake. Returns the index into `frames`, or
+/// `None` if no single frame encloses both (the contradiction straddles frames,
+/// so the outer site is the honest anchor) or there are no frames.
+fn localize_inward(frames: &[TypingFrame], left: Span, right: Span) -> Option<usize> {
+    // Walk inward (deepest last) and take the deepest enclosing frame.
+    frames
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, fr)| span_contains(fr.span, left) && span_contains(fr.span, right))
+        .map(|(i, _)| i)
+}
+
+/// Render a [`TypeError::Mismatch`]: the provenance pair (§7.1), then the
+/// nested-quotation frame breadcrumb (§7.2), anchored at the innermost frame
+/// still carrying the contradiction (§7.3). Internal variable names never appear
+/// — the underlying [`UnifyError`] renders shapes, and frames render only source
+/// byte offsets (§7 / §13 invariant 6).
+fn render_mismatch(
+    f: &mut std::fmt::Formatter<'_>,
+    error: &UnifyError,
+    frames: &[TypingFrame],
+) -> std::fmt::Result {
+    // §7.1: the provenance pair, exactly as the unifier described it.
+    write!(f, "{error}")?;
+
+    if frames.is_empty() {
+        return Ok(());
+    }
+
+    // §7.3: pick the anchor frame from the conflicting birth spans, if we have a
+    // provenance pair. A cyclic error carries one span; anchor on it alone.
+    let anchor = match error {
+        UnifyError::Mismatch {
+            left_span,
+            right_span,
+            ..
+        } => localize_inward(frames, *left_span, *right_span),
+        UnifyError::Cyclic { span, .. } => frames
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, fr)| span_contains(fr.span, *span))
+            .map(|(i, _)| i),
+    };
+
+    // §7.2: render the breadcrumb, outermost first, as a backtrace. Mark the
+    // anchor frame (the innermost concrete contradiction) so the reader's eye
+    // lands on the likely mistake rather than the outer consequence.
+    for (i, fr) in frames.iter().enumerate() {
+        if Some(i) == anchor {
+            write!(
+                f,
+                "\n  in the quotation at byte {} (innermost frame carrying the contradiction)",
+                fr.span.start
+            )?;
+        } else {
+            write!(f, "\n  in the quotation at byte {}", fr.span.start)?;
+        }
+    }
+    Ok(())
+}
+
+/// The Tier-0 **CI-gate entry point** — the public seam the eventual
+/// `caternary check` command drives (§12 *"Tier 0 done … public entry point
+/// wired into the existing pipeline"*; §10.10 / invariant 20 *"CI gate; free
+/// runtime"*).
+///
+/// This is the pass/fail face of [`type_check`]: it runs full Tier-0
+/// shape-safety over the whole program loaded into `evaluator` (the flat global
+/// definition namespace plus the attested operator contracts) and reports `Ok(())`
+/// when the program is *checked* or a [`TypeError`] — provenance pair, frame
+/// breadcrumb, innermost-frame anchor (§7) — when it is not. The inferred effect
+/// itself is an implementation detail of the gate; callers that want it use
+/// [`type_check`]. A checked program carries **no** verification residue into the
+/// runtime (annotation directives are inert, §10.10): `check` is the build-time
+/// gate, `Evaluator::eval` is the lean runtime.
+///
+/// Wiring: this is the single function a host's `caternary check` subcommand or a
+/// CI step calls after [`Evaluator::load_with_spans`]; everything else in the
+/// Tier-0 checker hangs off it.
+pub fn check<T>(evaluator: &Evaluator<T>) -> Result<(), TypeError>
+where
+    T: Quotable,
+{
+    type_check(evaluator).map(|_effect| ())
+}
+
 /// Type-checks the whole program: locate the distinguished entry [`MAIN`] and
 /// check it against the empty initial stack.
 ///
 /// Returns the **inferred whole-program effect** (§5): the composition of every
 /// word's stack arrow in `main`'s body, unified left-to-right, then required to
 /// close against the empty initial stack. A program that demands inputs from the
-/// empty stack underflows and is rejected (§12 M2).
+/// empty stack underflows and is rejected (§12 M2). For the plain pass/fail
+/// CI-gate face, use [`check`].
 pub fn type_check<T>(evaluator: &Evaluator<T>) -> Result<WordTy, TypeError>
 where
     T: Quotable,
@@ -427,9 +556,11 @@ where
         };
 
         // Compose: unify the accumulator's output against this word's input, then
-        // advance the output to the word's output (§5).
-        ctx.unify_stack(&acc.output, &word_arrow.input)
-            .map_err(TypeError::Mismatch)?;
+        // advance the output to the word's output (§5). A failure is enriched
+        // with the live typing-frame breadcrumb (§7.2) before it escapes.
+        if let Err(e) = ctx.unify_stack(&acc.output, &word_arrow.input) {
+            return Err(mismatch(ctx, e));
+        }
         acc = WordTy::new(acc.input, word_arrow.output);
 
         // Top-level underflow: if composing this word raised the program's
@@ -1058,9 +1189,12 @@ where
                 let body_arrow =
                     infer_seq(evaluator, body, ctx, &mut locals, &def_env, &poly, false)?;
                 // The body must match its declared arrow (which is `assumption`).
-                ctx.unify_stack(&body_arrow.input, &assumption.input)
+                if let Err(e) = ctx
+                    .unify_stack(&body_arrow.input, &assumption.input)
                     .and_then(|()| ctx.unify_stack(&body_arrow.output, &assumption.output))
-                    .map_err(TypeError::Mismatch)?;
+                {
+                    return Err(mismatch(ctx, e));
+                }
                 continue;
             }
 
@@ -1071,14 +1205,14 @@ where
             let body_arrow =
                 match infer_seq(evaluator, body, ctx, &mut locals, &def_env, &no_poly, false) {
                     Ok(arrow) => arrow,
-                    Err(TypeError::Mismatch(mismatch)) => {
+                    Err(TypeError::Mismatch { error, frames }) => {
                         // A `Mismatch` might be the rank-2 pattern: a quotation
                         // parameter applied at two distinct types (§8). Rewind to
                         // a clean state and re-infer with every twice-applied
                         // parameter bound to a fully generic quotation. If THAT
                         // succeeds, the only obstacle was rank-1 monomorphism, so
                         // emit the targeted §8 diagnostic; otherwise the original
-                        // mismatch is the honest error.
+                        // mismatch (breadcrumb intact) is the honest error.
                         ctx.subst.rewind(cp);
                         if rank2_probe(evaluator, body, ctx, &def_env) {
                             return Err(TypeError::Rank2 {
@@ -1086,7 +1220,7 @@ where
                                 span,
                             });
                         }
-                        return Err(TypeError::Mismatch(mismatch));
+                        return Err(TypeError::Mismatch { error, frames });
                     }
                     Err(other) => return Err(other),
                 };
@@ -1557,7 +1691,7 @@ mod tests {
         // single ( 'S -- 'T ) the `IF` scheme shares — a typed mismatch (§7).
         let err = infer_snippet("true [ 1 ] [ true ] IF").unwrap_err();
         assert!(
-            matches!(err, TypeError::Mismatch(_)),
+            matches!(err, TypeError::Mismatch { .. }),
             "disagreeing branches must be a typed mismatch, got {err:?}"
         );
     }
@@ -1990,7 +2124,7 @@ mod tests {
         let src = "[ Num -- ] @rank2 [ >f 1 f CALL true f CALL ] :rank2";
         let err = check_defs(src).unwrap_err();
         assert!(
-            matches!(err, TypeError::Mismatch(_)),
+            matches!(err, TypeError::Mismatch { .. }),
             "a body that contradicts its annotation is a mismatch, got {err:?}"
         );
     }
@@ -2044,5 +2178,200 @@ mod tests {
         let tokens = parse_with_spans("[ even ] :main [ odd ] :even [ even ] :odd").unwrap();
         eval.load_with_spans(&tokens).unwrap();
         type_check(&eval).expect("mutual recursion reachable from main type-checks");
+    }
+
+    // ----- §12 M5 acceptance: error quality (§7) -----
+
+    #[test]
+    fn m5_mismatch_reports_provenance_pair_and_innermost_frame_no_var_names() {
+        // §7.1 + §7.3: a type mismatch must report BOTH origin spans (the
+        // provenance pair) and anchor at the innermost frame where both
+        // conflicting types are concrete — and must NOT leak internal variable
+        // names (`'t7`, `'r3`).
+        //
+        // `[ [ 1 true + ] call ]`: inside the inner quotation `+` demands two
+        // `Num`s but `true` produced a `Bool`. The contradiction is born inside
+        // the inner frame; both frames enclose it, so localize-inward must anchor
+        // at the INNER one (the user's real mistake), not the outer consequence.
+        let err = infer_snippet("[ [ 1 true + ] call ]").unwrap_err();
+        let TypeError::Mismatch { error, frames } = &err else {
+            panic!("expected a typed mismatch, got {err:?}");
+        };
+
+        // Provenance pair: both birth spans are carried, and they differ (one is
+        // the `Bool` from `true`, the other the `Num` demanded by `+`).
+        let (ls, rs) = match error {
+            UnifyError::Mismatch {
+                left_span,
+                right_span,
+                ..
+            } => (*left_span, *right_span),
+            other => panic!("expected a Mismatch provenance pair, got {other:?}"),
+        };
+        assert_ne!(ls.start, rs.start, "the two origin spans must be distinct");
+
+        // Localize inward must pick the innermost (deepest) of the two frames.
+        let anchor = localize_inward(frames, ls, rs).expect("a frame encloses both");
+        assert_eq!(
+            anchor,
+            frames.len() - 1,
+            "the anchor must be the innermost enclosing frame, not the outer one"
+        );
+
+        // The rendered diagnostic shows the provenance pair AND marks the
+        // innermost frame, and leaks no internal variable name (no apostrophes —
+        // the user-facing text uses backticks, never `'t7`).
+        let msg = format!("{err}");
+        assert!(
+            msg.contains(&format!("byte {}", ls.start))
+                && msg.contains(&format!("byte {}", rs.start)),
+            "both origin spans must appear: {msg}"
+        );
+        assert!(
+            msg.contains("innermost frame carrying the contradiction"),
+            "the innermost frame must be marked: {msg}"
+        );
+        assert!(
+            !msg.contains('\''),
+            "no internal variable name (no apostrophe) may leak: {msg}"
+        );
+    }
+
+    #[test]
+    fn m5_nested_quotation_renders_a_multi_level_breadcrumb() {
+        // §7.2: a mismatch inside a NESTED quotation renders the frame
+        // breadcrumb — a backtrace, not one opaque site. `[ [ 1 true + ] call ]`
+        // is two frames deep, so the diagnostic must list BOTH "in the quotation
+        // at byte N" lines, outermost first.
+        let err = infer_snippet("[ [ 1 true + ] call ]").unwrap_err();
+        let TypeError::Mismatch { frames, .. } = &err else {
+            panic!("expected a typed mismatch, got {err:?}");
+        };
+        assert_eq!(frames.len(), 2, "two nested quotation frames: {frames:?}");
+
+        let msg = format!("{err}");
+        let crumb_lines = msg.matches("in the quotation at byte").count();
+        assert_eq!(
+            crumb_lines, 2,
+            "the breadcrumb must render both frames as a backtrace: {msg}"
+        );
+
+        // Outermost first: the outer frame (smaller start) renders before the
+        // inner one.
+        let outer = frames[0].span.start;
+        let inner = frames[1].span.start;
+        assert!(outer < inner, "frames must be ordered outermost first");
+        let outer_pos = msg
+            .find(&format!("in the quotation at byte {outer}"))
+            .unwrap();
+        let inner_pos = msg
+            .find(&format!("in the quotation at byte {inner}"))
+            .unwrap();
+        assert!(
+            outer_pos < inner_pos,
+            "the breadcrumb must read outermost-first: {msg}"
+        );
+
+        // And the inner (deepest) frame is the anchored one (§7.3).
+        assert!(
+            msg.contains(&format!(
+                "in the quotation at byte {inner} (innermost frame carrying the contradiction)"
+            )),
+            "the inner frame is the innermost contradiction: {msg}"
+        );
+    }
+
+    #[test]
+    fn m5_localize_inward_skips_outer_frame_with_no_contradiction() {
+        // §7.3 precision: localize_inward walks INWARD to the deepest frame still
+        // enclosing both conflicting spans. Given two nested frames where both
+        // enclose the contradiction, the inner one wins; a frame that does not
+        // enclose both is never chosen.
+        let outer = TypingFrame {
+            span: Span { start: 0, end: 100 },
+            expected: WordTy::new(StackTy::empty(0, sp()), StackTy::empty(0, sp())),
+        };
+        let inner = TypingFrame {
+            span: Span { start: 40, end: 60 },
+            expected: WordTy::new(StackTy::empty(1, sp()), StackTy::empty(1, sp())),
+        };
+        let frames = vec![outer, inner];
+        let left = Span { start: 45, end: 46 };
+        let right = Span { start: 50, end: 51 };
+        // Both spans sit inside the inner frame: anchor must be index 1.
+        assert_eq!(localize_inward(&frames, left, right), Some(1));
+
+        // A contradiction that straddles the inner boundary (one span outside it)
+        // can only be enclosed by the outer frame: anchor must be index 0.
+        let straddle_left = Span { start: 10, end: 11 };
+        let straddle_right = Span { start: 50, end: 51 };
+        assert_eq!(
+            localize_inward(&frames, straddle_left, straddle_right),
+            Some(0)
+        );
+
+        // No frame encloses both: no anchor.
+        let none_left = Span {
+            start: 200,
+            end: 201,
+        };
+        let none_right = Span { start: 50, end: 51 };
+        assert_eq!(localize_inward(&frames, none_left, none_right), None);
+    }
+
+    #[test]
+    fn m5_arity_underflow_names_word_and_gives_counts() {
+        // §7 / §12 M5: an arity/underflow message names the offending word and
+        // gives counts. Top-level `DROP` against the empty initial stack
+        // underflows; the diagnostic blames `DROP` with expected/found counts and
+        // leaks no internal variable name.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let err = type_check(&eval).unwrap_err();
+        match &err {
+            TypeError::Arity {
+                word,
+                expected,
+                found,
+                ..
+            } => {
+                assert_eq!(word, "DROP", "the arity error must name the offending word");
+                assert_eq!(*expected, 1, "it consumes one value");
+                assert_eq!(*found, 0, "none were available below the empty floor");
+            }
+            other => panic!("expected an Arity underflow naming DROP, got {other:?}"),
+        }
+        let msg = format!("{err}");
+        assert!(msg.contains("DROP"), "message names the word: {msg}");
+        assert!(
+            msg.contains('1') && msg.contains('0'),
+            "message gives counts: {msg}"
+        );
+        assert!(
+            !msg.contains('\''),
+            "no internal variable name may leak: {msg}"
+        );
+    }
+
+    #[test]
+    fn check_is_the_pass_fail_ci_gate() {
+        // §12 "Tier 0 done": the public `check` entry point is the CI-gate seam.
+        // A well-typed whole program passes with `Ok(())`; an ill-typed one fails
+        // with the same rich `TypeError` `type_check` would raise.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("+", plus_scheme());
+        let ok = parse_with_spans("[ 1 2 + ] :main").unwrap();
+        eval.load_with_spans(&ok).unwrap();
+        assert_eq!(check(&eval), Ok(()), "a checked program passes the gate");
+
+        // An underflowing program is rejected by the gate with an Arity error.
+        let mut bad: Evaluator<Value> = Evaluator::new();
+        let prog = parse_with_spans("[ DROP ] :main").unwrap();
+        bad.load_with_spans(&prog).unwrap();
+        match check(&bad) {
+            Err(TypeError::Arity { word, .. }) => assert_eq!(word, "DROP"),
+            other => panic!("the gate must reject an underflow, got {other:?}"),
+        }
     }
 }

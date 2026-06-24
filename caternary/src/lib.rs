@@ -12,6 +12,7 @@ mod types;
 
 pub use builtins::register_stack_builtins;
 pub use check::TypeError;
+pub use check::check;
 pub use check::type_check;
 pub use check::type_check_entry;
 pub use combinators::Quotable;

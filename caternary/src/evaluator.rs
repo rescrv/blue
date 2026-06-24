@@ -1403,4 +1403,47 @@ mod tests {
         let tokens = parse("[5 >x] CALL [x] CALL").unwrap();
         assert_eq!(eval.eval(&tokens).unwrap(), vec![word("x")]);
     }
+
+    #[test]
+    fn annotation_pairs_are_inert_at_runtime() {
+        // §10.10 / invariant 20: a Tier-0 `[ effect ] @name` annotation is a
+        // checker-only directive. It lives in the load/check stream as a sibling
+        // of the `[ body ] :name` definition; it never enters a definition body,
+        // so it is never evaluated, and the runtime carries no verification
+        // residue.
+        let mut eval = locals_eval();
+        let tokens = crate::parse_with_spans("[ a -- a a ] @dupw [ 1 ADD ] :inc").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+
+        // The annotation was recorded for the checker, but the definition body
+        // is exactly `[ 1 ADD ]` — the `@dupw` directive is NOT spliced in.
+        assert!(eval.annotation_tokens("dupw").is_some());
+        let body = eval.definition_body("inc").expect("inc is defined");
+        let has_at = body
+            .iter()
+            .any(|t| matches!(t, Token::Word(w) if w.starts_with('@')));
+        assert!(
+            !has_at,
+            "no annotation directive leaks into a definition body"
+        );
+
+        // Running a program that uses the checked definition executes only the
+        // body; `@dupw` never appears in the evaluated stream and the result is
+        // the ordinary one.
+        let program = parse("5 inc").unwrap();
+        assert_eq!(eval.eval(&program).unwrap(), vec![word("6")]);
+
+        // And even if an `@name` word somehow reached evaluation, it is INERT: it
+        // is not executed as an unknown operator (no operator error) — it is
+        // pushed as a plain literal, exactly like any other undefined word. So an
+        // annotation pair that slipped into a runtime stream would at worst leave
+        // a literal, never run anything.
+        let stray = parse("@dupw").unwrap();
+        let result = eval.eval(&stray).expect("@dupw must not error at runtime");
+        assert_eq!(
+            result,
+            vec![word("@dupw")],
+            "an `@name` word is an inert literal, never an executed operator"
+        );
+    }
 }
