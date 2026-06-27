@@ -10,3 +10,7 @@ repository = "https://github.com/rescrv/blue"
 [dependencies]
 handled = { workspace = true }
 shvar = { workspace = true }
+
+[[example]]
+name = "m8_script"
+path = "examples/m8_script.rs"
