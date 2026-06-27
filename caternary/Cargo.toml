@@ -30,3 +30,8 @@ required-features = ["binaries"]
 name = "m13_emission_parity"
 path = "examples/m13_emission_parity.rs"
 required-features = ["binaries"]
+
+[[example]]
+name = "m14_attestation"
+path = "examples/m14_attestation.rs"
+required-features = ["binaries"]
