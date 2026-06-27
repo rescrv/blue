@@ -71,6 +71,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use crate::Span;
 use crate::StackTy;
@@ -80,9 +81,11 @@ use crate::WordTy;
 use crate::refinement::BinOp;
 use crate::refinement::Binder;
 use crate::refinement::Pred;
+use crate::refinement::RefineSpan;
 use crate::refinement::RefinementSide;
 use crate::refinement::RefinementSig;
 use crate::refinement::UnOp;
+use crate::refinement::parse_assume;
 use crate::shadow::NamedBinding;
 use crate::shadow::ShadowError;
 use crate::shadow::ShadowStack;
@@ -330,6 +333,28 @@ impl CounterModel for SmtLibSolver {
     }
 }
 
+/// A read-only **snapshot of the live facts** (§10.7 / M12). This is a sibling
+/// capability to [`Solver`], kept off the core seam so the seam keeps its
+/// **exactly four** methods (`assert`/`check`/`push_scope`/`pop_scope`).
+///
+/// The `assume` boundary (§10.7) needs two things the bare seam does not expose:
+/// the set of facts currently in scope — to decide whether a value is
+/// **genuinely opaque** (invariant 13) and to key the **exploratory-verdict
+/// cache** on the obligation's canonical content — and nothing more. Reading the live
+/// facts from the solver (rather than re-tracking them in parallel) keeps the
+/// snapshot the single source of truth: it cannot drift from what `check()`
+/// actually reasons over.
+pub trait FactSnapshot {
+    /// The facts currently asserted across all live scopes, in assertion order.
+    fn live_facts(&self) -> Vec<Pred>;
+}
+
+impl FactSnapshot for SmtLibSolver {
+    fn live_facts(&self) -> Vec<Pred> {
+        self.live_formulas()
+    }
+}
+
 // ===========================================================================
 // SMT-LIB2 rendering of a refinement predicate
 // ===========================================================================
@@ -574,15 +599,15 @@ fn is_if(word: &str) -> bool {
 /// [`ShadowStack`] dispatch. A [`VerifyWord::Call`] moves data per its Tier 0
 /// arrow (opaque for M8). `resolve` is threaded so `dip`/`call` can run inner
 /// bodies.
-fn apply_effect<R: VerifyResolve, S: Solver + CounterModel>(
+fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
     word: &str,
     resolve: &R,
     solver: &mut S,
-    obligations: &mut Vec<Obligation>,
+    ctx: &mut VerifyCtx,
 ) -> Result<(), ShadowError> {
     match resolve.resolve(word) {
-        VerifyWord::Core(core) => apply_core(stack, core, resolve, solver, obligations),
+        VerifyWord::Core(core) => apply_core(stack, core, resolve, solver, ctx),
         VerifyWord::Call {
             binders,
             demand,
@@ -598,7 +623,7 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel>(
                 let bindings = bind_positional(&binders, stack)?;
                 let goal = substitute(&demand, &bindings);
                 let (verdict, model) = discharge_with_model(solver, &goal);
-                obligations.push(Obligation {
+                ctx.obligations.push(Obligation {
                     word: word.to_string(),
                     goal,
                     verdict,
@@ -625,12 +650,12 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel>(
 /// Apply a core [`ShadowWord`] to the shadow stack, threading the verifier so
 /// `dip`/`call` recurse through [`verify`] (and so an `if` *inside* a quotation
 /// still gets path conditions).
-fn apply_core<R: VerifyResolve, S: Solver + CounterModel>(
+fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
     core: ShadowWord,
     resolve: &R,
     solver: &mut S,
-    obligations: &mut Vec<Obligation>,
+    ctx: &mut VerifyCtx,
 ) -> Result<(), ShadowError> {
     match core {
         ShadowWord::Dup => stack.dup(),
@@ -656,13 +681,13 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel>(
             // term, verify the quotation on the rest, restore the set-aside term.
             let body = stack.pop_quote()?;
             let hidden = stack.pop()?;
-            verify(&body, stack, solver, resolve, obligations)?;
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(hidden);
             Ok(())
         }
         ShadowWord::Call => {
             let body = stack.pop_quote()?;
-            verify(&body, stack, solver, resolve, obligations)
+            verify_ctx(&body, stack, solver, resolve, ctx)
         }
     }
 }
@@ -677,21 +702,51 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel>(
 /// branch's path condition) is recorded in `obligations`. The scopes live
 /// entirely in `solver` and this function's `stack`; nothing here touches the
 /// Tier 0 substitution (immutability barrier — module docs / invariant 18).
-pub fn verify<R: VerifyResolve, S: Solver + CounterModel>(
+pub fn verify<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     tokens: &[Token],
     stack: &mut ShadowStack,
     solver: &mut S,
     resolve: &R,
     obligations: &mut Vec<Obligation>,
 ) -> Result<(), ShadowError> {
+    let mut ctx = VerifyCtx::new();
+    let r = verify_ctx(tokens, stack, solver, resolve, &mut ctx);
+    obligations.append(&mut ctx.obligations);
+    r
+}
+
+/// The context-threaded core verifier (§10.7 / M12): like [`verify`] but
+/// carrying a [`VerifyCtx`] so `assume` boundaries land in the ledger and the
+/// exploratory cache persists across the whole body. [`verify`] is the thin
+/// backward-compatible wrapper (M8–M11 callers that only need the obligation
+/// stream).
+///
+/// An `assume( PRED )` word (§10.7) is intercepted here — never resolved as an
+/// ordinary word — bound to the live shadow stack, checked for STRICT legality,
+/// recorded, and (when legal) discharged-on-faith into the current scope.
+pub fn verify_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    tokens: &[Token],
+    stack: &mut ShadowStack,
+    solver: &mut S,
+    resolve: &R,
+    ctx: &mut VerifyCtx,
+) -> Result<(), ShadowError> {
     for token in tokens {
         match token {
             Token::Bracket(body) => stack.push_quote(body.clone()),
             Token::Word(w) if is_if(w) => {
-                verify_if(stack, solver, resolve, obligations)?;
+                verify_if(stack, solver, resolve, ctx)?;
+            }
+            Token::Word(w) if parse_assume(w).is_some() => {
+                // Safe: `is_some()` above. A malformed `assume(` body surfaces as
+                // a located ShadowError rather than being mistaken for a word.
+                let pred = parse_assume(w).unwrap().map_err(|e| ShadowError {
+                    message: format!("malformed `assume` clause: {e}"),
+                })?;
+                apply_assume(stack, w, pred, solver, ctx)?;
             }
             Token::Word(w) => {
-                apply_effect(stack, w, resolve, solver, obligations)?;
+                apply_effect(stack, w, resolve, solver, ctx)?;
             }
         }
     }
@@ -709,11 +764,11 @@ pub fn verify<R: VerifyResolve, S: Solver + CounterModel>(
 /// Both branches have the same Tier 0 effect, so after verifying both the actual
 /// shadow stack is advanced by running the then-body once (Tier 0 already proved
 /// the branches agree on shape).
-fn verify_if<R: VerifyResolve, S: Solver + CounterModel>(
+fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
     solver: &mut S,
     resolve: &R,
-    obligations: &mut Vec<Obligation>,
+    ctx: &mut VerifyCtx,
 ) -> Result<(), ShadowError> {
     let else_body = stack.pop_quote()?;
     let then_body = stack.pop_quote()?;
@@ -728,7 +783,7 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel>(
         let mut branch = stack.clone();
         solver.push_scope();
         solver.assert(&cond);
-        verify(&then_body, &mut branch, solver, resolve, obligations)?;
+        verify_ctx(&then_body, &mut branch, solver, resolve, ctx)?;
         solver.pop_scope();
         branch
     };
@@ -738,7 +793,7 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel>(
         let mut branch = stack.clone();
         solver.push_scope();
         solver.assert(&negate(&cond));
-        verify(&else_body, &mut branch, solver, resolve, obligations)?;
+        verify_ctx(&else_body, &mut branch, solver, resolve, ctx)?;
         solver.pop_scope();
     }
 
@@ -819,13 +874,667 @@ pub fn check_refinements<L, S>(
 ) -> Result<Vec<Obligation>, ShadowError>
 where
     L: Fn(&str) -> Option<RefinementSig>,
-    S: Solver + CounterModel,
+    S: Solver + CounterModel + FactSnapshot,
 {
     let resolve = |w: &str| refinement_verify_word(w, lookup(w).as_ref());
     let mut stack = ShadowStack::new();
     let mut obligations = Vec::new();
     verify(tokens, &mut stack, solver, &resolve, &mut obligations)?;
     Ok(obligations)
+}
+// ===========================================================================
+// The `assume` boundary — strict + cached/lenient (M12, §10.7 / invariant 13)
+// ===========================================================================
+//
+// `assume` is the resolution for **Situation B** (§10.7): an opaque/uncontracted
+// value flows into a demand or guarantee, the VC becomes `true ⟹ <goal>`,
+// invalid, and the obligation fails closed. The user attaches an `assume( PRED )`
+// clause at the boundary — a refinement **taken as true without proof**, recorded
+// as an explicit, enumerable **ledger** entry, and **discharged-on-faith**. The
+// assumed predicate is asserted as a live fact so the dependent obligation
+// discharges; the word's honest status becomes *"verified modulo { … }"* and
+// callers inherit the modulo status visibly.
+//
+// Three properties keep it sound, never a disguised fail-open:
+//
+//   1. **Default fail-closed.** Without `assume` the obligation still fails; a
+//      *rejected* `assume` injects nothing, so its obligation fails closed too.
+//   2. **STRICT anti-rot (invariant 13).** An `assume` is a **hard error** where
+//      it is unnecessary: (a) the obligation is provable WITHOUT it — *drop the
+//      assumption, re-run the VC, and a solver `Unsat` (the positive showing)
+//      rejects* with [`ASSUME_PROVABLE_MSG`] — or (b) there is no genuinely
+//      opaque dependency in the obligation's chain ([`ASSUME_NO_OPAQUE_MSG`]).
+//   3. **Cheap.** The exploratory (without-assumption) solve is **cached** on the
+//      obligation's canonical content and **fails lenient**: only a *positive*
+//      `Unsat` rejects; an `Unknown` (the embedded reasoner's opaque/timeout
+//      analogue) is **not** a positive showing and **accepts** the `assume`.
+//
+// The expensive/correct solve is the *second* one — the dependent obligation
+// **under** the asserted assumption, discharged by the ordinary VC pipeline once
+// the faith-fact is in scope. The exploratory check here is the cheap first one,
+// on a short leash, off the critical proof path (§10.7).
+
+/// STRICT positive-rejection message (§10.7 / invariant 13): emitted when the
+/// exploratory drop-and-re-run shows the obligation is **provable without** the
+/// `assume` (solver returned `Unsat`). The ledger must mean *"things we honestly
+/// cannot prove,"* never *"things we couldn't be bothered to."*
+pub const ASSUME_PROVABLE_MSG: &str =
+    "this obligation is provable; remove the unnecessary `assume`";
+
+/// STRICT no-opaque-dependency message (§10.7 / invariant 13): emitted when an
+/// `assume`'s obligation has **no genuinely opaque/uncontracted value** in its
+/// chain — `assume` is legal only where such a dependency sits.
+pub const ASSUME_NO_OPAQUE_MSG: &str = "this `assume` has no opaque dependency; `assume` is legal only where a genuinely opaque/uncontracted value sits in the obligation's chain";
+
+/// The legality verdict for one `assume` boundary (§10.7 / invariant 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssumeLegality {
+    /// Legal: a genuinely opaque dependency, not provable without the assumption
+    /// (`Sat` without it, or `Unknown` ⇒ fail-lenient accept). The faith-fact is
+    /// asserted.
+    Legal,
+    /// Rejected — **provable without it**: the exploratory drop-and-re-run
+    /// returned `Unsat` (the positive showing). See [`ASSUME_PROVABLE_MSG`].
+    RejectedProvable,
+    /// Rejected — **no opaque dependency** sits in the obligation's chain. See
+    /// [`ASSUME_NO_OPAQUE_MSG`].
+    RejectedNoOpaqueDependency,
+}
+
+impl AssumeLegality {
+    /// Whether the `assume` is legal (its faith-fact is admitted).
+    pub fn is_legal(self) -> bool {
+        matches!(self, AssumeLegality::Legal)
+    }
+
+    /// The rejection diagnostic, or `None` if legal.
+    pub fn message(self) -> Option<&'static str> {
+        match self {
+            AssumeLegality::Legal => None,
+            AssumeLegality::RejectedProvable => Some(ASSUME_PROVABLE_MSG),
+            AssumeLegality::RejectedNoOpaqueDependency => Some(ASSUME_NO_OPAQUE_MSG),
+        }
+    }
+}
+
+/// One processed `assume` boundary recorded during verification (§10.7 / M12):
+/// its surface, the bound faith-predicate, the legality verdict, and the
+/// exploratory drop-and-re-run details (verdict + whether it was served from the
+/// content-key cache).
+#[derive(Debug, Clone)]
+pub struct AssumeRecord {
+    /// The definition/word being verified when this `assume` was encountered
+    /// (the ledger **site** — `grep assume` granularity).
+    pub site: String,
+    /// The raw `assume( … )` surface word from the program token stream.
+    pub surface: String,
+    /// The faith-predicate with its free variables **bound to the actual shadow
+    /// terms** (§10.2) — the precise fact asserted (when legal) and the goal the
+    /// exploratory check ran on.
+    pub predicate: Pred,
+    /// The faith-predicate exactly as the user **wrote** it (unbound) — what the
+    /// ledger displays (`result > 0`, not the bound `$t0 > 0`) and `grep assume`
+    /// enumerates.
+    pub surface_pred: Pred,
+    /// The legality verdict (`Legal` ⇒ the fact was asserted; otherwise a hard
+    /// error and nothing was asserted).
+    pub legality: AssumeLegality,
+    /// The **exploratory** (without-assumption) verdict — the drop-and-re-run.
+    /// `Unsat` ⇒ provable ⇒ rejected; `Sat`/`Unknown` ⇒ not a positive showing.
+    pub exploratory: Verdict,
+    /// Whether the exploratory verdict was served from the content-key cache
+    /// (a warm hit) rather than freshly solved (§10.7 — cheap).
+    pub from_cache: bool,
+}
+
+/// Cache of **exploratory** (without-assumption) verdicts keyed on the
+/// obligation's canonical content (§10.7 — cheap). Strict legality solves twice;
+/// this memoizes the first (cheap, fail-lenient) solve so a warm compile pays it
+/// zero times for unchanged obligations. It also tracks how many real solves vs.
+/// cache hits occurred so a test can assert the cache is actually used.
+#[derive(Debug, Clone, Default)]
+pub struct ExploratoryCache {
+    verdicts: HashMap<String, Verdict>,
+    solves: usize,
+    hits: usize,
+}
+
+impl ExploratoryCache {
+    /// A fresh, empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of **real** solver runs (cache misses) performed.
+    pub fn solves(&self) -> usize {
+        self.solves
+    }
+
+    /// Number of **cache hits** (verdicts reused without re-solving).
+    pub fn hits(&self) -> usize {
+        self.hits
+    }
+
+    /// Number of distinct obligations memoized.
+    pub fn len(&self) -> usize {
+        self.verdicts.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.verdicts.is_empty()
+    }
+
+    /// Run the exploratory drop-and-re-run for `goal` under the solver's live
+    /// facts, reusing a cached verdict when the obligation's canonical content
+    /// (predicate + in-scope facts) is unchanged. Returns the verdict and whether
+    /// it was a cache hit.
+    fn discharge_cached<S: Solver + FactSnapshot>(
+        &mut self,
+        solver: &mut S,
+        goal: &Pred,
+    ) -> (Verdict, bool) {
+        let key = obligation_key(goal, &solver.live_facts());
+        if let Some(v) = self.verdicts.get(&key) {
+            self.hits += 1;
+            return (*v, true);
+        }
+        // The drop-and-re-run: `goal` is discharged WITHOUT the assumption being
+        // asserted (it is not in scope yet) — exactly "drop the assumption,
+        // re-run the VC" (§10.7 / invariant 13). This path actually runs.
+        let v = discharge(solver, goal);
+        self.solves += 1;
+        self.verdicts.insert(key, v);
+        (v, false)
+    }
+}
+
+/// Canonical key for an obligation: its goal predicate plus the
+/// (order-independent) set of in-scope facts (§10.7 — the same per-obligation
+/// cache key as the whole-program reverify story). Rendering to SMT-LIB text
+/// gives a stable, structural key; storing the full string keeps the cache exact
+/// even if the hash table's internal hash function collides.
+fn obligation_key(goal: &Pred, facts: &[Pred]) -> String {
+    fn push_part(key: &mut String, part: &str) {
+        key.push_str(&part.len().to_string());
+        key.push(':');
+        key.push_str(part);
+        key.push('\n');
+    }
+
+    let mut fact_strs: Vec<String> = facts.iter().map(render_smtlib).collect();
+    fact_strs.sort();
+
+    let mut key = String::new();
+    push_part(&mut key, "goal");
+    push_part(&mut key, &render_smtlib(goal));
+    push_part(&mut key, "facts");
+    for f in &fact_strs {
+        push_part(&mut key, f);
+    }
+    key
+}
+
+/// The free variables of `pred` in **left-to-right first-appearance order** — the
+/// binding order for an `assume` clause (§10.2): the topmost stack slot binds the
+/// last-appearing variable (matching [`bind_positional`]).
+fn ordered_free_vars(pred: &Pred) -> Vec<String> {
+    fn walk(p: &Pred, out: &mut Vec<String>) {
+        match p {
+            Pred::Var(n) => {
+                if !out.iter().any(|x| x == n) {
+                    out.push(n.clone());
+                }
+            }
+            Pred::Num(_) => {}
+            Pred::Bin(_, a, b) => {
+                walk(a, out);
+                walk(b, out);
+            }
+            Pred::Un(_, a) => walk(a, out),
+            Pred::App(_, args) => {
+                for a in args {
+                    walk(a, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(pred, &mut out);
+    out
+}
+
+/// Bind an `assume` predicate's free variables **positionally** to the top of the
+/// shadow stack (§10.2): the deepest free variable binds the deeper slot, the
+/// last-appearing one binds the top. The result is the predicate over the actual
+/// shadow terms — the goal the legality check and the faith-fact use.
+///
+/// A predicate with no free variables (a purely concrete assertion) is returned
+/// unchanged — it binds to nothing and will be caught by the no-opaque-dependency
+/// check (§10.7 / invariant 13).
+fn bind_assume_to_stack(pred: &Pred, stack: &ShadowStack) -> Result<Pred, ShadowError> {
+    let vars = ordered_free_vars(pred);
+    if vars.is_empty() {
+        return Ok(pred.clone());
+    }
+    let binders: Vec<Binder> = vars
+        .iter()
+        .map(|v| Binder {
+            name: v.clone(),
+            ty: String::new(),
+            span: RefineSpan { start: 0, end: 0 },
+        })
+        .collect();
+    let bindings = bind_positional(&binders, stack)?;
+    Ok(substitute(pred, &bindings))
+}
+
+/// Whether the obligation `goal` has a **genuinely opaque dependency** under the
+/// in-scope `facts` (§10.7 / invariant 13): a goal variable the solver knows
+/// nothing about (it appears in no in-scope fact). A purely concrete goal (no
+/// free variables) has no opaque dependency.
+fn has_opaque_dependency(goal: &Pred, facts: &[Pred]) -> bool {
+    let mut goal_vars = BTreeSet::new();
+    collect_vars(goal, &mut goal_vars);
+    if goal_vars.is_empty() {
+        return false;
+    }
+    let mut fact_vars = BTreeSet::new();
+    for f in facts {
+        collect_vars(f, &mut fact_vars);
+    }
+    goal_vars.iter().any(|v| !fact_vars.contains(v))
+}
+
+/// Decide an `assume` boundary's STRICT legality (§10.7 / invariant 13) for the
+/// bound goal, returning the verdict, the exploratory drop-and-re-run verdict,
+/// and whether that exploratory verdict was a cache hit.
+///
+/// Order of checks:
+///   1. **Positive rejection (drop-and-re-run).** Discharge `goal` WITHOUT the
+///      assumption (cached, fail-lenient). `Unsat` ⇒ provable ⇒
+///      [`AssumeLegality::RejectedProvable`]. An `Unknown` is **not** a positive
+///      showing — strictness accepts it.
+///   2. **No opaque dependency.** If the goal has no genuinely opaque value in
+///      its chain ⇒ [`AssumeLegality::RejectedNoOpaqueDependency`].
+///   3. Otherwise [`AssumeLegality::Legal`].
+fn assume_legality<S: Solver + CounterModel + FactSnapshot>(
+    solver: &mut S,
+    goal: &Pred,
+    cache: &mut ExploratoryCache,
+) -> (AssumeLegality, Verdict, bool) {
+    let facts = solver.live_facts();
+    let (verdict, from_cache) = cache.discharge_cached(solver, goal);
+    if verdict == Verdict::Unsat {
+        return (AssumeLegality::RejectedProvable, verdict, from_cache);
+    }
+    if !has_opaque_dependency(goal, &facts) {
+        return (
+            AssumeLegality::RejectedNoOpaqueDependency,
+            verdict,
+            from_cache,
+        );
+    }
+    (AssumeLegality::Legal, verdict, from_cache)
+}
+
+/// Process an `assume( PRED )` boundary against the live shadow stack + solver
+/// scope (§10.7 / M12): bind the predicate to the actual terms, run STRICT
+/// legality, record the [`AssumeRecord`] in `ctx`, and — **only when legal** —
+/// assert the faith-fact so the dependent obligation discharges. A rejected
+/// `assume` asserts nothing (its obligation then fails closed, exactly as if the
+/// `assume` were absent — invariant 13 default fail-closed).
+fn apply_assume<S: Solver + CounterModel + FactSnapshot>(
+    stack: &ShadowStack,
+    surface: &str,
+    pred: Pred,
+    solver: &mut S,
+    ctx: &mut VerifyCtx,
+) -> Result<(), ShadowError> {
+    let goal = bind_assume_to_stack(&pred, stack)?;
+    let (legality, exploratory, from_cache) = assume_legality(solver, &goal, &mut ctx.cache);
+    let legal = legality.is_legal();
+    ctx.assumes.push(AssumeRecord {
+        site: ctx.site.clone(),
+        surface: surface.to_string(),
+        predicate: goal.clone(),
+        surface_pred: pred,
+        legality,
+        exploratory,
+        from_cache,
+    });
+    if legal {
+        // Discharge-on-faith: the assumption becomes a live fact so the
+        // dependent obligation (the expensive *second* solve, via the ordinary
+        // VC pipeline) discharges.
+        solver.assert(&goal);
+    }
+    Ok(())
+}
+
+/// The verification context threaded through [`verify_ctx`] (§10.7 / M12): the
+/// obligations raised, the `assume` boundaries processed, the exploratory cache,
+/// and the **site** (the definition/word being verified) used as the ledger
+/// granularity.
+#[derive(Debug, Default)]
+pub struct VerifyCtx {
+    /// VC verdicts in call order (the M9 obligation stream).
+    pub obligations: Vec<Obligation>,
+    /// Every `assume` boundary processed (legal or rejected), in program order.
+    pub assumes: Vec<AssumeRecord>,
+    /// The exploratory drop-and-re-run cache (§10.7 — cheap).
+    cache: ExploratoryCache,
+    /// The site label for ledger entries (the definition being verified).
+    site: String,
+}
+
+impl VerifyCtx {
+    /// A fresh context with an empty (anonymous) site.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A fresh context whose `assume` ledger entries are attributed to `site`.
+    pub fn with_site(site: impl Into<String>) -> Self {
+        VerifyCtx {
+            site: site.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The obligations raised (M9 stream).
+    pub fn obligations(&self) -> &[Obligation] {
+        &self.obligations
+    }
+
+    /// The `assume` boundaries processed (legal + rejected), program order.
+    pub fn assumes(&self) -> &[AssumeRecord] {
+        &self.assumes
+    }
+
+    /// The exploratory verdict cache (for cache-effectiveness assertions).
+    pub fn cache(&self) -> &ExploratoryCache {
+        &self.cache
+    }
+}
+// ===========================================================================
+// The whole-program verification ledger (M12, §10.7 / invariant 13)
+// ===========================================================================
+//
+// Whole-program, one global ledger (architecture / invariant 15): every `assume`
+// in the program lands here as a first-class, enumerable entry, and a word's
+// honest status is *"verified modulo { … }."* The modulo status **propagates
+// upward** through the call graph — a caller of a word verified modulo `S`
+// inherits `S` — so a guarantee never silently reads stronger than it is proven.
+// `grep assume` over the source = the complete user trusted base; this ledger is
+// the in-memory counterpart enumerated by [`Ledger::assumptions`] /
+// [`Ledger::grep_assume`]. (M14 layers a whole-program attestation hash on top;
+// it is **not** built here.)
+
+/// One **accepted** user assumption in the ledger (§10.7 / invariant 13): a
+/// first-class, enumerable trust entry. Rejected assumes are hard errors and do
+/// **not** land here (see [`Ledger::rejections`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssumeEntry {
+    /// The definition/word that owns this `assume` (the ledger site).
+    pub word: String,
+    /// The raw `assume( … )` surface from the program (what `grep assume` finds).
+    pub surface: String,
+    /// The bound faith-predicate taken as true without proof.
+    pub predicate: Pred,
+}
+
+/// A word's honest verification status (§10.7 / invariant 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WordStatus {
+    /// Fully verified — no user assumption sits in its trust chain.
+    Verified,
+    /// Verified **modulo** a set of user assumptions (its own + every assumption
+    /// inherited transitively from the words it calls). The set is the exact,
+    /// enumerable statement of what is taken on faith.
+    VerifiedModulo(Vec<Pred>),
+}
+
+impl WordStatus {
+    /// Whether this status carries any user assumption (i.e. is `VerifiedModulo`).
+    pub fn is_modulo(&self) -> bool {
+        matches!(self, WordStatus::VerifiedModulo(_))
+    }
+
+    /// The assumptions this status is modulo (empty for [`WordStatus::Verified`]).
+    pub fn assumptions(&self) -> &[Pred] {
+        match self {
+            WordStatus::Verified => &[],
+            WordStatus::VerifiedModulo(a) => a,
+        }
+    }
+}
+
+impl std::fmt::Display for WordStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WordStatus::Verified => write!(f, "verified"),
+            WordStatus::VerifiedModulo(preds) => {
+                let body = preds
+                    .iter()
+                    .map(render_pred_infix)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "verified modulo {{ {body} }}")
+            }
+        }
+    }
+}
+
+/// The whole-program verification ledger (§10.7 / invariant 13): the enumerable
+/// set of accepted user assumptions, the rejected ones (hard errors), and each
+/// word's modulo status after upward propagation through the call graph.
+#[derive(Debug, Clone, Default)]
+pub struct Ledger {
+    entries: Vec<AssumeEntry>,
+    rejections: Vec<AssumeRecord>,
+    status: BTreeMap<String, Vec<Pred>>,
+}
+
+impl Ledger {
+    /// An empty ledger.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every **accepted** assumption, in program (definition) order — the
+    /// complete user trusted base (the in-memory `grep assume`).
+    pub fn assumptions(&self) -> &[AssumeEntry] {
+        &self.entries
+    }
+
+    /// Every **rejected** assume (a hard error: provable-without or
+    /// no-opaque-dependency). A non-empty list means the program does not check.
+    pub fn rejections(&self) -> &[AssumeRecord] {
+        &self.rejections
+    }
+
+    /// Whether the program checked clean (no rejected assumes).
+    pub fn is_clean(&self) -> bool {
+        self.rejections.is_empty()
+    }
+
+    /// The surfaces of every accepted assume — the textual `grep assume`
+    /// enumeration of the complete user trusted base.
+    pub fn grep_assume(&self) -> Vec<String> {
+        self.entries.iter().map(|e| e.surface.clone()).collect()
+    }
+
+    /// A word's honest status after upward propagation: [`WordStatus::Verified`]
+    /// if nothing in its trust chain is assumed, else [`WordStatus::VerifiedModulo`]
+    /// with the full inherited assumption set.
+    pub fn status(&self, word: &str) -> WordStatus {
+        match self.status.get(word) {
+            None => WordStatus::Verified,
+            Some(preds) if preds.is_empty() => WordStatus::Verified,
+            Some(preds) => WordStatus::VerifiedModulo(preds.clone()),
+        }
+    }
+}
+
+/// A whole-program definition to verify (§10.7 / M12): a name, its body tokens,
+/// and its optional refinement signature.
+#[derive(Debug, Clone)]
+pub struct Definition {
+    /// The definition name (the word other definitions call).
+    pub name: String,
+    /// The body token sequence (`[ body ]`).
+    pub body: Vec<Token>,
+    /// The optional refinement signature attached to this definition.
+    pub sig: Option<RefinementSig>,
+}
+
+/// Verify a token body in a fresh context attributed to `site`, returning the
+/// full [`VerifyCtx`] (obligations + assume ledger entries) — the M12 entry that
+/// surfaces the `assume` ledger (the M9-era [`check_refinements`] returns only
+/// obligations).
+pub fn check_refinements_ctx<L, S>(
+    tokens: &[Token],
+    lookup: &L,
+    solver: &mut S,
+    site: &str,
+) -> Result<VerifyCtx, ShadowError>
+where
+    L: Fn(&str) -> Option<RefinementSig>,
+    S: Solver + CounterModel + FactSnapshot,
+{
+    let resolve = |w: &str| refinement_verify_word(w, lookup(w).as_ref());
+    let mut stack = ShadowStack::new();
+    let mut ctx = VerifyCtx::with_site(site);
+    verify_ctx(tokens, &mut stack, solver, &resolve, &mut ctx)?;
+    Ok(ctx)
+}
+
+/// Collect the words a body **calls** (referenced word tokens, recursing into
+/// quotations) — the edges of the call graph used for upward modulo propagation.
+/// `assume( … )` surfaces and the `if` combinator are not call edges.
+fn collect_called_words(tokens: &[Token], out: &mut BTreeSet<String>) {
+    for t in tokens {
+        match t {
+            Token::Bracket(body) => collect_called_words(body, out),
+            Token::Word(w) if parse_assume(w).is_some() || is_if(w) => {}
+            Token::Word(w) => {
+                out.insert(w.clone());
+            }
+        }
+    }
+}
+
+/// Verify a **whole program** of definitions under one global ledger (§10.7 /
+/// invariant 13/15): check each body, record every `assume` (accepted entries in
+/// the ledger, rejected ones as hard errors), then **propagate the modulo status
+/// upward** through the call graph so a caller of a word verified modulo `S`
+/// inherits `S`. `mk_solver` builds a fresh solver per definition (the seam is
+/// per-checking-session).
+pub fn check_program<S, MkSolver, L>(
+    defs: &[Definition],
+    lookup: &L,
+    mut mk_solver: MkSolver,
+) -> Result<Ledger, ShadowError>
+where
+    S: Solver + CounterModel + FactSnapshot,
+    MkSolver: FnMut() -> S,
+    L: Fn(&str) -> Option<RefinementSig>,
+{
+    let mut ledger = Ledger::new();
+    let mut own: BTreeMap<String, Vec<Pred>> = BTreeMap::new();
+
+    // Pass 1: verify each body; collect its own accepted/rejected assumes.
+    for def in defs {
+        let mut solver = mk_solver();
+        let ctx = check_refinements_ctx(&def.body, lookup, &mut solver, &def.name)?;
+        let mut mine: Vec<Pred> = Vec::new();
+        for a in &ctx.assumes {
+            if a.legality.is_legal() {
+                ledger.entries.push(AssumeEntry {
+                    word: def.name.clone(),
+                    surface: a.surface.clone(),
+                    predicate: a.surface_pred.clone(),
+                });
+                if !mine.contains(&a.surface_pred) {
+                    mine.push(a.surface_pred.clone());
+                }
+            } else {
+                ledger.rejections.push(a.clone());
+            }
+        }
+        own.insert(def.name.clone(), mine);
+    }
+
+    // Pass 2: transitive upward propagation of modulo status through the call
+    // graph (caller inherits callee's assumptions — invariant 13 property 2).
+    let nameset: BTreeSet<String> = defs.iter().map(|d| d.name.clone()).collect();
+    let mut callees: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for def in defs {
+        let mut cs = BTreeSet::new();
+        collect_called_words(&def.body, &mut cs);
+        cs.retain(|w| nameset.contains(w) && w != &def.name);
+        callees.insert(def.name.clone(), cs);
+    }
+    let mut modulo: BTreeMap<String, Vec<Pred>> = own;
+    loop {
+        let mut changed = false;
+        for def in defs {
+            let inherited: Vec<Pred> = callees[&def.name]
+                .iter()
+                .flat_map(|c| modulo.get(c).cloned().unwrap_or_default())
+                .collect();
+            let set = modulo.get_mut(&def.name).unwrap();
+            for p in inherited {
+                if !set.contains(&p) {
+                    set.push(p);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    ledger.status = modulo;
+    Ok(ledger)
+}
+
+/// Render a predicate in the **infix** `where` surface (§10.1) for human ledger
+/// display — `result > 0` rather than the SMT s-expression. Fully parenthesized
+/// on nested binary forms to keep precedence unambiguous.
+fn render_pred_infix(pred: &Pred) -> String {
+    match pred {
+        Pred::Var(n) => n.clone(),
+        Pred::Num(n) => n.clone(),
+        Pred::Un(UnOp::Not, p) => format!("not {}", render_pred_infix(p)),
+        Pred::Un(UnOp::Neg, p) => format!("-{}", render_pred_infix(p)),
+        Pred::Bin(op, a, b) => {
+            let sym = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::Ge => ">=",
+                BinOp::Le => "<=",
+                BinOp::Gt => ">",
+                BinOp::Lt => "<",
+                BinOp::Eq => "=",
+                BinOp::And => "and",
+                BinOp::Or => "or",
+                BinOp::Implies => "=>",
+            };
+            format!("{} {} {}", render_pred_infix(a), sym, render_pred_infix(b))
+        }
+        Pred::App(f, args) => {
+            let inner = args
+                .iter()
+                .map(render_pred_infix)
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{f} {inner}")
+        }
+    }
 }
 
 // ===========================================================================
@@ -3096,5 +3805,290 @@ mod tests {
         s: &mut SmtLibSolver,
     ) -> SubsumptionResult {
         check_subsumption(p, e, s)
+    }
+
+    // =======================================================================
+    // M12 — the `assume` boundary: strict + cached/lenient (§10.7 / invariant 13)
+    // =======================================================================
+    //
+    // These tests pin the assumed-contract boundary: discharge-on-faith rescues a
+    // genuinely-opaque dependency while the default WITHOUT `assume` still fails
+    // closed; the STRICT anti-rot drop-and-re-run actually runs and rejects an
+    // unnecessary `assume`; `assume` with no opaque dependency is rejected; the
+    // exploratory check is cached and fails lenient; and the whole-program ledger
+    // records each `assume` as an enumerable `verified modulo { … }` entry that
+    // propagates to callers.
+
+    // A word `pos : ( -- r where r > 0 )`: a contracted producer that publishes a
+    // guarantee `r > 0` as a downstream fact (no demand). Used to manufacture a
+    // *non-opaque* (already-contracted) dependency for the strict checks.
+    fn pos_call() -> VerifyWord {
+        VerifyWord::Call {
+            binders: vec![],
+            demand: None,
+            out_binders: vec![binder("r", "Num")],
+            guarantee: Some(Pred::Bin(BinOp::Gt, Box::new(var("r")), Box::new(num("0")))),
+            arrow: WordTy::new(
+                StackTy::new(vec![], 0, S),
+                StackTy::new(vec![Ty::num(S)], 0, S),
+            ),
+        }
+    }
+
+    // Resolver: `sqrt` (demand n>=0), `pos` (guarantee r>0); everything else is a
+    // core word, with an uncontracted word like `opaque` falling through to a
+    // free-variable term (the genuinely-opaque case). `if`/`assume(...)` never
+    // reach here (the verifier intercepts them).
+    fn m12_resolver(w: &str) -> VerifyWord {
+        match w {
+            "sqrt" => sqrt_call(),
+            "pos" => pos_call(),
+            _ => demo_resolver(w),
+        }
+    }
+
+    // Run the M12 verifier over `src` with the `m12_resolver` (a VerifyWord
+    // resolver, the M8-style seam) and return the full context (obligations +
+    // assume ledger). `assume( … )` words are intercepted by `verify_ctx`.
+    fn run_m12(src: &str, site: &str) -> VerifyCtx {
+        let toks = parse(src).unwrap();
+        let mut solver = SmtLibSolver::new();
+        let mut stack = ShadowStack::new();
+        let mut ctx = VerifyCtx::with_site(site);
+        verify_ctx(&toks, &mut stack, &mut solver, &m12_resolver, &mut ctx).unwrap();
+        ctx
+    }
+
+    #[test]
+    fn m12_assume_rescues_opaque_dependency_default_fails_closed() {
+        // (§12 M12) WITHOUT `assume`, an opaque value flowing into sqrt's demand
+        // fails closed (the M11 Situation B baseline).
+        let ctx = run_m12("opaque sqrt", "foo");
+        assert_eq!(ctx.obligations().len(), 1);
+        assert!(
+            !ctx.obligations()[0].is_discharged(),
+            "without assume the opaque dependency fails closed: {:?}",
+            ctx.obligations()
+        );
+        assert!(ctx.assumes().is_empty(), "no assume present");
+
+        // WITH `assume(x >= 0)` on the opaque value, the demand discharges on
+        // faith and the assume is recorded as legal.
+        let ctx = run_m12("opaque assume(x>=0) sqrt", "foo");
+        assert_eq!(ctx.assumes().len(), 1);
+        assert_eq!(
+            ctx.assumes()[0].legality,
+            AssumeLegality::Legal,
+            "a genuinely-opaque dependency makes the assume legal: {:?}",
+            ctx.assumes()[0]
+        );
+        assert_eq!(ctx.obligations().len(), 1);
+        assert!(
+            ctx.obligations()[0].is_discharged(),
+            "the assumed fact discharges sqrt's demand on faith: {:?}",
+            ctx.obligations()
+        );
+    }
+
+    #[test]
+    fn m12_strict_positive_rejection_drop_and_re_run_actually_runs() {
+        // (§12 M12, positive rejection REQUIRED to run) `pos` already guarantees
+        // r > 0; assuming `x > 0` on its result is UNNECESSARY. The strict
+        // drop-and-re-run must actually execute (discharge WITHOUT the assume) and,
+        // on `Unsat`, reject with the provable message.
+        let ctx = run_m12("pos assume(x>0)", "foo");
+        assert_eq!(ctx.assumes().len(), 1);
+        let rec = &ctx.assumes()[0];
+        assert_eq!(
+            rec.legality,
+            AssumeLegality::RejectedProvable,
+            "an assume the solver can discharge without it is rejected: {rec:?}"
+        );
+        assert_eq!(rec.legality.message(), Some(ASSUME_PROVABLE_MSG));
+        // The drop-and-re-run actually RAN (not a no-op) and produced the positive
+        // `Unsat` showing.
+        assert_eq!(
+            rec.exploratory,
+            Verdict::Unsat,
+            "the exploratory drop-and-re-run returned the positive Unsat showing"
+        );
+        assert_eq!(
+            ctx.cache().solves(),
+            1,
+            "the drop-and-re-run path executed exactly one real solve"
+        );
+        assert!(
+            !rec.from_cache,
+            "the first run is a cache miss (a real solve)"
+        );
+        // A rejected assume injects NO fact (fail closed): script never asserts it.
+        // (The producer's own guarantee `(> $... 0)` is present; the assume's
+        // re-run asserts the NEGATED goal in a popped scope only.)
+    }
+
+    #[test]
+    fn m12_assume_with_no_opaque_dependency_is_rejected() {
+        // (§12 M12) `pos` guarantees r > 0 (a CONTRACTED value). Assuming a
+        // STRONGER `x > 5` is not provable from r > 0, but r is not opaque — it is
+        // already contracted — so the assume has no opaque dependency and is a
+        // hard error.
+        let ctx = run_m12("pos assume(x>5)", "foo");
+        assert_eq!(ctx.assumes().len(), 1);
+        let rec = &ctx.assumes()[0];
+        assert_eq!(
+            rec.legality,
+            AssumeLegality::RejectedNoOpaqueDependency,
+            "assuming about a contracted (non-opaque) value is rejected: {rec:?}"
+        );
+        assert_eq!(rec.legality.message(), Some(ASSUME_NO_OPAQUE_MSG));
+        // It was genuinely not provable-without (so the rejection is specifically
+        // about the missing opaque dependency, not about provability).
+        assert_ne!(rec.exploratory, Verdict::Unsat);
+    }
+
+    #[test]
+    fn m12_exploratory_check_is_cached() {
+        // (§12 M12, cheap) The exploratory verdict is memoized on the obligation's
+        // content key (predicate + in-scope facts). Running the SAME body against
+        // a FRESH solver with the SAME ctx (so the cache persists, the facts are
+        // identical) pays the solver ZERO times the second time — a warm-compile
+        // cache HIT, not a re-solve.
+        let toks = parse("opaque assume(x>=0) sqrt").unwrap();
+        let resolve = m12_resolver;
+
+        let mut ctx = VerifyCtx::with_site("foo");
+
+        let mut s1 = SmtLibSolver::new();
+        let mut stack1 = ShadowStack::new();
+        verify_ctx(&toks, &mut stack1, &mut s1, &resolve, &mut ctx).unwrap();
+        assert_eq!(ctx.cache().solves(), 1, "first run is a real solve (miss)");
+        assert_eq!(ctx.cache().hits(), 0);
+
+        let mut s2 = SmtLibSolver::new();
+        let mut stack2 = ShadowStack::new();
+        verify_ctx(&toks, &mut stack2, &mut s2, &resolve, &mut ctx).unwrap();
+        assert_eq!(
+            ctx.cache().solves(),
+            1,
+            "the identical obligation is served from the cache — zero new solves"
+        );
+        assert_eq!(ctx.cache().hits(), 1, "the second run is a warm cache hit");
+        // Both runs accepted the assume (the cached verdict is the same).
+        assert!(ctx.assumes().iter().all(|a| a.legality.is_legal()));
+    }
+
+    #[test]
+    fn m12_unknown_exploratory_fails_lenient_and_accepts() {
+        // (§12 M12, fail-lenient) The exploratory drop-and-re-run on an
+        // uninterpreted/opaque goal returns `Unknown` (the embedded reasoner's
+        // opaque/timeout analogue). `Unknown` is NOT a positive showing, so the
+        // assume is ACCEPTED, never rejected.
+        let ctx = run_m12("opaque \"assume(length x > 0)\"", "foo");
+        assert_eq!(ctx.assumes().len(), 1);
+        let rec = &ctx.assumes()[0];
+        assert_eq!(
+            rec.exploratory,
+            Verdict::Unknown,
+            "an opaque/uninterpreted goal is Unknown to the exploratory check: {rec:?}"
+        );
+        assert_eq!(
+            rec.legality,
+            AssumeLegality::Legal,
+            "Unknown fails lenient ⇒ the assume is accepted, never rejected: {rec:?}"
+        );
+    }
+
+    #[test]
+    fn m12_ledger_modulo_status_propagates_to_callers() {
+        // (§12 M12) Whole-program ledger: `foo` verifies modulo { result > 0 } via
+        // an assume on an opaque dependency; `bar` calls `foo` and INHERITS the
+        // modulo status visibly. Each assume is an enumerable ledger entry.
+        let foo_body = parse("opaque \"assume(result > 0)\" sqrt").unwrap();
+        let bar_body = parse("foo").unwrap();
+        let defs = vec![
+            Definition {
+                name: "foo".to_string(),
+                body: foo_body,
+                sig: None,
+            },
+            Definition {
+                name: "bar".to_string(),
+                body: bar_body,
+                sig: None,
+            },
+        ];
+        let lookup = |w: &str| match w {
+            "sqrt" => crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").ok(),
+            _ => None,
+        };
+        let ledger = check_program(&defs, &lookup, SmtLibSolver::new).unwrap();
+
+        // The program checked clean (the assume was accepted, no hard errors).
+        assert!(ledger.is_clean(), "rejections: {:?}", ledger.rejections());
+
+        // One enumerable ledger entry, attributed to `foo`, displaying the
+        // user-written predicate.
+        assert_eq!(ledger.assumptions().len(), 1);
+        let entry = &ledger.assumptions()[0];
+        assert_eq!(entry.word, "foo");
+        assert_eq!(
+            entry.predicate,
+            Pred::Bin(BinOp::Gt, Box::new(var("result")), Box::new(num("0")))
+        );
+        // grep_assume enumerates the complete user trusted base.
+        assert_eq!(ledger.grep_assume(), vec!["assume(result > 0)".to_string()]);
+
+        // `foo`'s honest status: verified modulo { result > 0 }.
+        let foo_status = ledger.status("foo");
+        assert!(foo_status.is_modulo());
+        assert_eq!(foo_status.to_string(), "verified modulo { result > 0 }");
+
+        // `bar` calls `foo` and INHERITS the modulo status (a guarantee never
+        // silently reads stronger than proven — invariant 13 property 2).
+        let bar_status = ledger.status("bar");
+        assert!(
+            bar_status.is_modulo(),
+            "the caller inherits the modulo status: {bar_status}"
+        );
+        assert_eq!(bar_status.to_string(), "verified modulo { result > 0 }");
+    }
+
+    #[test]
+    fn m12_rejected_assume_is_a_hard_error_in_the_program_ledger() {
+        // (§12 M12) A program whose `assume` is unnecessary (provable without it)
+        // does NOT check clean: the rejection is surfaced in the ledger, not
+        // silently dropped.
+        let body = parse("pos assume(x>0)").unwrap();
+        let defs = vec![Definition {
+            name: "foo".to_string(),
+            body,
+            sig: None,
+        }];
+        let lookup = |_: &str| None;
+        // pos must resolve to its guarantee; route through a lookup-free resolver
+        // by giving foo a real `pos` contract via the signature lookup.
+        let lookup2 = |w: &str| match w {
+            "pos" => crate::parse_signature("pos : ( -- r: Num where r > 0 )").ok(),
+            _ => lookup(w),
+        };
+        let ledger = check_program(&defs, &lookup2, SmtLibSolver::new).unwrap();
+        assert!(!ledger.is_clean());
+        assert_eq!(ledger.rejections().len(), 1);
+        assert_eq!(
+            ledger.rejections()[0].legality,
+            AssumeLegality::RejectedProvable
+        );
+        // A rejected assume is NOT in the trusted base.
+        assert!(ledger.assumptions().is_empty());
+        assert!(ledger.grep_assume().is_empty());
+    }
+
+    // A compile-time witness that the `assume` legality check is solver-only and
+    // never reaches Tier 0: it threads a `Solver`/`FactSnapshot` and a cache, no
+    // `Subst`/`InferCtx` (the immutability barrier — invariant 18). If it grew a
+    // Tier 0 inference parameter this signature would change.
+    #[allow(dead_code)]
+    fn _assume_is_solver_only(s: &mut SmtLibSolver, goal: &Pred, c: &mut ExploratoryCache) {
+        let _ = assume_legality(s, goal, c);
     }
 }
