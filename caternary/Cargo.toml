@@ -7,6 +7,16 @@ description = "Caternary is a stack-based language and runtime."
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
+binaries = []
+
 [dependencies]
 handled = { workspace = true }
 shvar = { workspace = true }
+
+[[example]]
+name = "m8_script"
+path = "examples/m8_script.rs"
+required-features = ["binaries"]
