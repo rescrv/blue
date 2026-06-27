@@ -66,6 +66,7 @@ pub use solver::Definition;
 pub use solver::ExploratoryCache;
 pub use solver::FactSnapshot;
 pub use solver::Ledger;
+pub use solver::M13_NATIVE_PARITY_NOTE;
 pub use solver::Model;
 pub use solver::Obligation;
 pub use solver::SUBSUMPTION_FAIL_CLOSED_MSG;

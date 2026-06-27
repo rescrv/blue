@@ -52,6 +52,43 @@
 //! four-method [`Solver`] trait drops in beside [`SmtLibSolver`] with no change
 //! to the path-condition plumbing (M13 will then assert text-mode/native parity).
 //!
+//! # M13 — SMT-LIB emission parity (§10.9 / §14.8)
+//!
+//! M13 is the milestone that **verifies the seam across the whole Tier 1
+//! surface** (M8–M12). It adds no new checking power; it locks two properties
+//! and records one deferral:
+//!
+//!   1. **Structural solver-agnosticism (invariant 10).** The VC generator core
+//!      **never** calls a concrete solver directly — every decision flows through
+//!      the four-method [`Solver`] trait (`assert`/`check`/`push_scope`/
+//!      `pop_scope`). The only `check_sat`/`check_sat_model` calls in this module
+//!      are **inside the seam's own implementation** ([`SmtLibSolver`]'s
+//!      [`Solver`]/[`CounterModel`] impls plus the embedded reasoner those impls
+//!      delegate to). The day-one text-emission mode and a future native backend
+//!      are interchangeable behind the trait. This is asserted **structurally**
+//!      by a test that reads this module's source and confirms no
+//!      generator-core symbol names a concrete solver entry point.
+//!   2. **Comprehensive emission parity (§10.9).** For **every** M8–M12 scenario
+//!      type — the path-condition `if`, a first-order VC discharge, subsumption's
+//!      **two** directional implications (covariant guarantee + contravariant
+//!      demand), gradual-interop `where true`, and the `assume` drop-and-re-run —
+//!      the emitted SMT-LIB2 script has correctly nested `(push 1)`/`(pop 1)`
+//!      matching every [`Solver::push_scope`]/[`Solver::pop_scope`], faithfully
+//!      contains the asserted/checked formulas, terminates each decision with
+//!      `(check-sat)`, declares every constant it references, and its **text-mode
+//!      verdict agrees with the seam's [`Solver::check`] verdict** for that
+//!      scenario.
+//!   3. **Native parity is the deferred "if wired" path** ([`M13_NATIVE_PARITY_NOTE`]).
+//!      §10.9's literal bar — "text mode agrees with the native `z3`-crate result"
+//!      — is unachievable offline (the registry is unreachable; the `z3` crate
+//!      cannot resolve, let alone build its bundled C++ Z3 — recorded since M8).
+//!      The **achievable, spec-aligned** M13 deliverable is therefore
+//!      text-faithfulness + verdict self-consistency: the emitted SMT-LIB2 script
+//!      is the **parity reference** a future `Z3Solver` (same four-method trait)
+//!      asserts its native verdict against. Wiring that backend is a one-line
+//!      drop-in beside [`SmtLibSolver`] once a registry/Z3 toolchain exists; no
+//!      change to the generator core is needed because of property (1).
+//!
 //! # Immutability barrier (§3 invariant 1 / 18)
 //!
 //! Every `push_scope`/`pop_scope` and every asserted path fact lives **entirely**
@@ -95,6 +132,27 @@ use crate::shadow::bind_positional;
 // ===========================================================================
 // The verdict and the seam
 // ===========================================================================
+
+/// **Recorded M13 deferral (§10.9 / invariant 10).** `docs/typing.md` is
+/// read-only; this is the in-code statement of why M13's literal "agrees with the
+/// native `z3`-crate result" is deferred and what stands in for it.
+///
+/// The `z3` crate cannot be resolved offline (the registry is unreachable, and it
+/// could not build its bundled C++ Z3 even if it resolved — recorded since M8), so
+/// **no native backend is wired in this workspace.** The achievable, spec-aligned
+/// M13 deliverable is therefore **text-faithfulness + verdict self-consistency**:
+/// the SMT-LIB2 script emitted by [`SmtLibSolver`] is the **parity reference** a
+/// future `Z3Solver` — implementing the *same* four-method [`Solver`] trait —
+/// asserts its native verdict against. Because the VC generator core routes every
+/// decision through the trait (invariant 10, locked structurally by M13), wiring
+/// that native backend is a one-line drop-in beside [`SmtLibSolver`]; no
+/// generator-core code changes.
+pub const M13_NATIVE_PARITY_NOTE: &str = "native z3-crate parity is the deferred \
+\"if wired\" path: the z3 crate cannot resolve/build offline, so the emitted \
+SMT-LIB2 script is the parity reference a future Z3Solver (same four-method Solver \
+trait) asserts its native verdict against; wiring it is a one-line drop-in beside \
+SmtLibSolver with no change to the solver-agnostic generator core (§10.9 / \
+invariant 10).";
 
 /// The result of a solver [`Solver::check`]: the three SMT outcomes.
 ///
@@ -4090,5 +4148,436 @@ mod tests {
     #[allow(dead_code)]
     fn _assume_is_solver_only(s: &mut SmtLibSolver, goal: &Pred, c: &mut ExploratoryCache) {
         let _ = assume_legality(s, goal, c);
+    }
+
+    // =======================================================================
+    // M13 — SMT-LIB emission parity across M8–M12 (§10.9 / §14.8 / §12 M13)
+    // =======================================================================
+
+    /// Strip `//…` comments (everything from `//` to end of line) so doc-comment
+    /// references to `check_sat`/`check_sat_model` don't confuse the structural
+    /// scan in [`vc_generator_core_never_calls_a_concrete_solver_directly`].
+    /// (No `//` appears inside a string literal in this module's core, so this is
+    /// safe.)
+    fn strip_line_comments(src: &str) -> String {
+        src.lines()
+            .map(|l| match l.find("//") {
+                Some(i) => &l[..i],
+                None => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Remove the brace-delimited item whose header contains `header`, from the
+    /// header's start through its matching `}` (braces inside `"…"` string
+    /// literals are skipped). Returns the source unchanged if `header` is absent.
+    /// Used to mask out the **seam's own** implementation so the remaining text is
+    /// exactly the VC generator core.
+    fn mask_block(src: &str, header: &str) -> String {
+        let Some(h) = src.find(header) else {
+            return src.to_string();
+        };
+        let bytes = src.as_bytes();
+        let mut i = h + header.len();
+        while i < bytes.len() && bytes[i] != b'{' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return src.to_string();
+        }
+        let mut depth = 0i32;
+        let mut in_str = false;
+        let mut esc = false;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if in_str {
+                if esc {
+                    esc = false;
+                } else if c == b'\\' {
+                    esc = true;
+                } else if c == b'"' {
+                    in_str = false;
+                }
+            } else {
+                match c {
+                    b'"' => in_str = true,
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        let mut out = String::with_capacity(src.len());
+        out.push_str(&src[..h]);
+        out.push_str(&src[i..]);
+        out
+    }
+
+    #[test]
+    fn vc_generator_core_never_calls_a_concrete_solver_directly() {
+        // (§12 M13 / §10.9 / invariant 10) The VC generator core must be
+        // solver-agnostic: every decision routes through the four-method `Solver`
+        // trait, and the ONLY `check_sat`/`check_sat_model` calls live inside the
+        // seam's own implementation (`SmtLibSolver`'s `Solver`/`CounterModel`
+        // impls, plus the embedded reasoner `check_sat`/`check_sat_model` those
+        // impls delegate to — the stand-in for a native `check-sat`). Lock it
+        // structurally: read this module's source, drop the test module, strip
+        // comments, mask the seam region, and assert no generator-core symbol
+        // names a concrete solver entry point.
+        let src = include_str!("solver.rs");
+        // Drop the test module (it legitimately calls check_sat directly to unit
+        // test the embedded reasoner).
+        let core = src
+            .split("\nmod tests")
+            .next()
+            .expect("tests module present");
+        let core = strip_line_comments(core);
+        // Mask the seam's own implementation: the embedded reasoner definitions
+        // and the two `SmtLibSolver` trait impls.
+        let masked = mask_block(&core, "pub fn check_sat_model(");
+        let masked = mask_block(&masked, "pub fn check_sat(");
+        let masked = mask_block(&masked, "impl Solver for SmtLibSolver");
+        let masked = mask_block(&masked, "impl CounterModel for SmtLibSolver");
+        assert!(
+            !masked.contains("check_sat"),
+            "a VC-generator-core symbol calls check_sat/check_sat_model directly; \
+             every decision must route through the Solver trait (§10.9 / invariant 10)"
+        );
+        // Sanity: the masking actually removed the real call sites (i.e. the
+        // headers were found), so the assertion above is meaningful and not
+        // vacuously masking everything.
+        assert!(
+            core.contains("check_sat"),
+            "precondition: the un-masked core does contain check_sat call sites"
+        );
+        assert!(
+            masked.contains("solver.check()") || masked.contains("solver.check ()"),
+            "the generator core still routes decisions through Solver::check"
+        );
+    }
+
+    // ----- emission-parity test harness -------------------------------------
+
+    /// The free-form identifiers referenced inside a rendered SMT-LIB expression
+    /// (variable names like `x`, `$post0`, `opaque`), excluding operator keywords
+    /// and numeric literals.
+    fn smt_idents(s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        for c in s.chars() {
+            if c.is_alphanumeric() || c == '$' || c == '_' {
+                cur.push(c);
+            } else if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out.into_iter()
+            .filter(|t| !matches!(t.as_str(), "and" | "or" | "not"))
+            .filter(|t| !t.chars().next().unwrap().is_ascii_digit())
+            .collect()
+    }
+
+    /// Assert an emitted SMT-LIB2 script is **well-formed** (§12 M13 acceptance):
+    /// balanced `(push 1)`/`(pop 1)` (depth never negative, net zero), a logic
+    /// header, at least one `(check-sat)`, and every constant referenced in an
+    /// `(assert …)` was `(declare-const …)`'d earlier in a still-live scope.
+    fn assert_wellformed_smtlib(script: &str) {
+        let mut depth: i32 = 0;
+        let mut checks = 0usize;
+        let mut declared: Vec<BTreeSet<String>> = vec![BTreeSet::new()];
+        let mut saw_logic = false;
+        for raw in script.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with(';') {
+                continue;
+            }
+            if line == "(set-logic QF_LRA)" {
+                saw_logic = true;
+            } else if line == "(push 1)" {
+                depth += 1;
+                declared.push(BTreeSet::new());
+            } else if line == "(pop 1)" {
+                depth -= 1;
+                assert!(depth >= 0, "(pop 1) underflow in script:\n{script}");
+                declared.pop();
+            } else if line == "(check-sat)" {
+                checks += 1;
+            } else if let Some(rest) = line.strip_prefix("(declare-const ") {
+                let name = rest
+                    .split_whitespace()
+                    .next()
+                    .expect("declare-const names a constant")
+                    .to_string();
+                declared.last_mut().unwrap().insert(name);
+            } else if let Some(rest) = line.strip_prefix("(assert ") {
+                let live: BTreeSet<&String> = declared.iter().flatten().collect();
+                for v in smt_idents(rest) {
+                    assert!(
+                        live.contains(&v),
+                        "(assert …) references undeclared const `{v}` in script:\n{script}"
+                    );
+                }
+            } else {
+                panic!("unexpected SMT-LIB line `{line}` in script:\n{script}");
+            }
+        }
+        assert!(saw_logic, "script missing (set-logic …):\n{script}");
+        assert_eq!(
+            depth, 0,
+            "unbalanced push/pop (ended at depth {depth}):\n{script}"
+        );
+        assert!(checks >= 1, "script has no (check-sat):\n{script}");
+        // Cross-check the push/pop counts directly, too.
+        assert_eq!(
+            script.matches("(push 1)").count(),
+            script.matches("(pop 1)").count(),
+            "(push 1)/(pop 1) count mismatch:\n{script}"
+        );
+    }
+
+    /// The per-decision verdicts the script self-documents (`; => …` comments),
+    /// in emission order — the **text-mode** verdicts that must agree with the
+    /// seam's [`Solver::check`] verdicts.
+    fn script_verdicts(script: &str) -> Vec<Verdict> {
+        script
+            .lines()
+            .filter_map(|l| match l.trim() {
+                "; => sat" => Some(Verdict::Sat),
+                "; => unsat" => Some(Verdict::Unsat),
+                "; => unknown" => Some(Verdict::Unknown),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn m13_parity_path_condition_if() {
+        // (§12 M13) Path-condition `if` (M8): the emitted script pushes a scope and
+        // asserts P for the then-branch, pushes a scope and asserts ¬P for the
+        // else-branch, with matching pops; the inner sqrt demand discharges under
+        // P. Text-mode verdict (the `; =>` comment) agrees with the obligation's
+        // check() verdict.
+        let toks = parse("x 0 > [ x sqrt ] [ 0 ] if").unwrap();
+        let mut solver = SmtLibSolver::new();
+        let mut stack = ShadowStack::new();
+        let mut obligations = Vec::new();
+        verify(
+            &toks,
+            &mut stack,
+            &mut solver,
+            &demo_resolver,
+            &mut obligations,
+        )
+        .unwrap();
+        let script = solver.script();
+        assert_wellformed_smtlib(script);
+        // Both branch path conditions are asserted (P and ¬P).
+        assert!(script.contains("(assert (> x 0))"), "then-P:\n{script}");
+        assert!(
+            script.contains("(assert (not (> x 0)))"),
+            "else-¬P:\n{script}"
+        );
+        // The sqrt demand is discharged via the negated-goal encoding.
+        assert!(
+            script.contains("(assert (not (>= x 0)))"),
+            "negated demand:\n{script}"
+        );
+        // Exactly one decision (the sqrt demand, in the then-branch); its
+        // text-mode verdict equals the obligation's check() verdict.
+        assert_eq!(obligations.len(), 1);
+        assert_eq!(obligations[0].verdict, Verdict::Unsat);
+        assert_eq!(script_verdicts(script), vec![obligations[0].verdict]);
+        // Two branch scopes + one discharge scope = three push/pop pairs.
+        assert_eq!(script.matches("(push 1)").count(), 3, "script:\n{script}");
+    }
+
+    #[test]
+    fn m13_parity_first_order_vc() {
+        // (§12 M13) First-order VC discharge (M9): `x sqrt` with no bounding fact
+        // fails — the negated goal ¬(x>=0) is Sat with a counterexample. The
+        // emitted script asserts the negated goal, ends with (check-sat), and its
+        // text-mode verdict agrees with the obligation's check() verdict.
+        let toks = parse("x sqrt").unwrap();
+        let sig = sqrt_sig();
+        let lookup = |w: &str| (w == "sqrt").then(|| sig.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        let script = solver.script();
+        assert_wellformed_smtlib(script);
+        assert!(
+            script.contains("(assert (not (>= x 0)))"),
+            "negated goal:\n{script}"
+        );
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].verdict, Verdict::Sat);
+        assert!(obs[0].model.is_some(), "Sat ⇒ counterexample");
+        assert_eq!(script_verdicts(script), vec![obs[0].verdict]);
+        // One discharge scope.
+        assert_eq!(script.matches("(push 1)").count(), 1, "script:\n{script}");
+    }
+
+    #[test]
+    fn m13_parity_subsumption_two_directional_implications() {
+        // (§12 M13) Subsumption (M10) emits EXACTLY TWO directional implications:
+        // the covariant guarantee (provided_post ⟹ expected_post) and the
+        // contravariant demand (expected_pre ⟹ provided_pre, FLIPPED). Both are
+        // emitted to the script with their own push/assert/check/pop, and both
+        // text-mode verdicts agree with the seam's check() verdicts in order.
+        let provided = RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![binder("n", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("n")), Box::new(num("0")))),
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("r")), Box::new(num("5")))),
+            },
+        };
+        let expected = RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![binder("n", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("n")), Box::new(num("5")))),
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("r")), Box::new(num("0")))),
+            },
+        };
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        let script = s.script();
+        assert_wellformed_smtlib(script);
+        // Covariant guarantee: hypothesis provided_post r>5, goal expected_post
+        // r>0 ⇒ negated goal ¬($post0 > 0) under hypothesis ($post0 > 5).
+        assert!(
+            script.contains("(assert (> $post0 5))"),
+            "guarantee hypothesis:\n{script}"
+        );
+        assert!(
+            script.contains("(assert (not (> $post0 0)))"),
+            "guarantee negated goal:\n{script}"
+        );
+        // Contravariant demand (the FLIP): hypothesis expected_pre n>5, goal
+        // provided_pre n>0 ⇒ negated goal ¬($pre0 > 0) under hypothesis ($pre0 > 5).
+        assert!(
+            script.contains("(assert (> $pre0 5))"),
+            "demand hypothesis:\n{script}"
+        );
+        assert!(
+            script.contains("(assert (not (> $pre0 0)))"),
+            "demand negated goal:\n{script}"
+        );
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+        assert_eq!(res.guarantee.verdict, Verdict::Unsat);
+        assert_eq!(res.demand.verdict, Verdict::Unsat);
+        // Two directional implications ⇒ two text-mode verdicts, in order
+        // (guarantee first, demand second), agreeing with the seam's verdicts.
+        assert_eq!(
+            script_verdicts(script),
+            vec![res.guarantee.verdict, res.demand.verdict]
+        );
+    }
+
+    #[test]
+    fn m13_parity_gradual_where_true() {
+        // (§12 M13) Gradual interop (M11): an UNREFINED (`where true`) provided
+        // guarantee meets a REQUIRED guarantee. The absent hypothesis asserts
+        // NOTHING (where true) and the goal is checked alone — the covariant VC
+        // `true ⟹ r>0` is Sat. Text-mode verdict agrees with the guarantee VC's
+        // check() verdict; the demand direction (both absent) emits no decision.
+        let provided = unrefined_sig();
+        let expected = post_sig(BinOp::Gt, "0");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        let script = s.script();
+        assert_wellformed_smtlib(script);
+        // The negated required guarantee is checked with NO hypothesis asserted
+        // (where true asserts nothing).
+        assert!(
+            script.contains("(assert (not (> $post0 0)))"),
+            "negated required guarantee:\n{script}"
+        );
+        // Exactly one decision (the guarantee VC); the demand direction is
+        // `true ⟹ true` and does no solver work.
+        assert_eq!(
+            script.matches("(check-sat)").count(),
+            1,
+            "script:\n{script}"
+        );
+        assert!(matches!(
+            res.outcome(),
+            SubsumptionOutcome::CarriesNoContract { .. }
+        ));
+        assert_eq!(res.guarantee.verdict, Verdict::Sat);
+        assert_eq!(script_verdicts(script), vec![res.guarantee.verdict]);
+    }
+
+    #[test]
+    fn m13_parity_assume_drop_and_re_run() {
+        // (§12 M13) The `assume` boundary (M12) emits TWO decisions in order: the
+        // strict exploratory DROP-AND-RE-RUN (discharge the goal WITHOUT the
+        // assumption) followed by the dependent obligation discharged UNDER the
+        // asserted faith-fact. Both text-mode verdicts agree with the seam's
+        // check() verdicts (exploratory verdict, then obligation verdict).
+        let toks = parse("opaque assume(x>=0) sqrt").unwrap();
+        let mut solver = SmtLibSolver::new();
+        let mut stack = ShadowStack::new();
+        let mut ctx = VerifyCtx::with_site("foo");
+        verify_ctx(&toks, &mut stack, &mut solver, &m12_resolver, &mut ctx).unwrap();
+        let script = solver.script();
+        assert_wellformed_smtlib(script);
+
+        assert_eq!(ctx.assumes().len(), 1);
+        let rec = &ctx.assumes()[0];
+        assert_eq!(rec.legality, AssumeLegality::Legal);
+        // The drop-and-re-run actually ran (a real solve, not a cache hit/no-op).
+        assert!(!rec.from_cache);
+        assert_eq!(ctx.cache().solves(), 1);
+        assert_eq!(ctx.obligations().len(), 1);
+        assert!(ctx.obligations()[0].is_discharged());
+
+        // The faith-fact is asserted (legal assume) and the dependent obligation
+        // discharges under it.
+        assert!(
+            script.contains("(assert (>= opaque 0))"),
+            "faith-fact asserted:\n{script}"
+        );
+        assert!(
+            script.contains("(assert (not (>= opaque 0)))"),
+            "negated goal (both the exploratory and the obligation discharge):\n{script}"
+        );
+        // Two decisions, in order: exploratory drop-and-re-run, then the
+        // dependent obligation — each agreeing with the seam's check() verdict.
+        assert_eq!(
+            script_verdicts(script),
+            vec![rec.exploratory, ctx.obligations()[0].verdict]
+        );
+    }
+
+    #[test]
+    fn m13_native_parity_is_recorded_as_deferred() {
+        // (§12 M13 / required) A recorded, in-code note states native z3-crate
+        // parity is the deferred "if wired" path (offline registry) with the
+        // emitted SMT-LIB2 script as the parity reference.
+        assert!(M13_NATIVE_PARITY_NOTE.contains("deferred"));
+        assert!(M13_NATIVE_PARITY_NOTE.contains("parity reference"));
+        assert!(M13_NATIVE_PARITY_NOTE.contains("Z3Solver"));
+        assert!(
+            M13_NATIVE_PARITY_NOTE.contains("offline"),
+            "the note records the offline reason"
+        );
     }
 }
