@@ -105,10 +105,30 @@ fn underflow(need: usize, found: usize) -> ShadowError {
 // Slots
 // ===========================================================================
 
+/// One executable item inside a shadow quotation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShadowQuoteItem {
+    /// Execute a word token through the resolver.
+    Word(String),
+    /// Push a nested quotation value.
+    Bracket(Vec<ShadowQuoteItem>),
+    /// Push a captured shadow slot directly.
+    Push(Slot),
+}
+
+pub(crate) fn shadow_quote_from_tokens(tokens: &[Token]) -> Vec<ShadowQuoteItem> {
+    tokens
+        .iter()
+        .map(|token| match token {
+            Token::Word(w) => ShadowQuoteItem::Word(w.clone()),
+            Token::Bracket(body) => ShadowQuoteItem::Bracket(shadow_quote_from_tokens(body)),
+        })
+        .collect()
+}
+
 /// A single shadow-stack slot. It mirrors what the runtime stack holds: either
 /// a *value*, modelled here as a symbolic term ([`Pred`]), or a *quotation*,
-/// modelled as the raw token body the runtime would carry as a value and a
-/// combinator would later execute.
+/// modelled as executable shadow quote items that a combinator can later run.
 ///
 /// Modelling quotations as slots (rather than special-casing them) is what lets
 /// `DIP`/`CALL` mirror the runtime exactly: at runtime a quotation is an
@@ -117,8 +137,8 @@ fn underflow(need: usize, found: usize) -> ShadowError {
 pub enum Slot {
     /// A value slot carrying its symbolic term.
     Term(Pred),
-    /// A quotation slot carrying the token body (executed by `DIP`/`CALL`).
-    Quote(Vec<Token>),
+    /// A quotation slot carrying executable quote items.
+    Quote(Vec<ShadowQuoteItem>),
 }
 
 impl Slot {
@@ -200,6 +220,12 @@ pub enum ShadowWord {
     TriAt,
     /// `COMPOSE` — concatenate two quotation bodies into one quotation value.
     Compose,
+    /// `CURRY` — prepend one captured slot to a quotation.
+    Curry,
+    /// `2CURRY` — prepend two captured slots to a quotation.
+    TwoCurry,
+    /// `3CURRY` — prepend three captured slots to a quotation.
+    ThreeCurry,
     /// An interpreted binary operator (arithmetic/comparison/connective): pops
     /// two terms `a b` and pushes the proposition/term `Bin(op, a, b)`.
     Bin(BinOp),
@@ -252,6 +278,9 @@ pub fn core_shadow_word(name: &str) -> Option<ShadowWord> {
         "TRI*" => ShadowWord::TriStar,
         "TRI@" => ShadowWord::TriAt,
         "COMPOSE" => ShadowWord::Compose,
+        "CURRY" => ShadowWord::Curry,
+        "2CURRY" => ShadowWord::TwoCurry,
+        "3CURRY" => ShadowWord::ThreeCurry,
         _ => return None,
     };
     Some(word)
@@ -338,7 +367,7 @@ impl ShadowStack {
     }
 
     /// Push a quotation body.
-    pub fn push_quote(&mut self, body: Vec<Token>) {
+    pub fn push_quote(&mut self, body: Vec<ShadowQuoteItem>) {
         self.slots.push(Slot::Quote(body));
     }
 
@@ -363,7 +392,7 @@ impl ShadowStack {
     }
 
     /// Pop a quotation body (error if the top is a value term).
-    pub fn pop_quote(&mut self) -> Result<Vec<Token>, ShadowError> {
+    pub fn pop_quote(&mut self) -> Result<Vec<ShadowQuoteItem>, ShadowError> {
         match self.pop()? {
             Slot::Quote(body) => Ok(body),
             Slot::Term(_) => Err(ShadowError::new(
@@ -566,7 +595,7 @@ impl ShadowStack {
         for token in tokens {
             match token {
                 // A quotation is a value on the stack at runtime; here too.
-                Token::Bracket(body) => self.push_quote(body.clone()),
+                Token::Bracket(body) => self.push_quote(shadow_quote_from_tokens(body)),
                 Token::Word(w) => match resolve(w) {
                     ShadowWord::Dup => self.dup()?,
                     ShadowWord::Drop => self.drop()?,
@@ -588,7 +617,7 @@ impl ShadowStack {
                         self.require(2)?;
                         let body = self.pop_quote()?;
                         let hidden = self.pop()?;
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.push_slot(hidden);
                     }
                     ShadowWord::TwoDip => {
@@ -596,7 +625,7 @@ impl ShadowStack {
                         let body = self.pop_quote()?;
                         let y = self.pop()?;
                         let x = self.pop()?;
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.push_slot(x);
                         self.push_slot(y);
                     }
@@ -606,7 +635,7 @@ impl ShadowStack {
                         let z = self.pop()?;
                         let y = self.pop()?;
                         let x = self.pop()?;
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.push_slot(x);
                         self.push_slot(y);
                         self.push_slot(z);
@@ -615,13 +644,13 @@ impl ShadowStack {
                         // Mirror combinators.rs::call: pop the quotation and run
                         // it on the whole stack.
                         let body = self.pop_quote()?;
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                     }
                     ShadowWord::Keep => {
                         self.require(2)?;
                         let body = self.pop_quote()?;
                         let kept = self.slots.last().unwrap().clone();
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.push_slot(kept);
                     }
                     ShadowWord::TwoKeep => {
@@ -629,7 +658,7 @@ impl ShadowStack {
                         let body = self.pop_quote()?;
                         let len = self.slots.len();
                         let kept = self.slots[len - 2..].to_vec();
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.slots.extend(kept);
                     }
                     ShadowWord::ThreeKeep => {
@@ -637,7 +666,7 @@ impl ShadowStack {
                         let body = self.pop_quote()?;
                         let len = self.slots.len();
                         let kept = self.slots[len - 3..].to_vec();
-                        self.exec(&body, resolve)?;
+                        self.exec_quote(&body, resolve)?;
                         self.slots.extend(kept);
                     }
                     ShadowWord::Bi => {
@@ -646,9 +675,9 @@ impl ShadowStack {
                         let p = self.pop_quote()?;
                         let x = self.pop()?;
                         self.push_slot(x.clone());
-                        self.exec(&p, resolve)?;
+                        self.exec_quote(&p, resolve)?;
                         self.push_slot(x);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                     }
                     ShadowWord::BiStar => {
                         self.require(4)?;
@@ -657,9 +686,9 @@ impl ShadowStack {
                         let y = self.pop()?;
                         let x = self.pop()?;
                         self.push_slot(x);
-                        self.exec(&p, resolve)?;
+                        self.exec_quote(&p, resolve)?;
                         self.push_slot(y);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                     }
                     ShadowWord::BiAt => {
                         self.require(3)?;
@@ -667,9 +696,9 @@ impl ShadowStack {
                         let y = self.pop()?;
                         let x = self.pop()?;
                         self.push_slot(x);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                         self.push_slot(y);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                     }
                     ShadowWord::Tri => {
                         self.require(4)?;
@@ -678,11 +707,11 @@ impl ShadowStack {
                         let p = self.pop_quote()?;
                         let x = self.pop()?;
                         self.push_slot(x.clone());
-                        self.exec(&p, resolve)?;
+                        self.exec_quote(&p, resolve)?;
                         self.push_slot(x.clone());
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                         self.push_slot(x);
-                        self.exec(&r, resolve)?;
+                        self.exec_quote(&r, resolve)?;
                     }
                     ShadowWord::TriStar => {
                         self.require(6)?;
@@ -693,11 +722,11 @@ impl ShadowStack {
                         let y = self.pop()?;
                         let x = self.pop()?;
                         self.push_slot(x);
-                        self.exec(&p, resolve)?;
+                        self.exec_quote(&p, resolve)?;
                         self.push_slot(y);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                         self.push_slot(z);
-                        self.exec(&r, resolve)?;
+                        self.exec_quote(&r, resolve)?;
                     }
                     ShadowWord::TriAt => {
                         self.require(4)?;
@@ -706,11 +735,11 @@ impl ShadowStack {
                         let y = self.pop()?;
                         let x = self.pop()?;
                         self.push_slot(x);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                         self.push_slot(y);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                         self.push_slot(z);
-                        self.exec(&q, resolve)?;
+                        self.exec_quote(&q, resolve)?;
                     }
                     ShadowWord::Compose => {
                         self.require(2)?;
@@ -719,12 +748,61 @@ impl ShadowStack {
                         p.extend(q);
                         self.push_quote(p);
                     }
+                    ShadowWord::Curry => {
+                        self.require(2)?;
+                        let mut body = self.pop_quote()?;
+                        let value = self.pop()?;
+                        body.insert(0, ShadowQuoteItem::Push(value));
+                        self.push_quote(body);
+                    }
+                    ShadowWord::TwoCurry => {
+                        self.require(3)?;
+                        let body = self.pop_quote()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        let mut combined = vec![ShadowQuoteItem::Push(x), ShadowQuoteItem::Push(y)];
+                        combined.extend(body);
+                        self.push_quote(combined);
+                    }
+                    ShadowWord::ThreeCurry => {
+                        self.require(4)?;
+                        let body = self.pop_quote()?;
+                        let z = self.pop()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        let mut combined = vec![
+                            ShadowQuoteItem::Push(x),
+                            ShadowQuoteItem::Push(y),
+                            ShadowQuoteItem::Push(z),
+                        ];
+                        combined.extend(body);
+                        self.push_quote(combined);
+                    }
                     ShadowWord::Bin(op) => self.bin(op)?,
                     ShadowWord::Un(op) => self.un(op)?,
                     ShadowWord::Num(lexeme) => self.push_term(Pred::Num(lexeme)),
                     ShadowWord::Var(name) => self.push_term(Pred::Var(name)),
                     ShadowWord::Opaque(arrow) => self.apply_opaque(&arrow)?,
                 },
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute an already-constructed shadow quotation.
+    pub fn exec_quote<R>(
+        &mut self,
+        items: &[ShadowQuoteItem],
+        resolve: &R,
+    ) -> Result<(), ShadowError>
+    where
+        R: Fn(&str) -> ShadowWord,
+    {
+        for item in items {
+            match item {
+                ShadowQuoteItem::Word(w) => self.exec(&[Token::Word(w.clone())], resolve)?,
+                ShadowQuoteItem::Bracket(body) => self.push_quote(body.clone()),
+                ShadowQuoteItem::Push(slot) => self.push_slot(slot.clone()),
             }
         }
         Ok(())
@@ -853,6 +931,9 @@ mod tests {
         assert_eq!(core_shadow_word("3KEEP"), Some(ShadowWord::ThreeKeep));
         assert_eq!(core_shadow_word("2ROT"), Some(ShadowWord::TwoRot));
         assert_eq!(core_shadow_word("TRI"), Some(ShadowWord::Tri));
+        assert_eq!(core_shadow_word("CURRY"), Some(ShadowWord::Curry));
+        assert_eq!(core_shadow_word("2CURRY"), Some(ShadowWord::TwoCurry));
+        assert_eq!(core_shadow_word("3CURRY"), Some(ShadowWord::ThreeCurry));
         assert_eq!(core_shadow_word("dup"), None);
         assert_eq!(core_shadow_word("dip"), None);
     }
@@ -1041,7 +1122,7 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     enum Tagged {
         Val(u32),
-        Quote(Vec<Token>),
+        Quote(Vec<crate::QuoteItem<Tagged>>),
     }
 
     impl From<Token> for Tagged {
@@ -1050,22 +1131,25 @@ mod tests {
                 // A bare word in a driver program is never a fresh value here;
                 // we only seed values directly. Treat any stray word as tag 0.
                 Token::Word(_) => Tagged::Val(0),
-                Token::Bracket(b) => Tagged::Quote(b),
+                Token::Bracket(b) => Tagged::Quote(crate::quote_items_from_tokens(&b)),
             }
         }
     }
 
     impl Quotable for Tagged {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[crate::QuoteItem<Self>]> {
             match self {
                 Tagged::Quote(b) => Some(b),
                 _ => None,
             }
         }
+        fn from_quotation(items: Vec<crate::QuoteItem<Self>>) -> Self {
+            Tagged::Quote(items)
+        }
         fn to_tokens(&self) -> Vec<Token> {
             match self {
                 Tagged::Val(n) => vec![Token::Word(n.to_string())],
-                Tagged::Quote(b) => vec![Token::Bracket(b.clone())],
+                Tagged::Quote(b) => vec![Token::Bracket(crate::quote_items_to_tokens(b))],
             }
         }
         fn is_truthy(&self) -> bool {
@@ -1086,7 +1170,7 @@ mod tests {
             .iter()
             .map(|v| match v {
                 Tagged::Val(n) => Identity::Val(*n),
-                Tagged::Quote(b) => Identity::Quote(b.clone()),
+                Tagged::Quote(b) => Identity::Quote(runtime_quote_identity(b)),
             })
             .collect()
     }
@@ -1103,15 +1187,60 @@ mod tests {
                     Identity::Val(n)
                 }
                 Slot::Term(other) => panic!("unexpected shadow term {other:?}"),
-                Slot::Quote(b) => Identity::Quote(b.clone()),
+                Slot::Quote(b) => Identity::Quote(shadow_quote_identity(b)),
+            })
+            .collect()
+    }
+
+    fn runtime_quote_identity(items: &[crate::QuoteItem<Tagged>]) -> Vec<QuoteIdentity> {
+        items
+            .iter()
+            .map(|item| match item {
+                crate::QuoteItem::Word(w) => QuoteIdentity::Word(w.clone()),
+                crate::QuoteItem::Bracket(body) => {
+                    QuoteIdentity::Bracket(runtime_quote_identity(body))
+                }
+                crate::QuoteItem::Push(Tagged::Val(n)) => QuoteIdentity::PushVal(*n),
+                crate::QuoteItem::Push(Tagged::Quote(body)) => {
+                    QuoteIdentity::PushQuote(runtime_quote_identity(body))
+                }
+            })
+            .collect()
+    }
+
+    fn shadow_quote_identity(items: &[ShadowQuoteItem]) -> Vec<QuoteIdentity> {
+        items
+            .iter()
+            .map(|item| match item {
+                ShadowQuoteItem::Word(w) => QuoteIdentity::Word(w.clone()),
+                ShadowQuoteItem::Bracket(body) => {
+                    QuoteIdentity::Bracket(shadow_quote_identity(body))
+                }
+                ShadowQuoteItem::Push(Slot::Term(Pred::Var(name))) => {
+                    QuoteIdentity::PushVal(name.trim_start_matches('v').parse::<u32>().unwrap())
+                }
+                ShadowQuoteItem::Push(Slot::Quote(body)) => {
+                    QuoteIdentity::PushQuote(shadow_quote_identity(body))
+                }
+                ShadowQuoteItem::Push(Slot::Term(other)) => {
+                    panic!("unexpected shadow quote term {other:?}")
+                }
             })
             .collect()
     }
 
     #[derive(Debug, Clone, PartialEq)]
+    enum QuoteIdentity {
+        Word(String),
+        Bracket(Vec<QuoteIdentity>),
+        PushVal(u32),
+        PushQuote(Vec<QuoteIdentity>),
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
     enum Identity {
         Val(u32),
-        Quote(Vec<Token>),
+        Quote(Vec<QuoteIdentity>),
     }
 
     // The shuffle resolver: only core shuffles + DIP/CALL. Anything else is a bug
@@ -1196,6 +1325,9 @@ mod tests {
         assert_conformance("[ DUP ] [ DROP ] [ SWAP ] TRI*", 3);
         assert_conformance("[ DUP ] TRI@", 3);
         assert_conformance("[ SWAP ] [ DUP ] COMPOSE CALL", 2);
+        assert_conformance("[ SWAP ] CURRY CALL", 3);
+        assert_conformance("[ ROT ] 2CURRY CALL", 4);
+        assert_conformance("[ 2SWAP ] 3CURRY CALL", 5);
     }
 
     #[test]

@@ -1714,6 +1714,7 @@ fn free_vars_ty(ty: &Ty, tyvars: &mut Vec<TyVar>, rowvars: &mut Vec<RowVar>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::QuoteItem;
     use crate::Token;
     use crate::parse;
     use crate::parse_with_spans;
@@ -1728,42 +1729,46 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     enum Value {
         Word(String),
-        Bracket(Vec<Token>),
+        Bracket(Vec<QuoteItem<Value>>),
     }
 
     impl From<Token> for Value {
         fn from(token: Token) -> Self {
             match token {
                 Token::Word(w) => Value::Word(w),
-                Token::Bracket(b) => Value::Bracket(b),
+                Token::Bracket(b) => Value::Bracket(crate::quote_items_from_tokens(&b)),
             }
         }
     }
 
     impl Quotable for Value {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             match self {
                 Value::Bracket(b) => Some(b),
                 Value::Word(_) => None,
             }
         }
 
+        fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+            Value::Bracket(items)
+        }
+
         fn to_tokens(&self) -> Vec<Token> {
             match self {
                 Value::Word(w) => vec![Token::Word(w.clone())],
-                Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+                Value::Bracket(b) => vec![Token::Bracket(crate::quote_items_to_tokens(b))],
             }
         }
 
         fn as_sequence(&self) -> Option<Vec<Self>> {
             match self {
-                Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+                Value::Bracket(b) => Some(crate::quote_items_to_values(b)),
                 Value::Word(_) => None,
             }
         }
 
         fn from_sequence(elements: Vec<Self>) -> Self {
-            Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+            Value::Bracket(elements.into_iter().map(QuoteItem::Push).collect())
         }
     }
 
@@ -2332,7 +2337,7 @@ mod tests {
     fn m4_core_schemes_cover_fixed_quotation_combinators() {
         for word in [
             "2DIP", "3DIP", "KEEP", "2KEEP", "3KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@",
-            "COMPOSE",
+            "COMPOSE", "CURRY", "2CURRY", "3CURRY",
         ] {
             assert!(
                 core_scheme(word).is_some(),
@@ -2352,7 +2357,10 @@ mod tests {
              5 [ 1 + ] [ 2 + ] [ 3 + ] TRI DROP DROP DROP \
              5 6 7 [ 1 + ] [ 2 + ] [ 3 + ] TRI* DROP DROP DROP \
              5 6 7 [ 1 + ] TRI@ DROP DROP DROP \
-             [ 1 + ] [ 2 + ] COMPOSE 5 SWAP CALL DROP",
+             [ 1 + ] [ 2 + ] COMPOSE 5 SWAP CALL DROP \
+             10 [ + ] CURRY 5 SWAP CALL DROP \
+             10 20 [ + + ] 2CURRY 5 SWAP CALL DROP \
+             1 2 3 [ + + + ] 3CURRY 4 SWAP CALL DROP",
         )
         .unwrap();
         assert!(arrow.input.elems.is_empty());
@@ -2482,8 +2490,16 @@ mod tests {
         let mut locals: Vec<Local> = Vec::new();
         let def_env = DefEnv::empty();
         let no_poly: HashMap<String, Scheme> = HashMap::new();
-        infer_seq(eval, &tokens, &mut ctx, &mut locals, &def_env, &no_poly, false)
-            .map(|arrow| ctx.resolve_word_deep(&arrow))
+        infer_seq(
+            eval,
+            &tokens,
+            &mut ctx,
+            &mut locals,
+            &def_env,
+            &no_poly,
+            false,
+        )
+        .map(|arrow| ctx.resolve_word_deep(&arrow))
     }
 
     #[test]
@@ -2492,7 +2508,10 @@ mod tests {
         // (effect lookup absent). It must now resolve as a language-core
         // primitive.
         assert!(core_scheme("MAP").is_some(), "MAP must have a core scheme");
-        assert!(core_scheme("FILTER").is_some(), "FILTER must have a core scheme");
+        assert!(
+            core_scheme("FILTER").is_some(),
+            "FILTER must have a core scheme"
+        );
     }
 
     #[test]
@@ -2525,7 +2544,11 @@ mod tests {
         match &arrow.output.elems[0].kind {
             TyKind::App(n, args) => {
                 assert_eq!(n, "List");
-                assert_eq!(args[0].kind, TyKind::Con(BOOL.into()), "element became Bool");
+                assert_eq!(
+                    args[0].kind,
+                    TyKind::Con(BOOL.into()),
+                    "element became Bool"
+                );
             }
             other => panic!("expected `List Bool`, got {other:?}"),
         }
@@ -2623,7 +2646,8 @@ mod tests {
     #[test]
     fn newly_typed_builtins_have_a_core_scheme() {
         for name in [
-            "KEEP", "BI", "BI*", "BI@", "COMPOSE", "CURRY", "WHEN", "UNLESS", "FOLD", "EACH",
+            "KEEP", "BI", "BI*", "BI@", "COMPOSE", "CURRY", "2CURRY", "3CURRY", "WHEN", "UNLESS",
+            "FOLD", "EACH",
         ] {
             assert!(
                 core_scheme(name).is_some(),
