@@ -25,3 +25,8 @@ required-features = ["binaries"]
 name = "m9_vc_generation"
 path = "examples/m9_vc_generation.rs"
 required-features = ["binaries"]
+
+[[example]]
+name = "m13_emission_parity"
+path = "examples/m13_emission_parity.rs"
+required-features = ["binaries"]
