@@ -1077,6 +1077,28 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             stack.push_slot(hidden);
             Ok(())
         }
+        ShadowWord::TwoDip => {
+            stack.require(3)?;
+            let body = stack.pop_quote()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            stack.push_slot(x);
+            stack.push_slot(y);
+            Ok(())
+        }
+        ShadowWord::ThreeDip => {
+            stack.require(4)?;
+            let body = stack.pop_quote()?;
+            let z = stack.pop()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            stack.push_slot(x);
+            stack.push_slot(y);
+            stack.push_slot(z);
+            Ok(())
+        }
         ShadowWord::Call => {
             let body = stack.pop_quote()?;
             verify_ctx(&body, stack, solver, resolve, ctx)
@@ -1087,6 +1109,26 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let kept = stack.slots().last().unwrap().clone();
             verify_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(kept);
+            Ok(())
+        }
+        ShadowWord::TwoKeep => {
+            stack.require(3)?;
+            let body = stack.pop_quote()?;
+            let kept = stack.slots()[stack.len() - 2..].to_vec();
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            for slot in kept {
+                stack.push_slot(slot);
+            }
+            Ok(())
+        }
+        ShadowWord::ThreeKeep => {
+            stack.require(4)?;
+            let body = stack.pop_quote()?;
+            let kept = stack.slots()[stack.len() - 3..].to_vec();
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            for slot in kept {
+                stack.push_slot(slot);
+            }
             Ok(())
         }
         ShadowWord::Bi => {

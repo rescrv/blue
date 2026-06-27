@@ -174,10 +174,18 @@ pub enum ShadowWord {
     /// `DIP` — pop the quotation, set aside the next term, run the quotation on
     /// the rest, restore the set-aside term (the real shuffle, §10.3).
     Dip,
+    /// `2DIP` — set aside the top pair while a quotation runs on the rest.
+    TwoDip,
+    /// `3DIP` — set aside the top triple while a quotation runs on the rest.
+    ThreeDip,
     /// `CALL` — pop the quotation and run it on the whole stack.
     Call,
     /// `KEEP` — run a quotation and restore a copy of its input value.
     Keep,
+    /// `2KEEP` — run a quotation and restore copies of its input pair.
+    TwoKeep,
+    /// `3KEEP` — run a quotation and restore copies of its input triple.
+    ThreeKeep,
     /// `BI` — run two quotations against one copied value.
     Bi,
     /// `BI*` — run two quotations against two corresponding values.
@@ -231,8 +239,12 @@ pub fn core_shadow_word(name: &str) -> Option<ShadowWord> {
         "2OVER" => ShadowWord::TwoOver,
         "2ROT" => ShadowWord::TwoRot,
         "DIP" => ShadowWord::Dip,
+        "2DIP" => ShadowWord::TwoDip,
+        "3DIP" => ShadowWord::ThreeDip,
         "CALL" => ShadowWord::Call,
         "KEEP" => ShadowWord::Keep,
+        "2KEEP" => ShadowWord::TwoKeep,
+        "3KEEP" => ShadowWord::ThreeKeep,
         "BI" => ShadowWord::Bi,
         "BI*" => ShadowWord::BiStar,
         "BI@" => ShadowWord::BiAt,
@@ -579,6 +591,26 @@ impl ShadowStack {
                         self.exec(&body, resolve)?;
                         self.push_slot(hidden);
                     }
+                    ShadowWord::TwoDip => {
+                        self.require(3)?;
+                        let body = self.pop_quote()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.exec(&body, resolve)?;
+                        self.push_slot(x);
+                        self.push_slot(y);
+                    }
+                    ShadowWord::ThreeDip => {
+                        self.require(4)?;
+                        let body = self.pop_quote()?;
+                        let z = self.pop()?;
+                        let y = self.pop()?;
+                        let x = self.pop()?;
+                        self.exec(&body, resolve)?;
+                        self.push_slot(x);
+                        self.push_slot(y);
+                        self.push_slot(z);
+                    }
                     ShadowWord::Call => {
                         // Mirror combinators.rs::call: pop the quotation and run
                         // it on the whole stack.
@@ -591,6 +623,22 @@ impl ShadowStack {
                         let kept = self.slots.last().unwrap().clone();
                         self.exec(&body, resolve)?;
                         self.push_slot(kept);
+                    }
+                    ShadowWord::TwoKeep => {
+                        self.require(3)?;
+                        let body = self.pop_quote()?;
+                        let len = self.slots.len();
+                        let kept = self.slots[len - 2..].to_vec();
+                        self.exec(&body, resolve)?;
+                        self.slots.extend(kept);
+                    }
+                    ShadowWord::ThreeKeep => {
+                        self.require(4)?;
+                        let body = self.pop_quote()?;
+                        let len = self.slots.len();
+                        let kept = self.slots[len - 3..].to_vec();
+                        self.exec(&body, resolve)?;
+                        self.slots.extend(kept);
                     }
                     ShadowWord::Bi => {
                         self.require(3)?;
@@ -799,6 +847,10 @@ mod tests {
     fn core_shadow_word_requires_runtime_spelling() {
         assert_eq!(core_shadow_word("DUP"), Some(ShadowWord::Dup));
         assert_eq!(core_shadow_word("DIP"), Some(ShadowWord::Dip));
+        assert_eq!(core_shadow_word("2DIP"), Some(ShadowWord::TwoDip));
+        assert_eq!(core_shadow_word("3DIP"), Some(ShadowWord::ThreeDip));
+        assert_eq!(core_shadow_word("2KEEP"), Some(ShadowWord::TwoKeep));
+        assert_eq!(core_shadow_word("3KEEP"), Some(ShadowWord::ThreeKeep));
         assert_eq!(core_shadow_word("2ROT"), Some(ShadowWord::TwoRot));
         assert_eq!(core_shadow_word("TRI"), Some(ShadowWord::Tri));
         assert_eq!(core_shadow_word("dup"), None);
@@ -1129,8 +1181,14 @@ mod tests {
         assert_conformance("[ OVER ] DIP SWAP", 4);
         assert_conformance("[ ROT ] DIP", 4);
         assert_conformance("[ [ SWAP ] DIP ] DIP", 4);
+        assert_conformance("[ SWAP ] 2DIP", 4);
+        assert_conformance("[ DUP ] 2DIP DROP", 4);
+        assert_conformance("[ ROT ] 3DIP", 6);
+        assert_conformance("[ DUP ] 3DIP DROP", 5);
         assert_conformance("[ SWAP ] CALL", 2);
         assert_conformance("[ DUP ] KEEP", 1);
+        assert_conformance("[ SWAP ] 2KEEP", 2);
+        assert_conformance("[ ROT ] 3KEEP", 3);
         assert_conformance("[ DUP ] [ DROP ] BI", 1);
         assert_conformance("[ DUP ] [ DROP ] BI*", 2);
         assert_conformance("[ DUP ] BI@", 2);
@@ -1210,6 +1268,10 @@ mod tests {
         assert_conformance("[ DROP DUP ] DIP", 4);
         assert_conformance("[ ROT ROT ] DIP DROP", 5);
         assert_conformance("[ TUCK ] DIP NIP", 4);
+        assert_conformance("[ SWAP ] 2DIP", 4);
+        assert_conformance("[ SWAP OVER ] 2DIP DROP", 5);
+        assert_conformance("[ ROT ] 3DIP", 6);
+        assert_conformance("[ TUCK ] 3DIP NIP", 5);
     }
 
     // =======================================================================
