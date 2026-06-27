@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use semver::Version;
 use toml::{Table, Value};
 
+pub mod select_ci;
+
 pub const EXCLUDE_MEMBERS: &[&str] = &["libpaxos", "meta", "paxos_pb"];
 
 pub const EXCLUDE_DIRS: &[&str] = &[

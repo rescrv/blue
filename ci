@@ -89,6 +89,80 @@ run_binaries_check() {
     )
 }
 
+usage() {
+    echo "usage: ./ci [--changed-files PATH [--global-fixtures PATH]]" >&2
+    exit 1
+}
+
+is_selected_member() {
+    local candidate="$1"
+    local selected
+    if [ "${#selected_members[@]}" -eq 0 ]
+    then
+        return 1
+    fi
+    for selected in "${selected_members[@]}"
+    do
+        if [ "$selected" = "$candidate" ]
+        then
+            return 0
+        fi
+    done
+    return 1
+}
+
+read_selection_facts() {
+    selection_mode="full"
+    selected_members=()
+    selected_packages=()
+    while IFS="$TAB" read -r kind value rest
+    do
+        case "$kind" in
+            mode)
+                selection_mode="$value"
+                ;;
+            selected_member)
+                selected_members+=("$value")
+                ;;
+            selected_package)
+                selected_packages+=("$value")
+                ;;
+        esac
+    done < .ci.selection
+}
+
+build_selected_package_args() {
+    selected_package_args=()
+    local package
+    if [ "${#selected_packages[@]}" -eq 0 ]
+    then
+        return
+    fi
+    for package in "${selected_packages[@]}"
+    do
+        selected_package_args+=("-p" "$package")
+    done
+}
+
+build_checked_package_args() {
+    checked_package_args=()
+    local package
+    if [ "${#selected_packages[@]}" -eq 0 ]
+    then
+        return
+    fi
+    for package in "${selected_packages[@]}"
+    do
+        case "$package" in
+            ci|paxos_pb)
+                ;;
+            *)
+                checked_package_args+=("-p" "$package")
+                ;;
+        esac
+    done
+}
+
 print_profile_summary() {
     if [ ! -f "$PROFILE_LOG" ]
     then
@@ -132,46 +206,141 @@ on_exit() {
 : > "$PROFILE_LOG"
 trap on_exit EXIT
 
+CHANGED_FILES=""
+GLOBAL_FIXTURES=".ci.global-fixtures"
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+        --changed-files)
+            if [ "$#" -lt 2 ]
+            then
+                usage
+            fi
+            CHANGED_FILES="$2"
+            shift 2
+            ;;
+        --global-fixtures)
+            if [ "$#" -lt 2 ]
+            then
+                usage
+            fi
+            GLOBAL_FIXTURES="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
 export PATH="$PATH":"${ROOTDIR}/target/release"
+
+run_profiled workspace/build-ci-tools "cargo build --release -p ci --bins" \
+    cargo build --release -p ci --bins
+
+selection_mode="full"
+selected_members=()
+selected_packages=()
+selected_package_args=()
+checked_package_args=()
+if [ -n "$CHANGED_FILES" ]
+then
+    run_profiled workspace/select "select-ci-packages --changed-files ${CHANGED_FILES}" \
+        target/release/select-ci-packages \
+            --changed-files "$CHANGED_FILES" \
+            --global-fixtures "$GLOBAL_FIXTURES" \
+            --output .ci.selection
+    read_selection_facts
+else
+    echo "CI SELECTION"
+    echo "  mode: full"
+    echo "  full rebuild triggers:"
+    echo "    <none> (no --changed-files provided)"
+fi
 
 run_profiled workspace/fmt "cargo fmt -- --check" \
     cargo fmt -- --check
 
-# Integration tests expect the workspace binaries to be present in target/release.
-run_profiled workspace/build-bins "cargo build --release --bins" \
-    cargo build --release --bins
+if [ "$selection_mode" = "full" ]
+then
+    # Integration tests expect the workspace binaries to be present in target/release.
+    run_profiled workspace/build-bins "cargo build --release --bins" \
+        cargo build --release --bins
+else
+    build_selected_package_args
+    if [ "${#selected_package_args[@]}" -gt 0 ]
+    then
+        run_profiled workspace/build-bins "cargo build --release --bins selected packages" \
+            cargo build --release --bins "${selected_package_args[@]}"
+    else
+        record_profile workspace/build-bins "skipped no selected packages" 0
+    fi
+fi
 
 run_profiled workspace/package-list "target/release/publish > .ci.packages" \
     bash -c 'target/release/publish > .ci.packages'
 
-run_profiled workspace/clippy "cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets" \
-    cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets -- -D warnings -D clippy::all
+if [ "$selection_mode" = "full" ]
+then
+    run_profiled workspace/clippy "cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets" \
+        cargo clippy --workspace --exclude ci --exclude paxos_pb --no-deps --all-targets -- -D warnings -D clippy::all
+else
+    build_checked_package_args
+    if [ "${#checked_package_args[@]}" -gt 0 ]
+    then
+        run_profiled workspace/clippy "cargo clippy selected packages --no-deps --all-targets" \
+            cargo clippy "${checked_package_args[@]}" --no-deps --all-targets -- -D warnings -D clippy::all
+    else
+        record_profile workspace/clippy "skipped selected packages are excluded" 0
+    fi
+fi
 
 packages=()
 while IFS= read -r package
 do
-    packages+=("$package")
+    if [ "$selection_mode" = "full" ] || is_selected_member "$package"
+    then
+        packages+=("$package")
+    fi
 done < .ci.packages
 
-for package in "${packages[@]}"
-do
-    package_name="$(package_name_for_member "$package")"
-    if manifest_has_default_feature "$package"
-    then
-        run_profiled package/test "${package_name} cargo hack" \
-            cargo hack -p "$package_name" --feature-powerset --exclude-features default test --release
-    else
-        status=$?
-        if [ "$status" -ne 1 ]
+if [ "${#packages[@]}" -gt 0 ]
+then
+    for package in "${packages[@]}"
+    do
+        package_name="$(package_name_for_member "$package")"
+        if manifest_has_default_feature "$package"
         then
-            exit "$status"
+            run_profiled package/test "${package_name} cargo hack" \
+                cargo hack -p "$package_name" --feature-powerset --exclude-features default test --release
+        else
+            status=$?
+            if [ "$status" -ne 1 ]
+            then
+                exit "$status"
+            fi
+            run_profiled package/test "${package_name} cargo hack" \
+                cargo hack -p "$package_name" --feature-powerset test --release
         fi
-        run_profiled package/test "${package_name} cargo hack" \
-            cargo hack -p "$package_name" --feature-powerset test --release
-    fi
-    run_profiled package/binaries "${package} binaries" \
-        run_binaries_check "$package"
-done
+        run_profiled package/binaries "${package} binaries" \
+            run_binaries_check "$package"
+    done
+fi
 
-run_profiled workspace/doc "cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps" \
-    cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps
+if [ "$selection_mode" = "full" ]
+then
+    run_profiled workspace/doc "cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps" \
+        cargo doc --workspace --exclude ci --exclude paxos_pb --no-deps
+else
+    build_checked_package_args
+    if [ "${#checked_package_args[@]}" -gt 0 ]
+    then
+        run_profiled workspace/doc "cargo doc selected packages --no-deps" \
+            cargo doc "${checked_package_args[@]}" --no-deps
+    else
+        record_profile workspace/doc "skipped selected packages are excluded" 0
+    fi
+fi

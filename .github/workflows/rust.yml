@@ -13,6 +13,8 @@ jobs:
       CARGO_TOOLS_ROOT: ${{ github.workspace }}/../.cargo-tools
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     - name: rustc cache key
       id: rustc
       run: |
@@ -44,5 +46,14 @@ jobs:
         if [ ! -x "${CARGO_TOOLS_ROOT}/bin/cargo-hack" ]; then
           cargo install --locked --root "${CARGO_TOOLS_ROOT}" cargo-hack
         fi
+    - name: changed files
+      if: github.event_name == 'pull_request'
+      run: |
+        git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" > .ci.changed-files
+        cat .ci.changed-files
     - name: run ci
+      if: github.event_name == 'pull_request'
+      run: ./ci --changed-files .ci.changed-files --global-fixtures .ci.global-fixtures
+    - name: run ci
+      if: github.event_name != 'pull_request'
       run: ./ci
