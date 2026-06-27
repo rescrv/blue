@@ -312,67 +312,6 @@ fn tri_at<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
     Ok(())
 }
 
-/// `CLEAVE`: Apply multiple quotations to a single value.
-///
-/// Stack effect: `( x [[P] [Q] ...] -- P(x) Q(x) ... )`
-///
-/// Pops a list of quotations and a value, applies each quotation to a copy of the value.
-fn cleave<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
-    require_len(stack, 2)?;
-    let quotations_val = stack.pop().ok_or_else(|| stack_underflow(1, 0))?;
-    let quotations = quotations_val
-        .as_quotation()
-        .ok_or_else(not_a_quotation)?
-        .to_vec();
-    let x = stack.pop().unwrap();
-
-    for token in quotations {
-        if let Token::Bracket(q) = token {
-            stack.push(x.clone());
-            eval.eval_with_stack(&q, stack)?;
-        } else {
-            return Err(operator_error("CLEAVE expects a list of quotations"));
-        }
-    }
-
-    Ok(())
-}
-
-/// `SPREAD`: Apply quotations from a list to corresponding stack values.
-///
-/// Stack effect: `( x y z [[P] [Q] [R]] -- P(x) Q(y) R(z) )`
-///
-/// Pops a list of quotations, then pops that many values, applies each quotation
-/// to its corresponding value.
-fn spread<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
-    require_len(stack, 1)?;
-    let quotations_val = stack.pop().ok_or_else(|| stack_underflow(1, 0))?;
-    let quotations = quotations_val
-        .as_quotation()
-        .ok_or_else(not_a_quotation)?
-        .to_vec();
-
-    let n = quotations.len();
-    require_len(stack, n)?;
-
-    let mut values: Vec<T> = Vec::with_capacity(n);
-    for _ in 0..n {
-        values.push(stack.pop().unwrap());
-    }
-    values.reverse();
-
-    for (val, token) in values.into_iter().zip(quotations) {
-        if let Token::Bracket(q) = token {
-            stack.push(val);
-            eval.eval_with_stack(&q, stack)?;
-        } else {
-            return Err(operator_error("SPREAD expects a list of quotations"));
-        }
-    }
-
-    Ok(())
-}
-
 /// `COMPOSE`: Concatenate two quotations.
 ///
 /// Stack effect: `( [P] [Q] -- [P Q] )`
@@ -631,7 +570,7 @@ fn each<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
 /// Register quotation combinators on an evaluator.
 ///
 /// This registers: `CALL`, `DIP`, `2DIP`, `3DIP`, `KEEP`, `2KEEP`, `3KEEP`,
-/// `BI`, `BI*`, `BI@`, `TRI`, `TRI*`, `TRI@`, `CLEAVE`, `SPREAD`, `COMPOSE`,
+/// `BI`, `BI*`, `BI@`, `TRI`, `TRI*`, `TRI@`, `COMPOSE`,
 /// `CURRY`, `2CURRY`, `3CURRY`.
 pub fn register_combinators<T>(evaluator: &mut Evaluator<T>)
 where
@@ -650,8 +589,6 @@ where
     evaluator.define("TRI", tri::<T>);
     evaluator.define("TRI*", tri_star::<T>);
     evaluator.define("TRI@", tri_at::<T>);
-    evaluator.define("CLEAVE", cleave::<T>);
-    evaluator.define("SPREAD", spread::<T>);
     evaluator.define("COMPOSE", compose::<T>);
     evaluator.define("CURRY", curry::<T>);
     evaluator.define("2CURRY", two_curry::<T>);
@@ -1016,32 +953,6 @@ mod tests {
         let tokens = parse("3 4 5 [DUP MUL] TRI@").unwrap();
         let result = eval.eval(&tokens).unwrap();
         assert_eq!(result, vec![Value::Int(9), Value::Int(16), Value::Int(25)]);
-        println!("Stack: {result:?}");
-    }
-
-    // ========================================================================
-    // CLEAVE tests
-    // ========================================================================
-
-    #[test]
-    fn cleave_applies_multiple_quotations() {
-        let eval = make_eval();
-        let tokens = parse("5 [[DUP ADD] [DUP MUL] [1 ADD]] CLEAVE").unwrap();
-        let result = eval.eval(&tokens).unwrap();
-        assert_eq!(result, vec![Value::Int(10), Value::Int(25), Value::Int(6)]);
-        println!("Stack: {result:?}");
-    }
-
-    // ========================================================================
-    // SPREAD tests
-    // ========================================================================
-
-    #[test]
-    fn spread_distributes_quotations() {
-        let eval = make_eval();
-        let tokens = parse("1 2 3 [[DUP ADD] [DUP MUL] [1 ADD]] SPREAD").unwrap();
-        let result = eval.eval(&tokens).unwrap();
-        assert_eq!(result, vec![Value::Int(2), Value::Int(4), Value::Int(4)]);
         println!("Stack: {result:?}");
     }
 
