@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+mod attestation;
 mod builtins;
 mod check;
 mod combinators;
@@ -13,9 +14,16 @@ mod shadow;
 mod solver;
 mod types;
 
+pub use attestation::ContractSet;
+pub use attestation::OperatorContract;
+pub use attestation::OperatorOrigin;
+pub use attestation::OperatorTable;
+pub use attestation::attestation_hash;
+pub use attestation::grep_assume_tokens;
 pub use builtins::register_stack_builtins;
 pub use check::TypeError;
 pub use check::check;
+pub use check::definition_schemes;
 pub use check::type_check;
 pub use check::type_check_entry;
 pub use combinators::Quotable;
@@ -90,6 +98,7 @@ pub use solver::check_subsumption;
 pub use solver::discharge;
 pub use solver::discharge_with_model;
 pub use solver::negate;
+pub use solver::obligation_sub_hash;
 pub use solver::refinement_verify_word;
 pub use solver::relay_quote_post;
 pub use solver::render_smtlib;
