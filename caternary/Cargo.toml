@@ -20,3 +20,8 @@ shvar = { workspace = true }
 name = "m8_script"
 path = "examples/m8_script.rs"
 required-features = ["binaries"]
+
+[[example]]
+name = "m9_vc_generation"
+path = "examples/m9_vc_generation.rs"
+required-features = ["binaries"]
