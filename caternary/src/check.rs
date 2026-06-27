@@ -882,7 +882,7 @@ where
     // operator: it asserts a predicate about the current top of stack and moves
     // no data, so its Tier-0 shape effect is the identity ( 'r -- 'r ). Tier 1
     // (`verify_ctx`) intercepts the same word before word resolution; Tier 0 must
-    // likewise accept it natively — it is a language construct (like `if`), never a
+    // likewise accept it natively — it is a language construct (like `IF`), never a
     // registered operator and never in the operator table — so an assume-bearing
     // program passes the whole-program gate's Tier-0 half (invariant 19/20). The
     // predicate text is opaque to Tier 0; a malformed clause surfaces at Tier 1.
@@ -2433,11 +2433,11 @@ mod tests {
         // conflicting types are concrete — and must NOT leak internal variable
         // names (`'t7`, `'r3`).
         //
-        // `[ [ 1 true + ] call ]`: inside the inner quotation `+` demands two
+        // `[ [ 1 true + ] CALL ]`: inside the inner quotation `+` demands two
         // `Num`s but `true` produced a `Bool`. The contradiction is born inside
         // the inner frame; both frames enclose it, so localize-inward must anchor
         // at the INNER one (the user's real mistake), not the outer consequence.
-        let err = infer_snippet("[ [ 1 true + ] call ]").unwrap_err();
+        let err = infer_snippet("[ [ 1 true + ] CALL ]").unwrap_err();
         let TypeError::Mismatch { error, frames } = &err else {
             panic!("expected a typed mismatch, got {err:?}");
         };
@@ -2484,10 +2484,10 @@ mod tests {
     #[test]
     fn m5_nested_quotation_renders_a_multi_level_breadcrumb() {
         // §7.2: a mismatch inside a NESTED quotation renders the frame
-        // breadcrumb — a backtrace, not one opaque site. `[ [ 1 true + ] call ]`
+        // breadcrumb — a backtrace, not one opaque site. `[ [ 1 true + ] CALL ]`
         // is two frames deep, so the diagnostic must list BOTH "in the quotation
         // at byte N" lines, outermost first.
-        let err = infer_snippet("[ [ 1 true + ] call ]").unwrap_err();
+        let err = infer_snippet("[ [ 1 true + ] CALL ]").unwrap_err();
         let TypeError::Mismatch { frames, .. } = &err else {
             panic!("expected a typed mismatch, got {err:?}");
         };

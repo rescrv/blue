@@ -359,32 +359,44 @@ fn warm_compile_reuses_unchanged_obligations_and_resolves_only_the_changed_one()
 
 #[test]
 fn checked_program_links_no_z3_symbols() {
-    // (§12 M14 / invariant 20) A checked program links no solver: no z3 crate in
-    // the dependency graph, and caternary's own dependencies name no solver crate.
+    // (§12 M14 / invariant 20) A checked program links no solver. The native z3
+    // backend (`Z3Solver`) is a build-time-only CHECK backend behind the optional
+    // `z3` feature; it must be OFF by default so the default build — and a checked
+    // program at runtime — links no solver. Assert that opt-in shape structurally.
     let manifest = include_str!("../../Cargo.toml");
+
+    // z3 must be declared `optional` (so it is never in the default graph) ...
     let deps = manifest
         .split_once("[dependencies]")
         .expect("a [dependencies] section")
         .1;
-    let lower = deps.to_lowercase();
+    let z3_line = deps
+        .lines()
+        .find(|l| l.trim_start().starts_with("z3"))
+        .expect("a z3 dependency line");
     assert!(
-        !lower.contains("z3"),
-        "caternary must not depend on a z3 crate"
-    );
-    assert!(
-        !lower.contains("cvc5") && !lower.contains("z3-sys"),
-        "no native solver crate in caternary's dependencies"
+        z3_line.contains("optional = true"),
+        "z3 must be an optional dependency, not a hard one: {z3_line}"
     );
 
-    let lock_path = format!("{}/../Cargo.lock", env!("CARGO_MANIFEST_DIR"));
-    let lock = std::fs::read_to_string(&lock_path).expect("workspace Cargo.lock");
-    for line in lock.lines() {
-        let l = line.trim();
-        assert!(
-            l != "name = \"z3\"" && l != "name = \"z3-sys\"" && l != "name = \"cvc5\"",
-            "a solver crate is in the dependency graph: {l}"
-        );
-    }
+    // ... gated behind a `z3` feature that the default feature set does NOT pull
+    // in (so `caternary check` links no solver unless explicitly built --features z3).
+    let features = manifest
+        .split_once("[features]")
+        .expect("a [features] section gating the solver")
+        .1;
+    assert!(
+        features.contains("z3 = [\"dep:z3\"]"),
+        "the z3 backend must be gated behind a `z3` feature"
+    );
+    let default_line = features
+        .lines()
+        .find(|l| l.trim_start().starts_with("default"))
+        .expect("a `default` feature line");
+    assert!(
+        !default_line.contains("z3"),
+        "the z3 feature must NOT be enabled by default: {default_line}"
+    );
 }
 
 #[test]
