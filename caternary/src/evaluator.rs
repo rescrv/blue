@@ -203,6 +203,19 @@ pub struct Evaluator<T> {
     refinements: HashMap<String, crate::RefinementSig>,
 }
 
+impl<T> Clone for Evaluator<T> {
+    fn clone(&self) -> Self {
+        Self {
+            operators: self.operators.clone(),
+            definitions: self.definitions.clone(),
+            contracts: self.contracts.clone(),
+            definition_spans: self.definition_spans.clone(),
+            annotations: self.annotations.clone(),
+            refinements: self.refinements.clone(),
+        }
+    }
+}
+
 impl<T> Default for Evaluator<T>
 where
     T: Quotable,
