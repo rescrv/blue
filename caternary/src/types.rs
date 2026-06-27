@@ -18,12 +18,12 @@
 //! registers for builtins, so there is no spec-name/runtime-name compatibility
 //! table in this layer. The remaining Tier-0 reconciliation facts are:
 //!
-//! * **There is no core `+` / `Num` builtin.** The spec's `+ : ( 'S Num Num --
-//!   'S Num )` signature does not correspond to any operator in the core tables;
-//!   only `ADD`/`MUL`/`GT` exist, and those appear *only in test code*. Numeric
-//!   operators therefore enter the type environment via *registration*
-//!   ([`crate::Evaluator::register_operator_with_contract`]), never from a core
-//!   table. The numeric base type is spelled [`NUM`].
+//! * **Scalar operators are registered builtins, not core schemes.** Arithmetic,
+//!   comparison, boolean, and bitwise words such as `+`, `>=`, `&&`, and `|`
+//!   enter the type environment through
+//!   [`crate::register_scalar_builtins`] /
+//!   [`crate::Evaluator::register_operator_with_contract`], never from
+//!   [`core_scheme`]. The numeric base type is spelled [`NUM`].
 //! * **There is no numeric token.** The parser emits only `Token::Word` and
 //!   `Token::Bracket` (see `parser.rs`); there is no `Token::Num`. The Tier-0
 //!   decision, recorded as [`is_numeric_literal`], is that a numeric literal is a

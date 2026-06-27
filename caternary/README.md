@@ -117,7 +117,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Language Features By Example
 
-Assume the evaluator has all builtins registered and helper operators like `ADD`, `MUL`, `GT`, `EVEN`.
+Assume the evaluator has all builtins registered. Examples that use `EVEN` assume
+a host predicate with that name is also registered.
 
 ### Stack Builtins
 
@@ -139,16 +140,16 @@ Assume the evaluator has all builtins registered and helper operators like `ADD`
 
 | Operator | Example | Resulting stack |
 |---|---|---|
-| `CALL` | `1 2 [ADD] CALL` | `3` |
-| `DIP` | `1 2 3 [ADD] DIP` | `3 3` |
-| `KEEP` | `5 [DUP MUL] KEEP` | `25 5` |
-| `BI` | `5 [DUP ADD] [DUP MUL] BI` | `10 25` |
-| `BI*` | `3 4 [DUP MUL] [DUP ADD] BI*` | `9 8` |
-| `BI@` | `3 4 [DUP MUL] BI@` | `9 16` |
-| `CLEAVE` | `5 [[DUP ADD] [DUP MUL] [1 ADD]] CLEAVE` | `10 25 6` |
-| `SPREAD` | `1 2 3 [[DUP ADD] [DUP MUL] [1 ADD]] SPREAD` | `2 4 4` |
-| `COMPOSE` | `[1 ADD] [2 MUL] COMPOSE` | `[1 ADD 2 MUL]` |
-| `CURRY` | `10 [ADD] CURRY` | `[10 ADD]` |
+| `CALL` | `1 2 [+] CALL` | `3` |
+| `DIP` | `1 2 3 [+] DIP` | `3 3` |
+| `KEEP` | `5 [DUP *] KEEP` | `25 5` |
+| `BI` | `5 [DUP +] [DUP *] BI` | `10 25` |
+| `BI*` | `3 4 [DUP *] [DUP +] BI*` | `9 8` |
+| `BI@` | `3 4 [DUP *] BI@` | `9 16` |
+| `CLEAVE` | `5 [[DUP +] [DUP *] [1 +]] CLEAVE` | `10 25 6` |
+| `SPREAD` | `1 2 3 [[DUP +] [DUP *] [1 +]] SPREAD` | `2 4 4` |
+| `COMPOSE` | `[1 +] [2 *] COMPOSE` | `[1 + 2 *]` |
+| `CURRY` | `10 [+] CURRY` | `[10 +]` |
 
 ### Conditionals
 
@@ -165,9 +166,9 @@ Assume the evaluator has all builtins registered and helper operators like `ADD`
 
 | Operator | Example | Resulting stack |
 |---|---|---|
-| `MAP` | `[1 2 3] [DUP MUL] MAP` | `[1 4 9]` |
+| `MAP` | `[1 2 3] [DUP *] MAP` | `[1 4 9]` |
 | `FILTER` | `[1 2 3 4] [EVEN] FILTER` | `[2 4]` |
-| `FOLD` | `[1 2 3] 0 [ADD] FOLD` | `6` |
+| `FOLD` | `[1 2 3] 0 [+] FOLD` | `6` |
 | `EACH` | `[1 2 3] [DROP] EACH` | *(unchanged)* |
 
 Notes:
@@ -207,9 +208,9 @@ Scoping rules:
   stream, so programs without locals are unaffected.
 
 ```text
-Program: 10 >x [x ADD] CALL
+Program: 10 >x [x +] CALL
 Meaning: bind 10 to x, push a quotation that captures x by value, then call it
-Stack (with 5 on the stack before, ADD registered): 15
+Stack (with 5 on the stack before): 15
 ```
 
 ### User Function Definitions
@@ -226,7 +227,7 @@ let mut eval: Evaluator<Value> = Evaluator::new();
 register_all_builtins(&mut eval);
 
 // Load definitions once, then evaluate many programs against them.
-eval.load(&parse("[1 ADD] :inc [inc inc] :twice")?)?;
+eval.load(&parse("[1 +] :inc [inc inc] :twice")?)?;
 
 let stack = eval.eval(&parse("5 twice")?)?; // 7
 ```
@@ -234,7 +235,7 @@ let stack = eval.eval(&parse("5 twice")?)?; // 7
 Because `load` sees the whole token stream before execution:
 
 - **Order does not matter.** Forward references resolve: `[inc inc] :twice` may
-  appear before `[1 ADD] :inc`.
+  appear before `[1 +] :inc`.
 - **Recursion works.** A body resolves its own name at call time against the
   fully populated table.
 - **Load is additive.** Call `load` repeatedly to assemble a library

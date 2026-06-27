@@ -20,6 +20,7 @@ pub use attestation::OperatorOrigin;
 pub use attestation::OperatorTable;
 pub use attestation::attestation_hash;
 pub use attestation::grep_assume_tokens;
+pub use builtins::register_scalar_builtins;
 pub use builtins::register_stack_builtins;
 pub use check::GateError;
 pub use check::TypeError;
@@ -134,6 +135,7 @@ where
     T: Quotable,
 {
     register_stack_builtins(evaluator);
+    register_scalar_builtins(evaluator);
     register_combinators(evaluator);
     register_conditionals(evaluator);
     register_sequence_combinators(evaluator);
