@@ -80,6 +80,7 @@ use crate::WordTy;
 use crate::refinement::BinOp;
 use crate::refinement::Binder;
 use crate::refinement::Pred;
+use crate::refinement::RefinementSide;
 use crate::refinement::RefinementSig;
 use crate::refinement::UnOp;
 use crate::shadow::NamedBinding;
@@ -825,6 +826,354 @@ where
     let mut obligations = Vec::new();
     verify(tokens, &mut stack, solver, &resolve, &mut obligations)?;
     Ok(obligations)
+}
+
+// ===========================================================================
+// Higher-order refinement subsumption (M10, §10.6 / §14.8)
+// ===========================================================================
+//
+// This is the **Tier 1 centerpiece**: the one admitted directional check
+// (subtyping-on-the-arrow), discharged **only** as SMT implications and **never**
+// inferred by the type engine (invariant 1/13). When a refined quotation crosses
+// a higher-order boundary — passed to a combinator / operator expecting a refined
+// signature — its contract must be checked for **preservation**. The checker
+// emits **exactly two** directional implications and hands them to the solver;
+// the solver settles them. Nothing here unifies, binds a `TyVar`, or touches the
+// Tier 0 substitution.
+//
+// The two directions are the classic mistake, spelled out (§10.6):
+//
+//   * **Guarantees (postconditions) are COVARIANT:** `provided_post ⟹ expected_post`.
+//     A *stronger* guarantee substitutes for a weaker one (`r > 5` where `r > 0`
+//     is expected is fine).
+//   * **Demands (preconditions) are CONTRAVARIANT:** `expected_pre ⟹ provided_pre`
+//     (note the **flip**). A *weaker* demand substitutes for a stronger one (a
+//     quotation that demands less than the boundary promises to supply is fine).
+//
+// **Fail closed (invariant 12):** if a subsumption VC comes back `Unknown` the
+// boundary is **rejected** with the targeted message — never a silent pass. A
+// refinement that fails open is worse than no refinement (vacuous verification).
+
+/// The fail-closed rejection message for an **undecidable** subsumption VC
+/// (§10.6, invariant 12). Emitted verbatim when a directional VC returns
+/// [`Verdict::Unknown`]: the contract could not be *proven* preserved, so the
+/// boundary is rejected rather than silently admitted.
+pub const SUBSUMPTION_FAIL_CLOSED_MSG: &str = "could not prove this contract is preserved across the combinator; annotate or simplify the predicate";
+
+/// Which of the two directional subsumption VCs (§10.6) a verdict belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubsumptionDirection {
+    /// **Covariant** guarantee check: `provided_post ⟹ expected_post`. A stronger
+    /// provided guarantee subsumes a weaker expected one.
+    Guarantee,
+    /// **Contravariant** demand check: `expected_pre ⟹ provided_pre` (the flipped
+    /// direction). A weaker provided demand subsumes a stronger expected one.
+    Demand,
+}
+
+impl SubsumptionDirection {
+    /// A short human label for diagnostics.
+    pub fn label(self) -> &'static str {
+        match self {
+            SubsumptionDirection::Guarantee => "guarantee (covariant)",
+            SubsumptionDirection::Demand => "demand (contravariant)",
+        }
+    }
+}
+
+/// One discharged **directional** subsumption VC (§10.6): the implication that
+/// was checked, the verdict the solver returned via the negated-goal encoding,
+/// and — on a `Sat` (violated) verdict — the surfaced counterexample [`Model`].
+#[derive(Debug, Clone)]
+pub struct SubsumptionVc {
+    /// Whether this is the covariant guarantee or contravariant demand check.
+    pub direction: SubsumptionDirection,
+    /// The implication actually checked (`hypothesis ⟹ goal`), rendered as a
+    /// predicate over the position-aligned binders — the exact thing handed to
+    /// the solver, for diagnostics and tests.
+    pub implication: Pred,
+    /// The verdict: `Unsat` ⇒ the implication is **valid** (this direction is
+    /// preserved); `Sat` ⇒ refuted (see `model`); `Unknown` ⇒ undecided — which
+    /// makes the whole subsumption **fail closed** (§10.6).
+    pub verdict: Verdict,
+    /// The counterexample model, present **iff** `verdict == Sat` and the VC was
+    /// fully decidable. An `Unknown` never carries a (fabricated) model (§10.5).
+    pub model: Option<Model>,
+}
+
+impl SubsumptionVc {
+    /// Whether this directional implication is **valid** (the negated goal came
+    /// back `Unsat`). `Sat` and `Unknown` are both **not** valid.
+    pub fn is_valid(&self) -> bool {
+        self.verdict == Verdict::Unsat
+    }
+}
+
+/// The collapsed outcome of a subsumption check (§10.6) — what a caller acts on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubsumptionOutcome {
+    /// **Both** directional VCs are valid (`Unsat`): the contract is preserved
+    /// across the boundary. The boundary is accepted.
+    Preserved,
+    /// A directional VC was **refuted** (`Sat`): the contract is *not* preserved.
+    /// Carries which direction failed and the surfaced counterexample.
+    Violated {
+        /// Which directional implication failed.
+        direction: SubsumptionDirection,
+        /// The concrete counterexample witnessing the failure (if decidable).
+        model: Option<Model>,
+    },
+    /// A directional VC came back `Unknown`: the boundary **fails closed**
+    /// (§10.6 / invariant 12) with [`SUBSUMPTION_FAIL_CLOSED_MSG`]. Never a
+    /// silent pass.
+    Undecidable {
+        /// Which directional implication could not be decided.
+        direction: SubsumptionDirection,
+        /// The verbatim targeted rejection message.
+        message: String,
+    },
+}
+
+/// The result of a higher-order subsumption check (§10.6): the **two** directional
+/// VCs (covariant guarantee + contravariant demand) and nothing else — the
+/// checker emits exactly these two implications and the solver settles them.
+#[derive(Debug, Clone)]
+pub struct SubsumptionResult {
+    /// The covariant guarantee VC: `provided_post ⟹ expected_post`.
+    pub guarantee: SubsumptionVc,
+    /// The contravariant demand VC: `expected_pre ⟹ provided_pre`.
+    pub demand: SubsumptionVc,
+}
+
+impl SubsumptionResult {
+    /// Collapse the two directional VCs into a single outcome, **failing closed**
+    /// on any `Unknown` (§10.6): the boundary is preserved **iff** both VCs are
+    /// valid; an `Unknown` rejects (never a silent pass); a `Sat` is a genuine
+    /// violation with a counterexample.
+    ///
+    /// Precedence is deliberate: an `Unknown` anywhere is reported as
+    /// [`SubsumptionOutcome::Undecidable`] **first** (the fail-closed mandate),
+    /// then a `Sat` as [`SubsumptionOutcome::Violated`], else
+    /// [`SubsumptionOutcome::Preserved`].
+    pub fn outcome(&self) -> SubsumptionOutcome {
+        for vc in [&self.guarantee, &self.demand] {
+            if vc.verdict == Verdict::Unknown {
+                return SubsumptionOutcome::Undecidable {
+                    direction: vc.direction,
+                    message: SUBSUMPTION_FAIL_CLOSED_MSG.to_string(),
+                };
+            }
+        }
+        for vc in [&self.guarantee, &self.demand] {
+            if vc.verdict == Verdict::Sat {
+                return SubsumptionOutcome::Violated {
+                    direction: vc.direction,
+                    model: vc.model.clone(),
+                };
+            }
+        }
+        SubsumptionOutcome::Preserved
+    }
+
+    /// Whether the contract is preserved across the boundary: **both** directional
+    /// VCs valid. Convenience for the common accept/reject branch.
+    pub fn is_preserved(&self) -> bool {
+        matches!(self.outcome(), SubsumptionOutcome::Preserved)
+    }
+}
+
+/// Rename a refinement side's predicate so its binders become **position-aligned**
+/// canonical SMT variables (`{prefix}{depth}`, depth measured from the top of
+/// stack, the only pinned end — §10.2). Returns `None` for an absent predicate
+/// (`where true`).
+///
+/// Both sides of a subsumption boundary must speak about the *same* logical
+/// variables for the implication to mean anything: a provided quotation may name
+/// its result `r` while the expected signature names it `out`, but positionally
+/// they are the same slot. Aligning both to `{prefix}{depth}` makes the
+/// implication well-formed over shared variables.
+fn align_side(side: &RefinementSide, prefix: &str) -> Option<Pred> {
+    let pred = side.predicate.as_ref()?;
+    let n = side.binders.len();
+    let bindings: Vec<NamedBinding> = side
+        .binders
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            // depth from the top of stack: the last binder is depth 0.
+            let depth = n - 1 - i;
+            NamedBinding {
+                name: b.name.clone(),
+                term: Pred::Var(format!("{prefix}{depth}")),
+            }
+        })
+        .collect();
+    Some(substitute(pred, &bindings))
+}
+
+/// Discharge a single directional implication `hypothesis ⟹ goal` through the
+/// solver via the negated-goal encoding (§10.5), returning the verdict, the
+/// counterexample model on `Sat`, and the implication predicate (for the record).
+///
+/// An absent `goal` (`where true`) is **trivially valid** (`Unsat`, no model):
+/// `h ⟹ true` always holds. An absent `hypothesis` (`where true`) asserts no
+/// extra fact, so the goal must hold on its own — which is exactly the
+/// unrefined-meets-required case that *should* fail (handled by M11's targeted
+/// diagnostic, but here it simply fails the VC; M10 does not special-case it).
+fn directional_implication<S: Solver + CounterModel>(
+    direction: SubsumptionDirection,
+    hypothesis: Option<Pred>,
+    goal: Option<Pred>,
+    solver: &mut S,
+) -> SubsumptionVc {
+    // Build the implication predicate for the record. `true ⟹ goal` reduces to
+    // `goal`; `h ⟹ true` reduces to `true`.
+    let implication = match (&hypothesis, &goal) {
+        (_, None) => Pred::Num("1".to_string()), // `true`; rendered placeholder
+        (None, Some(g)) => g.clone(),
+        (Some(h), Some(g)) => Pred::Bin(BinOp::Implies, Box::new(h.clone()), Box::new(g.clone())),
+    };
+
+    // `h ⟹ true` is valid with no solver work.
+    let goal = match goal {
+        None => {
+            return SubsumptionVc {
+                direction,
+                implication,
+                verdict: Verdict::Unsat,
+                model: None,
+            };
+        }
+        Some(g) => g,
+    };
+
+    // Assert the hypothesis (if any) in a fresh scope, discharge the goal via the
+    // negated-goal encoding, then pop — never disturbing the live facts above.
+    solver.push_scope();
+    if let Some(h) = hypothesis {
+        solver.assert(&h);
+    }
+    let (verdict, model) = discharge_with_model(solver, &goal);
+    solver.pop_scope();
+
+    SubsumptionVc {
+        direction,
+        implication,
+        verdict,
+        model,
+    }
+}
+
+/// **Higher-order refinement subsumption** (§10.6 / M10): at a boundary where a
+/// `provided` quotation refinement meets an `expected` refined signature, emit
+/// **exactly two** directional VCs and discharge them through the solver.
+///
+///   * **Covariant guarantee:** `provided_post ⟹ expected_post`.
+///   * **Contravariant demand:** `expected_pre ⟹ provided_pre` (flipped).
+///
+/// The checker only *generates* these two implications; the solver settles them
+/// (invariant 1/13 — subsumption is **never inferred** by the type engine). The
+/// binders of both sides are position-aligned ([`align_side`]) so the implications
+/// are over shared SMT variables. Discharge reuses the M9 negated-goal encoding
+/// ([`discharge_with_model`]) so a violation surfaces a counterexample.
+///
+/// The returned [`SubsumptionResult::outcome`] **fails closed** on any `Unknown`
+/// (§10.6, invariant 12).
+///
+/// This takes only refinement payloads and a solver — no Tier 0 inference handle
+/// — so it cannot touch the frozen substitution (immutability barrier).
+pub fn check_subsumption<S: Solver + CounterModel>(
+    provided: &RefinementSig,
+    expected: &RefinementSig,
+    solver: &mut S,
+) -> SubsumptionResult {
+    // Covariant guarantee: provided_post ⟹ expected_post.
+    let guarantee = directional_implication(
+        SubsumptionDirection::Guarantee,
+        align_side(&provided.guarantees, "$post"),
+        align_side(&expected.guarantees, "$post"),
+        solver,
+    );
+    // Contravariant demand (the FLIP): expected_pre ⟹ provided_pre.
+    let demand = directional_implication(
+        SubsumptionDirection::Demand,
+        align_side(&expected.demands, "$pre"),
+        align_side(&provided.demands, "$pre"),
+        solver,
+    );
+    SubsumptionResult { guarantee, demand }
+}
+
+// ===========================================================================
+// Operator refinement axioms for the language-core combinators (M10, §10.6/§8)
+// ===========================================================================
+//
+// The primitive combinators `dip` / `call` / `if` are **language-core operator
+// registrations** (§8): they have no Caternary body, and carry an authored Tier 0
+// scheme (§2) *and* an authored **Tier 1 refinement axiom** here. These axioms
+// are what let a refined quotation's guarantee survive a combinator boundary;
+// without them the contract would evaporate at `dip` exactly as at an
+// unaxiomatized foreign call.
+//
+// The axioms are the §2 schemes **lifted to predicates** (the relay rule —
+// invariant 8: a combinator's contract uses only the *declared* arrow of its
+// quotation argument; the body is never expanded into the caller's contract):
+//
+//   * **`dip` — relay + identity (`dip q = q ⊗ id_a`, lifted).** `dip` sets aside
+//     the top value `a`, runs the quotation `q` on the rest, then restores `a`.
+//     Lifted: (1) the set-aside value's predicate is **preserved unchanged** (it
+//     is literally the same term by identity — any fact about it stays asserted),
+//     and (2) the quotation's `post` holds on the rest (the values `q` produced).
+//   * **`call` — relay.** `call q` runs `q` on the whole stack; its axiom is just
+//     `q`'s post holding on the result (the `dip` rule with no set-aside value).
+//   * **`if` — relay both branches.** Each branch quotation's post holds under its
+//     branch's path condition (§10.4); the post-`if` facts are the branches'
+//     relayed guarantees.
+//
+// In this verifier quotations are token bodies and the relay is realized by the
+// shadow recursion in [`apply_core`] (`Dip`/`Call`) and [`verify_if`]: running a
+// refined word inside the body **publishes its guarantee as a live fact** on the
+// far side, and the set-aside `dip` value is restored by identity so its fact
+// persists. [`relay_quote_post`] is the same axiom expressed at the **declared
+// contract** level — used when a quotation arrives carrying a *declared*
+// refinement (rather than an inline body) so the contract is relayed without
+// expanding any body.
+
+/// The `dip`/`call` refinement axiom expressed at the **declared contract** level
+/// (§10.6): relay a quotation's declared `post` (guarantee) onto the result slots
+/// it produced, asserting it as a live fact so a downstream obligation can use it.
+///
+/// `result_terms` are the shadow terms occupying the quotation's output slots
+/// (top-of-stack last), produced by running the quotation. The guarantee's output
+/// binders are position-aligned against them (right-to-left from the top, §10.2)
+/// and the substituted predicate is asserted. An absent guarantee (`where true`)
+/// asserts nothing.
+///
+/// This is the **relay** (invariant 8): only the quotation's *declared* arrow /
+/// contract is used — its body is never expanded into the combinator's contract.
+/// `dip`'s extra clause (the set-aside value's predicate is preserved unchanged)
+/// needs no work here: that value is the same term by identity, so any fact about
+/// it already stands in the solver scope.
+pub fn relay_quote_post<S: Solver>(quote: &RefinementSig, result_terms: &[Pred], solver: &mut S) {
+    let Some(post) = quote.guarantees.predicate.as_ref() else {
+        return; // `where true` — nothing to relay.
+    };
+    let binders = &quote.guarantees.binders;
+    let n = binders.len();
+    // Align each output binder to its result term, right-to-left from the top.
+    let mut bindings = Vec::with_capacity(n);
+    let m = result_terms.len();
+    for (i, b) in binders.iter().enumerate() {
+        let depth = n - 1 - i; // depth from the top
+        if depth < m {
+            bindings.push(NamedBinding {
+                name: b.name.clone(),
+                term: result_terms[m - 1 - depth].clone(),
+            });
+        }
+    }
+    let fact = substitute(post, &bindings);
+    solver.assert(&fact);
 }
 
 // ===========================================================================
@@ -2022,5 +2371,470 @@ mod tests {
         let _ = solver.check();
         solver.pop_scope();
         drop(solver); // discarded before anything "ships".
+    }
+
+    // =======================================================================
+    // M10 — higher-order refinement subsumption (§10.6 / §12 M10)
+    // =======================================================================
+
+    // A quotation/signature carrying only an output (post) refinement `r OP k`.
+    fn post_sig(op: BinOp, k: &str) -> RefinementSig {
+        RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(op, Box::new(var("r")), Box::new(num(k)))),
+            },
+        }
+    }
+
+    // A quotation/signature carrying only an input (pre/demand) refinement `n OP k`.
+    fn pre_sig(op: BinOp, k: &str) -> RefinementSig {
+        RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![binder("n", "Num")],
+                predicate: Some(Pred::Bin(op, Box::new(var("n")), Box::new(num(k)))),
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: None,
+            },
+        }
+    }
+
+    #[test]
+    fn m10_covariant_stronger_guarantee_is_accepted() {
+        // provided post r>5 where expected post r>0: covariant VC r>5 ⟹ r>0 is
+        // valid (a STRONGER guarantee subsumes a weaker one) ⇒ ACCEPTED.
+        let provided = post_sig(BinOp::Gt, "5");
+        let expected = post_sig(BinOp::Gt, "0");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(
+            res.guarantee.direction,
+            SubsumptionDirection::Guarantee,
+            "first VC is the covariant guarantee direction"
+        );
+        assert!(
+            res.guarantee.is_valid(),
+            "r>5 ⟹ r>0 must be valid: {:?}",
+            res.guarantee
+        );
+        // The demand side is `true ⟹ true` (both absent) ⇒ trivially valid.
+        assert!(res.demand.is_valid());
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+        assert!(res.is_preserved());
+    }
+
+    #[test]
+    fn m10_covariant_weaker_guarantee_is_rejected() {
+        // provided post r>0 where expected post r>5: covariant VC r>0 ⟹ r>5 is
+        // INVALID (a weaker guarantee cannot substitute for a stronger one) ⇒
+        // REJECTED, with a counterexample.
+        let provided = post_sig(BinOp::Gt, "0");
+        let expected = post_sig(BinOp::Gt, "5");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert!(!res.guarantee.is_valid(), "r>0 ⟹ r>5 must be invalid");
+        assert_eq!(res.guarantee.verdict, Verdict::Sat);
+        match res.outcome() {
+            SubsumptionOutcome::Violated { direction, model } => {
+                assert_eq!(direction, SubsumptionDirection::Guarantee);
+                let m = model.expect("a refuted subsumption surfaces a counterexample");
+                // Witness: a point with r>0 but r<=5 (e.g. r between 0 and 5).
+                assert!(
+                    m.get("$post0").is_some(),
+                    "model constrains the result: {m}"
+                );
+            }
+            other => panic!("expected Violated, got {other:?}"),
+        }
+        assert!(!res.is_preserved());
+    }
+
+    #[test]
+    fn m10_contravariant_weaker_demand_is_accepted() {
+        // provided demand n>0 where expected demand n>5: contravariant VC
+        // expected_pre ⟹ provided_pre, i.e. n>5 ⟹ n>0, is valid (a WEAKER
+        // provided demand subsumes a stronger expected one) ⇒ ACCEPTED. Note the
+        // FLIP relative to the guarantee direction.
+        let provided = pre_sig(BinOp::Gt, "0");
+        let expected = pre_sig(BinOp::Gt, "5");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(res.demand.direction, SubsumptionDirection::Demand);
+        assert!(
+            res.demand.is_valid(),
+            "n>5 ⟹ n>0 (expected_pre ⟹ provided_pre) must be valid: {:?}",
+            res.demand
+        );
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+    }
+
+    #[test]
+    fn m10_contravariant_stronger_demand_is_rejected() {
+        // provided demand n>5 where expected demand n>0: contravariant VC
+        // n>0 ⟹ n>5 is INVALID (a quotation demanding MORE than the boundary
+        // supplies cannot substitute) ⇒ REJECTED. The symmetric (flipped) case.
+        let provided = pre_sig(BinOp::Gt, "5");
+        let expected = pre_sig(BinOp::Gt, "0");
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert!(!res.demand.is_valid(), "n>0 ⟹ n>5 must be invalid");
+        assert_eq!(res.demand.verdict, Verdict::Sat);
+        match res.outcome() {
+            SubsumptionOutcome::Violated { direction, .. } => {
+                assert_eq!(direction, SubsumptionDirection::Demand);
+            }
+            other => panic!("expected Violated on the demand direction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m10_undecidable_subsumption_fails_closed() {
+        // A subsumption VC the reasoner cannot decide (an opaque/uninterpreted
+        // conjunct) must be REJECTED with the targeted message — never accepted
+        // (fail closed, invariant 12). provided post r>0, expected post
+        // `length r > 0` (uninterpreted `length`): the guarantee VC
+        // r>0 ⟹ length r > 0 has an opaque conjunct ⇒ Unknown ⇒ rejected.
+        let provided = post_sig(BinOp::Gt, "0");
+        let expected = RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(
+                    BinOp::Gt,
+                    Box::new(Pred::App("length".into(), vec![var("r")])),
+                    Box::new(num("0")),
+                )),
+            },
+        };
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(
+            res.guarantee.verdict,
+            Verdict::Unknown,
+            "an opaque subsumption VC is Unknown"
+        );
+        assert!(
+            !res.guarantee.is_valid(),
+            "Unknown is NOT valid — never a silent pass"
+        );
+        match res.outcome() {
+            SubsumptionOutcome::Undecidable { direction, message } => {
+                assert_eq!(direction, SubsumptionDirection::Guarantee);
+                assert_eq!(message, SUBSUMPTION_FAIL_CLOSED_MSG);
+            }
+            other => panic!("Unknown subsumption must fail closed, got {other:?}"),
+        }
+        assert!(!res.is_preserved(), "fails closed ⇒ not preserved");
+    }
+
+    #[test]
+    fn m10_unknown_takes_precedence_over_sat_in_failing_closed() {
+        // If one direction is Sat (violated) and the other Unknown, the
+        // fail-closed mandate reports Undecidable first (the stronger rejection):
+        // an Unknown is never downgraded.
+        let provided = RefinementSig {
+            name: "q".into(),
+            // demand n>5 where expected n>0 ⇒ demand VC n>0 ⟹ n>5 is Sat.
+            demands: RefinementSide {
+                binders: vec![binder("n", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("n")), Box::new(num("5")))),
+            },
+            // post r>0 where expected `length r > 0` ⇒ guarantee VC Unknown.
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("r")), Box::new(num("0")))),
+            },
+        };
+        let expected = RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![binder("n", "Num")],
+                predicate: Some(Pred::Bin(BinOp::Gt, Box::new(var("n")), Box::new(num("0")))),
+            },
+            guarantees: RefinementSide {
+                binders: vec![binder("r", "Num")],
+                predicate: Some(Pred::Bin(
+                    BinOp::Gt,
+                    Box::new(Pred::App("length".into(), vec![var("r")])),
+                    Box::new(num("0")),
+                )),
+            },
+        };
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(res.guarantee.verdict, Verdict::Unknown);
+        assert_eq!(res.demand.verdict, Verdict::Sat);
+        assert!(
+            matches!(res.outcome(), SubsumptionOutcome::Undecidable { .. }),
+            "Unknown must take precedence (fail closed) over a Sat violation"
+        );
+    }
+
+    #[test]
+    fn m10_both_absent_refinements_trivially_preserved() {
+        // Two unrefined quotations (where true on both sides): true ⟹ true on
+        // both directions ⇒ preserved. (The unrefined-meets-REQUIRED-guarantee
+        // case — true ⟹ r>0 — fails, but its targeted "carries no contract"
+        // diagnostic is M11, not pulled forward here.)
+        let provided = RefinementSig {
+            name: "q".into(),
+            demands: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+            guarantees: RefinementSide {
+                binders: vec![],
+                predicate: None,
+            },
+        };
+        let expected = provided.clone();
+        let mut s = SmtLibSolver::new();
+        let res = check_subsumption(&provided, &expected, &mut s);
+        assert_eq!(res.outcome(), SubsumptionOutcome::Preserved);
+    }
+
+    // =======================================================================
+    // M10 — operator refinement axioms: dip relays a quotation's guarantee
+    // (§10.6 / §8 / §12 M10)
+    // =======================================================================
+
+    #[test]
+    fn m10_dip_relays_refined_quotation_guarantee_to_far_side() {
+        // A refined quotation (post r>0) passed through `DIP` preserves its
+        // guarantee on the far side via DIP's authored refinement axiom:
+        //   a [ produce ] DIP DROP sqrt
+        // `produce : ( -- r where r > 0 )` runs on the rest (under dip), its
+        // guarantee r>0 is published; `a` is set aside and restored by identity;
+        // `DROP` removes it; `sqrt`'s demand r>=0 then discharges via r>0.
+        let toks = parse("a [ produce ] DIP DROP sqrt").unwrap();
+        let produce = crate::parse_signature("produce : ( -- r: Num where r > 0 )").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            "produce" => Some(produce.clone()),
+            "sqrt" => Some(sqrt.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1, "only sqrt raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "the quotation's guarantee must survive dip and discharge sqrt's demand"
+        );
+        assert!(obs[0].is_discharged());
+    }
+
+    #[test]
+    fn m10_dip_preserves_set_aside_value_predicate() {
+        // DIP's axiom also preserves the set-aside value's predicate unchanged.
+        //   x guard [ produce ] DIP   then a demand on x
+        // We model `guard` as an operator that guarantees its result > 10, set it
+        // aside with DIP, run produce on the rest, and confirm the set-aside
+        // value's fact still discharges a demand about it on the far side.
+        //   guard : ( -- g where g > 10 )
+        //   produce : ( -- r where r > 0 )
+        //   needs10 : ( m where m > 10 -- s )    (a downstream demand on the value)
+        // Program: guard [ produce ] DIP DROP needs10
+        //   after guard: stack = g  (g>10 asserted)
+        //   [ produce ] DIP: set aside g, run produce (push r, r>0), restore g
+        //     ⇒ stack = r g  (g on top, by identity — its fact g>10 preserved)
+        //   DROP: remove g? No — DROP removes top = g. That loses g. Instead:
+        // Use `SWAP DROP` to drop r and keep g. Simpler: keep g on top and call
+        // needs10 directly (needs10 binds m<-top=g).
+        // Program: guard [ produce ] DIP needs10
+        let toks = parse("guard [ produce ] DIP needs10").unwrap();
+        let guard = crate::parse_signature("guard : ( -- g: Num where g > 10 )").unwrap();
+        let produce = crate::parse_signature("produce : ( -- r: Num where r > 0 )").unwrap();
+        let needs10 =
+            crate::parse_signature("needs10 : ( m: Num where m > 10  --  s: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            "guard" => Some(guard.clone()),
+            "produce" => Some(produce.clone()),
+            "needs10" => Some(needs10.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1, "only needs10 raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "the set-aside value's predicate (g>10) must survive dip by identity"
+        );
+    }
+
+    #[test]
+    fn m10_call_relays_refined_quotation_guarantee() {
+        // `CALL` likewise relays its quotation argument's contract (the DIP rule
+        // with no set-aside value): a refined quotation run by `call` publishes
+        // its guarantee, which discharges a downstream demand.
+        //   [ produce ] CALL sqrt   with produce: ( -- r where r > 0 )
+        let toks = parse("[ produce ] CALL sqrt").unwrap();
+        let produce = crate::parse_signature("produce : ( -- r: Num where r > 0 )").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            "produce" => Some(produce.clone()),
+            "sqrt" => Some(sqrt.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1, "only sqrt raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "the quotation's guarantee must survive call and discharge sqrt's demand"
+        );
+    }
+
+    #[test]
+    fn m10_if_relays_branch_guarantees_under_path_conditions() {
+        // `if` relays each branch quotation's contract under its branch's path
+        // condition (§10.4): a refined producer in the true branch publishes its
+        // guarantee there, discharging an in-branch demand.
+        //   c [ produce sqrt ] [ 0 ] if
+        // with produce: ( -- r where r > 0 ); sqrt's demand r>=0 discharges via
+        // the relayed guarantee inside the branch.
+        let toks = parse("c [ produce sqrt ] [ 0 ] if").unwrap();
+        let produce = crate::parse_signature("produce : ( -- r: Num where r > 0 )").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            "produce" => Some(produce.clone()),
+            "sqrt" => Some(sqrt.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(
+            obs.len(),
+            1,
+            "only sqrt (in the true branch) raises a demand: {obs:?}"
+        );
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "the branch quotation's guarantee must discharge the in-branch demand"
+        );
+    }
+
+    #[test]
+    fn m10_relay_quote_post_asserts_declared_guarantee() {
+        // The contract-level relay axiom: relay_quote_post substitutes a
+        // quotation's declared post onto its result terms and asserts it, so a
+        // downstream goal discharges. This is the axiom expressed WITHOUT
+        // expanding the quotation's body (the relay rule, invariant 8).
+        let quote = crate::parse_signature("q : ( -- r: Num where r > 0 )").unwrap();
+        let mut s = SmtLibSolver::new();
+        // The quotation produced one result term `y`.
+        relay_quote_post(&quote, &[var("y")], &mut s);
+        // Now the goal y >= 0 discharges (Unsat) under the relayed fact y>0.
+        let goal = Pred::Bin(BinOp::Ge, Box::new(var("y")), Box::new(num("0")));
+        assert_eq!(discharge(&mut s, &goal), Verdict::Unsat);
+        // And the relayed fact appears in the script.
+        assert!(
+            s.script().contains("(assert (> y 0))"),
+            "relayed guarantee must be asserted\nscript:\n{}",
+            s.script()
+        );
+    }
+
+    #[test]
+    fn m10_relay_quote_post_absent_guarantee_asserts_nothing() {
+        // An unrefined quotation (where true) relays nothing.
+        let quote = crate::parse_signature("q : ( -- r: Num )").unwrap();
+        let mut s = SmtLibSolver::new();
+        relay_quote_post(&quote, &[var("y")], &mut s);
+        // No fact ⇒ the goal y>=0 is NOT valid (counterexample exists).
+        let goal = Pred::Bin(BinOp::Ge, Box::new(var("y")), Box::new(num("0")));
+        assert_eq!(discharge(&mut s, &goal), Verdict::Sat);
+    }
+
+    // =======================================================================
+    // M10 — embedder operator's registered post discharges a downstream
+    // user obligation; its pre is checked at the call site (§10.6 / §12 M10)
+    // =======================================================================
+
+    #[test]
+    fn m10_embedder_operator_post_discharges_downstream_obligation() {
+        // An embedder operator carries its pre/post from registration (the
+        // operator table is the modulo). Here `db_count` is a registered host
+        // operator guaranteeing a non-negative count; its post discharges a
+        // downstream user obligation (`sqrt`'s demand) — the user inherits the
+        // contract automatically, on faith.
+        //   db_count : ( -- c: Num where c >= 0 )    (embedder-registered post)
+        //   sqrt     : ( n: Num where n >= 0 -- r )  (user obligation)
+        // Program: db_count sqrt
+        let toks = parse("db_count sqrt").unwrap();
+        let db_count = crate::parse_signature("db_count : ( -- c: Num where c >= 0 )").unwrap();
+        let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
+        let lookup = |w: &str| match w {
+            "db_count" => Some(db_count.clone()),
+            "sqrt" => Some(sqrt.clone()),
+            _ => None,
+        };
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1, "only sqrt raises a demand: {obs:?}");
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Unsat,
+            "the embedder operator's registered post (c>=0) discharges sqrt's demand"
+        );
+        assert!(obs[0].is_discharged());
+    }
+
+    #[test]
+    fn m10_embedder_operator_pre_is_checked_at_call_site() {
+        // The operator's pre (demand) is checked at its call site like any other
+        // obligation. `db_get` requires a non-negative key; calling it with an
+        // unconstrained `k` fails (Sat, counterexample) — the operator's pre is a
+        // genuine obligation on the caller, not assumed.
+        //   db_get : ( k: Num where k >= 0 -- v: Num )
+        // Program: k db_get   (k unconstrained)
+        let toks = parse("k db_get").unwrap();
+        let db_get =
+            crate::parse_signature("db_get : ( k: Num where k >= 0  --  v: Num )").unwrap();
+        let lookup = |w: &str| (w == "db_get").then(|| db_get.clone());
+        let mut solver = SmtLibSolver::new();
+        let obs = check_refinements(&toks, &lookup, &mut solver).unwrap();
+        assert_eq!(obs.len(), 1);
+        assert_eq!(
+            obs[0].verdict,
+            Verdict::Sat,
+            "the operator's pre is a real call-site obligation and must fail unbacked"
+        );
+        assert!(!obs[0].is_discharged());
+        let m = obs[0].model.as_ref().expect("Sat ⇒ counterexample");
+        assert!(m.get("k").is_some(), "counterexample constrains k: {m}");
+    }
+
+    // =======================================================================
+    // M10 — subsumption is SMT-discharged only, never inferred (invariant 1/13)
+    // =======================================================================
+
+    // A compile-time witness that subsumption is settled by the solver, not the
+    // type engine: `check_subsumption` takes only refinement payloads and a
+    // `Solver` — no `Subst`/`InferCtx` handle — so it cannot infer/unify. If it
+    // ever grew a Tier 0 inference parameter this signature would change.
+    #[allow(dead_code)]
+    fn _subsumption_is_solver_only(
+        p: &RefinementSig,
+        e: &RefinementSig,
+        s: &mut SmtLibSolver,
+    ) -> SubsumptionResult {
+        check_subsumption(p, e, s)
     }
 }
