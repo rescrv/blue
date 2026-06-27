@@ -521,10 +521,16 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
 /// scheme's authoring span (§7: every conflicting type carries a real birth
 /// span; a core scheme's `CORE_SPAN` would otherwise surface as byte 0).
 pub fn respan_word(word: &WordTy, span: Span) -> WordTy {
-    WordTy::new(
-        respan_stack(&word.input, span),
-        respan_stack(&word.output, span),
-    )
+    WordTy {
+        input: respan_stack(&word.input, span),
+        output: respan_stack(&word.output, span),
+        refinement: word.refinement.clone(),
+        // Re-anchor the dual-purpose tag at the call-site span like every node.
+        list_elem: word
+            .list_elem
+            .as_ref()
+            .map(|t| Box::new(respan_ty(t, span))),
+    }
 }
 
 fn respan_stack(stack: &StackTy, span: Span) -> StackTy {
@@ -650,7 +656,7 @@ impl StackTy {
 
 /// A word's type: an arrow between two stack types (§2, §3). A quotation value
 /// carries one of these inside [`TyKind::Quote`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct WordTy {
     /// The stack before the word runs.
     pub input: StackTy,
@@ -664,6 +670,30 @@ pub struct WordTy {
     /// milestone. For M6 it is a parse-only payload: the [`crate::RefinementSig`]
     /// the §10.1 parser produces lands here so the shape exists for later tiers.
     pub refinement: Option<Box<crate::refinement::RefinementSig>>,
+    /// **Dual-purpose bracket tag.** Set only on the arrow inside a quotation
+    /// literal whose body is *pure, monomorphic literal data* (numeric literals,
+    /// boolean literals, or nested bracket literals that recursively satisfy the
+    /// same rule). When `Some(elem)`, the unifier permits this quote to coerce
+    /// to `List elem` (§8 sequence relays), so `[1 2 3] [ inc ] MAP` and
+    /// `[[1] [2]] [ [ inc ] MAP ] MAP` type-check even though brackets are
+    /// represented as quotations. The tag is computed at the bracket inference
+    /// site, where the syntax is still visible — this is what keeps the
+    /// coercion sound: a body that *computes* (`[1 2 +]`) carries no tag, so it
+    /// can never masquerade as data. `None` everywhere else, and **inert to
+    /// unification equality** (see the manual [`PartialEq`]).
+    pub list_elem: Option<Box<Ty>>,
+}
+
+// The `list_elem` tag is a coercion capability, not part of a type's identity:
+// two arrows with the same shape are the same type whether or not one came from
+// a literal bracket. Equality therefore ignores it, exactly as inference treats
+// the `refinement` payload as shape-inert (§3 invariant 10).
+impl PartialEq for WordTy {
+    fn eq(&self, other: &Self) -> bool {
+        self.input == other.input
+            && self.output == other.output
+            && self.refinement == other.refinement
+    }
 }
 
 impl WordTy {
@@ -674,6 +704,7 @@ impl WordTy {
             input,
             output,
             refinement: None,
+            list_elem: None,
         }
     }
 
@@ -689,6 +720,7 @@ impl WordTy {
             input,
             output,
             refinement: Some(Box::new(refinement)),
+            list_elem: None,
         }
     }
 }
@@ -1218,6 +1250,11 @@ impl InferCtx {
             // Resolution chases type/row bindings; the refinement payload (§3) is
             // over named binders, so it is forwarded untouched — never read.
             refinement: w.refinement.clone(),
+            // The dual-purpose tag is an element type; resolve it like any other.
+            list_elem: w
+                .list_elem
+                .as_ref()
+                .map(|t| Box::new(self.resolve_ty_deep(t))),
         }
     }
 
@@ -1385,6 +1422,33 @@ impl InferCtx {
                 self.unify_stack_d(&p.input, &q.input, depth + 1)?;
                 self.unify_stack_d(&p.output, &q.output, depth + 1)
             }
+            // Dual-purpose coercion (§8): a quotation literal whose body is pure
+            // monomorphic literal data carries a `list_elem` tag, and may stand
+            // in for `List elem`. An untagged quote (one that *computes*) does
+            // not, so the coercion stays sound. Tried in both unification
+            // orders since `unify_stack` is direction-sensitive.
+            (TyKind::Quote(p), TyKind::App(n, xs)) if n == "List" && xs.len() == 1 => {
+                match &p.list_elem {
+                    Some(elem) => self.unify_ty_d(elem, &xs[0], depth + 1),
+                    None => Err(UnifyError::Mismatch {
+                        left: describe_ty(&a),
+                        left_span: a.span,
+                        right: describe_ty(&b),
+                        right_span: b.span,
+                    }),
+                }
+            }
+            (TyKind::App(n, xs), TyKind::Quote(q)) if n == "List" && xs.len() == 1 => {
+                match &q.list_elem {
+                    Some(elem) => self.unify_ty_d(&xs[0], elem, depth + 1),
+                    None => Err(UnifyError::Mismatch {
+                        left: describe_ty(&a),
+                        left_span: a.span,
+                        right: describe_ty(&b),
+                        right_span: b.span,
+                    }),
+                }
+            }
             _ => Err(UnifyError::Mismatch {
                 left: describe_ty(&a),
                 left_span: a.span,
@@ -1491,6 +1555,11 @@ fn rename_word(word: &WordTy, ty_map: &[(TyVar, TyVar)], row_map: &[(RowVar, Row
         // The refinement payload (§3) is over named binders, not type/row
         // variables, so renaming never touches it — forward it untouched.
         refinement: word.refinement.clone(),
+        // The dual-purpose tag is a concrete element type; rename it uniformly.
+        list_elem: word
+            .list_elem
+            .as_ref()
+            .map(|t| Box::new(rename_ty(t, ty_map, row_map))),
     }
 }
 
