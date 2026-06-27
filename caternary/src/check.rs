@@ -742,6 +742,59 @@ impl Local {
 /// are currently available underflows and is rejected, named (§7); inside a
 /// quotation or definition body the row tail is polymorphic, so consuming from it
 /// is ordinary inference, not an error.
+/// The dual-purpose element type of a bracket body, if the body can stand in
+/// for a `List` (§8).
+///
+/// Returns `Some(Num)` when every token is a numeric literal, `Some(Bool)` when
+/// every token is a boolean literal, and recursively returns `Some(List elem)`
+/// for nested bracket literals whose own bodies are literal lists. The *empty*
+/// bracket returns `Some(a)` for a fresh type variable, since an empty list is
+/// mappable at every element type (`∀a. List a`, the polymorphic empty list;
+/// sound because there are zero elements to iterate). Returns `None` for a body
+/// that does not monomorphize (`[ 1 true ]`, `[ [ 1 ] [ true ] ]`) or that
+/// contains a word which computes (`[ 1 2 + ]`). Operating on the *syntax* —
+/// rather than the inferred arrow, which cannot distinguish `[ 1 ]` from
+/// `[ 1 1 + ]` — is what keeps the resulting `List elem` coercion sound against
+/// the runtime's element-wise `as_sequence`.
+fn literal_list_elem(body: &[SpannedToken], span: Span, ctx: &mut InferCtx) -> Option<Box<Ty>> {
+    if body.is_empty() {
+        // The polymorphic empty list: no element fixes the type, so mint a
+        // fresh variable that unifies with whatever the consumer demands.
+        return Some(Box::new(Ty::var(ctx.fresh_ty(), span)));
+    }
+    let mut elem: Option<Ty> = None;
+    for token in body {
+        let next = literal_token_elem(token, ctx)?;
+        match &elem {
+            Some(prev) => {
+                if ctx.unify_ty(prev, &next).is_err() {
+                    return None;
+                }
+            }
+            None => elem = Some(next),
+        }
+    }
+    elem.map(|elem| Box::new(ctx.resolve_ty_deep(&elem)))
+}
+
+fn literal_token_elem(token: &SpannedToken, ctx: &mut InferCtx) -> Option<Ty> {
+    match &token.kind {
+        SpannedTokenKind::Word(w) => {
+            if is_numeric_literal(w) {
+                Some(Ty::num(token.span))
+            } else if is_bool_literal(w) {
+                Some(Ty::bool(token.span))
+            } else {
+                None
+            }
+        }
+        SpannedTokenKind::Bracket(inner) => {
+            let elem = literal_list_elem(inner, token.span, ctx)?;
+            Some(Ty::app("List", vec![*elem], token.span))
+        }
+    }
+}
+
 fn infer_seq<T>(
     evaluator: &Evaluator<T>,
     tokens: &[SpannedToken],
@@ -798,7 +851,13 @@ where
                     false,
                 );
                 ctx.frames.pop();
-                let body_arrow = result?;
+                let mut body_arrow = result?;
+                // Dual-purpose tag (§8): if the body is pure monomorphic literal
+                // data, record the element type so the unifier may coerce this
+                // quote to `List elem`. Computed from the *syntax* (not the
+                // arrow), which is what makes it sound — a body that computes,
+                // like `[ 1 2 + ]`, is not all-literals and stays untagged.
+                body_arrow.list_elem = literal_list_elem(inner, frame_span, ctx);
                 // Quotation literal: ( 'a -- 'a Quote(P -- Q) ) (§5).
                 let qrow = ctx.fresh_row();
                 let quote = Ty::quote(body_arrow, frame_span);
@@ -2440,6 +2499,21 @@ mod tests {
         Ty::app("List", vec![elem], s)
     }
 
+    fn assert_list_num_depth(ty: &Ty, depth: usize) {
+        if depth == 0 {
+            assert_eq!(ty.kind, TyKind::Con(NUM.into()), "leaf element is Num");
+            return;
+        }
+        match &ty.kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(args.len(), 1, "List carries exactly one element type");
+                assert_list_num_depth(&args[0], depth - 1);
+            }
+            other => panic!("expected List nesting depth {depth}, got {other:?}"),
+        }
+    }
+
     /// Seed an evaluator with a `List Num` source and the element words the
     /// MAP/FILTER acceptance tests apply through a quotation.
     fn eval_with_list_words(s: Span) -> Evaluator<Value> {
@@ -2534,6 +2608,181 @@ mod tests {
     }
 
     #[test]
+    fn literal_bracket_coerces_to_list_for_map() {
+        // The dual-purpose tag (§8): a quotation literal of pure monomorphic
+        // numeric data stands in for `List Num`, so `[ 1 2 3 ] [ inc ] MAP`
+        // type-checks even though brackets are represented as quotations.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "[ 1 2 3 ] [ inc ] MAP").expect("literal list must MAP");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(args[0].kind, TyKind::Con(NUM.into()), "element is Num");
+            }
+            other => panic!("expected `List Num`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_literal_bracket_coerces_to_list_of_lists_for_map() {
+        // Nested literal data is tagged recursively: `[ [ 1 2 ] [ 3 4 ] ]`
+        // stands in for `List (List Num)`. The outer MAP consumes each inner
+        // `List Num`, and its quotation maps `inc` across that inner list.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "[ [ 1 2 ] [ 3 4 ] ] [ [ inc ] MAP ] MAP")
+            .expect("literal list of lists must MAP");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        assert_list_num_depth(&arrow.output.elems[0], 2);
+    }
+
+    #[test]
+    fn triple_nested_literal_bracket_maps_recursively() {
+        // The same recursive literal tag supports `List (List (List Num))`;
+        // this is not a special `List2` case.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(
+            &eval,
+            "[ [ [ 1 ] [ 2 ] ] [ [ 3 ] [ 4 ] ] ] [ [ [ inc ] MAP ] MAP ] MAP",
+        )
+        .expect("literal list of lists of lists must MAP");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        assert_list_num_depth(&arrow.output.elems[0], 3);
+    }
+
+    #[test]
+    fn empty_nested_literal_list_unifies_with_non_empty_sibling() {
+        // Empty lists remain polymorphic at any nesting level: the first inner
+        // `[]` is fixed to `List Num` by its non-empty sibling and the mapping
+        // quotation.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "[ [ ] [ 1 2 ] ] [ [ inc ] MAP ] MAP")
+            .expect("empty nested list should be fixed by sibling element type");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        assert_list_num_depth(&arrow.output.elems[0], 2);
+    }
+
+    #[test]
+    fn empty_bracket_is_a_polymorphic_list() {
+        // The empty list is mappable at every element type (`∀a. List a`): the
+        // fresh tag unifies with the transform's input, so `[ ] [ inc ] MAP`
+        // yields `List Num`. This matches the runtime, which maps zero times and
+        // returns the empty list.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow = infer_effect(&eval, "[ ] [ inc ] MAP").expect("empty list must MAP");
+        assert_eq!(arrow.output.elems.len(), 1, "result is a single List");
+        match &arrow.output.elems[0].kind {
+            TyKind::App(n, args) => {
+                assert_eq!(n, "List");
+                assert_eq!(
+                    args[0].kind,
+                    TyKind::Con(NUM.into()),
+                    "element fixed to Num by the transform"
+                );
+            }
+            other => panic!("expected `List Num`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn heterogenous_nested_literal_bracket_does_not_coerce() {
+        // The recursive tag still requires one monomorphic element type. A list
+        // containing both `List Num` and `List Bool` does not stand in for a
+        // `List` demanded by MAP.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "[ [ 1 ] [ true ] ] [ [ inc ] MAP ] MAP")
+            .expect_err("heterogeneous list-of-lists must not pass as a List");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "expected a type mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn nested_computing_bracket_does_not_coerce_to_a_list() {
+        // Soundness guard at depth > 1: an inner bracket that computes is not
+        // literal data, so the outer bracket cannot become `List (List _)`.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "[ [ 1 inc ] ] [ [ inc ] MAP ] MAP")
+            .expect_err("a nested computing bracket must not pass as a List");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "expected a type mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn boolean_literal_bracket_coerces_to_list_bool() {
+        // The tag monomorphizes on the boolean base type too: `[ true false ]`
+        // coerces to `List Bool`, which `[ is_pos ]` (Num -> Bool) then rejects
+        // because the element is Bool, not Num — a *correct* rejection, proving
+        // the coercion carries the real element type rather than waving it past.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "[ true false ] [ is_pos ] MAP")
+            .expect_err("Bool element cannot feed a Num -> Bool transform");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "expected a type mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn computing_bracket_does_not_coerce_to_a_list() {
+        // Soundness guard: `[ 1 inc ]` *computes* (it is not all-literals), so it
+        // carries no tag and stays a quotation. Feeding it where a `List` is
+        // demanded must fail — otherwise the checker would accept a program the
+        // runtime's element-wise `as_sequence` would mis-iterate.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "[ 1 inc ] [ inc ] MAP")
+            .expect_err("a computing bracket must not pass as a List");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "expected a type mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn non_monomorphic_bracket_does_not_coerce() {
+        // `[ 1 true ]` mixes a numeric and a boolean literal, so it does not
+        // monomorphize to a single element type and earns no tag. It cannot
+        // stand in for a `List`.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let err = infer_effect(&eval, "[ 1 true ] [ inc ] MAP")
+            .expect_err("a heterogeneous bracket must not pass as a List");
+        assert!(
+            matches!(err, TypeError::Mismatch { .. }),
+            "expected a type mismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn tagged_bracket_still_serves_as_a_code_quotation() {
+        // Dual purpose is preserved: a tagged literal bracket is still a
+        // quotation, so `IF`'s branch slots (which demand `( 'S -- 'T )` arrows,
+        // not lists) accept it exactly as before. `true [ 1 ] [ 2 ] IF : Num`.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+        let arrow =
+            infer_effect(&eval, "true [ 1 ] [ 2 ] IF").expect("IF branches stay quotations");
+        assert_eq!(arrow.output.elems.len(), 1);
+        assert_eq!(
+            arrow.output.elems[0].kind,
+            TyKind::Con(NUM.into()),
+            "IF yields the branch's Num"
+        );
+    }
+
+    #[test]
     fn map_changes_the_element_type_through_the_quotation() {
         // `nums [ is_pos ] MAP` : the Num->Bool quotation makes the output a
         // `List Bool` — the quotation's output element `b` becomes the result
@@ -2570,6 +2819,36 @@ mod tests {
             }
             other => panic!("expected `List Num`, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sequence_relays_accept_nested_list_elements() {
+        // FILTER/FOLD/EACH are generic over `List a`, so once recursive literal
+        // tagging gives us `List (List Num)`, the existing schemes should relay
+        // that nested element type without extra `List2` variants.
+        let s = sp();
+        let eval = eval_with_list_words(s);
+
+        let filtered = infer_effect(&eval, "[ [ 1 ] [ 2 ] ] [ DROP true ] FILTER")
+            .expect("FILTER accepts a predicate over inner lists");
+        assert_eq!(filtered.output.elems.len(), 1);
+        assert_list_num_depth(&filtered.output.elems[0], 2);
+
+        let folded = infer_effect(&eval, "[ [ 1 ] [ 2 ] ] 0 [ DROP inc ] FOLD")
+            .expect("FOLD accepts a step over inner lists");
+        assert_eq!(folded.output.elems.len(), 1);
+        assert_eq!(
+            folded.output.elems[0].kind,
+            TyKind::Con(NUM.into()),
+            "FOLD returns the numeric accumulator"
+        );
+
+        let each = infer_effect(&eval, "[ [ 1 ] [ 2 ] ] [ DROP ] EACH")
+            .expect("EACH accepts a consumer over inner lists");
+        assert!(
+            each.output.elems.is_empty(),
+            "EACH consumes the nested list"
+        );
     }
 
     #[test]
