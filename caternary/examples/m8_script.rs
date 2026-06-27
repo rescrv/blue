@@ -19,6 +19,7 @@ fn main() {
                     name: "n".into(),
                     ty: "Num".into(),
                     span: rspan(),
+                    quote: None,
                 }],
                 demand: Some(Pred::Bin(
                     BinOp::Ge,
@@ -29,6 +30,7 @@ fn main() {
                     name: "r".into(),
                     ty: "Num".into(),
                     span: rspan(),
+                    quote: None,
                 }],
                 guarantee: None,
                 arrow: WordTy::new(

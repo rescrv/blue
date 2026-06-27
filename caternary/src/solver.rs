@@ -127,6 +127,7 @@ use crate::shadow::NamedBinding;
 use crate::shadow::ShadowError;
 use crate::shadow::ShadowStack;
 use crate::shadow::ShadowWord;
+use crate::shadow::Slot;
 use crate::shadow::bind_positional;
 
 // ===========================================================================
@@ -619,6 +620,17 @@ pub struct Obligation {
     /// The counterexample model, present **iff** `verdict == Sat` and the VC was
     /// fully decidable (§10.5). An `Unknown` never carries a (fabricated) model.
     pub model: Option<Model>,
+    /// A **targeted diagnostic** that supersedes the bare counterexample when the
+    /// failure has a more actionable root cause than the SMT witness (§7 /
+    /// invariant 12). Set only for higher-order subsumption boundaries routed
+    /// through [`SubsumptionResult::outcome`]: the gradual-interop
+    /// [`SUBSUMPTION_NO_CONTRACT_MSG`] ("carries no contract", §10.7 / M11) and the
+    /// fail-closed [`SUBSUMPTION_FAIL_CLOSED_MSG`] (an undecidable boundary,
+    /// §10.6). When present, the gate renders this instead of the raw model so the
+    /// honest, fixable cause reaches the user. `None` for ordinary obligations and
+    /// for a present-but-weaker subsumption violation (which keeps its
+    /// counterexample).
+    pub message: Option<String>,
 }
 
 impl Obligation {
@@ -636,6 +648,19 @@ impl Obligation {
 pub trait VerifyResolve {
     /// Resolve a non-`if` word to its verification action.
     fn resolve(&self, word: &str) -> VerifyWord;
+
+    /// The full refinement signature of a word, when it has one.
+    ///
+    /// Used to **relay** (§8 / §10.6 — never expand) a referenced word's
+    /// *declared* contract at a higher-order boundary: when a quotation value
+    /// `[ w ]` crosses into a refined-quotation parameter, the provided contract
+    /// is `w`'s declared signature, read here — its body is never expanded. The
+    /// default is `None`, so a plain `Fn(&str) -> VerifyWord` resolver (the
+    /// M8–M11 test resolvers) has no higher-order surface and never triggers a
+    /// subsumption check.
+    fn signature(&self, _word: &str) -> Option<RefinementSig> {
+        None
+    }
 }
 
 impl<F> VerifyResolve for F
@@ -644,6 +669,42 @@ where
 {
     fn resolve(&self, word: &str) -> VerifyWord {
         self(word)
+    }
+}
+
+/// A [`VerifyResolve`] that resolves both a word's verification action **and** its
+/// full refinement signature from a single `lookup: Fn(&str) -> Option<RefinementSig>`.
+///
+/// This is the resolver the whole-program Tier-1 path uses (vs. the bare closures
+/// the unit tests use): it carries [`VerifyResolve::signature`] so a refined
+/// quotation crossing a higher-order boundary can have its **declared** contract
+/// relayed and subsumption-checked (§10.6) — the centerpiece reachable
+/// end-to-end, not only from unit tests.
+pub struct SigResolver<'a, L> {
+    /// The whole-program signature lookup (callees + operators).
+    lookup: &'a L,
+}
+
+impl<'a, L> SigResolver<'a, L>
+where
+    L: Fn(&str) -> Option<RefinementSig>,
+{
+    /// Build a resolver over a whole-program signature `lookup`.
+    pub fn new(lookup: &'a L) -> Self {
+        SigResolver { lookup }
+    }
+}
+
+impl<L> VerifyResolve for SigResolver<'_, L>
+where
+    L: Fn(&str) -> Option<RefinementSig>,
+{
+    fn resolve(&self, word: &str) -> VerifyWord {
+        refinement_verify_word(word, (self.lookup)(word).as_ref())
+    }
+
+    fn signature(&self, word: &str) -> Option<RefinementSig> {
+        (self.lookup)(word)
     }
 }
 
@@ -685,8 +746,18 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
                     goal,
                     verdict,
                     model,
+                    message: None,
                 });
             }
+            // (1b) Higher-order subsumption (§10.6 — the centerpiece): any input
+            // binder declared as a refined quotation `q: ( pre -- post )` is an
+            // **expected** contract. The quotation value sitting in that slot
+            // carries a **provided** contract (its referenced word's *declared*
+            // signature — relayed, never expanded). Emit the two directional VCs
+            // and record their verdicts as obligations so a non-`Preserved`
+            // outcome (violated `Sat` or undecidable `Unknown`) lands in the
+            // ledger and the gate fails closed (§10.6 fail-closed).
+            check_quote_subsumption(word, &binders, stack, resolve, solver, ctx);
             // (2) Move the data per the Tier 0 arrow (opaque: outputs are fresh
             // literals).
             stack.apply_opaque(&arrow)?;
@@ -702,6 +773,133 @@ fn apply_effect<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             Ok(())
         }
     }
+}
+
+/// **Higher-order subsumption at a call boundary** (§10.6 — the centerpiece,
+/// reached end-to-end). For every input binder of `word` declared as a refined
+/// quotation `q: ( pre -- post )` (`binder.quote == Some`), check the quotation
+/// value occupying that slot against the binder's *expected* contract:
+///
+///   * **Expected** contract = the binder's declared
+///     [`QuoteContract`](crate::refinement::QuoteContract).
+///   * **Provided** contract = the quotation value's declared signature, **relayed**
+///     from the word it references (`[ w ]` ⇒ `w`'s signature via
+///     [`VerifyResolve::signature`]) — never expanded from its body (invariant 8).
+///     A quotation that references no declared contract is unrefined (`where
+///     true`), which a *required guarantee* rejects as "carries no contract"
+///     (§10.7).
+///
+/// The two directional VCs ([`check_subsumption`]) are recorded as
+/// [`Obligation`]s on `ctx`: a valid (`Unsat`) direction is a discharged
+/// obligation, while a violated (`Sat`, with counterexample) or undecidable
+/// (`Unknown`) direction is **undischarged** — so it surfaces into the ledger's
+/// violations and the gate **fails closed** (§10.6). The checker only *emits* the
+/// two implications; the solver settles them (invariant 1/13 — never inferred).
+fn check_quote_subsumption<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    word: &str,
+    binders: &[Binder],
+    stack: &ShadowStack,
+    resolve: &R,
+    solver: &mut S,
+    ctx: &mut VerifyCtx,
+) {
+    let n = binders.len();
+    let slots = stack.slots();
+    if slots.len() < n {
+        // Tier 0 guarantees the arity; this guard only keeps the indexing total.
+        return;
+    }
+    let base = slots.len() - n;
+    for (i, binder) in binders.iter().enumerate() {
+        let Some(expected) = binder.quote.as_ref() else {
+            continue; // scalar binder — no higher-order boundary here.
+        };
+        // The slot bound to this input binder (top-n slots, in source order).
+        let provided = relay_provided_contract(&slots[base + i], resolve);
+        let result = check_subsumption(&provided, &expected.as_sig(), solver);
+        record_subsumption(word, &binder.name, &result, ctx);
+    }
+}
+
+/// Derive a quotation value's **provided** refinement contract by **relay**
+/// (§8 / §10.6 — never expand the body): if the slot is a quotation `[ w ]`
+/// referencing exactly one word `w` whose declared signature is known, the
+/// provided contract is that signature; otherwise the quotation is treated as
+/// **unrefined** (`where true` on both sides) — the §10.7 absent-payload case.
+fn relay_provided_contract<R: VerifyResolve>(slot: &Slot, resolve: &R) -> RefinementSig {
+    if let Slot::Quote(body) = slot
+        && let [Token::Word(w)] = body.as_slice()
+        && let Some(sig) = resolve.signature(w)
+    {
+        return sig;
+    }
+    // Unrefined: both sides absent (`where true`).
+    RefinementSig {
+        name: "<quote>".to_string(),
+        demands: RefinementSide {
+            binders: Vec::new(),
+            predicate: None,
+        },
+        guarantees: RefinementSide {
+            binders: Vec::new(),
+            predicate: None,
+        },
+    }
+}
+
+/// Record a higher-order subsumption check as **at most one** [`Obligation`] on
+/// `ctx`, routed through [`SubsumptionResult::outcome`] so the *targeted*
+/// diagnostic reaches the gate (§10.6 / §10.7 / invariant 12) rather than a bare
+/// directional counterexample.
+///
+/// `outcome()` already collapses the two directional VCs into the single decisive
+/// cause; this records exactly that cause (one obligation per boundary, §7
+/// localize-inward):
+///
+///   * [`SubsumptionOutcome::Preserved`] — both directions valid; **no** violation
+///     recorded (the boundary accepts).
+///   * [`SubsumptionOutcome::Violated`] — a *present-but-weaker* contract: keep the
+///     refuted (`Sat`) directional VC **with its counterexample model** (the M10
+///     behavior), no targeted message.
+///   * [`SubsumptionOutcome::CarriesNoContract`] — an *unrefined* quotation met a
+///     required guarantee: surface the directional VC carrying
+///     [`SUBSUMPTION_NO_CONTRACT_MSG`] (§10.7 / M11) so the gate renders "carries
+///     no contract" instead of a bare SMT witness.
+///   * [`SubsumptionOutcome::Undecidable`] — an `Unknown` boundary: surface the
+///     directional VC carrying [`SUBSUMPTION_FAIL_CLOSED_MSG`] (§10.6 fail-closed).
+///
+/// Each recorded obligation keeps the solver's `verdict` (`Sat`/`Unknown`) so it
+/// stays **undischarged** and lands in the ledger's violations (the gate fails
+/// closed); the optional `message` is the targeted text the gate renders in place
+/// of the model when present.
+fn record_subsumption(word: &str, param: &str, result: &SubsumptionResult, ctx: &mut VerifyCtx) {
+    let (direction, message) = match result.outcome() {
+        // Boundary accepted — nothing to surface.
+        SubsumptionOutcome::Preserved => return,
+        // Present-but-weaker contract: keep the M10 counterexample, no message.
+        SubsumptionOutcome::Violated { direction, .. } => (direction, None),
+        // Unrefined quotation met a required guarantee — the targeted §10.7 text.
+        SubsumptionOutcome::CarriesNoContract { direction, message } => (direction, Some(message)),
+        // Undecidable boundary — the §10.6 fail-closed text.
+        SubsumptionOutcome::Undecidable { direction, message } => (direction, Some(message)),
+    };
+    let vc = result.vc(direction);
+    // When a targeted message supersedes the model (carries-no-contract /
+    // fail-closed), drop the incidental SMT witness: the message *is* the honest
+    // cause, and a stray counterexample would only mislead (§7). A present-but-
+    // weaker `Violated` keeps its model (message is `None`).
+    let model = if message.is_some() {
+        None
+    } else {
+        vc.model.clone()
+    };
+    ctx.obligations.push(Obligation {
+        word: format!("{word} @ {param} subsumption [{}]", vc.direction.label()),
+        goal: vc.implication.clone(),
+        verdict: vc.verdict,
+        model,
+        message,
+    });
 }
 
 /// Apply a core [`ShadowWord`] to the shadow stack, threading the verifier so
@@ -933,7 +1131,7 @@ where
     L: Fn(&str) -> Option<RefinementSig>,
     S: Solver + CounterModel + FactSnapshot,
 {
-    let resolve = |w: &str| refinement_verify_word(w, lookup(w).as_ref());
+    let resolve = SigResolver::new(lookup);
     let mut stack = ShadowStack::new();
     let mut obligations = Vec::new();
     verify(tokens, &mut stack, solver, &resolve, &mut obligations)?;
@@ -1216,6 +1414,7 @@ fn bind_assume_to_stack(pred: &Pred, stack: &ShadowStack) -> Result<Pred, Shadow
             name: v.clone(),
             ty: String::new(),
             span: RefineSpan { start: 0, end: 0 },
+            quote: None,
         })
         .collect();
     let bindings = bind_positional(&binders, stack)?;
@@ -1426,6 +1625,7 @@ impl std::fmt::Display for WordStatus {
 pub struct Ledger {
     entries: Vec<AssumeEntry>,
     rejections: Vec<AssumeRecord>,
+    violations: Vec<Obligation>,
     status: BTreeMap<String, Vec<Pred>>,
 }
 
@@ -1447,9 +1647,20 @@ impl Ledger {
         &self.rejections
     }
 
-    /// Whether the program checked clean (no rejected assumes).
+    /// Every **undischarged** refinement obligation (§10.5/§10.7 Situation B): a
+    /// VC whose negated-goal encoding came back `Sat` (a refuted demand/guarantee,
+    /// carrying a counterexample [`Model`]) or `Unknown` (undecided — fails closed
+    /// for higher-order subsumption per §10.6). A non-empty list means the program
+    /// does not check: a refinement demand was violated, not merely assumed away.
+    pub fn violations(&self) -> &[Obligation] {
+        &self.violations
+    }
+
+    /// Whether the program checked clean: no rejected assumes (§10.7 hard error)
+    /// **and** no undischarged obligation (a violated refinement demand/guarantee —
+    /// §10.5/§10.7 Situation B). The CI gate fails closed on either (invariant 20).
     pub fn is_clean(&self) -> bool {
-        self.rejections.is_empty()
+        self.rejections.is_empty() && self.violations.is_empty()
     }
 
     /// The surfaces of every accepted assume — the textual `grep assume`
@@ -1496,7 +1707,7 @@ where
     L: Fn(&str) -> Option<RefinementSig>,
     S: Solver + CounterModel + FactSnapshot,
 {
-    let resolve = |w: &str| refinement_verify_word(w, lookup(w).as_ref());
+    let resolve = SigResolver::new(lookup);
     let mut stack = ShadowStack::new();
     let mut ctx = VerifyCtx::with_site(site);
     verify_ctx(tokens, &mut stack, solver, &resolve, &mut ctx)?;
@@ -1541,6 +1752,19 @@ where
     for def in defs {
         let mut solver = mk_solver();
         let ctx = check_refinements_ctx(&def.body, lookup, &mut solver, &def.name)?;
+        // Fail closed on any UNDISCHARGED obligation (§10.5/§10.7 Situation B):
+        // `verify` records a `Sat` (refuted demand/guarantee, with a
+        // counterexample model) or `Unknown` (undecided — fails closed for
+        // higher-order subsumption per §10.6) into `ctx.obligations` but does NOT
+        // error — discharge-checking is the caller's job, and the whole-program
+        // gate is that caller. Surface every non-discharged obligation into the
+        // ledger so `is_clean()` reports false and the gate rejects, carrying the
+        // counterexample for §10.5 surfacing.
+        for o in &ctx.obligations {
+            if !o.is_discharged() {
+                ledger.violations.push(o.clone());
+            }
+        }
         let mut mine: Vec<Pred> = Vec::new();
         for a in &ctx.assumes {
             if a.legality.is_legal() {
@@ -1842,6 +2066,15 @@ impl SubsumptionResult {
     /// VCs valid. Convenience for the common accept/reject branch.
     pub fn is_preserved(&self) -> bool {
         matches!(self.outcome(), SubsumptionOutcome::Preserved)
+    }
+
+    /// The directional VC for `direction` — the one [`outcome`](Self::outcome)
+    /// nominated as the decisive cause, so the recorder can surface exactly it.
+    pub fn vc(&self, direction: SubsumptionDirection) -> &SubsumptionVc {
+        match direction {
+            SubsumptionDirection::Guarantee => &self.guarantee,
+            SubsumptionDirection::Demand => &self.demand,
+        }
     }
 }
 
@@ -2676,6 +2909,7 @@ mod tests {
             name: name.to_string(),
             ty: ty.to_string(),
             span: rspan(),
+            quote: None,
         }
     }
 
@@ -3488,7 +3722,7 @@ mod tests {
     }
 
     // =======================================================================
-    // M10 — operator refinement axioms: dip relays a quotation's guarantee
+    // M10 — operator refinement axioms: DIP relays a quotation's guarantee
     // (§10.6 / §8 / §12 M10)
     // =======================================================================
 
@@ -3497,7 +3731,7 @@ mod tests {
         // A refined quotation (post r>0) passed through `DIP` preserves its
         // guarantee on the far side via DIP's authored refinement axiom:
         //   a [ produce ] DIP DROP sqrt
-        // `produce : ( -- r where r > 0 )` runs on the rest (under dip), its
+        // `produce : ( -- r where r > 0 )` runs on the rest (under DIP), its
         // guarantee r>0 is published; `a` is set aside and restored by identity;
         // `DROP` removes it; `sqrt`'s demand r>=0 then discharges via r>0.
         let toks = parse("a [ produce ] DIP DROP sqrt").unwrap();
@@ -3561,7 +3795,7 @@ mod tests {
     #[test]
     fn m10_call_relays_refined_quotation_guarantee() {
         // `CALL` likewise relays its quotation argument's contract (the DIP rule
-        // with no set-aside value): a refined quotation run by `call` publishes
+        // with no set-aside value): a refined quotation run by `CALL` publishes
         // its guarantee, which discharges a downstream demand.
         //   [ produce ] CALL sqrt   with produce: ( -- r where r > 0 )
         let toks = parse("[ produce ] CALL sqrt").unwrap();
@@ -3584,13 +3818,13 @@ mod tests {
 
     #[test]
     fn m10_if_relays_branch_guarantees_under_path_conditions() {
-        // `if` relays each branch quotation's contract under its branch's path
+        // `IF` relays each branch quotation's contract under its branch's path
         // condition (§10.4): a refined producer in the true branch publishes its
         // guarantee there, discharging an in-branch demand.
-        //   c [ produce sqrt ] [ 0 ] if
+        //   c [ produce sqrt ] [ 0 ] IF
         // with produce: ( -- r where r > 0 ); sqrt's demand r>=0 discharges via
         // the relayed guarantee inside the branch.
-        let toks = parse("c [ produce sqrt ] [ 0 ] if").unwrap();
+        let toks = parse("c [ produce sqrt ] [ 0 ] IF").unwrap();
         let produce = crate::parse_signature("produce : ( -- r: Num where r > 0 )").unwrap();
         let sqrt = crate::parse_signature("sqrt : ( n: Num where n >= 0  --  r: Num )").unwrap();
         let lookup = |w: &str| match w {
