@@ -44,6 +44,10 @@ statslicer = { workspace = true }
 name = "block_cursor"
 harness = false
 
+[[bench]]
+name = "sst_log"
+harness = false
+
 [[bin]]
 name = "jester-from-plaintext"
 path = "src/bin/jester-from-plaintext.rs"
