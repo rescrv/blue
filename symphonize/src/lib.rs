@@ -58,15 +58,28 @@ impl From<k8src::Error> for Error {
     }
 }
 
+fn k8src_missing_image_service(err: &k8src::Error) -> Option<String> {
+    if k8src::error_code(err) == Some("missing-required-variable")
+        && k8src::error_string_field(err, "key").as_deref() == Some("IMAGE")
+    {
+        k8src::error_string_field(err, "service")
+    } else {
+        None
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Io(err) => write!(f, "IO error: {err}"),
             Error::RcConf(err) => write!(f, "rc.conf error: {err}"),
-            Error::K8sRc(k8src::Error::MissingImage { service }) => {
-                write!(f, "missing IMAGE configuration for service {service}")
+            Error::K8sRc(err) => {
+                if let Some(service) = k8src_missing_image_service(err) {
+                    write!(f, "missing IMAGE configuration for service {service}")
+                } else {
+                    write!(f, "k8src error: {err}")
+                }
             }
-            Error::K8sRc(err) => write!(f, "k8src error: {err:?}"),
             Error::MissingImage { service } => {
                 write!(f, "missing IMAGE configuration for service {service}")
             }

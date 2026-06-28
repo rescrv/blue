@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_yaml::{Deserializer, Value, to_string};
 
+use k8src::{error_code, error_message};
 use rc_conf::RcConf;
 use utf8path::Path;
 
@@ -36,10 +37,10 @@ fn run_test(spec: &Path, idx: usize, doc: Value) {
         } else if let Some(Value::String(error)) = h.get(Value::String("error".to_string())) {
             match k8src::rewrite(&rc_conf, rc_d, &to_string(template).unwrap()) {
                 Ok(_) => panic!("rewrite succeeded, but error was expected {spec}[{idx}]"),
-                Err(k8src::Error::Shvar(shvar::Error::Requested(message))) => {
-                    assert_eq!(*error, message);
+                Err(err) => {
+                    assert_eq!(error_code(&err), Some("parse-error"));
+                    assert_eq!(error_message(&err), Some(error.to_string()));
                 }
-                Err(err) => panic!("unhandled error: {err:?}"),
             }
         } else {
             panic!("unhandled case");

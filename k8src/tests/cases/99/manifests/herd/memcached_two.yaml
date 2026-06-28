@@ -1,5 +1,6 @@
 host: memcached.example.org
 port: 22122
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

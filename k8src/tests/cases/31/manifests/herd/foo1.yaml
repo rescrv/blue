@@ -1,5 +1,6 @@
 source: this is foo1 template
-salutation: Hej Bob!---
+salutation: Hej Bob!
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
