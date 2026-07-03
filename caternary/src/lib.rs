@@ -100,6 +100,8 @@ pub use solver::VerifyResolve;
 pub use solver::VerifyWord;
 pub use solver::WordStatus;
 pub use solver::check_program;
+pub use solver::ArrowLookup;
+pub use solver::check_program_with_arrows;
 pub use solver::check_refinements;
 pub use solver::check_refinements_ctx;
 pub use solver::check_sat;
