@@ -1400,9 +1400,14 @@ fn verify_quote_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
 ///     below `P`; `pop_scope`.
 ///   * `[ else ]`: `push_scope`; `assert(¬P)`; verify the else-body; `pop_scope`.
 ///
-/// Both branches have the same Tier 0 effect, so after verifying both the actual
-/// shadow stack is advanced by running the then-body once (Tier 0 already proved
-/// the branches agree on shape).
+/// Both branches have the same Tier 0 effect, so the two post-states agree on
+/// **shape** — but not necessarily on **values**. The IF's post-state is the
+/// slot-wise **join** ([`ShadowStack::join_branch_states`]): agreed slots keep
+/// their knowledge, disagreed slots become fresh opaque literals. Advancing
+/// with either branch's concrete post-state would leak branch-conditional
+/// values into the continuation, where the path condition is no longer in
+/// scope — a downstream demand would discharge against terms the runtime's
+/// other branch never produces.
 fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     stack: &mut ShadowStack,
     solver: &mut S,
@@ -1413,11 +1418,9 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     let then_body = stack.pop_quote()?;
     let cond = stack.pop_term()?;
 
-    // then-branch under P. Keep its resulting stack to advance the real stack:
-    // both branches have the same Tier 0 effect, so the then-branch's post-state
-    // *is* the IF's post-state. Reusing it (rather than re-running a body) means
-    // each obligation is discharged exactly once, under its branch's path
-    // condition.
+    // then-branch under P. Each branch's obligations are discharged exactly
+    // once, under that branch's path condition; the branch stacks are kept for
+    // the join below.
     let then_stack = {
         let mut branch = stack.clone();
         solver.push_scope();
@@ -1428,16 +1431,18 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     };
 
     // else-branch under ¬P.
-    {
+    let else_stack = {
         let mut branch = stack.clone();
         solver.push_scope();
         solver.assert(&negate(&cond));
         verify_quote_ctx(&else_body, &mut branch, solver, resolve, ctx)?;
         solver.pop_scope();
-    }
+        branch
+    };
 
-    // Advance the real stack by the (shape-identical) then-branch's post-state.
-    *stack = then_stack;
+    // Advance the real stack by the join: only branch-agreed knowledge
+    // survives into the unconditional continuation.
+    *stack = ShadowStack::join_branch_states(then_stack, &else_stack)?;
     Ok(())
 }
 

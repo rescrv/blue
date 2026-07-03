@@ -409,6 +409,43 @@ impl ShadowStack {
         p
     }
 
+    /// Join two branch post-states into an `IF`'s post-state (§10.4).
+    ///
+    /// Tier 0 proved the branches agree on **shape**; nothing proves they agree
+    /// on **values**. A slot the branches agree on syntactically keeps its
+    /// term (or quotation); a slot they disagree on becomes a **fresh opaque
+    /// literal** — branch-conditional knowledge must not survive into the
+    /// unconditional continuation, where no path condition remains in scope to
+    /// qualify it. (Soundness: a downstream demand binding a then-branch value
+    /// would otherwise discharge against a term the runtime's else branch never
+    /// produces.)
+    ///
+    /// A *disagreed quotation* slot also joins to an opaque term: a later
+    /// combinator that needs to run it fails the shadow structurally, which is
+    /// the fail-closed reading — the checker cannot know which body it would be
+    /// verifying. An ite-aware join could recover precision here later; opacity
+    /// is the conservative floor.
+    pub fn join_branch_states(
+        then_state: ShadowStack,
+        else_state: &ShadowStack,
+    ) -> Result<ShadowStack, ShadowError> {
+        if then_state.slots.len() != else_state.slots.len() {
+            // Tier 0 guarantees shape agreement; this guard keeps the zip total.
+            return Err(ShadowError::new(
+                "IF branches disagree on stack shape (Tier 0 should have rejected this program)",
+            ));
+        }
+        let mut joined = then_state;
+        joined.fresh = joined.fresh.max(else_state.fresh);
+        for i in 0..joined.slots.len() {
+            if joined.slots[i] != else_state.slots[i] {
+                let opaque = joined.fresh_literal();
+                joined.slots[i] = Slot::Term(opaque);
+            }
+        }
+        Ok(joined)
+    }
+
     /// Seed the stack with `n` **opaque input terms** — the shadow image of a
     /// definition's inputs at body entry (§10.3: arity comes from the Tier 0
     /// arrow; the caller supplies `n` from the definition's inferred arrow).
@@ -920,6 +957,75 @@ mod tests {
 
     fn var(name: &str) -> Pred {
         Pred::Var(name.to_string())
+    }
+
+    // -- join_branch_states (§10.4 branch join) -------------------------------
+
+    #[test]
+    fn join_keeps_agreed_slots_and_opaques_disagreed_ones() {
+        let mut then_state = ShadowStack::new();
+        then_state.push_term(Pred::Num("7".to_string()));
+        then_state.push_term(Pred::Num("5".to_string()));
+        let mut else_state = ShadowStack::new();
+        else_state.push_term(Pred::Num("7".to_string()));
+        else_state.push_term(Pred::Num("0".to_string()));
+
+        let joined = ShadowStack::join_branch_states(then_state, &else_state)
+            .expect("shape-identical states join");
+        assert_eq!(joined.len(), 2);
+        // The agreed `7` survives — a demand below the IF still binds it.
+        assert_eq!(joined.slots()[0], Slot::Term(Pred::Num("7".to_string())));
+        // The disagreed slot is opaque: neither `5` nor `0` may reach the
+        // continuation, where no path condition qualifies them.
+        assert!(
+            matches!(&joined.slots()[1], Slot::Term(Pred::Var(v)) if v.starts_with("$t")),
+            "disagreed slot must join to a fresh opaque literal, got {:?}",
+            joined.slots()[1]
+        );
+    }
+
+    #[test]
+    fn join_opaques_disagreed_quotation_slots() {
+        // Fail-closed: the checker cannot know which quotation body a later
+        // combinator would run, so a disagreed quotation joins to an opaque
+        // term (a later CALL of it fails the shadow structurally).
+        let mut then_state = ShadowStack::new();
+        then_state.push_quote(vec![ShadowQuoteItem::Word("1".to_string())]);
+        let mut else_state = ShadowStack::new();
+        else_state.push_quote(vec![ShadowQuoteItem::Word("2".to_string())]);
+
+        let joined = ShadowStack::join_branch_states(then_state, &else_state)
+            .expect("shape-identical states join");
+        assert!(matches!(&joined.slots()[0], Slot::Term(Pred::Var(_))));
+    }
+
+    #[test]
+    fn join_fresh_literals_collide_with_neither_branch() {
+        // Each branch minted its own fresh literals after the clone; the join's
+        // counter must clear both so its opaques are new names.
+        let mut base = ShadowStack::new();
+        base.push_term(var("x"));
+        let mut then_state = base.clone();
+        let mut else_state = base.clone();
+        // The then branch mints $t0 in its slot; the else keeps `x`.
+        then_state
+            .apply_opaque(&WordTy::new(
+                StackTy::new(vec![Ty::num(S)], 0, S),
+                StackTy::new(vec![Ty::num(S)], 0, S),
+            ))
+            .unwrap();
+        let joined = ShadowStack::join_branch_states(then_state, &else_state)
+            .expect("shape-identical states join");
+        // The joined opaque must not reuse the then-branch's `$t0`.
+        assert_eq!(joined.slots()[0], Slot::Term(var("$t1")));
+    }
+
+    #[test]
+    fn join_rejects_shape_disagreement() {
+        let mut then_state = ShadowStack::new();
+        then_state.push_term(var("x"));
+        let else_state = ShadowStack::new();
+        assert!(ShadowStack::join_branch_states(then_state, &else_state).is_err());
     }
 
     /// A resolver covering core shuffles + interpreted operators; treats every

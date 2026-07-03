@@ -4187,6 +4187,45 @@ mod tests {
     }
 
     #[test]
+    fn gate_does_not_certify_branch_conditional_knowledge() {
+        // SOUNDNESS REGRESSION (§10.4). verify_if used to advance the shadow
+        // stack with the *then-branch's* concrete post-state, so after
+        // `false [ 5 ] [ 0 ] IF` the continuation unconditionally "knew" the
+        // slot was 5 — with the path condition already popped. A demand
+        // `n >= 1` then discharged cleanly while the runtime carries 0 into
+        // that slot: a certified contract, violated in the actual execution.
+        // The fix joins the branch post-states (agreed slots keep knowledge,
+        // disagreed slots go opaque), so this demand now fails closed — with a
+        // counterexample the runtime can actually realize.
+        let mut eval = arrow_seam_program("[ false [ 5 ] [ 0 ] IF need1 ] :main");
+        eval.register_operator_with_contract("need1", num_scheme(1, 0));
+        eval.attach_refinement("need1 : ( n: Num where n >= 1 -- )")
+            .expect("need1 refinement attaches");
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect_err("branch-conditional knowledge must not certify the demand");
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert!(
+                    violations
+                        .iter()
+                        .any(|o| o.word == "need1" && o.verdict == crate::Verdict::Sat),
+                    "the demand is refuted with a realizable counterexample: {violations:?}"
+                );
+            }
+            other => panic!("expected Tier1Violated, got: {other}"),
+        }
+        // The agreed-knowledge side: identical arms keep their term, and the
+        // demand discharges — the join costs nothing where the branches agree.
+        let mut eval = arrow_seam_program("[ false [ 5 ] [ 5 ] IF need1 ] :main");
+        eval.register_operator_with_contract("need1", num_scheme(1, 0));
+        eval.attach_refinement("need1 : ( n: Num where n >= 1 -- )")
+            .expect("need1 refinement attaches");
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("branch-agreed knowledge survives the join");
+        assert!(ledger.is_clean());
+    }
+
+    #[test]
     fn gate_seeds_definition_inputs_from_the_tier0_arrow() {
         // REGRESSION. A definition body was verified against an EMPTY shadow
         // stack, so any definition that consumes inputs (`[ + ] :add2`) failed
