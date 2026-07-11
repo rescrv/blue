@@ -18,7 +18,10 @@
 //! terminates the element. Integers use compact, order-preserving prefix
 //! varints. Small values such as `-1`, `0`, and unsigned `0` encode as a single
 //! byte; full-width `i64`/`u64` values encode as one tag byte plus eight data
-//! bytes.
+//! bytes. Floats use a fixed-width, order-preserving IEEE-754 encoding: one tag
+//! byte plus four (`f32`) or eight (`f64`) data bytes. The stored ordering is
+//! the IEEE-754 total order, so `-0.0` sorts before `+0.0` and NaNs sort at the
+//! extremes.
 
 #![deny(missing_docs)]
 
@@ -34,9 +37,14 @@ const SIGNED_NONNEG_LAST: u8 = 0x21;
 const UNSIGNED_BASE: u8 = 0x22;
 const UNSIGNED_LAST: u8 = 0x2a;
 const UNIT_TAG: u8 = 0x2b;
+const F32_TAG: u8 = 0x2c;
+const F64_TAG: u8 = 0x2d;
 
-const INTEGER_TAG_MIN: u8 = SIGNED_NEG_BASE;
-const INTEGER_TAG_MAX: u8 = UNIT_TAG;
+const TAG_MIN: u8 = SIGNED_NEG_BASE;
+const TAG_MAX: u8 = F64_TAG;
+
+const F32_SIGN_MASK: u32 = 0x8000_0000;
+const F64_SIGN_MASK: u64 = 0x8000_0000_0000_0000;
 
 const ONES: u64 = 0x0101_0101_0101_0101;
 const HIGHS: u64 = 0x8080_8080_8080_8080;
@@ -57,6 +65,11 @@ pub enum Error {
     /// The parser expected a unit element, but found another byte.
     InvalidUnitTag {
         /// The byte encountered where the unit tag was required.
+        tag: u8,
+    },
+    /// The parser expected a float tag, but found another byte.
+    InvalidFloatTag {
+        /// The byte encountered where a float tag was required.
         tag: u8,
     },
     /// An integer used a longer representation than necessary.
@@ -88,6 +101,7 @@ impl fmt::Display for Error {
             Self::UnexpectedEnd => write!(f, "unexpected end of tuple key"),
             Self::InvalidIntegerTag { tag } => write!(f, "invalid integer tag: 0x{tag:02x}"),
             Self::InvalidUnitTag { tag } => write!(f, "invalid unit tag: 0x{tag:02x}"),
+            Self::InvalidFloatTag { tag } => write!(f, "invalid float tag: 0x{tag:02x}"),
             Self::NonCanonicalInteger => write!(f, "non-canonical integer encoding"),
             Self::ValueOutOfRange { target } => write!(f, "value out of range for {target}"),
             Self::InvalidBytesEscape { byte } => {
@@ -312,6 +326,24 @@ impl TupleKeyBuilder {
         self
     }
 
+    /// Append a 32-bit float using the order-preserving IEEE-754 encoding.
+    ///
+    /// Encoded floats compare in IEEE-754 total order: `-0.0` sorts before
+    /// `+0.0` and NaNs sort at the extremes.
+    pub fn f32(mut self, value: f32) -> Self {
+        encode_f32(value, &mut self.bytes);
+        self
+    }
+
+    /// Append a 64-bit float using the order-preserving IEEE-754 encoding.
+    ///
+    /// Encoded floats compare in IEEE-754 total order: `-0.0` sorts before
+    /// `+0.0` and NaNs sort at the extremes.
+    pub fn f64(mut self, value: f64) -> Self {
+        encode_f64(value, &mut self.bytes);
+        self
+    }
+
     /// End construction and return the encoded tuple key.
     pub fn build(self) -> TupleKey {
         TupleKey { bytes: self.bytes }
@@ -522,6 +554,40 @@ impl<'a> TupleKeyParser<'a> {
         self.parse_i64_as("i8")
     }
 
+    /// Parse a 32-bit float from the order-preserving IEEE-754 encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEnd`] for truncation and
+    /// [`Error::InvalidFloatTag`] when the next byte is not the `f32` tag.
+    pub fn f32(&mut self) -> Result<f32, Error> {
+        let tag = self.take_one()?;
+        if tag != F32_TAG {
+            return Err(Error::InvalidFloatTag { tag });
+        }
+        let payload = self.take_payload(4)?;
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(payload);
+        Ok(ordered_bits_to_f32(u32::from_be_bytes(bytes)))
+    }
+
+    /// Parse a 64-bit float from the order-preserving IEEE-754 encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnexpectedEnd`] for truncation and
+    /// [`Error::InvalidFloatTag`] when the next byte is not the `f64` tag.
+    pub fn f64(&mut self) -> Result<f64, Error> {
+        let tag = self.take_one()?;
+        if tag != F64_TAG {
+            return Err(Error::InvalidFloatTag { tag });
+        }
+        let payload = self.take_payload(8)?;
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(payload);
+        Ok(ordered_bits_to_f64(u64::from_be_bytes(bytes)))
+    }
+
     fn parse_u64_as<T>(&mut self, target: &'static str) -> Result<T, Error>
     where
         T: TryFrom<u64>,
@@ -585,7 +651,7 @@ pub fn is_unit_tag(byte: u8) -> bool {
 
 /// Return true if `byte` can begin a tagged element.
 pub fn is_tag(byte: u8) -> bool {
-    (INTEGER_TAG_MIN..=INTEGER_TAG_MAX).contains(&byte)
+    (TAG_MIN..=TAG_MAX).contains(&byte)
 }
 
 /// Return a high-bit mask for zero bytes in `word`.
@@ -595,8 +661,8 @@ pub fn zero_byte_mask(word: u64) -> u64 {
 
 /// Return a high-bit mask for bytes with high nibble `0x1` or `0x2`.
 ///
-/// All tuple_key2 tagged elements currently live in `0x10..=0x2b`; this mask
-/// intentionally treats `0x2c..=0x2f` as candidates so callers can use one
+/// All tuple_key2 tagged elements currently live in `0x10..=0x2d`; this mask
+/// intentionally treats `0x2e..=0x2f` as candidates so callers can use one
 /// cheap SWAR predicate and then verify exact tags.
 pub fn broad_tag_candidate_mask(word: u64) -> u64 {
     let high_nibbles = word & NIBBLE_MASK;
@@ -664,6 +730,52 @@ fn encode_i64(value: i64, out: &mut Vec<u8>) {
         out.push(SIGNED_NONNEG_BASE + len as u8);
         push_big_endian_suffix(value, len, out);
     }
+}
+
+fn encode_f32(value: f32, out: &mut Vec<u8>) {
+    out.push(F32_TAG);
+    out.extend_from_slice(&f32_to_ordered_bits(value).to_be_bytes());
+}
+
+fn encode_f64(value: f64, out: &mut Vec<u8>) {
+    out.push(F64_TAG);
+    out.extend_from_slice(&f64_to_ordered_bits(value).to_be_bytes());
+}
+
+fn f32_to_ordered_bits(value: f32) -> u32 {
+    let bits = value.to_bits();
+    if bits & F32_SIGN_MASK != 0 {
+        !bits
+    } else {
+        bits | F32_SIGN_MASK
+    }
+}
+
+fn ordered_bits_to_f32(ordered: u32) -> f32 {
+    let bits = if ordered & F32_SIGN_MASK != 0 {
+        ordered & !F32_SIGN_MASK
+    } else {
+        !ordered
+    };
+    f32::from_bits(bits)
+}
+
+fn f64_to_ordered_bits(value: f64) -> u64 {
+    let bits = value.to_bits();
+    if bits & F64_SIGN_MASK != 0 {
+        !bits
+    } else {
+        bits | F64_SIGN_MASK
+    }
+}
+
+fn ordered_bits_to_f64(ordered: u64) -> f64 {
+    let bits = if ordered & F64_SIGN_MASK != 0 {
+        ordered & !F64_SIGN_MASK
+    } else {
+        !ordered
+    };
+    f64::from_bits(bits)
 }
 
 fn push_big_endian_suffix(value: u64, len: usize, out: &mut Vec<u8>) {
@@ -751,6 +863,31 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// `f32` wrapper whose equality compares raw bits, so distinct NaN payloads
+    /// (which round-trip exactly) still compare equal to themselves.
+    #[derive(Clone, Copy, Debug)]
+    struct OrdF32(f32);
+
+    impl PartialEq for OrdF32 {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.to_bits() == other.0.to_bits()
+        }
+    }
+
+    impl Eq for OrdF32 {}
+
+    /// `f64` wrapper whose equality compares raw bits.
+    #[derive(Clone, Copy, Debug)]
+    struct OrdF64(f64);
+
+    impl PartialEq for OrdF64 {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.to_bits() == other.0.to_bits()
+        }
+    }
+
+    impl Eq for OrdF64 {}
+
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum TestElement {
         Unit,
@@ -764,6 +901,8 @@ mod tests {
         I16(i16),
         I32(i32),
         I64(i64),
+        F32(OrdF32),
+        F64(OrdF64),
     }
 
     impl TestElement {
@@ -780,6 +919,8 @@ mod tests {
                 Self::I16(value) => builder.i16(*value),
                 Self::I32(value) => builder.i32(*value),
                 Self::I64(value) => builder.i64(*value),
+                Self::F32(value) => builder.f32(value.0),
+                Self::F64(value) => builder.f64(value.0),
             }
         }
 
@@ -799,6 +940,8 @@ mod tests {
                 Self::I16(_) => parser.i16().map(Self::I16),
                 Self::I32(_) => parser.i32().map(Self::I32),
                 Self::I64(_) => parser.i64().map(Self::I64),
+                Self::F32(_) => parser.f32().map(|value| Self::F32(OrdF32(value))),
+                Self::F64(_) => parser.f64().map(|value| Self::F64(OrdF64(value))),
             }
         }
     }
@@ -843,6 +986,8 @@ mod tests {
             any::<i16>().prop_map(TestElement::I16),
             any::<i32>().prop_map(TestElement::I32),
             any::<i64>().prop_map(TestElement::I64),
+            any::<f32>().prop_map(|value| TestElement::F32(OrdF32(value))),
+            any::<f64>().prop_map(|value| TestElement::F64(OrdF64(value))),
         ]
     }
 
@@ -1080,6 +1225,114 @@ mod tests {
             .map(|(value, _)| value)
             .collect::<Vec<_>>();
         assert_eq!(values, got);
+    }
+
+    #[test]
+    fn floats_round_trip_including_special_values() {
+        let key = TupleKey::builder()
+            .f32(f32::NEG_INFINITY)
+            .f32(-0.0)
+            .f32(0.0)
+            .f32(f32::INFINITY)
+            .f64(f64::NEG_INFINITY)
+            .f64(-0.0)
+            .f64(0.0)
+            .f64(f64::INFINITY)
+            .build();
+
+        let mut parser = key.parser();
+        assert_eq!(f32::NEG_INFINITY, parser.f32().unwrap());
+        assert_eq!(-0.0, parser.f32().unwrap());
+        assert_eq!(0.0, parser.f32().unwrap());
+        assert_eq!(f32::INFINITY, parser.f32().unwrap());
+        assert_eq!(f64::NEG_INFINITY, parser.f64().unwrap());
+        assert_eq!(-0.0, parser.f64().unwrap());
+        assert_eq!(0.0, parser.f64().unwrap());
+        assert_eq!(f64::INFINITY, parser.f64().unwrap());
+        assert_eq!((), parser.finish().unwrap());
+
+        // NaN round-trips exactly at the bit level.
+        let nan_key = TupleKey::builder().f32(f32::NAN).f64(f64::NAN).build();
+        let mut parser = nan_key.parser();
+        assert_eq!(f32::NAN.to_bits(), parser.f32().unwrap().to_bits());
+        assert_eq!(f64::NAN.to_bits(), parser.f64().unwrap().to_bits());
+        assert_eq!((), parser.finish().unwrap());
+    }
+
+    #[test]
+    fn f64_encoding_preserves_total_order() {
+        let values = vec![
+            f64::NEG_INFINITY,
+            f64::MIN,
+            -1.5,
+            -1.0,
+            -f64::MIN_POSITIVE,
+            -0.0,
+            0.0,
+            f64::MIN_POSITIVE,
+            1.0,
+            1.5,
+            f64::MAX,
+            f64::INFINITY,
+        ];
+        let mut encoded = values
+            .iter()
+            .map(|value| {
+                (
+                    *value,
+                    TupleKey::builder().f64(*value).build().into_bytes(),
+                )
+            })
+            .collect::<Vec<_>>();
+        encoded.sort_by(|lhs, rhs| lhs.1.cmp(&rhs.1));
+
+        let got = encoded
+            .into_iter()
+            .map(|(value, _)| value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, got);
+    }
+
+    #[test]
+    fn f32_encoding_preserves_total_order() {
+        let values = vec![
+            f32::NEG_INFINITY,
+            f32::MIN,
+            -1.5,
+            -1.0,
+            -0.0,
+            0.0,
+            1.0,
+            1.5,
+            f32::MAX,
+            f32::INFINITY,
+        ];
+        let mut encoded = values
+            .iter()
+            .map(|value| {
+                (
+                    *value,
+                    TupleKey::builder().f32(*value).build().into_bytes(),
+                )
+            })
+            .collect::<Vec<_>>();
+        encoded.sort_by(|lhs, rhs| lhs.1.cmp(&rhs.1));
+
+        let got = encoded
+            .into_iter()
+            .map(|(value, _)| value)
+            .collect::<Vec<_>>();
+        assert_eq!(values, got);
+    }
+
+    #[test]
+    fn parser_rejects_wrong_float_tag() {
+        let key = TupleKey::builder().f64(1.0).build();
+        let mut parser = key.parser();
+        assert_eq!(
+            Err(Error::InvalidFloatTag { tag: F64_TAG }),
+            parser.f32()
+        );
     }
 
     #[test]
