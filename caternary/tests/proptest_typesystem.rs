@@ -241,9 +241,10 @@ fn elems_match(elems: &[Ty], expected: &[Base]) -> bool {
     if elems.len() != expected.len() {
         return false;
     }
-    elems.iter().zip(expected).all(|(e, b)| {
-        matches!(&e.kind, TyKind::Con(name) if name == base_con(*b))
-    })
+    elems
+        .iter()
+        .zip(expected)
+        .all(|(e, b)| matches!(&e.kind, TyKind::Con(name) if name == base_con(*b)))
 }
 
 /// A bounded choice script.
@@ -549,7 +550,10 @@ fn norm_ty(t: &Ty) -> Ty {
         TyKind::App(n, args) => TyKind::App(n.clone(), args.iter().map(norm_ty).collect()),
         TyKind::Quote(w) => TyKind::Quote(Box::new(norm_word(w))),
     };
-    Ty { kind, span: ZERO_SPAN }
+    Ty {
+        kind,
+        span: ZERO_SPAN,
+    }
 }
 fn norm_stack(s: &StackTy) -> StackTy {
     StackTy {
