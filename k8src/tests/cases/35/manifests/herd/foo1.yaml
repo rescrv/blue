@@ -1,5 +1,6 @@
 source: this is foo1 template
-salutation: <UNSET>---
+salutation: <UNSET>
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
