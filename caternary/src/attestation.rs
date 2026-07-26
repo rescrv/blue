@@ -51,7 +51,8 @@ use crate::types::core_scheme;
 
 const CORE_PRIMITIVES: &[&str] = &[
     "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP", "2OVER",
-    "2ROT", "CALL", "DIP", "IF", "KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE",
+    "2ROT", "CALL", "DIP", "2DIP", "3DIP", "IF", "KEEP", "2KEEP", "3KEEP", "BI", "BI*", "BI@",
+    "TRI", "TRI*", "TRI@", "COMPOSE",
 ];
 
 // ===========================================================================

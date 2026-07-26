@@ -226,6 +226,22 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
                 stack(1, vec![v(0)]),
             ),
         ),
+        "2DIP" => Scheme::new(
+            vec![0, 1],
+            vec![0, 1],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), Ty::quote(arrow_st(), s)]),
+                stack(1, vec![v(0), v(1)]),
+            ),
+        ),
+        "3DIP" => Scheme::new(
+            vec![0, 1, 2],
+            vec![0, 1],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), v(2), Ty::quote(arrow_st(), s)]),
+                stack(1, vec![v(0), v(1), v(2)]),
+            ),
+        ),
         "IF" => Scheme::new(
             vec![],
             vec![0, 1],
@@ -247,6 +263,25 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
                 vec![0],
                 vec![0, 1],
                 WordTy::new(stack(0, vec![v(0), q]), stack(1, vec![v(0)])),
+            )
+        }
+        "2KEEP" => {
+            let q = quote(stack(0, vec![v(0), v(1)]), empty(1));
+            Scheme::new(
+                vec![0, 1],
+                vec![0, 1],
+                WordTy::new(stack(0, vec![v(0), v(1), q]), stack(1, vec![v(0), v(1)])),
+            )
+        }
+        "3KEEP" => {
+            let q = quote(stack(0, vec![v(0), v(1), v(2)]), empty(1));
+            Scheme::new(
+                vec![0, 1, 2],
+                vec![0, 1],
+                WordTy::new(
+                    stack(0, vec![v(0), v(1), v(2), q]),
+                    stack(1, vec![v(0), v(1), v(2)]),
+                ),
             )
         }
         "BI" => {
