@@ -1892,7 +1892,7 @@ impl SstBuilder {
 
     fn assign_last_key(&mut self, key: &[u8], timestamp: u64) {
         BUILDER_ASSIGN_LAST_KEY.click();
-        self.last_key.truncate(0);
+        self.last_key.clear();
         self.last_key.extend_from_slice(key);
         self.last_timestamp = timestamp;
         if self.smallest_timestamp > timestamp {

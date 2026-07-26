@@ -220,7 +220,7 @@ pub trait CommandLine: Sized + Default + Eq + PartialEq {
 provided: {:?}
 expected: {:?}
 check argument order amongst other differences",
-                &args, reconstructed_args
+                args, reconstructed_args
             );
         }
         (command_line, free)

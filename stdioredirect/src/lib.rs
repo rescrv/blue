@@ -80,10 +80,9 @@ pub fn pct_substitution(subs: &HashMap<char, String>, input: &str) -> Option<Str
         if prev == '%' {
             if c == '%' {
                 output.push('%')
-            } else if let Some(sub) = subs.get(&c) {
-                output += sub;
             } else {
-                return None;
+                let sub = subs.get(&c)?;
+                output += sub;
             }
         } else if c != '%' {
             output.push(c);
