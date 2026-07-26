@@ -199,7 +199,7 @@ fn new_evaluator() -> Evaluator<Value> {
 }
 
 fn register_shell_builtins(evaluator: &mut Evaluator<Value>) {
-    evaluator.define("TYPEOF", shell_typeof);
+    evaluator.define("TYPEOF", |stack, evaluator| shell_typeof(stack, evaluator));
     evaluator.register_operator_with_contract("TYPEOF", typeof_scheme());
 }
 
@@ -216,7 +216,7 @@ fn typeof_scheme() -> Scheme {
 }
 
 fn shell_typeof(
-    stack: &mut Vec<Value>,
+    stack: &mut [Value],
     evaluator: &Evaluator<Value>,
 ) -> std::result::Result<(), EvalError> {
     let value = stack
