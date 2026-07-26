@@ -11,20 +11,42 @@ use crate::Evaluator;
 use crate::Token;
 use crate::evaluator::operator_error;
 
+/// One executable item inside a runtime quotation.
+///
+/// Source quotations start as [`QuoteItem::Word`] / [`QuoteItem::Bracket`].
+/// Higher-order construction such as `CURRY` can add [`QuoteItem::Push`] items
+/// that push an already-captured runtime value directly. That is the sound path
+/// for arbitrary host values: no generic value-to-source-token reification is
+/// required.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuoteItem<T> {
+    /// Execute a word token.
+    Word(String),
+    /// Push a nested quotation value, capturing the locals in scope when this
+    /// item is executed.
+    Bracket(Vec<QuoteItem<T>>),
+    /// Push this captured value directly.
+    Push(T),
+}
+
 /// A trait for stack element types that can contain quotations.
 ///
 /// Quotations are bracketed code that can be executed by combinators. This trait
 /// allows combinators to extract the tokens from a quotation value on the stack.
-pub trait Quotable: From<Token> + Clone {
-    /// Attempts to extract the tokens from a quotation value.
+pub trait Quotable: From<Token> + Clone + Sized {
+    /// Attempts to extract the executable items from a quotation value.
     ///
-    /// Returns `Some(tokens)` if this value is a quotation (bracket), or `None` otherwise.
-    fn as_quotation(&self) -> Option<&[Token]>;
+    /// Returns `Some(items)` if this value is a quotation, or `None` otherwise.
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]>;
+
+    /// Creates a quotation value from executable quotation items.
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self;
 
     /// Converts this value back to tokens for use in quotation construction.
     ///
-    /// Used by `CURRY` to embed a value into a quotation. Returns a vector of
-    /// tokens that, when evaluated, would produce this value on the stack.
+    /// This is a rendering/scalar-conversion hook. It is not used by `CURRY`;
+    /// captured values inside quotations are represented by [`QuoteItem::Push`]
+    /// so arbitrary host values do not need to round-trip through source tokens.
     fn to_tokens(&self) -> Vec<Token>;
 
     /// Returns true if this value represents a truthy condition.
@@ -45,6 +67,45 @@ pub trait Quotable: From<Token> + Clone {
     ///
     /// Used by sequence combinators to construct result sequences.
     fn from_sequence(elements: Vec<Self>) -> Self;
+}
+
+/// Convert parsed source tokens into executable quotation items.
+pub fn quote_items_from_tokens<T>(tokens: &[Token]) -> Vec<QuoteItem<T>> {
+    tokens
+        .iter()
+        .map(|token| match token {
+            Token::Word(w) => QuoteItem::Word(w.clone()),
+            Token::Bracket(body) => QuoteItem::Bracket(quote_items_from_tokens(body)),
+        })
+        .collect()
+}
+
+/// Render quotation items back to tokens for display/scalar comparison.
+///
+/// [`QuoteItem::Push`] delegates to [`Quotable::to_tokens`]. This function is
+/// not used to execute captured quotation values.
+pub fn quote_items_to_tokens<T: Quotable>(items: &[QuoteItem<T>]) -> Vec<Token> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            QuoteItem::Word(w) => vec![Token::Word(w.clone())],
+            QuoteItem::Bracket(body) => vec![Token::Bracket(quote_items_to_tokens(body))],
+            QuoteItem::Push(value) => value.to_tokens(),
+        })
+        .collect()
+}
+
+/// Convert quotation items to stack values, treating words/brackets as literals
+/// and captured pushes as the captured value.
+pub fn quote_items_to_values<T: Quotable>(items: &[QuoteItem<T>]) -> Vec<T> {
+    items
+        .iter()
+        .map(|item| match item {
+            QuoteItem::Word(w) => T::from(Token::Word(w.clone())),
+            QuoteItem::Bracket(body) => T::from_quotation(body.clone()),
+            QuoteItem::Push(value) => value.clone(),
+        })
+        .collect()
 }
 
 fn stack_underflow(expected: usize, found: usize) -> EvalError {
@@ -68,11 +129,11 @@ fn not_a_sequence() -> EvalError {
     operator_error("expected a sequence")
 }
 
-/// Pops a quotation from the stack, returning its tokens.
-fn pop_quotation<T: Quotable>(stack: &mut Vec<T>) -> Result<Vec<Token>, EvalError> {
+/// Pops a quotation from the stack, returning its executable items.
+fn pop_quotation<T: Quotable>(stack: &mut Vec<T>) -> Result<Vec<QuoteItem<T>>, EvalError> {
     let val = stack.pop().ok_or_else(|| stack_underflow(1, 0))?;
     val.as_quotation()
-        .map(|tokens| tokens.to_vec())
+        .map(|items| items.to_vec())
         .ok_or_else(not_a_quotation)
 }
 
@@ -87,7 +148,7 @@ fn pop_quotation<T: Quotable>(stack: &mut Vec<T>) -> Result<Vec<Token>, EvalErro
 /// Pops a quotation from the stack and executes it.
 fn call<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalError> {
     let quotation = pop_quotation(stack)?;
-    eval.eval_with_stack(&quotation, stack)
+    eval.eval_quote_with_stack(&quotation, stack)
 }
 
 /// `DIP`: Execute a quotation while hiding the top element.
@@ -100,7 +161,7 @@ fn dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalE
     require_len(stack, 2)?;
     let quotation = pop_quotation(stack)?;
     let hidden = stack.pop().unwrap();
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.push(hidden);
     Ok(())
 }
@@ -115,7 +176,7 @@ fn two_dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), E
     require_len(stack, 3)?;
     let quotation = pop_quotation(stack)?;
     let hidden = stack.split_off(stack.len() - 2);
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.extend(hidden);
     Ok(())
 }
@@ -130,7 +191,7 @@ fn three_dip<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(),
     require_len(stack, 4)?;
     let quotation = pop_quotation(stack)?;
     let hidden = stack.split_off(stack.len() - 3);
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.extend(hidden);
     Ok(())
 }
@@ -144,7 +205,7 @@ fn keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     require_len(stack, 2)?;
     let quotation = pop_quotation(stack)?;
     let x = stack.last().unwrap().clone();
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.push(x);
     Ok(())
 }
@@ -158,7 +219,7 @@ fn two_keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), 
     require_len(stack, 3)?;
     let quotation = pop_quotation(stack)?;
     let kept = stack[stack.len() - 2..].to_vec();
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.extend(kept);
     Ok(())
 }
@@ -172,7 +233,7 @@ fn three_keep<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<()
     require_len(stack, 4)?;
     let quotation = pop_quotation(stack)?;
     let kept = stack[stack.len() - 3..].to_vec();
-    eval.eval_with_stack(&quotation, stack)?;
+    eval.eval_quote_with_stack(&quotation, stack)?;
     stack.extend(kept);
     Ok(())
 }
@@ -189,10 +250,10 @@ fn bi<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalEr
     let x = stack.pop().unwrap();
 
     stack.push(x.clone());
-    eval.eval_with_stack(&p, stack)?;
+    eval.eval_quote_with_stack(&p, stack)?;
 
     stack.push(x);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     Ok(())
 }
@@ -210,10 +271,10 @@ fn bi_star<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), E
     let x = stack.pop().unwrap();
 
     stack.push(x);
-    eval.eval_with_stack(&p, stack)?;
+    eval.eval_quote_with_stack(&p, stack)?;
 
     stack.push(y);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     Ok(())
 }
@@ -230,10 +291,10 @@ fn bi_at<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eva
     let x = stack.pop().unwrap();
 
     stack.push(x);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     stack.push(y);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     Ok(())
 }
@@ -251,13 +312,13 @@ fn tri<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalE
     let x = stack.pop().unwrap();
 
     stack.push(x.clone());
-    eval.eval_with_stack(&p, stack)?;
+    eval.eval_quote_with_stack(&p, stack)?;
 
     stack.push(x.clone());
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     stack.push(x);
-    eval.eval_with_stack(&r, stack)?;
+    eval.eval_quote_with_stack(&r, stack)?;
 
     Ok(())
 }
@@ -277,13 +338,13 @@ fn tri_star<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), 
     let x = stack.pop().unwrap();
 
     stack.push(x);
-    eval.eval_with_stack(&p, stack)?;
+    eval.eval_quote_with_stack(&p, stack)?;
 
     stack.push(y);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     stack.push(z);
-    eval.eval_with_stack(&r, stack)?;
+    eval.eval_quote_with_stack(&r, stack)?;
 
     Ok(())
 }
@@ -301,13 +362,13 @@ fn tri_at<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
     let x = stack.pop().unwrap();
 
     stack.push(x);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     stack.push(y);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     stack.push(z);
-    eval.eval_with_stack(&q, stack)?;
+    eval.eval_quote_with_stack(&q, stack)?;
 
     Ok(())
 }
@@ -325,7 +386,7 @@ fn compose<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), 
     let mut combined = p;
     combined.extend(q);
 
-    stack.push(T::from(Token::Bracket(combined)));
+    stack.push(T::from_quotation(combined));
     Ok(())
 }
 
@@ -339,10 +400,10 @@ fn curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), Ev
     let q = pop_quotation(stack)?;
     let x_val = stack.pop().unwrap();
 
-    let mut combined = x_val.to_tokens();
+    let mut combined = vec![QuoteItem::Push(x_val)];
     combined.extend(q);
 
-    stack.push(T::from(Token::Bracket(combined)));
+    stack.push(T::from_quotation(combined));
     Ok(())
 }
 
@@ -358,11 +419,11 @@ fn two_curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<()
 
     let mut combined = Vec::new();
     for value in values {
-        combined.extend(value.to_tokens());
+        combined.push(QuoteItem::Push(value));
     }
     combined.extend(q);
 
-    stack.push(T::from(Token::Bracket(combined)));
+    stack.push(T::from_quotation(combined));
     Ok(())
 }
 
@@ -378,11 +439,11 @@ fn three_curry<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<
 
     let mut combined = Vec::new();
     for value in values {
-        combined.extend(value.to_tokens());
+        combined.push(QuoteItem::Push(value));
     }
     combined.extend(q);
 
-    stack.push(T::from(Token::Bracket(combined)));
+    stack.push(T::from_quotation(combined));
     Ok(())
 }
 
@@ -402,9 +463,9 @@ fn if_combinator<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result
     let condition = stack.pop().unwrap();
 
     if condition.is_truthy() {
-        eval.eval_with_stack(&true_branch, stack)
+        eval.eval_quote_with_stack(&true_branch, stack)
     } else {
-        eval.eval_with_stack(&false_branch, stack)
+        eval.eval_quote_with_stack(&false_branch, stack)
     }
 }
 
@@ -419,7 +480,7 @@ fn when<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     let condition = stack.pop().unwrap();
 
     if condition.is_truthy() {
-        eval.eval_with_stack(&quotation, stack)
+        eval.eval_quote_with_stack(&quotation, stack)
     } else {
         Ok(())
     }
@@ -436,7 +497,7 @@ fn unless<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
     let condition = stack.pop().unwrap();
 
     if !condition.is_truthy() {
-        eval.eval_with_stack(&quotation, stack)
+        eval.eval_quote_with_stack(&quotation, stack)
     } else {
         Ok(())
     }
@@ -461,7 +522,7 @@ fn map<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), EvalE
     for elem in seq {
         let before = stack.len();
         stack.push(elem);
-        eval.eval_with_stack(&quotation, stack)?;
+        eval.eval_quote_with_stack(&quotation, stack)?;
         if stack.len() != before + 1 {
             return Err(operator_error(
                 "MAP quotation must consume one element and leave one result",
@@ -492,7 +553,7 @@ fn filter<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Ev
     for elem in seq {
         let before = stack.len();
         stack.push(elem.clone());
-        eval.eval_with_stack(&quotation, stack)?;
+        eval.eval_quote_with_stack(&quotation, stack)?;
         if stack.len() != before + 1 {
             return Err(operator_error(
                 "FILTER quotation must consume one element and leave one predicate value",
@@ -527,7 +588,7 @@ fn fold<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     for elem in seq {
         let before = stack.len();
         stack.push(elem);
-        eval.eval_with_stack(&quotation, stack)?;
+        eval.eval_quote_with_stack(&quotation, stack)?;
         if stack.len() != before {
             return Err(operator_error(
                 "FOLD quotation must consume accumulator+element and leave one accumulator",
@@ -552,7 +613,7 @@ fn each<T: Quotable>(stack: &mut Vec<T>, eval: &Evaluator<T>) -> Result<(), Eval
     for elem in seq {
         let before = stack.len();
         stack.push(elem);
-        eval.eval_with_stack(&quotation, stack)?;
+        eval.eval_quote_with_stack(&quotation, stack)?;
         if stack.len() != before {
             return Err(operator_error(
                 "EACH quotation must consume one element and leave no extra values",
@@ -631,7 +692,7 @@ mod tests {
         Int(i64),
         Bool(bool),
         Word(String),
-        Quotation(Vec<Token>),
+        Quotation(Vec<QuoteItem<Value>>),
         Sequence(Vec<Value>),
     }
 
@@ -649,17 +710,21 @@ mod tests {
                         Value::Word(w)
                     }
                 }
-                Token::Bracket(tokens) => Value::Quotation(tokens),
+                Token::Bracket(tokens) => Value::Quotation(quote_items_from_tokens(&tokens)),
             }
         }
     }
 
     impl Quotable for Value {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             match self {
                 Value::Quotation(tokens) => Some(tokens),
                 _ => None,
             }
+        }
+
+        fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+            Value::Quotation(items)
         }
 
         fn to_tokens(&self) -> Vec<Token> {
@@ -667,7 +732,7 @@ mod tests {
                 Value::Int(n) => vec![Token::Word(n.to_string())],
                 Value::Bool(b) => vec![Token::Word(b.to_string())],
                 Value::Word(w) => vec![Token::Word(w.clone())],
-                Value::Quotation(tokens) => vec![Token::Bracket(tokens.clone())],
+                Value::Quotation(tokens) => vec![Token::Bracket(quote_items_to_tokens(tokens))],
                 Value::Sequence(elems) => {
                     let inner: Vec<Token> = elems.iter().flat_map(|e| e.to_tokens()).collect();
                     vec![Token::Bracket(inner)]
@@ -686,9 +751,7 @@ mod tests {
         fn as_sequence(&self) -> Option<Vec<Self>> {
             match self {
                 Value::Sequence(elems) => Some(elems.clone()),
-                Value::Quotation(tokens) => {
-                    Some(tokens.iter().map(|t| Value::from(t.clone())).collect())
-                }
+                Value::Quotation(tokens) => Some(quote_items_to_values(tokens)),
                 _ => None,
             }
         }

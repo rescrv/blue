@@ -126,10 +126,12 @@ use crate::refinement::UnOp;
 use crate::refinement::parse_assume;
 use crate::shadow::NamedBinding;
 use crate::shadow::ShadowError;
+use crate::shadow::ShadowQuoteItem;
 use crate::shadow::ShadowStack;
 use crate::shadow::ShadowWord;
 use crate::shadow::Slot;
 use crate::shadow::bind_positional;
+use crate::shadow::shadow_quote_from_tokens;
 
 // ===========================================================================
 // The verdict and the seam
@@ -959,7 +961,7 @@ fn check_quote_subsumption<R: VerifyResolve, S: Solver + CounterModel + FactSnap
 /// **unrefined** (`where true` on both sides) — the §10.7 absent-payload case.
 fn relay_provided_contract<R: VerifyResolve>(slot: &Slot, resolve: &R) -> RefinementSig {
     if let Slot::Quote(body) = slot
-        && let [Token::Word(w)] = body.as_slice()
+        && let [ShadowQuoteItem::Word(w)] = body.as_slice()
         && let Some(sig) = resolve.signature(w)
     {
         return sig;
@@ -1073,7 +1075,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             // term, verify the quotation on the rest, restore the set-aside term.
             let body = stack.pop_quote()?;
             let hidden = stack.pop()?;
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(hidden);
             Ok(())
         }
@@ -1082,7 +1084,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let body = stack.pop_quote()?;
             let y = stack.pop()?;
             let x = stack.pop()?;
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(x);
             stack.push_slot(y);
             Ok(())
@@ -1093,7 +1095,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let z = stack.pop()?;
             let y = stack.pop()?;
             let x = stack.pop()?;
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(x);
             stack.push_slot(y);
             stack.push_slot(z);
@@ -1101,13 +1103,13 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
         }
         ShadowWord::Call => {
             let body = stack.pop_quote()?;
-            verify_ctx(&body, stack, solver, resolve, ctx)
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)
         }
         ShadowWord::Keep => {
             stack.require(2)?;
             let body = stack.pop_quote()?;
             let kept = stack.slots().last().unwrap().clone();
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             stack.push_slot(kept);
             Ok(())
         }
@@ -1115,7 +1117,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             stack.require(3)?;
             let body = stack.pop_quote()?;
             let kept = stack.slots()[stack.len() - 2..].to_vec();
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             for slot in kept {
                 stack.push_slot(slot);
             }
@@ -1125,7 +1127,7 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             stack.require(4)?;
             let body = stack.pop_quote()?;
             let kept = stack.slots()[stack.len() - 3..].to_vec();
-            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&body, stack, solver, resolve, ctx)?;
             for slot in kept {
                 stack.push_slot(slot);
             }
@@ -1137,9 +1139,9 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let p = stack.pop_quote()?;
             let x = stack.pop()?;
             stack.push_slot(x.clone());
-            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&p, stack, solver, resolve, ctx)?;
             stack.push_slot(x);
-            verify_ctx(&q, stack, solver, resolve, ctx)
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)
         }
         ShadowWord::BiStar => {
             stack.require(4)?;
@@ -1148,9 +1150,9 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let y = stack.pop()?;
             let x = stack.pop()?;
             stack.push_slot(x);
-            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&p, stack, solver, resolve, ctx)?;
             stack.push_slot(y);
-            verify_ctx(&q, stack, solver, resolve, ctx)
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)
         }
         ShadowWord::BiAt => {
             stack.require(3)?;
@@ -1158,9 +1160,9 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let y = stack.pop()?;
             let x = stack.pop()?;
             stack.push_slot(x);
-            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)?;
             stack.push_slot(y);
-            verify_ctx(&q, stack, solver, resolve, ctx)
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)
         }
         ShadowWord::Tri => {
             stack.require(4)?;
@@ -1169,11 +1171,11 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let p = stack.pop_quote()?;
             let x = stack.pop()?;
             stack.push_slot(x.clone());
-            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&p, stack, solver, resolve, ctx)?;
             stack.push_slot(x.clone());
-            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)?;
             stack.push_slot(x);
-            verify_ctx(&r, stack, solver, resolve, ctx)
+            verify_quote_ctx(&r, stack, solver, resolve, ctx)
         }
         ShadowWord::TriStar => {
             stack.require(6)?;
@@ -1184,11 +1186,11 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let y = stack.pop()?;
             let x = stack.pop()?;
             stack.push_slot(x);
-            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&p, stack, solver, resolve, ctx)?;
             stack.push_slot(y);
-            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)?;
             stack.push_slot(z);
-            verify_ctx(&r, stack, solver, resolve, ctx)
+            verify_quote_ctx(&r, stack, solver, resolve, ctx)
         }
         ShadowWord::TriAt => {
             stack.require(4)?;
@@ -1197,11 +1199,11 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let y = stack.pop()?;
             let x = stack.pop()?;
             stack.push_slot(x);
-            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)?;
             stack.push_slot(y);
-            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)?;
             stack.push_slot(z);
-            verify_ctx(&q, stack, solver, resolve, ctx)
+            verify_quote_ctx(&q, stack, solver, resolve, ctx)
         }
         ShadowWord::Compose => {
             stack.require(2)?;
@@ -1209,6 +1211,39 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             let mut p = stack.pop_quote()?;
             p.extend(q);
             stack.push_quote(p);
+            Ok(())
+        }
+        ShadowWord::Curry => {
+            stack.require(2)?;
+            let mut body = stack.pop_quote()?;
+            let value = stack.pop()?;
+            body.insert(0, ShadowQuoteItem::Push(value));
+            stack.push_quote(body);
+            Ok(())
+        }
+        ShadowWord::TwoCurry => {
+            stack.require(3)?;
+            let body = stack.pop_quote()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            let mut combined = vec![ShadowQuoteItem::Push(x), ShadowQuoteItem::Push(y)];
+            combined.extend(body);
+            stack.push_quote(combined);
+            Ok(())
+        }
+        ShadowWord::ThreeCurry => {
+            stack.require(4)?;
+            let body = stack.pop_quote()?;
+            let z = stack.pop()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            let mut combined = vec![
+                ShadowQuoteItem::Push(x),
+                ShadowQuoteItem::Push(y),
+                ShadowQuoteItem::Push(z),
+            ];
+            combined.extend(body);
+            stack.push_quote(combined);
             Ok(())
         }
     }
@@ -1255,7 +1290,7 @@ pub fn verify_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
 ) -> Result<(), ShadowError> {
     for token in tokens {
         match token {
-            Token::Bracket(body) => stack.push_quote(body.clone()),
+            Token::Bracket(body) => stack.push_quote(shadow_quote_from_tokens(body)),
             Token::Word(w) if is_if(w) => {
                 verify_if(stack, solver, resolve, ctx)?;
             }
@@ -1270,6 +1305,34 @@ pub fn verify_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             Token::Word(w) => {
                 apply_effect(stack, w, resolve, solver, ctx)?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn verify_quote_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    items: &[ShadowQuoteItem],
+    stack: &mut ShadowStack,
+    solver: &mut S,
+    resolve: &R,
+    ctx: &mut VerifyCtx,
+) -> Result<(), ShadowError> {
+    for item in items {
+        match item {
+            ShadowQuoteItem::Word(w) if is_if(w) => {
+                verify_if(stack, solver, resolve, ctx)?;
+            }
+            ShadowQuoteItem::Word(w) if parse_assume(w).is_some() => {
+                let pred = parse_assume(w).unwrap().map_err(|e| ShadowError {
+                    message: format!("malformed `assume` clause: {e}"),
+                })?;
+                apply_assume(stack, w, pred, solver, ctx)?;
+            }
+            ShadowQuoteItem::Word(w) => {
+                apply_effect(stack, w, resolve, solver, ctx)?;
+            }
+            ShadowQuoteItem::Bracket(body) => stack.push_quote(body.clone()),
+            ShadowQuoteItem::Push(slot) => stack.push_slot(slot.clone()),
         }
     }
     Ok(())
@@ -1305,7 +1368,7 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
         let mut branch = stack.clone();
         solver.push_scope();
         solver.assert(&cond);
-        verify_ctx(&then_body, &mut branch, solver, resolve, ctx)?;
+        verify_quote_ctx(&then_body, &mut branch, solver, resolve, ctx)?;
         solver.pop_scope();
         branch
     };
@@ -1315,7 +1378,7 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
         let mut branch = stack.clone();
         solver.push_scope();
         solver.assert(&negate(&cond));
-        verify_ctx(&else_body, &mut branch, solver, resolve, ctx)?;
+        verify_quote_ctx(&else_body, &mut branch, solver, resolve, ctx)?;
         solver.pop_scope();
     }
 

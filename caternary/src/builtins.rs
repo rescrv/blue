@@ -492,8 +492,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        Evaluator, Quotable, Scheme, Span, StackTy, Token, Ty, WordTy, check_whole_program, parse,
-        parse_with_spans,
+        Evaluator, Quotable, QuoteItem, Scheme, Span, StackTy, Token, Ty, WordTy,
+        check_whole_program, parse, parse_with_spans, quote_items_from_tokens,
+        quote_items_to_tokens, quote_items_to_values,
     };
 
     use super::{register_scalar_builtins, register_stack_builtins};
@@ -511,8 +512,12 @@ mod tests {
     }
 
     impl Quotable for Number {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             None
+        }
+
+        fn from_quotation(_items: Vec<QuoteItem<Self>>) -> Self {
+            Number(0)
         }
 
         fn to_tokens(&self) -> Vec<Token> {
@@ -537,7 +542,7 @@ mod tests {
         Word(String),
         Number(f64),
         Bool(bool),
-        Quotation(Vec<Token>),
+        Quotation(Vec<QuoteItem<Value>>),
     }
 
     impl From<Token> for Value {
@@ -554,17 +559,21 @@ mod tests {
                         Value::Word(w)
                     }
                 }
-                Token::Bracket(tokens) => Value::Quotation(tokens),
+                Token::Bracket(tokens) => Value::Quotation(quote_items_from_tokens(&tokens)),
             }
         }
     }
 
     impl Quotable for Value {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             match self {
                 Value::Quotation(tokens) => Some(tokens),
                 _ => None,
             }
+        }
+
+        fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+            Value::Quotation(items)
         }
 
         fn to_tokens(&self) -> Vec<Token> {
@@ -572,7 +581,7 @@ mod tests {
                 Value::Word(w) => vec![Token::Word(w.clone())],
                 Value::Number(n) => vec![Token::Word(n.to_string())],
                 Value::Bool(b) => vec![Token::Word(b.to_string())],
-                Value::Quotation(tokens) => vec![Token::Bracket(tokens.clone())],
+                Value::Quotation(tokens) => vec![Token::Bracket(quote_items_to_tokens(tokens))],
             }
         }
 
@@ -586,13 +595,13 @@ mod tests {
 
         fn as_sequence(&self) -> Option<Vec<Self>> {
             match self {
-                Value::Quotation(tokens) => Some(tokens.iter().cloned().map(Value::from).collect()),
+                Value::Quotation(tokens) => Some(quote_items_to_values(tokens)),
                 _ => None,
             }
         }
 
         fn from_sequence(elements: Vec<Self>) -> Self {
-            Value::Quotation(elements.iter().flat_map(|v| v.to_tokens()).collect())
+            Value::Quotation(elements.into_iter().map(QuoteItem::Push).collect())
         }
     }
 

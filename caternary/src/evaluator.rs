@@ -11,6 +11,8 @@ use handled::SError;
 
 use crate::Quotable;
 use crate::Token;
+use crate::combinators::QuoteItem;
+use crate::combinators::quote_items_from_tokens;
 use crate::types::Scheme;
 
 /// Evaluation error type.
@@ -84,43 +86,81 @@ fn is_local_name(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Bake enclosing locals into a quotation by value (lexical capture at
-/// construction time). A bare-word reference is replaced by the tokens of its
-/// bound value only when it is *free* in the quotation -- not shadowed by a
-/// binder (`>name`) lexically preceding it -- and bound in the enclosing `env`.
-/// References that are not bound here are left untouched so they resolve when
-/// (and where) the quotation eventually runs.
-fn capture_body<T: Quotable>(body: &[Token], env: &HashMap<String, T>) -> Vec<Token> {
+/// Bake enclosing locals into parsed quotation tokens by value.
+fn capture_tokens<T: Quotable>(body: &[Token], env: &HashMap<String, T>) -> Vec<QuoteItem<T>> {
     let mut local: HashSet<&str> = HashSet::new();
-    let mut out: Vec<Token> = Vec::with_capacity(body.len());
+    let mut out: Vec<QuoteItem<T>> = Vec::with_capacity(body.len());
     for tok in body {
         match tok {
             Token::Word(w) => {
                 if let Some(name) = bind_target(w) {
                     local.insert(name);
-                    out.push(tok.clone());
+                    out.push(QuoteItem::Word(w.clone()));
                 } else if !local.contains(w.as_str()) {
                     if let Some(value) = env.get(w) {
-                        out.extend(value.to_tokens());
+                        out.push(QuoteItem::Push(value.clone()));
                     } else {
-                        out.push(tok.clone());
+                        out.push(QuoteItem::Word(w.clone()));
                     }
                 } else {
-                    out.push(tok.clone());
+                    out.push(QuoteItem::Word(w.clone()));
                 }
             }
             Token::Bracket(inner) => {
-                if local.is_empty() {
-                    out.push(Token::Bracket(capture_body(inner, env)));
+                let body = if local.is_empty() {
+                    capture_tokens(inner, env)
                 } else {
                     let shadowed: HashMap<String, T> = env
                         .iter()
                         .filter(|(k, _)| !local.contains(k.as_str()))
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
-                    out.push(Token::Bracket(capture_body(inner, &shadowed)));
+                    capture_tokens(inner, &shadowed)
+                };
+                out.push(QuoteItem::Bracket(body));
+            }
+        }
+    }
+    out
+}
+
+/// Bake enclosing locals into an existing quote-item body by value.
+fn capture_quote_items<T: Quotable>(
+    body: &[QuoteItem<T>],
+    env: &HashMap<String, T>,
+) -> Vec<QuoteItem<T>> {
+    let mut local: HashSet<&str> = HashSet::new();
+    let mut out: Vec<QuoteItem<T>> = Vec::with_capacity(body.len());
+    for item in body {
+        match item {
+            QuoteItem::Word(w) => {
+                if let Some(name) = bind_target(w) {
+                    local.insert(name);
+                    out.push(QuoteItem::Word(w.clone()));
+                } else if !local.contains(w.as_str()) {
+                    if let Some(value) = env.get(w) {
+                        out.push(QuoteItem::Push(value.clone()));
+                    } else {
+                        out.push(QuoteItem::Word(w.clone()));
+                    }
+                } else {
+                    out.push(QuoteItem::Word(w.clone()));
                 }
             }
+            QuoteItem::Bracket(inner) => {
+                let body = if local.is_empty() {
+                    capture_quote_items(inner, env)
+                } else {
+                    let shadowed: HashMap<String, T> = env
+                        .iter()
+                        .filter(|(k, _)| !local.contains(k.as_str()))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    capture_quote_items(inner, &shadowed)
+                };
+                out.push(QuoteItem::Bracket(body));
+            }
+            QuoteItem::Push(value) => out.push(QuoteItem::Push(value.clone())),
         }
     }
     out
@@ -576,6 +616,56 @@ where
         self.eval_scope(tokens, stack, &mut env)
     }
 
+    /// Evaluates executable quotation items using an existing stack.
+    pub fn eval_quote_with_stack(
+        &self,
+        items: &[QuoteItem<T>],
+        stack: &mut Vec<T>,
+    ) -> Result<(), EvalError> {
+        let mut env: HashMap<String, T> = HashMap::new();
+        self.eval_quote_scope(items, stack, &mut env)
+    }
+
+    fn eval_word(
+        &self,
+        w: &str,
+        stack: &mut Vec<T>,
+        env: &mut HashMap<String, T>,
+    ) -> Result<(), EvalError> {
+        if let Some(name) = bind_target(w) {
+            // bind: pop the top of stack into a single-assignment local
+            if env.contains_key(name) {
+                return Err(operator_error(format!(
+                    "single-assignment violation: `{name}` is already bound in this scope"
+                )));
+            }
+            let value = stack.pop().ok_or_else(|| {
+                operator_error(format!("stack underflow: `>{name}` needs a value to bind"))
+            })?;
+            env.insert(name.to_string(), value);
+        } else if has_def_prefix(w) {
+            // A `:`-binder reached evaluation. `load` consumes every valid binder
+            // and rejects malformed ones, so reaching here means definitions were
+            // not loaded or a binder was smuggled into a quotation body.
+            return Err(definition_error(format!(
+                "definition binder `{w}` encountered during evaluation; \
+                 definitions must be loaded with `Evaluator::load`, not evaluated"
+            )));
+        } else if let Some(value) = env.get(w) {
+            // reference: resolved scope-first, ahead of definitions and operators
+            stack.push(value.clone());
+        } else if let Some(body) = self.definitions.get(w) {
+            // function call: re-enter in a fresh scope.
+            let body = body.clone();
+            self.eval_with_stack(&body, stack)?;
+        } else if let Some(op) = self.operators.get(w) {
+            op(stack, self)?;
+        } else {
+            stack.push(T::from(Token::Word(w.to_string())));
+        }
+        Ok(())
+    }
+
     fn eval_scope(
         &self,
         tokens: &[Token],
@@ -584,56 +674,39 @@ where
     ) -> Result<(), EvalError> {
         for token in tokens {
             match token {
-                Token::Word(w) => {
-                    if let Some(name) = bind_target(w) {
-                        // bind: pop the top of stack into a single-assignment local
-                        if env.contains_key(name) {
-                            return Err(operator_error(format!(
-                                "single-assignment violation: `{name}` is already bound in this scope"
-                            )));
-                        }
-                        let value = stack.pop().ok_or_else(|| {
-                            operator_error(format!(
-                                "stack underflow: `>{name}` needs a value to bind"
-                            ))
-                        })?;
-                        env.insert(name.to_string(), value);
-                    } else if has_def_prefix(w) {
-                        // A `:`-binder reached evaluation. `load` consumes every
-                        // valid binder and rejects malformed ones, so reaching
-                        // here means definitions were not loaded (or a binder
-                        // was smuggled into a quotation body, which `load` also
-                        // rejects). Fail loudly rather than push it as a literal.
-                        return Err(definition_error(format!(
-                            "definition binder `{w}` encountered during evaluation; \
-                             definitions must be loaded with `Evaluator::load`, not evaluated"
-                        )));
-                    } else if let Some(value) = env.get(w) {
-                        // reference: resolved scope-first, ahead of definitions and operators
-                        stack.push(value.clone());
-                    } else if let Some(body) = self.definitions.get(w) {
-                        // function call: re-enter in a fresh scope. Resolved at
-                        // call time against the populated table, so a definition
-                        // may call itself (recursion) or any sibling definition,
-                        // in any textual order.
-                        let body = body.clone();
-                        self.eval_with_stack(&body, stack)?;
-                    } else if let Some(op) = self.operators.get(w) {
-                        op(stack, self)?;
-                    } else {
-                        stack.push(T::from(token.clone()));
-                    }
-                }
+                Token::Word(w) => self.eval_word(w, stack, env)?,
                 Token::Bracket(body) => {
                     // A quotation value captures the locals in scope by value.
-                    // The empty-env fast path is byte-for-byte the original
-                    // behavior, so programs without locals are unaffected.
-                    if env.is_empty() {
-                        stack.push(T::from(token.clone()));
+                    let quotation = if env.is_empty() {
+                        quote_items_from_tokens(body)
                     } else {
-                        stack.push(T::from(Token::Bracket(capture_body(body, env))));
-                    }
+                        capture_tokens(body, env)
+                    };
+                    stack.push(T::from_quotation(quotation));
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn eval_quote_scope(
+        &self,
+        items: &[QuoteItem<T>],
+        stack: &mut Vec<T>,
+        env: &mut HashMap<String, T>,
+    ) -> Result<(), EvalError> {
+        for item in items {
+            match item {
+                QuoteItem::Word(w) => self.eval_word(w, stack, env)?,
+                QuoteItem::Bracket(body) => {
+                    let quotation = if env.is_empty() {
+                        body.clone()
+                    } else {
+                        capture_quote_items(body, env)
+                    };
+                    stack.push(T::from_quotation(quotation));
+                }
+                QuoteItem::Push(value) => stack.push(value.clone()),
             }
         }
         Ok(())
@@ -649,14 +722,14 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     enum Value {
         Word(String),
-        Bracket(Vec<Token>),
+        Bracket(Vec<QuoteItem<Value>>),
     }
 
     impl From<Token> for Value {
         fn from(token: Token) -> Self {
             match token {
                 Token::Word(w) => Value::Word(w),
-                Token::Bracket(b) => Value::Bracket(b),
+                Token::Bracket(b) => Value::Bracket(quote_items_from_tokens(&b)),
             }
         }
     }
@@ -671,35 +744,43 @@ mod tests {
     }
 
     impl Quotable for Value {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             match self {
                 Value::Bracket(b) => Some(b),
                 Value::Word(_) => None,
             }
         }
 
+        fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+            Value::Bracket(items)
+        }
+
         fn to_tokens(&self) -> Vec<Token> {
             match self {
                 Value::Word(w) => vec![Token::Word(w.clone())],
-                Value::Bracket(b) => vec![Token::Bracket(b.clone())],
+                Value::Bracket(b) => vec![Token::Bracket(crate::quote_items_to_tokens(b))],
             }
         }
 
         fn as_sequence(&self) -> Option<Vec<Self>> {
             match self {
-                Value::Bracket(b) => Some(b.iter().map(|t| Value::from(t.clone())).collect()),
+                Value::Bracket(b) => Some(crate::quote_items_to_values(b)),
                 Value::Word(_) => None,
             }
         }
 
         fn from_sequence(elements: Vec<Self>) -> Self {
-            Value::Bracket(elements.iter().flat_map(|v| v.to_tokens()).collect())
+            Value::Bracket(elements.iter().cloned().map(QuoteItem::Push).collect())
         }
     }
 
     impl Quotable for i32 {
-        fn as_quotation(&self) -> Option<&[Token]> {
+        fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
             None
+        }
+
+        fn from_quotation(_items: Vec<QuoteItem<Self>>) -> Self {
+            0
         }
 
         fn to_tokens(&self) -> Vec<Token> {
@@ -1134,8 +1215,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         if let Value::Bracket(outer) = &result[0] {
             assert_eq!(outer.len(), 2);
-            assert!(matches!(&outer[0], Token::Bracket(_)));
-            assert!(matches!(&outer[1], Token::Bracket(_)));
+            assert!(matches!(&outer[0], QuoteItem::Bracket(_)));
+            assert!(matches!(&outer[1], QuoteItem::Bracket(_)));
         } else {
             panic!("Expected bracket");
         }

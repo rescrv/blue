@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use arrrg::CommandLine;
 use caternary::{
-    CODE_OPERATOR_ERROR, EvalError, Evaluator, ParseError, Quotable, Scheme, SmtLibSolver, Span,
-    SpannedToken, SpannedTokenKind, StackTy, Token, Ty, WordTy, check_whole_program, core_scheme,
-    format_word_type, infer_quote_type, parse_with_spans, register_all_builtins,
+    CODE_OPERATOR_ERROR, EvalError, Evaluator, ParseError, Quotable, QuoteItem, Scheme,
+    SmtLibSolver, Span, SpannedToken, SpannedTokenKind, StackTy, Token, Ty, WordTy,
+    check_whole_program, core_scheme, format_word_type, infer_quote_type, parse_with_spans,
+    quote_items_from_tokens, quote_items_to_tokens, quote_items_to_values, register_all_builtins,
 };
 use handled::SError;
 use rustyline::error::ReadlineError;
@@ -46,13 +47,14 @@ enum Value {
     Word(String),
     Number(f64),
     Bool(bool),
-    Quotation(Vec<Token>),
+    Quotation(Vec<QuoteItem<Value>>),
 }
 
 const CORE_OPERATOR_NAMES: &[&str] = &[
     "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP", "2OVER",
     "2ROT", "CALL", "DIP", "2DIP", "3DIP", "IF", "KEEP", "2KEEP", "3KEEP", "BI", "BI*", "BI@",
-    "TRI", "TRI*", "TRI@", "COMPOSE",
+    "TRI", "TRI*", "TRI@", "COMPOSE", "CURRY", "2CURRY", "3CURRY", "WHEN", "UNLESS", "MAP",
+    "FILTER", "FOLD", "EACH",
 ];
 
 impl From<Token> for Value {
@@ -69,17 +71,21 @@ impl From<Token> for Value {
                     Value::Word(w)
                 }
             }
-            Token::Bracket(tokens) => Value::Quotation(tokens),
+            Token::Bracket(tokens) => Value::Quotation(quote_items_from_tokens(&tokens)),
         }
     }
 }
 
 impl Quotable for Value {
-    fn as_quotation(&self) -> Option<&[Token]> {
+    fn as_quotation(&self) -> Option<&[QuoteItem<Self>]> {
         match self {
             Value::Quotation(tokens) => Some(tokens),
             _ => None,
         }
+    }
+
+    fn from_quotation(items: Vec<QuoteItem<Self>>) -> Self {
+        Value::Quotation(items)
     }
 
     fn to_tokens(&self) -> Vec<Token> {
@@ -87,7 +93,7 @@ impl Quotable for Value {
             Value::Word(w) => vec![Token::Word(w.clone())],
             Value::Number(n) => vec![Token::Word(n.to_string())],
             Value::Bool(b) => vec![Token::Word(b.to_string())],
-            Value::Quotation(tokens) => vec![Token::Bracket(tokens.clone())],
+            Value::Quotation(tokens) => vec![Token::Bracket(quote_items_to_tokens(tokens))],
         }
     }
 
@@ -101,13 +107,13 @@ impl Quotable for Value {
 
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
-            Value::Quotation(tokens) => Some(tokens.iter().cloned().map(Value::from).collect()),
+            Value::Quotation(tokens) => Some(quote_items_to_values(tokens)),
             _ => None,
         }
     }
 
     fn from_sequence(elements: Vec<Self>) -> Self {
-        Value::Quotation(elements.into_iter().flat_map(|v| v.to_tokens()).collect())
+        Value::Quotation(elements.into_iter().map(QuoteItem::Push).collect())
     }
 }
 
@@ -518,13 +524,29 @@ fn typeof_value(
     value: &Value,
 ) -> std::result::Result<String, EvalError> {
     match value {
-        Value::Quotation(tokens) => infer_quote_type(evaluator, tokens)
-            .map(|word| format_word_type(&word))
-            .map_err(|err| repl_operator_error(err.to_string())),
+        Value::Quotation(items) => {
+            let tokens = source_tokens_from_quote_items(items).ok_or_else(|| {
+                repl_operator_error("TYPEOF cannot infer quotations with captured runtime values")
+            })?;
+            infer_quote_type(evaluator, &tokens)
+                .map(|word| format_word_type(&word))
+                .map_err(|err| repl_operator_error(err.to_string()))
+        }
         _ => Err(repl_operator_error(
             "TYPEOF expects a quotation on top of the stack",
         )),
     }
+}
+
+fn source_tokens_from_quote_items(items: &[QuoteItem<Value>]) -> Option<Vec<Token>> {
+    items
+        .iter()
+        .map(|item| match item {
+            QuoteItem::Word(w) => Some(Token::Word(w.clone())),
+            QuoteItem::Bracket(body) => Some(Token::Bracket(source_tokens_from_quote_items(body)?)),
+            QuoteItem::Push(_) => None,
+        })
+        .collect()
 }
 
 fn repl_operator_error(message: impl AsRef<str>) -> EvalError {
@@ -591,7 +613,7 @@ fn format_value(value: &Value) -> String {
         Value::Word(w) => format_word(w),
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
-        Value::Quotation(tokens) => format!("[{}]", format_tokens(tokens)),
+        Value::Quotation(tokens) => format!("[{}]", format_tokens(&quote_items_to_tokens(tokens))),
     }
 }
 
@@ -649,7 +671,7 @@ mod tests {
     #[test]
     fn typeof_renders_inferred_quote_type() {
         let evaluator = new_evaluator();
-        let value = Value::Quotation(caternary::parse("1 +").unwrap());
+        let value = Value::Quotation(quote_items_from_tokens(&caternary::parse("1 +").unwrap()));
 
         let rendered = typeof_value(&evaluator, &value).unwrap();
 
