@@ -292,7 +292,7 @@ impl<W: Write> LogBuilder<W> {
         };
         let header_sz: v64 = header.pack_sz().into();
         let header_pa = stack_pack(header_sz);
-        let header_pa = header_pa.pack(header);
+        let header_pa = header_pa.pack(&header);
         let nb = next_boundary(self.bytes_written);
         let new_offset = self.bytes_written + (header_pa.pack_sz() + buffer.len()) as u64;
         check_table_size(new_offset as usize)?;
@@ -302,8 +302,7 @@ impl<W: Write> LogBuilder<W> {
         if new_offset > nb {
             self.append_split(buffer)
         } else {
-            let header_buf = header_pa.to_vec();
-            self.write(&header_buf)?;
+            self.write_header(header)?;
             self.write(buffer)?;
             assert!(self.bytes_written <= nb);
             Ok(())
@@ -330,18 +329,22 @@ impl<W: Write> LogBuilder<W> {
             crc32c: crc32c::crc32c(second),
             discriminant: HEADER_SECOND,
         };
-        let first_header_sz: v64 = first_header.pack_sz().into();
-        let second_header_sz: v64 = second_header.pack_sz().into();
-        let first_header_buf = stack_pack(first_header_sz).pack(first_header).to_vec();
-        let second_header_buf = stack_pack(second_header_sz).pack(second_header).to_vec();
-        assert!(first_header_buf.len() as u64 <= HEADER_MAX_SIZE);
-        assert!(second_header_buf.len() as u64 <= HEADER_MAX_SIZE);
-        self.write(&first_header_buf)?;
+        self.write_header(first_header)?;
         self.write(first)?;
         self.true_up(nb)?;
-        self.write(&second_header_buf)?;
+        self.write_header(second_header)?;
         self.write(second)?;
         Ok(())
+    }
+
+    fn write_header(&mut self, header: Header) -> Result<(), SError> {
+        let header_sz: v64 = header.pack_sz().into();
+        let header_pa = stack_pack(header_sz);
+        let header_pa = header_pa.pack(header);
+        assert!(header_pa.pack_sz() as u64 <= HEADER_MAX_SIZE + 1);
+        let mut header_buf = [0u8; HEADER_MAX_SIZE as usize + 1];
+        let header_buf = header_pa.into_slice(&mut header_buf);
+        self.write(header_buf)
     }
 
     fn true_up(&mut self, nb: u64) -> Result<(), SError> {
@@ -684,40 +687,14 @@ impl<R: Read + Seek> LogIterator<R> {
         let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])
             .map_err(unpack_key_value_entry_prototk)?;
         self.buffer_idx = self.buffer.len() - rem.len();
-        fn check_shared(shared: u64) -> Result<(), SError> {
-            if shared != 0 {
-                Err(corruption_shared_not_zero())
-            } else {
-                Ok(())
-            }
+        if kve.shared() != 0 {
+            return Err(corruption_shared_not_zero());
         }
-        match &kve {
-            KeyValueEntry::Put(KeyValuePut {
-                shared,
-                key_frag,
-                timestamp,
-                value,
-            }) => {
-                check_shared(*shared)?;
-                Ok(Some(KeyValueRef {
-                    key: key_frag,
-                    timestamp: *timestamp,
-                    value: Some(value),
-                }))
-            }
-            KeyValueEntry::Del(KeyValueDel {
-                shared,
-                key_frag,
-                timestamp,
-            }) => {
-                check_shared(*shared)?;
-                Ok(Some(KeyValueRef {
-                    key: key_frag,
-                    timestamp: *timestamp,
-                    value: None,
-                }))
-            }
-        }
+        Ok(Some(KeyValueRef {
+            key: kve.key_frag(),
+            timestamp: kve.timestamp(),
+            value: kve.value(),
+        }))
     }
 
     fn next_frame(&mut self) -> Result<Option<Header>, SError> {
