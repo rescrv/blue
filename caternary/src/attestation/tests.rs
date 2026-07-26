@@ -192,7 +192,8 @@ fn operator_table_enumerates_the_modulo() {
     let expected_core = [
         "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP",
         "2OVER", "2ROT", "CALL", "DIP", "2DIP", "3DIP", "IF", "KEEP", "2KEEP", "3KEEP", "BI",
-        "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE",
+        "BI*", "BI@", "TRI", "TRI*", "TRI@", "COMPOSE", "CURRY", "WHEN", "UNLESS", "MAP", "FILTER",
+        "FOLD", "EACH",
     ];
     for p in expected_core.iter().copied() {
         assert!(

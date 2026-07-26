@@ -190,8 +190,6 @@ a host predicate with that name is also registered.
 | `TRI` | `5 [DUP +] [DUP *] [1 +] TRI` | `10 25 6` |
 | `TRI*` | `3 4 5 [DUP *] [DUP +] [1 +] TRI*` | `9 8 6` |
 | `TRI@` | `3 4 5 [DUP *] TRI@` | `9 16 25` |
-| `CLEAVE` | `5 [[DUP +] [DUP *] [1 +]] CLEAVE` | `10 25 6` |
-| `SPREAD` | `1 2 3 [[DUP +] [DUP *] [1 +]] SPREAD` | `2 4 4` |
 | `COMPOSE` | `[1 +] [2 *] COMPOSE` | `[1 + 2 *]` |
 | `CURRY` | `10 [+] CURRY` | `[10 +]` |
 | `2CURRY` | `10 20 [+ +] 2CURRY` | `[10 20 + +]` |
