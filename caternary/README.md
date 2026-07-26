@@ -115,6 +115,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Command-Line Tools
+
+`caternary check` reads a whole program from standard input, loads its
+definitions, and runs the whole-program checker. A checked program must define
+`main`:
+
+```sh
+printf '[ 1 2 + ] :main\n' | caternary check
+```
+
+`caternary repl` starts the development REPL. Normal input is parsed, loaded,
+and evaluated against a persistent definition table and stack. Definition pairs
+such as `[ 1 + ] :inc` are loaded but not pushed onto the runtime stack.
+
+REPL meta-commands start with `:`:
+
+| Command | Behavior |
+|---|---|
+| `:help` | Show REPL commands. |
+| `:quit`, `:q` | Exit the REPL. |
+| `:stack` | Print the current stack. |
+| `:clear` | Clear the current stack. |
+| `:reset` | Clear stack and session definitions. |
+| `:defs` | List loaded user definitions as `name = [body]`. |
+| `:ops` | List typed core and registered operators. |
+| `:type <program>` | Infer and print the stack effect of a program snippet. |
+| `:check [program]` | Run the whole-program checker on the session, optionally plus a temporary program. |
+| `:load <path>` | Load and evaluate a source file transactionally. |
+
+REPL input is transactional: a parse, load, type, check, or evaluation error
+leaves the previous stack and definitions intact. If an input line has an
+unclosed `[` or shell quote, the REPL continues with a `... ` prompt until the
+program is complete. History is persisted in `~/.caternary_history` when
+available.
+
 ## Language Features By Example
 
 Assume the evaluator has all builtins registered. Examples that use `EVEN` assume
