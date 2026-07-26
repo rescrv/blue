@@ -129,12 +129,14 @@ a host predicate with that name is also registered.
 | `SWAP` | `1 2 SWAP` | `2 1` |
 | `OVER` | `1 2 OVER` | `1 2 1` |
 | `ROT` | `1 2 3 ROT` | `2 3 1` |
+| `-ROT` | `1 2 3 -ROT` | `3 1 2` |
 | `NIP` | `1 2 NIP` | `2` |
 | `TUCK` | `1 2 TUCK` | `2 1 2` |
 | `2DUP` | `1 2 2DUP` | `1 2 1 2` |
 | `2DROP` | `1 2 3 4 2DROP` | `1 2` |
 | `2SWAP` | `1 2 3 4 2SWAP` | `3 4 1 2` |
 | `2OVER` | `1 2 3 4 2OVER` | `1 2 3 4 1 2` |
+| `2ROT` | `1 2 3 4 5 6 2ROT` | `3 4 5 6 1 2` |
 
 ### Core Combinators
 
@@ -146,6 +148,9 @@ a host predicate with that name is also registered.
 | `BI` | `5 [DUP +] [DUP *] BI` | `10 25` |
 | `BI*` | `3 4 [DUP *] [DUP +] BI*` | `9 8` |
 | `BI@` | `3 4 [DUP *] BI@` | `9 16` |
+| `TRI` | `5 [DUP +] [DUP *] [1 +] TRI` | `10 25 6` |
+| `TRI*` | `3 4 5 [DUP *] [DUP +] [1 +] TRI*` | `9 8 6` |
+| `TRI@` | `3 4 5 [DUP *] TRI@` | `9 16 25` |
 | `CLEAVE` | `5 [[DUP +] [DUP *] [1 +]] CLEAVE` | `10 25 6` |
 | `SPREAD` | `1 2 3 [[DUP +] [DUP *] [1 +]] SPREAD` | `2 4 4` |
 | `COMPOSE` | `[1 +] [2 *] COMPOSE` | `[1 + 2 *]` |

@@ -74,7 +74,8 @@ pub fn is_bool_literal(word: &str) -> bool {
 }
 
 /// The synthetic span carried by a language-core scheme's nodes. Core schemes
-/// (`DUP`/`DROP`/`SWAP`/`OVER`/`CALL`/`IF`) have no *source* location — they
+/// (`DUP`/`DROP`/`SWAP`/`OVER`/`CALL`/`IF` and the other fixed builtins here)
+/// have no *source* location — they
 /// are authored contracts, not parsed text — so their nodes are born at this
 /// neutral span and [`respan_word`] re-anchors them at the call-site token
 /// whenever a use is instantiated, so diagnostics point at the user's word
@@ -89,15 +90,25 @@ const CORE_SPAN: Span = Span { start: 0, end: 0 };
 /// This is the language-core counterpart to the embedder's
 /// [`crate::Evaluator::register_operator_with_contract`]: both contribute schemes
 /// to inference (§5 `lookup`), but core schemes are baked in rather than attested
-/// at embed time. The schemes are exactly §2:
+/// at embed time. The schemes include the §2 primitives and the fixed-arity
+/// stack/combinator words that the runtime implements directly:
 ///
 /// ```text
-/// DUP   : ( 'S a        -- 'S a a )
-/// DROP  : ( 'S a        -- 'S )
-/// SWAP  : ( 'S a b       -- 'S b a )
-/// OVER  : ( 'S a b       -- 'S a b a )
-/// CALL  : ( 'S ('S -- 'T) -- 'T )
-/// IF    : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
+/// DUP    : ( 'S a        -- 'S a a )
+/// DROP   : ( 'S a        -- 'S )
+/// SWAP   : ( 'S a b      -- 'S b a )
+/// OVER   : ( 'S a b      -- 'S a b a )
+/// ROT    : ( 'S a b c    -- 'S b c a )
+/// -ROT   : ( 'S a b c    -- 'S c a b )
+/// NIP    : ( 'S a b      -- 'S b )
+/// TUCK   : ( 'S a b      -- 'S b a b )
+/// 2DUP   : ( 'S a b      -- 'S a b a b )
+/// 2DROP  : ( 'S a b      -- 'S )
+/// 2SWAP  : ( 'S a b c d  -- 'S c d a b )
+/// 2OVER  : ( 'S a b c d  -- 'S a b c d a b )
+/// 2ROT   : ( 'S a b c d e f -- 'S c d e f a b )
+/// CALL   : ( 'S ('S -- 'T) -- 'T )
+/// IF     : ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
 /// ```
 ///
 /// `DIP` is the M4 §8 **relay** combinator: its scheme alone states the only
@@ -107,48 +118,100 @@ const CORE_SPAN: Span = Span { start: 0, end: 0 };
 /// (§13 invariant 8).
 pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
     let s = CORE_SPAN;
+    let v = |idx| Ty::var(idx, s);
+    let stack = |row, elems| StackTy::new(elems, row, s);
+    let empty = |row| StackTy::empty(row, s);
+    let quote = |input, output| Ty::quote(WordTy::new(input, output), s);
     // The quotation argument's arrow ( 'S -- 'T ): rowvar 0 = 'S, rowvar 1 = 'T.
-    let arrow_st = || WordTy::new(StackTy::empty(0, s), StackTy::empty(1, s));
+    let arrow_st = || WordTy::new(empty(0), empty(1));
     let scheme = match runtime_name {
         "DUP" => Scheme::new(
             vec![0],
             vec![0],
-            WordTy::new(
-                StackTy::new(vec![Ty::var(0, s)], 0, s),
-                StackTy::new(vec![Ty::var(0, s), Ty::var(0, s)], 0, s),
-            ),
+            WordTy::new(stack(0, vec![v(0)]), stack(0, vec![v(0), v(0)])),
         ),
         "DROP" => Scheme::new(
             vec![0],
             vec![0],
-            WordTy::new(
-                StackTy::new(vec![Ty::var(0, s)], 0, s),
-                StackTy::empty(0, s),
-            ),
+            WordTy::new(stack(0, vec![v(0)]), empty(0)),
         ),
         "SWAP" => Scheme::new(
             vec![0, 1],
             vec![0],
-            WordTy::new(
-                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s)], 0, s),
-                StackTy::new(vec![Ty::var(1, s), Ty::var(0, s)], 0, s),
-            ),
+            WordTy::new(stack(0, vec![v(0), v(1)]), stack(0, vec![v(1), v(0)])),
         ),
         "OVER" => Scheme::new(
             vec![0, 1],
             vec![0],
+            WordTy::new(stack(0, vec![v(0), v(1)]), stack(0, vec![v(0), v(1), v(0)])),
+        ),
+        "ROT" => Scheme::new(
+            vec![0, 1, 2],
+            vec![0],
             WordTy::new(
-                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s)], 0, s),
-                StackTy::new(vec![Ty::var(0, s), Ty::var(1, s), Ty::var(0, s)], 0, s),
+                stack(0, vec![v(0), v(1), v(2)]),
+                stack(0, vec![v(1), v(2), v(0)]),
+            ),
+        ),
+        "-ROT" => Scheme::new(
+            vec![0, 1, 2],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), v(2)]),
+                stack(0, vec![v(2), v(0), v(1)]),
+            ),
+        ),
+        "NIP" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(stack(0, vec![v(0), v(1)]), stack(0, vec![v(1)])),
+        ),
+        "TUCK" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(stack(0, vec![v(0), v(1)]), stack(0, vec![v(1), v(0), v(1)])),
+        ),
+        "2DUP" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![v(0), v(1)]),
+                stack(0, vec![v(0), v(1), v(0), v(1)]),
+            ),
+        ),
+        "2DROP" => Scheme::new(
+            vec![0, 1],
+            vec![0],
+            WordTy::new(stack(0, vec![v(0), v(1)]), empty(0)),
+        ),
+        "2SWAP" => Scheme::new(
+            vec![0, 1, 2, 3],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), v(2), v(3)]),
+                stack(0, vec![v(2), v(3), v(0), v(1)]),
+            ),
+        ),
+        "2OVER" => Scheme::new(
+            vec![0, 1, 2, 3],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), v(2), v(3)]),
+                stack(0, vec![v(0), v(1), v(2), v(3), v(0), v(1)]),
+            ),
+        ),
+        "2ROT" => Scheme::new(
+            vec![0, 1, 2, 3, 4, 5],
+            vec![0],
+            WordTy::new(
+                stack(0, vec![v(0), v(1), v(2), v(3), v(4), v(5)]),
+                stack(0, vec![v(2), v(3), v(4), v(5), v(0), v(1)]),
             ),
         ),
         "CALL" => Scheme::new(
             vec![],
             vec![0, 1],
-            WordTy::new(
-                StackTy::new(vec![Ty::quote(arrow_st(), s)], 0, s),
-                StackTy::empty(1, s),
-            ),
+            WordTy::new(stack(0, vec![Ty::quote(arrow_st(), s)]), empty(1)),
         ),
         // DIP : ( 'S a ( 'S -- 'T ) -- 'T a ) (§2, §8 relay). Input has the
         // set-aside value `a` (tyvar 0) below the quotation ( 'S -- 'T ) on top
@@ -159,26 +222,100 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
             vec![0],
             vec![0, 1],
             WordTy::new(
-                StackTy::new(vec![Ty::var(0, s), Ty::quote(arrow_st(), s)], 0, s),
-                StackTy::new(vec![Ty::var(0, s)], 1, s),
+                stack(0, vec![v(0), Ty::quote(arrow_st(), s)]),
+                stack(1, vec![v(0)]),
             ),
         ),
         "IF" => Scheme::new(
             vec![],
             vec![0, 1],
             WordTy::new(
-                StackTy::new(
+                stack(
+                    0,
                     vec![
                         Ty::bool(s),
                         Ty::quote(arrow_st(), s),
                         Ty::quote(arrow_st(), s),
                     ],
-                    0,
-                    s,
                 ),
-                StackTy::empty(1, s),
+                empty(1),
             ),
         ),
+        "KEEP" => {
+            let q = quote(stack(0, vec![v(0)]), empty(1));
+            Scheme::new(
+                vec![0],
+                vec![0, 1],
+                WordTy::new(stack(0, vec![v(0), q]), stack(1, vec![v(0)])),
+            )
+        }
+        "BI" => {
+            let p = quote(stack(0, vec![v(0)]), empty(1));
+            let q = quote(stack(1, vec![v(0)]), empty(2));
+            Scheme::new(
+                vec![0],
+                vec![0, 1, 2],
+                WordTy::new(stack(0, vec![v(0), p, q]), empty(2)),
+            )
+        }
+        "BI*" => {
+            let p = quote(stack(0, vec![v(0)]), empty(1));
+            let q = quote(stack(1, vec![v(1)]), empty(2));
+            Scheme::new(
+                vec![0, 1],
+                vec![0, 1, 2],
+                WordTy::new(stack(0, vec![v(0), v(1), p, q]), empty(2)),
+            )
+        }
+        "BI@" => {
+            let q = quote(stack(1, vec![v(0)]), stack(1, vec![v(1)]));
+            Scheme::new(
+                vec![0, 1],
+                vec![0, 1],
+                WordTy::new(stack(0, vec![v(0), v(0), q]), stack(0, vec![v(1), v(1)])),
+            )
+        }
+        "TRI" => {
+            let p = quote(stack(0, vec![v(0)]), empty(1));
+            let q = quote(stack(1, vec![v(0)]), empty(2));
+            let r = quote(stack(2, vec![v(0)]), empty(3));
+            Scheme::new(
+                vec![0],
+                vec![0, 1, 2, 3],
+                WordTy::new(stack(0, vec![v(0), p, q, r]), empty(3)),
+            )
+        }
+        "TRI*" => {
+            let p = quote(stack(0, vec![v(0)]), empty(1));
+            let q = quote(stack(1, vec![v(1)]), empty(2));
+            let r = quote(stack(2, vec![v(2)]), empty(3));
+            Scheme::new(
+                vec![0, 1, 2],
+                vec![0, 1, 2, 3],
+                WordTy::new(stack(0, vec![v(0), v(1), v(2), p, q, r]), empty(3)),
+            )
+        }
+        "TRI@" => {
+            let q = quote(stack(1, vec![v(0)]), stack(1, vec![v(1)]));
+            Scheme::new(
+                vec![0, 1],
+                vec![0, 1],
+                WordTy::new(
+                    stack(0, vec![v(0), v(0), v(0), q]),
+                    stack(0, vec![v(1), v(1), v(1)]),
+                ),
+            )
+        }
+        "COMPOSE" => {
+            let p = quote(empty(1), empty(2));
+            let q = quote(empty(2), empty(3));
+            let composed = quote(empty(1), empty(3));
+            Scheme::new(
+                vec![],
+                vec![0, 1, 2, 3],
+                WordTy::new(stack(0, vec![p, q]), stack(0, vec![composed])),
+            )
+        }
         _ => return None,
     };
     Some(scheme)

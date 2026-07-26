@@ -189,7 +189,12 @@ fn operator_table_enumerates_the_modulo() {
     let table = OperatorTable::of(&eval);
 
     let core_names: Vec<String> = table.core().map(|c| c.name.clone()).collect();
-    for p in ["DUP", "DROP", "SWAP", "OVER", "CALL", "DIP", "IF"] {
+    let expected_core = [
+        "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP",
+        "2OVER", "2ROT", "CALL", "DIP", "IF", "KEEP", "BI", "BI*", "BI@", "TRI", "TRI*", "TRI@",
+        "COMPOSE",
+    ];
+    for p in expected_core.iter().copied() {
         assert!(
             core_names.contains(&p.to_string()),
             "missing core primitive {p}"
@@ -204,9 +209,9 @@ fn operator_table_enumerates_the_modulo() {
     assert_eq!(plus.origin, OperatorOrigin::Embedder);
     assert_eq!(plus.scheme, plus_scheme());
 
-    assert_eq!(table.core().count(), 7);
+    assert_eq!(table.core().count(), expected_core.len());
     assert_eq!(table.embedder().count(), 1);
-    assert_eq!(table.len(), 8);
+    assert_eq!(table.len(), expected_core.len() + 1);
 }
 
 #[test]

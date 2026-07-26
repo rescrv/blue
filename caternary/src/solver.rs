@@ -1049,8 +1049,14 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
         ShadowWord::Swap => stack.swap(),
         ShadowWord::Over => stack.over(),
         ShadowWord::Rot => stack.rot(),
+        ShadowWord::MinusRot => stack.minus_rot(),
         ShadowWord::Nip => stack.nip(),
         ShadowWord::Tuck => stack.tuck(),
+        ShadowWord::TwoDup => stack.two_dup(),
+        ShadowWord::TwoDrop => stack.two_drop(),
+        ShadowWord::TwoSwap => stack.two_swap(),
+        ShadowWord::TwoOver => stack.two_over(),
+        ShadowWord::TwoRot => stack.two_rot(),
         ShadowWord::Bin(op) => stack.bin(op),
         ShadowWord::Un(op) => stack.un(op),
         ShadowWord::Num(lexeme) => {
@@ -1074,6 +1080,94 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
         ShadowWord::Call => {
             let body = stack.pop_quote()?;
             verify_ctx(&body, stack, solver, resolve, ctx)
+        }
+        ShadowWord::Keep => {
+            stack.require(2)?;
+            let body = stack.pop_quote()?;
+            let kept = stack.slots().last().unwrap().clone();
+            verify_ctx(&body, stack, solver, resolve, ctx)?;
+            stack.push_slot(kept);
+            Ok(())
+        }
+        ShadowWord::Bi => {
+            stack.require(3)?;
+            let q = stack.pop_quote()?;
+            let p = stack.pop_quote()?;
+            let x = stack.pop()?;
+            stack.push_slot(x.clone());
+            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            stack.push_slot(x);
+            verify_ctx(&q, stack, solver, resolve, ctx)
+        }
+        ShadowWord::BiStar => {
+            stack.require(4)?;
+            let q = stack.pop_quote()?;
+            let p = stack.pop_quote()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            stack.push_slot(x);
+            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            stack.push_slot(y);
+            verify_ctx(&q, stack, solver, resolve, ctx)
+        }
+        ShadowWord::BiAt => {
+            stack.require(3)?;
+            let q = stack.pop_quote()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            stack.push_slot(x);
+            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            stack.push_slot(y);
+            verify_ctx(&q, stack, solver, resolve, ctx)
+        }
+        ShadowWord::Tri => {
+            stack.require(4)?;
+            let r = stack.pop_quote()?;
+            let q = stack.pop_quote()?;
+            let p = stack.pop_quote()?;
+            let x = stack.pop()?;
+            stack.push_slot(x.clone());
+            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            stack.push_slot(x.clone());
+            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            stack.push_slot(x);
+            verify_ctx(&r, stack, solver, resolve, ctx)
+        }
+        ShadowWord::TriStar => {
+            stack.require(6)?;
+            let r = stack.pop_quote()?;
+            let q = stack.pop_quote()?;
+            let p = stack.pop_quote()?;
+            let z = stack.pop()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            stack.push_slot(x);
+            verify_ctx(&p, stack, solver, resolve, ctx)?;
+            stack.push_slot(y);
+            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            stack.push_slot(z);
+            verify_ctx(&r, stack, solver, resolve, ctx)
+        }
+        ShadowWord::TriAt => {
+            stack.require(4)?;
+            let q = stack.pop_quote()?;
+            let z = stack.pop()?;
+            let y = stack.pop()?;
+            let x = stack.pop()?;
+            stack.push_slot(x);
+            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            stack.push_slot(y);
+            verify_ctx(&q, stack, solver, resolve, ctx)?;
+            stack.push_slot(z);
+            verify_ctx(&q, stack, solver, resolve, ctx)
+        }
+        ShadowWord::Compose => {
+            stack.require(2)?;
+            let q = stack.pop_quote()?;
+            let mut p = stack.pop_quote()?;
+            p.extend(q);
+            stack.push_quote(p);
+            Ok(())
         }
     }
 }
