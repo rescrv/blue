@@ -383,10 +383,7 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
             vec![0],
             vec![0, 1, 2],
             WordTy::new(
-                stack(
-                    0,
-                    vec![v(0), quote(stack(1, vec![v(0)]), empty(2))],
-                ),
+                stack(0, vec![v(0), quote(stack(1, vec![v(0)]), empty(2))]),
                 stack(0, vec![quote(empty(1), empty(2))]),
             ),
         ),
@@ -485,13 +482,7 @@ pub fn core_scheme(runtime_name: &str) -> Option<Scheme> {
             vec![0],
             vec![0, 1],
             WordTy::new(
-                stack(
-                    0,
-                    vec![
-                        list(v(0)),
-                        quote(stack(1, vec![v(0)]), empty(1)),
-                    ],
-                ),
+                stack(0, vec![list(v(0)), quote(stack(1, vec![v(0)]), empty(1))]),
                 empty(0),
             ),
         ),

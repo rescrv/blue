@@ -2482,8 +2482,16 @@ mod tests {
         let mut locals: Vec<Local> = Vec::new();
         let def_env = DefEnv::empty();
         let no_poly: HashMap<String, Scheme> = HashMap::new();
-        infer_seq(eval, &tokens, &mut ctx, &mut locals, &def_env, &no_poly, false)
-            .map(|arrow| ctx.resolve_word_deep(&arrow))
+        infer_seq(
+            eval,
+            &tokens,
+            &mut ctx,
+            &mut locals,
+            &def_env,
+            &no_poly,
+            false,
+        )
+        .map(|arrow| ctx.resolve_word_deep(&arrow))
     }
 
     #[test]
@@ -2492,7 +2500,10 @@ mod tests {
         // (effect lookup absent). It must now resolve as a language-core
         // primitive.
         assert!(core_scheme("MAP").is_some(), "MAP must have a core scheme");
-        assert!(core_scheme("FILTER").is_some(), "FILTER must have a core scheme");
+        assert!(
+            core_scheme("FILTER").is_some(),
+            "FILTER must have a core scheme"
+        );
     }
 
     #[test]
@@ -2525,7 +2536,11 @@ mod tests {
         match &arrow.output.elems[0].kind {
             TyKind::App(n, args) => {
                 assert_eq!(n, "List");
-                assert_eq!(args[0].kind, TyKind::Con(BOOL.into()), "element became Bool");
+                assert_eq!(
+                    args[0].kind,
+                    TyKind::Con(BOOL.into()),
+                    "element became Bool"
+                );
             }
             other => panic!("expected `List Bool`, got {other:?}"),
         }
