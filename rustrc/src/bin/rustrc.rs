@@ -163,7 +163,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 }
             }
             _ => {
-                return format!("error: unknown command {:?}", &argv[0]);
+                return format!("error: unknown command {:?}", argv[0]);
             }
         }
         response

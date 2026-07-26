@@ -478,7 +478,7 @@ impl BlockCursor {
                 value: _,
             } => {
                 let mut ret = Vec::new();
-                key.truncate(0);
+                key.clear();
                 std::mem::swap(&mut ret, key);
                 ret
             }

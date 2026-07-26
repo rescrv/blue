@@ -1098,10 +1098,9 @@ where
                 {
                     return self.correlates.pop().map(Exemplar::from);
                 }
-            } else if let Some(correlate) = self.correlates.pop() {
-                return Some(Exemplar::from(correlate));
             } else {
-                return None;
+                let correlate = self.correlates.pop()?;
+                return Some(Exemplar::from(correlate));
             }
         }
     }

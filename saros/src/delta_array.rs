@@ -192,14 +192,13 @@ impl Iterator for DeltaDecoder<'_> {
                 self.remain = &self.remain[bytes_len..];
                 self.slice = Some(DeltaSliceDecoder::from_bits_and_bytes(bits, bytes));
                 self.resets += 1;
-            } else if let Some(slice) = self.slice.as_mut() {
+            } else {
+                let slice = self.slice.as_mut()?;
                 if let Some(decoded) = slice.next() {
                     return Some(decoded);
                 } else {
                     self.slice = None;
                 }
-            } else {
-                return None;
             }
         }
     }

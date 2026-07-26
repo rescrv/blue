@@ -510,7 +510,7 @@ impl RcScript {
         if !status.success() {
             return Err(Error::invalid_invocation(format!(
                 "command {} failed with exit code {:?}",
-                &cmd[0],
+                cmd[0],
                 status.code()
             )));
         }
@@ -581,13 +581,9 @@ impl shvar::VariableProvider for EnvironmentVariableProvider {
         }
 
         let read_env = |key: &str| {
-            std::env::var(key).ok().and_then(|value| {
-                if value.contains('\0') {
-                    None // Reject values containing null bytes
-                } else {
-                    Some(value)
-                }
-            })
+            std::env::var(key)
+                .ok()
+                .filter(|value| !value.contains('\0'))
         };
 
         if let Some(prefix) = self.prefix.as_ref() {
