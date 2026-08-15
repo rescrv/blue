@@ -927,7 +927,9 @@ impl RcConf {
             let mut chain = Vec::new();
             let mut positions: HashMap<&str, usize> = HashMap::default();
             let mut current = name.as_str();
-            while let Some(alias) = aliases.get(current) {
+            // Probe with the normalized var name so cycles through spelling
+            // (e.g. `foo_bar_ALIASES="foo-bar"`) are detected.
+            while let Some(alias) = aliases.get(&var_name_from_service(current)) {
                 if alias.aliases.is_empty() {
                     return Err(Error::invalid_rc_conf(
                         path,
@@ -1111,7 +1113,7 @@ impl RcConf {
             });
             if !self
                 .aliases
-                .get(a.to_string().as_str())
+                .get(&var_name_from_service(a))
                 .map(|a| a.inherit)
                 .unwrap_or(false)
             {
@@ -1271,7 +1273,7 @@ impl RcConf {
 
     /// Resolve the alias `service` one-hop.
     pub fn direct_alias<'a>(&'a self, service: &'a str) -> &'a str {
-        if let Some(alias) = self.aliases.get(service) {
+        if let Some(alias) = self.aliases.get(&var_name_from_service(service)) {
             &alias.aliases
         } else {
             service
@@ -1280,15 +1282,16 @@ impl RcConf {
 
     /// Recursively resolve the alias `service`.
     pub fn resolve_alias<'a>(&'a self, service: &'a str) -> &'a str {
-        let mut direct_alias = service;
-        let mut seen = HashSet::new();
-        while let Some(alias) = self.aliases.get(direct_alias) {
-            if !seen.insert(direct_alias) {
+        let mut seen = HashSet::from([var_name_from_service(service)]);
+        let mut resolved = service;
+        while let Some(alias) = self.aliases.get(&var_name_from_service(resolved)) {
+            if !seen.insert(var_name_from_service(&alias.aliases)) {
+                // Alias cycle; parse rejects cycles, so this is defense-in-depth.
                 break;
             }
-            direct_alias = &alias.aliases;
+            resolved = &alias.aliases;
         }
-        direct_alias
+        resolved
     }
 
     /// Generate the alias lookup order for `service` and a cascade of variables.
@@ -1299,22 +1302,19 @@ impl RcConf {
         let mut alias_lookup_order = vec![service];
         let mut direct_alias = service;
         let mut pre_lookup = HashMap::new();
-        let mut seen = HashSet::new();
-        while let Some(alias) = self.aliases.get(direct_alias) {
-            if !seen.insert(direct_alias) {
+        let mut seen = HashSet::from([var_name_from_service(service)]);
+        while let Some(alias) = self.aliases.get(&var_name_from_service(direct_alias)) {
+            if !seen.insert(var_name_from_service(&alias.aliases)) {
+                // Alias cycle; parse rejects cycles, so this is defense-in-depth.
                 break;
             }
+            alias_lookup_order.push(&alias.aliases);
+            direct_alias = &alias.aliases;
             for (k, v) in alias.vp.iter() {
                 if !pre_lookup.contains_key(k) {
                     pre_lookup.insert(k.clone(), v.clone());
                 }
             }
-            let next = alias.aliases.as_str();
-            if seen.contains(next) {
-                break;
-            }
-            alias_lookup_order.push(next);
-            direct_alias = next;
         }
         (alias_lookup_order, pre_lookup)
     }
@@ -1385,7 +1385,7 @@ fn exec_rc_with_override(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd
         std::process::exit(132);
     }
     let mut env = HashMap::new();
-    let path = if let Some(alias) = rc_conf.aliases.get(service) {
+    let path = if let Some(alias) = rc_conf.aliases.get(&var_name_from_service(service)) {
         let Some(path) = rc_d.get(rc_conf.resolve_alias(&alias.aliases)) else {
             eprintln!("expected alias of service to be available via --rc-d-path");
             std::process::exit(130);
@@ -1455,7 +1455,7 @@ pub fn exec_container(
         eprintln!("service not enabled");
         std::process::exit(132);
     }
-    let path = if let Some(alias) = rc_conf.aliases.get(service) {
+    let path = if let Some(alias) = rc_conf.aliases.get(&var_name_from_service(service)) {
         let Some(path) = rc_d.get(rc_conf.resolve_alias(&alias.aliases)) else {
             eprintln!("expected alias of service to be available via --rc-d-path");
             std::process::exit(130);
@@ -2166,5 +2166,151 @@ edit_auto_INHERIT="YES"
             ],
             rc_conf.list().unwrap().collect::<Vec<_>>()
         );
+    }
+
+    mod dashed_aliases {
+        /// Write `contents` to a unique rc.conf file and return (dir, path).
+        fn write_rc_conf(test: &str, contents: &str) -> (std::path::PathBuf, String) {
+            let dir = std::env::temp_dir().join(format!(
+                "rc_conf_dashed_aliases_{}_{}",
+                std::process::id(),
+                test
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("rc.conf");
+            std::fs::write(&path, contents).unwrap();
+            (dir, path.to_string_lossy().to_string())
+        }
+
+        const INHERITING_ALIAS_CONF: &str = r#"
+real_service_ENABLED="YES"
+real_service_FIELD1="hello"
+foo_bar_ALIASES="real_service"
+foo_bar_INHERIT="YES"
+foo_bar_FIELD2="world"
+"#;
+
+        #[test]
+        fn underscore_form_resolves_alias() {
+            let (_dir, path) =
+                write_rc_conf("underscore_form_resolves_alias", INHERITING_ALIAS_CONF);
+            let rc_conf = super::super::RcConf::parse(&path).unwrap();
+            assert_eq!("real_service", rc_conf.direct_alias("foo_bar"));
+            assert_eq!("real_service", rc_conf.resolve_alias("foo_bar"));
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("foo_bar")
+            );
+            assert_eq!(
+                Some("hello".to_string()),
+                rc_conf.lookup_suffix("foo_bar", "FIELD1")
+            );
+            assert_eq!(
+                Some("world".to_string()),
+                rc_conf.lookup_suffix("foo_bar", "FIELD2")
+            );
+        }
+
+        #[test]
+        fn dashed_form_resolves_alias() {
+            let (_dir, path) = write_rc_conf("dashed_form_resolves_alias", INHERITING_ALIAS_CONF);
+            let rc_conf = super::super::RcConf::parse(&path).unwrap();
+            assert_eq!("real_service", rc_conf.direct_alias("foo-bar"));
+            assert_eq!("real_service", rc_conf.resolve_alias("foo-bar"));
+            let (order, _) = rc_conf.alias_lookup_order("foo-bar");
+            assert_eq!(vec!["foo-bar", "real_service"], order);
+            // INHERIT=YES must be honored for the dashed spelling.
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("foo-bar")
+            );
+            assert_eq!(
+                Some("hello".to_string()),
+                rc_conf.lookup_suffix("foo-bar", "FIELD1")
+            );
+            // The alias's own bindings still take precedence.
+            assert_eq!(
+                Some("world".to_string()),
+                rc_conf.lookup_suffix("foo-bar", "FIELD2")
+            );
+        }
+
+        #[test]
+        fn dashed_autogen_alias_resolves() {
+            // VALUES_ paths must be CWD-relative: is_safe_source_path rejects absolute paths.
+            let values_name = format!("rc_conf_dashed_aliases_{}_metros.conf", std::process::id());
+            std::fs::write(&values_name, "Jfk=\nSfo=\n").unwrap();
+            let (_dir, path) = write_rc_conf(
+                "dashed_autogen_alias_resolves",
+                &format!(
+                    r#"
+example1_ENABLED="YES"
+example1_FIELD1="hello"
+VALUES_METRO="{values_name}"
+METRO_example5_AUTOGEN="YES"
+METRO_example5_ALIASES="example1"
+METRO_example5_INHERIT="YES"
+"#,
+                ),
+            );
+            let rc_conf = super::super::RcConf::parse(&path).unwrap();
+            let _ = std::fs::remove_file(&values_name);
+            // Autogen candidates carry their bindings regardless of spelling.
+            assert_eq!("example1", rc_conf.resolve_alias("Jfk-example5"));
+            assert_eq!(
+                Some("Jfk".to_string()),
+                rc_conf.lookup_suffix("Jfk-example5", "METRO")
+            );
+            assert_eq!(
+                Some("hello".to_string()),
+                rc_conf.lookup_suffix("Jfk-example5", "FIELD1")
+            );
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("Jfk-example5")
+            );
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("Sfo_example5")
+            );
+        }
+
+        #[test]
+        fn alias_cycle_is_an_error() {
+            let (_dir, path) = write_rc_conf(
+                "alias_cycle_is_an_error",
+                r#"
+cycle_a_ALIASES="cycle_b"
+cycle_a_ENABLED="YES"
+cycle_b_ALIASES="cycle-a"
+"#,
+            );
+            assert!(super::super::RcConf::parse(&path).is_err());
+        }
+
+        #[test]
+        fn self_alias_through_spelling_is_an_error() {
+            // An alias whose target differs only in spelling is a cycle once normalized.
+            let (_dir, path) = write_rc_conf(
+                "self_alias_through_spelling_is_an_error",
+                r#"
+foo_bar_ENABLED="YES"
+foo_bar_ALIASES="foo-bar"
+"#,
+            );
+            assert!(super::super::RcConf::parse(&path).is_err());
+        }
+
+        #[test]
+        fn colliding_alias_spellings_are_an_error() {
+            let (_dir, path) = write_rc_conf(
+                "colliding_alias_spellings_are_an_error",
+                r#"
+foo_bar_ALIASES="service_a"
+foo-bar_ALIASES="service_b"
+"#,
+            );
+            assert!(super::super::RcConf::parse(&path).is_err());
+        }
     }
 }
