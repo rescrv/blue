@@ -2192,11 +2192,15 @@ foo_bar_FIELD2="world"
 
         #[test]
         fn underscore_form_resolves_alias() {
-            let (_dir, path) = write_rc_conf("underscore_form_resolves_alias", INHERITING_ALIAS_CONF);
+            let (_dir, path) =
+                write_rc_conf("underscore_form_resolves_alias", INHERITING_ALIAS_CONF);
             let rc_conf = super::super::RcConf::parse(&path).unwrap();
             assert_eq!("real_service", rc_conf.direct_alias("foo_bar"));
             assert_eq!("real_service", rc_conf.resolve_alias("foo_bar"));
-            assert_eq!(super::super::SwitchPosition::Yes, rc_conf.service_switch("foo_bar"));
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("foo_bar")
+            );
             assert_eq!(
                 Some("hello".to_string()),
                 rc_conf.lookup_suffix("foo_bar", "FIELD1")
@@ -2216,7 +2220,10 @@ foo_bar_FIELD2="world"
             let (order, _) = rc_conf.alias_lookup_order("foo-bar");
             assert_eq!(vec!["foo-bar", "real_service"], order);
             // INHERIT=YES must be honored for the dashed spelling.
-            assert_eq!(super::super::SwitchPosition::Yes, rc_conf.service_switch("foo-bar"));
+            assert_eq!(
+                super::super::SwitchPosition::Yes,
+                rc_conf.service_switch("foo-bar")
+            );
             assert_eq!(
                 Some("hello".to_string()),
                 rc_conf.lookup_suffix("foo-bar", "FIELD1")
@@ -2231,10 +2238,7 @@ foo_bar_FIELD2="world"
         #[test]
         fn dashed_autogen_alias_resolves() {
             // VALUES_ paths must be CWD-relative: is_safe_source_path rejects absolute paths.
-            let values_name = format!(
-                "rc_conf_dashed_aliases_{}_metros.conf",
-                std::process::id()
-            );
+            let values_name = format!("rc_conf_dashed_aliases_{}_metros.conf", std::process::id());
             std::fs::write(&values_name, "Jfk=\nSfo=\n").unwrap();
             let (_dir, path) = write_rc_conf(
                 "dashed_autogen_alias_resolves",
@@ -2309,5 +2313,4 @@ foo-bar_ALIASES="service_b"
             assert!(super::super::RcConf::parse(&path).is_err());
         }
     }
-
 }
