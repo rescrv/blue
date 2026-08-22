@@ -112,10 +112,10 @@ mod tests {
     #[test]
     fn reserved_detection() {
         let mut batch = WriteBatch::new();
-        batch.put(&vec![0xff; 6], SSTDB_TIMESTAMP, b"x").unwrap();
+        batch.put(&[0xff; 6], SSTDB_TIMESTAMP, b"x").unwrap();
         assert!(check_batch(&batch).is_err());
         let mut ok = WriteBatch::new();
-        ok.put(&vec![0xff; 4], SSTDB_TIMESTAMP, b"x").unwrap();
+        ok.put(&[0xff; 4], SSTDB_TIMESTAMP, b"x").unwrap();
         assert!(check_batch(&ok).is_ok());
     }
 
