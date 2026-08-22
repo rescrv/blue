@@ -125,6 +125,103 @@ impl Drop for FileHandle {
     }
 }
 
+//////////////////////////////////////////// InMemoryFile //////////////////////////////////////////
+
+/// An InMemoryFile provides the positioned-read interface of [FileHandle] over a byte vector.
+///
+/// An [Sst] can be opened from an InMemoryFile, allowing an SST to be built and read back without
+/// touching disk.  Writes are unsupported and return an error.
+#[derive(Clone, Debug, Default)]
+pub struct InMemoryFile {
+    contents: Arc<Vec<u8>>,
+    position: u64,
+}
+
+impl InMemoryFile {
+    /// Create an InMemoryFile that reads from the provided contents.
+    pub fn new(contents: Vec<u8>) -> Self {
+        Self {
+            contents: Arc::new(contents),
+            position: 0,
+        }
+    }
+
+    /// The contents backing this in-memory file.
+    pub fn contents(&self) -> &[u8] {
+        &self.contents
+    }
+
+    /// The size of the in-memory file.
+    pub fn size(&self) -> u64 {
+        self.contents.len() as u64
+    }
+}
+
+impl Seek for InMemoryFile {
+    fn seek(&mut self, from: SeekFrom) -> Result<u64, std::io::Error> {
+        let len = self.contents.len() as u64;
+        let position = match from {
+            SeekFrom::Start(offset) => Some(offset),
+            SeekFrom::End(delta) => {
+                if delta < 0 {
+                    len.checked_sub(delta.unsigned_abs())
+                } else {
+                    len.checked_add(delta as u64)
+                }
+            }
+            SeekFrom::Current(delta) => {
+                if delta < 0 {
+                    self.position.checked_sub(delta.unsigned_abs())
+                } else {
+                    self.position.checked_add(delta as u64)
+                }
+            }
+        };
+        match position {
+            Some(position) => {
+                self.position = position;
+                Ok(position)
+            }
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "seek out of bounds of in-memory file",
+            )),
+        }
+    }
+}
+
+impl Write for InMemoryFile {
+    fn write(&mut self, _buf: &[u8]) -> Result<usize, std::io::Error> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "in-memory file is read-only",
+        ))
+    }
+
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+}
+
+impl FileExt for InMemoryFile {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize, std::io::Error> {
+        let Ok(offset) = usize::try_from(offset) else {
+            return Ok(0);
+        };
+        let available = self.contents.len().saturating_sub(offset);
+        let amount = buf.len().min(available);
+        buf[..amount].copy_from_slice(&self.contents[offset..offset + amount]);
+        Ok(amount)
+    }
+
+    fn write_at(&self, _buf: &[u8], _offset: u64) -> Result<usize, std::io::Error> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "in-memory file is read-only",
+        ))
+    }
+}
+
 /////////////////////////////////////////////// State //////////////////////////////////////////////
 
 #[derive(Debug, Default)]

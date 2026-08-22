@@ -42,7 +42,7 @@ pub use setsum::Setsum;
 
 use block::{Block, BlockBuilder, BlockBuilderOptions, BlockCursor};
 use bounds_cursor::BoundsCursor;
-use file_manager::{FileHandle, open_without_manager};
+use file_manager::{FileHandle, InMemoryFile, open_without_manager};
 use pruning_cursor::PruningCursor;
 use sbbf::Filter;
 
@@ -304,6 +304,7 @@ pub const CODE_LOGIC_ERROR_FILE_MANAGER_BROKEN_POINTER: &str =
     "logic-error-file-manager-broken-pointer";
 pub const CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED: &str =
     "logic-error-buf-writer-into-inner-failed";
+pub const CODE_LOGIC_ERROR_SST_BUILDER_NO_PATH: &str = "logic-error-sst-builder-no-path";
 pub const CODE_SYSTEM_ERROR: &str = "system-error";
 pub const CODE_TOO_MANY_OPEN_FILES: &str = "too-many-open-files";
 
@@ -672,6 +673,10 @@ fn logic_error_file_manager_broken_pointer(fd: usize) -> SError {
 
 fn logic_error_buf_writer_into_inner_failed() -> SError {
     error(CODE_LOGIC_ERROR_BUF_WRITER_INTO_INNER_FAILED)
+}
+
+fn logic_error_sst_builder_no_path() -> SError {
+    error(CODE_LOGIC_ERROR_SST_BUILDER_NO_PATH)
 }
 
 fn too_many_open_files(limit: usize, current: usize) -> SError {
@@ -1680,6 +1685,13 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 }
 
+impl Sst<InMemoryFile> {
+    /// Create an Sst from its in-memory byte representation, without touching disk.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, SError> {
+        Self::from_file_handle(InMemoryFile::new(bytes))
+    }
+}
+
 ///////////////////////////////////////// BlockCompression /////////////////////////////////////////
 
 /// An enum matching the types of compression supported.
@@ -1813,7 +1825,11 @@ impl Default for SstOptions {
 //////////////////////////////////////////// SstBuilder ////////////////////////////////////////////
 
 /// Build Ssts by providing keys in-order.
-pub struct SstBuilder {
+///
+/// The builder writes to any `W: Write`.  Use [`SstBuilder::new`] to build a file on disk or
+/// [`SstBuilder::from_write`] to build atop an arbitrary writer (e.g. `Vec<u8>` for building an
+/// SST in memory).
+pub struct SstBuilder<W: Write = File> {
     // Options for every "normal" table entry.
     options: SstOptions,
     // The most recent that was successfully written.  Update only after writing to the block to
@@ -1834,16 +1850,15 @@ pub struct SstBuilder {
     smallest_timestamp: u64,
     biggest_timestamp: u64,
     // Output information.
-    output: BufWriter<File>,
-    path: PathBuf,
+    output: BufWriter<W>,
+    // The path to reopen on seal; set only for file-backed builders.
+    path: Option<PathBuf>,
 }
 
-impl SstBuilder {
-    /// Create a new SstBuilder.
+impl SstBuilder<File> {
+    /// Create a new SstBuilder that writes an SST to the file at `path`.
     pub fn new<P: AsRef<Path>>(options: SstOptions, path: P) -> Result<Self, SError> {
         BUILDER_NEW.click();
-        let block_options = options.block.clone();
-        let write_buffer_size = options.write_buffer_size;
         let output = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -1856,7 +1871,18 @@ impl SstBuilder {
                     "opening file for sst builder",
                 )
             })?;
-        Ok(SstBuilder {
+        let mut builder = Self::from_write(options, output);
+        builder.path = Some(path.as_ref().to_path_buf());
+        Ok(builder)
+    }
+}
+
+impl<W: Write> SstBuilder<W> {
+    /// Create a new SstBuilder that writes an SST to the provided writer.
+    pub fn from_write(options: SstOptions, write: W) -> Self {
+        let block_options = options.block.clone();
+        let write_buffer_size = options.write_buffer_size;
+        SstBuilder {
             options,
             last_key: Vec::new(),
             last_timestamp: u64::MAX,
@@ -1868,9 +1894,9 @@ impl SstBuilder {
             setsum: Setsum::default(),
             smallest_timestamp: u64::MAX,
             biggest_timestamp: 0,
-            output: BufWriter::with_capacity(write_buffer_size, output),
-            path: path.as_ref().to_path_buf(),
-        })
+            output: BufWriter::with_capacity(write_buffer_size, write),
+            path: None,
+        }
     }
 
     fn enforce_sort_order(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
@@ -1961,12 +1987,9 @@ impl SstBuilder {
 
         Ok(self.block_builder.as_mut().unwrap())
     }
-}
 
-impl Builder for SstBuilder {
-    type Sealed = Sst;
-
-    fn approximate_size(&self) -> usize {
+    /// The approximate size of the builder.
+    pub fn approximate_size(&self) -> usize {
         BUILDER_APPROX_SIZE.click();
         let mut sum = self.bytes_written;
         sum += match &self.block_builder {
@@ -1978,7 +2001,8 @@ impl Builder for SstBuilder {
         sum
     }
 
-    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
+    /// Put a key into the builder.
+    pub fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
         BUILDER_PUT.click();
         check_key_len(key)?;
         check_value_len(value)?;
@@ -1992,7 +2016,8 @@ impl Builder for SstBuilder {
         Ok(())
     }
 
-    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
+    /// Put a tombstone into the builder.
+    pub fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
         BUILDER_DEL.click();
         check_key_len(key)?;
         check_table_size(self.approximate_size())?;
@@ -2005,61 +2030,118 @@ impl Builder for SstBuilder {
         Ok(())
     }
 
-    fn seal(self) -> Result<Sst, SError> {
-        BUILDER_SEAL.click();
-        let mut builder = self;
+    // Flush a table entry (index, filter, or final block) to the writer and return its metadata.
+    fn flush_entry(&mut self, entry: SstEntry) -> Result<BlockMetadata, SError> {
+        let start = self.bytes_written as u64;
+        let crc32c = entry.crc32c();
+        let pa = stack_pack(entry);
+        self.bytes_written +=
+            io_result_with_context(pa.stream(&mut self.output), "sst builder write")?;
+        let limit = self.bytes_written as u64;
+        Ok(BlockMetadata {
+            start,
+            limit,
+            crc32c,
+        })
+    }
+
+    // Flush the pending block, the index block, the filter block, and the final block to the
+    // writer; then flush the writer.  What happens after (fsync, reopen, harvest bytes) is left
+    // to the concrete `Builder::seal` implementation.
+    fn seal_blocks(&mut self) -> Result<(), SError> {
         // Flush the block we have.
-        if builder.block_builder.is_some() {
-            let (key, timestamp) = minimal_successor_key(&builder.last_key, builder.last_timestamp);
-            builder.flush_block(&key, timestamp)?;
-        }
-        fn flush_block(builder: &mut SstBuilder, entry: SstEntry) -> Result<BlockMetadata, SError> {
-            let start = builder.bytes_written as u64;
-            let crc32c = entry.crc32c();
-            let pa = stack_pack(entry);
-            builder.bytes_written +=
-                io_result_with_context(pa.stream(&mut builder.output), "sst builder write")?;
-            let limit = builder.bytes_written as u64;
-            Ok(BlockMetadata {
-                start,
-                limit,
-                crc32c,
-            })
+        if self.block_builder.is_some() {
+            let (key, timestamp) = minimal_successor_key(&self.last_key, self.last_timestamp);
+            self.flush_block(&key, timestamp)?;
         }
         // Flush the index block after the data blocks.
-        let index_block = builder.index_block.clone().seal()?;
+        let index_block = self.index_block.clone().seal()?;
         let index_bytes = index_block.as_bytes();
-        let index_block = flush_block(&mut builder, SstEntry::PlainBlock(index_bytes))?;
+        let index_block = self.flush_entry(SstEntry::PlainBlock(index_bytes))?;
         // Flush the filter block after the index block.
         let mut filter = Filter::new(
-            (builder.filter.len() as u32).saturating_mul(builder.options.bloom_filter_bits as u32),
+            (self.filter.len() as u32).saturating_mul(self.options.bloom_filter_bits as u32),
         );
-        for x in builder.filter.iter() {
+        for x in self.filter.iter() {
             filter.deferred_insert(*x);
         }
         let filter_bytes = filter.to_bytes();
-        let filter_block = flush_block(&mut builder, SstEntry::FilterBlock(&filter_bytes))?;
+        let filter_block = self.flush_entry(SstEntry::FilterBlock(&filter_bytes))?;
         // Update timestamps if nothing written
-        if builder.smallest_timestamp > builder.biggest_timestamp {
-            builder.smallest_timestamp = 0;
-            builder.biggest_timestamp = 0;
+        if self.smallest_timestamp > self.biggest_timestamp {
+            self.smallest_timestamp = 0;
+            self.biggest_timestamp = 0;
         }
         // Our final_block
         let final_block = FinalBlock {
             index_block,
             filter_block,
-            final_block_offset: builder.bytes_written as u64,
-            setsum: builder.setsum.digest(),
-            smallest_timestamp: builder.smallest_timestamp,
-            biggest_timestamp: builder.biggest_timestamp,
+            final_block_offset: self.bytes_written as u64,
+            setsum: self.setsum.digest(),
+            smallest_timestamp: self.smallest_timestamp,
+            biggest_timestamp: self.biggest_timestamp,
         };
         let pa = stack_pack(final_block);
-        builder.bytes_written +=
-            io_result_with_context(pa.stream(&mut builder.output), "sst builder write")?;
+        self.bytes_written +=
+            io_result_with_context(pa.stream(&mut self.output), "sst builder write")?;
+        io_result_with_context(self.output.flush(), "sst builder flush")?;
+        Ok(())
+    }
+}
+
+impl Builder for SstBuilder<File> {
+    type Sealed = Sst;
+
+    fn approximate_size(&self) -> usize {
+        SstBuilder::approximate_size(self)
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
+        SstBuilder::put(self, key, timestamp, value)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
+        SstBuilder::del(self, key, timestamp)
+    }
+
+    fn seal(self) -> Result<Sst, SError> {
+        BUILDER_SEAL.click();
+        let mut builder = self;
+        builder.seal_blocks()?;
         // fsync
-        io_result_with_context(builder.output.flush(), "sst builder flush")?;
         io_result_with_context(builder.output.get_mut().sync_all(), "sst builder sync_all")?;
-        Sst::<FileHandle>::new(builder.options, builder.path)
+        let Some(path) = builder.path.take() else {
+            LOGIC_ERROR.click();
+            return Err(logic_error_sst_builder_no_path());
+        };
+        Sst::<FileHandle>::new(builder.options, path)
+    }
+}
+
+impl Builder for SstBuilder<Vec<u8>> {
+    type Sealed = Vec<u8>;
+
+    fn approximate_size(&self) -> usize {
+        SstBuilder::approximate_size(self)
+    }
+
+    fn put(&mut self, key: &[u8], timestamp: u64, value: &[u8]) -> Result<(), SError> {
+        SstBuilder::put(self, key, timestamp, value)
+    }
+
+    fn del(&mut self, key: &[u8], timestamp: u64) -> Result<(), SError> {
+        SstBuilder::del(self, key, timestamp)
+    }
+
+    fn seal(self) -> Result<Vec<u8>, SError> {
+        BUILDER_SEAL.click();
+        let mut builder = self;
+        builder.seal_blocks()?;
+        let bytes = builder
+            .output
+            .into_inner()
+            .map_err(|_| logic_error_buf_writer_into_inner_failed())?;
+        Ok(bytes)
     }
 }
 

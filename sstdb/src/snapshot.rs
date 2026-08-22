@@ -19,9 +19,9 @@
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use setsum::Setsum;
+use sst::file_manager::InMemoryFile;
 use sst::log::WriteBatch;
 use sst::{Builder, Cursor, Key, Sst, SstBuilder, SstOptions};
 
@@ -220,10 +220,7 @@ impl Snapshot {
     /// snapshot's own `log_lo`/`log_hi`/`setsum` (§8: stamping the setsum does not perturb it,
     /// because meta keys are excluded from the setsum domain).
     pub fn to_sst_bytes(&self) -> Result<Vec<u8>> {
-        let path = temp_path("build");
-        // Best-effort: ensure no stale file at this unique path.
-        let _ = std::fs::remove_file(&path);
-        let mut builder = SstBuilder::new(sst_options(), &path)?;
+        let mut builder = SstBuilder::<Vec<u8>>::from_write(sst_options(), Vec::new());
         // User keys first (already sorted), all at timestamp 0 for a single materialized version.
         for (k, v) in &self.map {
             builder.put(&k.key, k.timestamp, v)?;
@@ -244,10 +241,7 @@ impl Snapshot {
         for (k, v) in &metas {
             builder.put(k, 0, v)?;
         }
-        let sst = builder.seal()?;
-        drop(sst);
-        let bytes = std::fs::read(&path)?;
-        let _ = std::fs::remove_file(&path);
+        let bytes = builder.seal()?;
         Ok(bytes)
     }
 
@@ -257,16 +251,11 @@ impl Snapshot {
     /// stamped setsum and a `setsum-mismatch` [`SError`] is returned on disagreement.  Writers verify
     /// on load; readers trust the stamp by default (§8).
     pub fn from_sst_bytes(bytes: &[u8], verify: bool) -> Result<Snapshot> {
-        let path = temp_path("load");
-        let _ = std::fs::remove_file(&path);
-        std::fs::write(&path, bytes)?;
-        let result = Self::from_sst_path(&path, verify);
-        let _ = std::fs::remove_file(&path);
-        result
+        let sst = Sst::<InMemoryFile>::from_bytes(bytes.to_vec())?;
+        Self::from_sst(&sst, verify)
     }
 
-    fn from_sst_path(path: &std::path::Path, verify: bool) -> Result<Snapshot> {
-        let sst = Sst::<sst::file_manager::FileHandle>::new(sst_options(), path)?;
+    fn from_sst(sst: &Sst<InMemoryFile>, verify: bool) -> Result<Snapshot> {
         let mut cursor = sst.cursor();
         cursor.seek_to_first()?;
         cursor.next()?;
@@ -328,22 +317,6 @@ impl Snapshot {
 fn parse_hex_u64(bytes: &[u8]) -> Result<u64> {
     let s = std::str::from_utf8(bytes).map_err(|_| corruption("meta: offset not utf8"))?;
     u64::from_str_radix(s, 16).map_err(|_| corruption("meta: offset not hex"))
-}
-
-/// A process-unique temp path for staging SST encode/decode.
-fn temp_path(tag: &str) -> std::path::PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut p = std::env::temp_dir();
-    p.push(format!(
-        "sstdb-{tag}-{}-{nanos}-{n}.sst",
-        std::process::id()
-    ));
-    p
 }
 
 #[cfg(test)]
