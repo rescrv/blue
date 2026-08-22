@@ -157,13 +157,31 @@ impl<W: Write> Write for BufWriter<W> {
 //////////////////////////////////////////// WriteBatch ////////////////////////////////////////////
 
 /// A WriteBatch for appending to a log.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WriteBatch {
     buffer: Vec<u8>,
     setsum: Setsum,
 }
 
 impl WriteBatch {
+    /// Create an empty write batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return true if this batch contains no key/value entries.
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    /// Iterate over the entries in insertion order.
+    pub fn iter(&self) -> WriteBatchIterator<'_> {
+        WriteBatchIterator {
+            buffer: &self.buffer,
+            buffer_idx: 0,
+        }
+    }
+
     /// Insert the key-value pair into the write batch.
     pub fn insert(&mut self, kvr: KeyValueRef<'_>) -> Result<(), SError> {
         if let Some(value) = kvr.value {
@@ -179,6 +197,63 @@ impl WriteBatch {
         self.buffer.extend_from_slice(&wb.buffer);
         self.setsum += wb.setsum;
         Ok(())
+    }
+}
+
+/// An iterator over the entries of a [`WriteBatch`].
+pub struct WriteBatchIterator<'a> {
+    buffer: &'a [u8],
+    buffer_idx: usize,
+}
+
+impl<'a> WriteBatchIterator<'a> {
+    /// Return the next key/value entry from the batch.
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Result<Option<KeyValueRef<'a>>, SError> {
+        if self.buffer_idx >= self.buffer.len() {
+            return Ok(None);
+        }
+        let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])
+            .map_err(unpack_key_value_entry_prototk)?;
+        self.buffer_idx = self.buffer.len() - rem.len();
+        key_value_ref_from_entry(&kve).map(Some)
+    }
+}
+
+fn key_value_ref_from_entry<'a>(kve: &KeyValueEntry<'a>) -> Result<KeyValueRef<'a>, SError> {
+    fn check_shared(shared: u64) -> Result<(), SError> {
+        if shared != 0 {
+            Err(corruption_shared_not_zero())
+        } else {
+            Ok(())
+        }
+    }
+    match kve {
+        KeyValueEntry::Put(KeyValuePut {
+            shared,
+            key_frag,
+            timestamp,
+            value,
+        }) => {
+            check_shared(*shared)?;
+            Ok(KeyValueRef {
+                key: key_frag,
+                timestamp: *timestamp,
+                value: Some(value),
+            })
+        }
+        KeyValueEntry::Del(KeyValueDel {
+            shared,
+            key_frag,
+            timestamp,
+        }) => {
+            check_shared(*shared)?;
+            Ok(KeyValueRef {
+                key: key_frag,
+                timestamp: *timestamp,
+                value: None,
+            })
+        }
     }
 }
 
@@ -687,14 +762,7 @@ impl<R: Read + Seek> LogIterator<R> {
         let (kve, rem) = <KeyValueEntry as Unpackable>::unpack(&self.buffer[self.buffer_idx..])
             .map_err(unpack_key_value_entry_prototk)?;
         self.buffer_idx = self.buffer.len() - rem.len();
-        if kve.shared() != 0 {
-            return Err(corruption_shared_not_zero());
-        }
-        Ok(Some(KeyValueRef {
-            key: kve.key_frag(),
-            timestamp: kve.timestamp(),
-            value: kve.value(),
-        }))
+        key_value_ref_from_entry(&kve).map(Some)
     }
 
     fn next_frame(&mut self) -> Result<Option<Header>, SError> {
@@ -945,6 +1013,28 @@ mod builder {
         ];
         let got: &[u8] = &write;
         assert_eq!(exp, got);
+    }
+
+    #[test]
+    fn write_batch_iterator() {
+        let mut batch = WriteBatch::new();
+        assert!(batch.is_empty());
+        batch.put(b"alpha", 7, b"one").unwrap();
+        batch.del(b"beta", 6).unwrap();
+        assert!(!batch.is_empty());
+
+        let mut iter = batch.iter();
+        let first = iter.next().unwrap().unwrap();
+        assert_eq!(b"alpha", first.key);
+        assert_eq!(7, first.timestamp);
+        assert_eq!(Some(&b"one"[..]), first.value);
+
+        let second = iter.next().unwrap().unwrap();
+        assert_eq!(b"beta", second.key);
+        assert_eq!(6, second.timestamp);
+        assert_eq!(None, second.value);
+
+        assert!(iter.next().unwrap().is_none());
     }
 
     #[test]

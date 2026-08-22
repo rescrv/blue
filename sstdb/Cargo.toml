@@ -1,0 +1,26 @@
+[package]
+name = "sstdb"
+version = "0.1.0"
+edition.workspace = true
+description = "sstdb: a single-SST linearizable key-value database on object storage."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+# Back the store with S3 (object_store's `aws` backend).  Off by default so the crate builds and
+# tests run with the in-memory store; enable with `--features s3` for production.
+default = []
+s3 = ["object_store/aws"]
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+object_store = { version = "0.13.2" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+
+handled = { workspace = true }
+setsum = { workspace = true }
+sst = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "test-util"] }

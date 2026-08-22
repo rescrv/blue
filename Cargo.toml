@@ -44,6 +44,7 @@ members = [
     "sig_fig_histogram",
     "split_channel",
     "sst",
+    "sstdb",
     "statslicer",
     "stdioredirect",
     "symphonize",
