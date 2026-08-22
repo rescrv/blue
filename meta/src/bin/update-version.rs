@@ -9,8 +9,7 @@ use std::process::{Command, Stdio};
 use semver::Version;
 use toml::{Table, Value};
 
-const USAGE: &str =
-    "usage: update-version (bump <crate> <new-version>|plan <crate> <new-version>|normalize)";
+const USAGE: &str = "usage: update-version (bump <crate> <new-version> [--frozen <crate,...>]|plan <crate> <new-version>|normalize)";
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -19,6 +18,9 @@ enum Mode {
     Bump {
         crate_name: String,
         new_version: Version,
+        /// Reverse-dependents that were already bumped earlier this release run and
+        /// must not have their versions incremented a second time by this cascade.
+        frozen: BTreeSet<String>,
     },
     Plan {
         crate_name: String,
@@ -63,9 +65,10 @@ fn main() -> Result<()> {
         Mode::Bump {
             crate_name,
             new_version,
+            frozen,
         } => {
             let workspace = read_workspace()?;
-            let changes = planned_bumps(&workspace, &crate_name, &new_version)?;
+            let changes = planned_bumps(&workspace, &crate_name, &new_version, &frozen)?;
             let report = apply_manifest_changes(&workspace, &changes, true)?;
             print_apply_report(&report);
             run_cargo_check()
@@ -75,7 +78,7 @@ fn main() -> Result<()> {
             new_version,
         } => {
             let workspace = read_workspace()?;
-            let changes = planned_bumps(&workspace, &crate_name, &new_version)?;
+            let changes = planned_bumps(&workspace, &crate_name, &new_version, &BTreeSet::new())?;
             let normalizations = planned_normalizations(&workspace)?;
             print_plan(&workspace, &changes, &normalizations);
             Ok(())
@@ -102,7 +105,15 @@ where
         [mode, crate_name, version] if mode == "bump" => Ok(Mode::Bump {
             crate_name: crate_name.to_string(),
             new_version: version.parse()?,
+            frozen: BTreeSet::new(),
         }),
+        [mode, crate_name, version, flag, list] if mode == "bump" && flag == "--frozen" => {
+            Ok(Mode::Bump {
+                crate_name: crate_name.to_string(),
+                new_version: version.parse()?,
+                frozen: parse_frozen(list),
+            })
+        }
         [mode, crate_name, version] if mode == "plan" => Ok(Mode::Plan {
             crate_name: crate_name.to_string(),
             new_version: version.parse()?,
@@ -110,6 +121,14 @@ where
         [mode] if mode == "normalize" => Ok(Mode::Normalize),
         _ => Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into()),
     }
+}
+
+fn parse_frozen(list: &str) -> BTreeSet<String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn read_workspace() -> Result<Workspace> {
@@ -230,6 +249,7 @@ fn planned_bumps(
     workspace: &Workspace,
     crate_name: &str,
     new_version: &Version,
+    frozen: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, VersionChange>> {
     let package = resolve_package(workspace, crate_name)?;
     if new_version <= &package.version {
@@ -249,6 +269,13 @@ fn planned_bumps(
         },
     );
     for dependent in reverse_dependency_closure(&package.name, &workspace.reverse_dependencies) {
+        // A dependent that was already bumped earlier in this release run keeps the version it
+        // was given then; re-incrementing it would bump the same record once per dependency that
+        // happened to bump.  Its dependency reference still tracks the freshly bumped crate via
+        // the workspace.dependencies entry, so skipping the version increment is safe.
+        if frozen.contains(&dependent) {
+            continue;
+        }
         let package = workspace
             .packages
             .get(&dependent)
@@ -734,7 +761,16 @@ mod tests {
             parse_mode(["bump", "handled", "0.8.0"]).unwrap(),
             Mode::Bump {
                 crate_name: "handled".to_string(),
-                new_version: version("0.8.0")
+                new_version: version("0.8.0"),
+                frozen: BTreeSet::new(),
+            }
+        );
+        assert_eq!(
+            parse_mode(["bump", "handled", "0.8.0", "--frozen", "lsmtk,sst"]).unwrap(),
+            Mode::Bump {
+                crate_name: "handled".to_string(),
+                new_version: version("0.8.0"),
+                frozen: BTreeSet::from(["lsmtk".to_string(), "sst".to_string()]),
             }
         );
         assert_eq!(
@@ -846,7 +882,7 @@ sync42 = "0.16"
             ]),
         };
         assert_eq!(
-            planned_bumps(&workspace, "a", &version("0.3.0")).unwrap(),
+            planned_bumps(&workspace, "a", &version("0.3.0"), &BTreeSet::new()).unwrap(),
             BTreeMap::from([
                 (
                     "a".to_string(),
@@ -870,6 +906,25 @@ sync42 = "0.16"
                     }
                 ),
             ])
+        );
+
+        // Freezing an already-bumped dependent keeps it out of the cascade so it is not
+        // incremented a second time, while the explicitly named crate is still bumped.
+        assert_eq!(
+            planned_bumps(
+                &workspace,
+                "a",
+                &version("0.3.0"),
+                &BTreeSet::from(["b".to_string(), "c".to_string()])
+            )
+            .unwrap(),
+            BTreeMap::from([(
+                "a".to_string(),
+                VersionChange {
+                    old: version("0.1.0"),
+                    new: version("0.3.0")
+                }
+            ),])
         );
     }
 
