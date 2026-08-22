@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, VecDeque};
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -12,7 +13,7 @@ use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
 
-use ci::{candidate_order, package};
+use ci::{candidate_order, graph, package};
 
 const PUBLISH_SCRIPT: &str = "publish.sh";
 const USAGE: &str = "usage: publish [--prepare]";
@@ -89,6 +90,11 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
         .build()?;
     let mut branch_created = false;
     let mut planned_publishes = Vec::new();
+    // Crate names whose package version has already been incremented during this run, either
+    // because they were published directly or because an earlier crate's bump cascaded into them.
+    // Passing this set to update-version keeps a shared dependent from being bumped once per
+    // dependency that happens to bump.
+    let mut already_bumped: BTreeSet<String> = BTreeSet::new();
 
     for member in candidate_order() {
         let package = package(&member);
@@ -129,10 +135,18 @@ fn prepare_release() -> Result<(), Box<dyn Error>> {
                     published_tag_exists,
                     &branch_name,
                     &mut branch_created,
+                    &already_bumped,
                 )?
                 else {
                     continue;
                 };
+                // A rewrite only happens when the version actually changed; when it does, the
+                // cascade also bumped every reverse-dependent, so freeze this crate and its
+                // dependents against any further increments this run.
+                if publish.version != package.version {
+                    already_bumped.insert(publish.crate_name.clone());
+                    already_bumped.extend(reverse_dependency_closure(&package.member));
+                }
                 planned_publishes.push(publish);
             }
         }
@@ -204,6 +218,7 @@ fn has_changed_since_tag(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_publish(
     crate_name: &str,
     current_version: &Version,
@@ -212,6 +227,7 @@ fn prepare_publish(
     published_tag_exists: bool,
     branch_name: &str,
     branch_created: &mut bool,
+    already_bumped: &BTreeSet<String>,
 ) -> Result<Option<PublishCommand>, Box<dyn Error>> {
     println!();
     println!("publishing candidate: {crate_name} {current_version}");
@@ -272,7 +288,7 @@ fn prepare_publish(
 
     if &new_version != current_version {
         let new_version = new_version.to_string();
-        run(Command::new("cargo").args([
+        let mut args = vec![
             "run",
             "-p",
             "ci",
@@ -282,7 +298,20 @@ fn prepare_publish(
             "bump",
             crate_name,
             &new_version,
-        ]))?;
+        ];
+        // Tell update-version which reverse-dependents already took their one increment so its
+        // cascade does not bump them again.
+        let frozen = already_bumped
+            .iter()
+            .filter(|name| name.as_str() != crate_name)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",");
+        if !frozen.is_empty() {
+            args.push("--frozen");
+            args.push(&frozen);
+        }
+        run(Command::new("cargo").args(args))?;
     } else {
         println!(
             "using current unpublished version {crate_name} {new_version} without rewriting manifests"
@@ -294,6 +323,32 @@ fn prepare_publish(
         crate_name: crate_name.to_string(),
         version: new_version,
     }))
+}
+
+/// Crate names of every member that transitively depends on `member`.
+///
+/// These are exactly the crates that `update-version bump <member>` cascades an automatic version
+/// increment into, so publish uses this set to freeze them against a second increment.
+fn reverse_dependency_closure(member: &str) -> BTreeSet<String> {
+    let (_members, edges) = graph();
+    reverse_dependent_members(member, &edges)
+        .iter()
+        .map(|dependent| package(dependent).name)
+        .collect()
+}
+
+/// Members reachable from `start` by following dependency -> dependent edges.
+fn reverse_dependent_members(start: &str, edges: &[(String, String)]) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut queue = VecDeque::from([start.to_string()]);
+    while let Some(current) = queue.pop_front() {
+        for (dependency, dependent) in edges {
+            if dependency == &current && dependent != start && seen.insert(dependent.clone()) {
+                queue.push_back(dependent.clone());
+            }
+        }
+    }
+    seen
 }
 
 fn create_branch(branch_name: &str) -> Result<(), Box<dyn Error>> {
@@ -433,10 +488,31 @@ fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
 mod tests {
     use semver::Version;
 
+    use std::collections::BTreeSet;
+
     use super::{
         Action, Mode, PublishCommand, VersionSelection, classify, current_version_is_publishable,
-        parse_mode, parse_version_selection, render_publish_script,
+        parse_mode, parse_version_selection, render_publish_script, reverse_dependent_members,
     };
+
+    #[test]
+    fn reverse_dependent_members_is_transitive_and_excludes_start() {
+        // a <- b <- c and a <- d (edges point dependency -> dependent).
+        let edges = vec![
+            ("a".to_string(), "b".to_string()),
+            ("b".to_string(), "c".to_string()),
+            ("a".to_string(), "d".to_string()),
+        ];
+        assert_eq!(
+            reverse_dependent_members("a", &edges),
+            BTreeSet::from(["b".to_string(), "c".to_string(), "d".to_string()])
+        );
+        assert_eq!(
+            reverse_dependent_members("b", &edges),
+            BTreeSet::from(["c".to_string()])
+        );
+        assert_eq!(reverse_dependent_members("c", &edges), BTreeSet::new());
+    }
 
     #[test]
     fn defaults_to_print_packages_mode() {
