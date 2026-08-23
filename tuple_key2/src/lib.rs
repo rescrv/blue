@@ -1277,12 +1277,7 @@ mod tests {
         ];
         let mut encoded = values
             .iter()
-            .map(|value| {
-                (
-                    *value,
-                    TupleKey::builder().f64(*value).build().into_bytes(),
-                )
-            })
+            .map(|value| (*value, TupleKey::builder().f64(*value).build().into_bytes()))
             .collect::<Vec<_>>();
         encoded.sort_by(|lhs, rhs| lhs.1.cmp(&rhs.1));
 
@@ -1309,12 +1304,7 @@ mod tests {
         ];
         let mut encoded = values
             .iter()
-            .map(|value| {
-                (
-                    *value,
-                    TupleKey::builder().f32(*value).build().into_bytes(),
-                )
-            })
+            .map(|value| (*value, TupleKey::builder().f32(*value).build().into_bytes()))
             .collect::<Vec<_>>();
         encoded.sort_by(|lhs, rhs| lhs.1.cmp(&rhs.1));
 
@@ -1329,10 +1319,7 @@ mod tests {
     fn parser_rejects_wrong_float_tag() {
         let key = TupleKey::builder().f64(1.0).build();
         let mut parser = key.parser();
-        assert_eq!(
-            Err(Error::InvalidFloatTag { tag: F64_TAG }),
-            parser.f32()
-        );
+        assert_eq!(Err(Error::InvalidFloatTag { tag: F64_TAG }), parser.f32());
     }
 
     #[test]
