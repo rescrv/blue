@@ -2112,6 +2112,42 @@ mod tests {
     }
 
     // =======================================================================
+    // The Tier-1 refinement source channel reaches the whole-program gate
+    // (`caternary check` loads with `load_with_spans`, which attaches
+    // signature words; the gate proves each guarantee through its body)
+    // =======================================================================
+
+    #[test]
+    fn source_attached_signature_discharges_through_the_gate() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let src = r#"[ 1 + ] :inc
+                     "inc : ( n: Num -- r: Num where r >= n + 1 )"
+                     [ 2 inc ] :main"#;
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
+            "the body proves the source-attached guarantee"
+        );
+    }
+
+    #[test]
+    fn source_attached_signature_rejects_a_violating_body() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let src = r#"[ 1 + ] :inc
+                     "inc : ( n: Num -- r: Num where r > n + 1 )"
+                     [ 2 inc ] :main"#;
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_err(),
+            "a guarantee the body refutes must fail the gate"
+        );
+    }
+
+    // =======================================================================
     // Regression: `assume(...)` must be a runtime no-op
     // =======================================================================
 

@@ -25,12 +25,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ## Low / polish
 
-- Refinement signatures are Rust-API-only (`attach_refinement`); the binary
-  never parses them, so through `caternary check` Tier 1 is exercisable only
-  via `assume(...)` and the four builtin arith axioms. If the surface is meant
-  to be user-writable, add a source channel (and teach `check_command`).
-
-
+(none open)
 
 
 
@@ -59,6 +54,11 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- Refinement-signature source channel (a quoted top-level word of the §10.1
+  grammar, load-attached, definitions-only): pinned by
+  `evaluator::tests::signature_word_attaches_a_refinement_at_load` and
+  `check::tests::source_attached_signature_{discharges_through_the_gate,
+  rejects_a_violating_body}`.
 - Refinement binder type names validated (`Num`/`Bool`/`List`/quote arrow):
   pinned by `refinement::tests::unknown_binder_type_is_rejected`.
 - Numeric-lexeme parity: the refinement lexer rejects trailing-dot literals,

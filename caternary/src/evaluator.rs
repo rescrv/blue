@@ -75,6 +75,17 @@ fn has_def_prefix(w: &str) -> bool {
     w.starts_with(':')
 }
 
+/// Is this top-level word a **refinement-signature attachment attempt**?
+/// The recorded Tier-1 source surface is one (quoted) word of the §10.1
+/// signature grammar — `name : ( … -- … )` — and the ` : (` infix is its
+/// cheap marker: only a quoted word can contain it (shell splitting would
+/// otherwise break it apart), so ordinary program words never match. The full
+/// grammar (`crate::parse_signature`) decides validity; a marked word that
+/// fails to parse is a located load error.
+pub(crate) fn is_signature_attempt(word: &str) -> bool {
+    word.contains(" : (")
+}
+
 fn is_local_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
@@ -601,8 +612,52 @@ impl<T> Evaluator<T> {
             }
         }
 
+        // Validate the stream's **refinement-signature words** — the recorded
+        // Tier-1 source channel (§10.1). The surface is one (quoted) top-level
+        // word in the signature grammar, `name : ( … -- … )`, a sibling of
+        // `[ body ] :name` and `[ effect ] @name`; the ` : (` infix marks the
+        // attempt and the full grammar decides validity, so a malformed
+        // attempt is a located error, never silently an ordinary word. A
+        // source-channel signature may only name a **definition** (its
+        // guarantee is *proven through the body* by the gate); it can never
+        // axiomize an operator — operator axioms remain the embedder's
+        // explicit attestation (`attach_refinement`, invariant 16).
+        let mut stream_sigs: Vec<crate::RefinementSig> = Vec::new();
+        for tok in tokens {
+            if let SpannedTokenKind::Word(w) = &tok.kind
+                && is_signature_attempt(w)
+            {
+                let sig = crate::parse_signature(w).map_err(|e| {
+                    definition_error(format!("malformed refinement signature: {e}"))
+                })?;
+                if self.refinements.contains_key(&sig.name)
+                    || stream_sigs.iter().any(|s| s.name == sig.name)
+                {
+                    return Err(definition_error(format!(
+                        "duplicate refinement signature: `{}` is already refined",
+                        sig.name
+                    )));
+                }
+                if !stream_defs.contains(sig.name.as_str())
+                    && !self.definitions.contains_key(&sig.name)
+                {
+                    return Err(definition_error(format!(
+                        "refinement signature for `{}` has no definition to refine \
+                         (operator axioms are attached by the embedder, not source text)",
+                        sig.name
+                    )));
+                }
+                stream_sigs.push(sig);
+            }
+        }
+
         // Validate and populate the runtime table through the existing path.
         self.load(&spanless)?;
+
+        // The stream validated end to end: attach its refinement signatures.
+        for sig in stream_sigs {
+            self.refinements.insert(sig.name.clone(), sig);
+        }
 
         // Re-walk the spanned top level to capture each definition's spanned
         // body. Validation already succeeded above, so the binder pairing is
@@ -1670,6 +1725,66 @@ mod tests {
         let eval = locals_eval();
         let tokens = parse("[5 >x] CALL [x] CALL").unwrap();
         assert_eq!(eval.eval(&tokens).unwrap(), vec![word("x")]);
+    }
+
+    // =======================================================================
+    // The Tier-1 refinement-signature source channel (one quoted word of the
+    // §10.1 grammar at top level, attached at load)
+    // =======================================================================
+
+    #[test]
+    fn signature_word_attaches_a_refinement_at_load() {
+        let mut eval = locals_eval();
+        let src = r#"[ 1 ADD ] :inc "inc : ( n: Num -- r: Num where r > n )""#;
+        let tokens = crate::parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let sig = eval.refinement("inc").expect("signature attached");
+        assert_eq!(sig.demands.binders[0].name, "n");
+        assert_eq!(sig.guarantees.binders[0].name, "r");
+    }
+
+    /// A signature naming nothing is rejected: definitions only — operator
+    /// axioms remain the embedder's explicit attestation (invariant 16).
+    #[test]
+    fn signature_word_for_an_undefined_name_is_rejected() {
+        let mut eval = locals_eval();
+        let src = r#""ghost : ( n: Num -- r: Num )" [ 0 ] :main"#;
+        let tokens = crate::parse_with_spans(src).unwrap();
+        let err = eval.load_with_spans(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("refinement signature for `ghost` has no definition")
+        );
+        assert!(!eval.has_definition("main"), "load stays atomic");
+    }
+
+    #[test]
+    fn duplicate_signature_word_is_rejected() {
+        let mut eval = locals_eval();
+        let src = r#"[ 1 ADD ] :inc
+                     "inc : ( n: Num -- r: Num )"
+                     "inc : ( n: Num -- r: Num where r > n )""#;
+        let tokens = crate::parse_with_spans(src).unwrap();
+        let err = eval.load_with_spans(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate refinement signature: `inc`")
+        );
+    }
+
+    /// A marked-but-malformed signature word is a load error, never silently
+    /// an ordinary word.
+    #[test]
+    fn malformed_signature_word_is_rejected() {
+        let mut eval = locals_eval();
+        let src = r#"[ 1 ADD ] :inc "inc : ( n: Banana -- r: Num )""#;
+        let tokens = crate::parse_with_spans(src).unwrap();
+        let err = eval.load_with_spans(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("malformed refinement signature"),
+            "got: {err}"
+        );
     }
 
     /// A **ghost** annotation — `@name` with no `:name` definition anywhere —
