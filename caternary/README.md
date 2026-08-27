@@ -132,6 +132,17 @@ definitions, and runs the whole-program checker. A checked program must define
 printf '[ 1 2 + ] :main\n' | caternary check
 ```
 
+Programs can attach a Tier-1 refinement signature to a definition from source
+text: one quoted top-level word in the signature grammar, a sibling of the
+`[ body ] :name` definition it refines. The gate proves the guarantee through
+the body (it is never taken on faith); operator axioms remain embedder-only
+(`attach_refinement`):
+
+```sh
+printf '[ 1 + ] :inc\n"inc : ( n: Num -- r: Num where r >= n + 1 )"\n[ 2 inc ] :main\n' \
+  | caternary check
+```
+
 A green gate proves stack shapes and refinement obligations — it is not a
 proof that every builtin accepts every value in its `Num` domain. The bitwise
 builtins (`|`/`&`/`^`/`<<`/`>>`/`~`) are typed `( Num Num -- Num )` under the
