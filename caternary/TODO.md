@@ -30,8 +30,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   via `assume(...)` and the four builtin arith axioms. If the surface is meant
   to be user-writable, add a source channel (and teach `check_command`).
 
-- Refinement binder type names are unvalidated (`n: Banana` parses and is
-  treated as a `Real`); only `Quote` is load-bearing.
+
 
 
 
@@ -60,6 +59,8 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- Refinement binder type names validated (`Num`/`Bool`/`List`/quote arrow):
+  pinned by `refinement::tests::unknown_binder_type_is_rejected`.
 - Numeric-lexeme parity: the refinement lexer rejects trailing-dot literals,
   `Rat::parse` handles scientific notation exactly (capped exponent), and
   `render_smtlib` canonicalizes numerals into valid SMT-LIB. Pinned by
