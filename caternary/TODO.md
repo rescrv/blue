@@ -29,11 +29,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   never parses them, so through `caternary check` Tier 1 is exercisable only
   via `assume(...)` and the four builtin arith axioms. If the surface is meant
   to be user-writable, add a source channel (and teach `check_command`).
-- The refinement lexer accepts a trailing-dot literal (`1.`);
-  `render_smtlib` emits it verbatim — invalid SMT-LIB for the z3 backend
-  (its `from_string` error path is unverified). Conversely `1e3` is
-  opaque/`Unknown` to the embedded reasoner but decidable by z3 — a parity
-  break despite the M13 "bit-for-bit aligned" claim.
+
 - Refinement binder type names are unvalidated (`n: Banana` parses and is
   treated as a `Real`); only `Quote` is load-bearing.
 
@@ -64,6 +60,11 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- Numeric-lexeme parity: the refinement lexer rejects trailing-dot literals,
+  `Rat::parse` handles scientific notation exactly (capped exponent), and
+  `render_smtlib` canonicalizes numerals into valid SMT-LIB. Pinned by
+  `refinement::tests::trailing_dot_numeric_literal_is_rejected` and
+  `solver::tests::scientific_notation_is_decidable_and_renders_canonically`.
 - `pop_scope` base underflow is a hard assert in all build profiles: pinned
   by `solver::tests::smtlib_pop_scope_underflow_panics_with_its_name`.
 - `Parser::finish` reports the outermost unmatched `[`: pinned by
