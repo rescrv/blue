@@ -592,7 +592,14 @@ pub fn render_smtlib(pred: &Pred) -> String {
     match pred {
         Pred::Var(name) => name.clone(),
         Pred::Num(lexeme) => {
-            // SMT-LIB writes a negative literal as `(- n)`.
+            // Canonicalize through the exact rational so every lexeme the
+            // embedded reasoner understands is also a valid SMT-LIB term:
+            // `1e3` renders `1000`, `0.5` renders `(/ 1 2)`, `-2` renders
+            // `(- 2)` (SMT-LIB writes a negative literal that way).
+            if let Some(rat) = Rat::parse(lexeme) {
+                return rat.render_smtlib();
+            }
+            // An unparseable lexeme falls back verbatim (negative form kept).
             if let Some(rest) = lexeme.strip_prefix('-') {
                 format!("(- {rest})")
             } else {
@@ -3531,6 +3538,12 @@ impl BigInt {
         BigInt { neg: false, mag: a }
     }
 
+    /// Render the magnitude (no sign) as decimal.
+    fn abs_render(&self) -> String {
+        let s = self.render();
+        s.strip_prefix('-').map(str::to_string).unwrap_or(s)
+    }
+
     /// Render as decimal.
     fn render(&self) -> String {
         if self.is_zero() {
@@ -3596,9 +3609,38 @@ impl Rat {
         }
     }
 
-    /// Parse a numeric lexeme (integer or simple decimal like `3.5`).
+    /// Parse a numeric lexeme: an integer, a simple decimal like `3.5`, or
+    /// scientific notation like `1e3` / `2.5E-2` — all **exactly** (the
+    /// mantissa scales by an exact power of ten), keeping the embedded
+    /// reasoner's numeric domain aligned with the z3 backend's (M13 parity).
     fn parse(lexeme: &str) -> Option<Rat> {
         let s = lexeme.trim();
+        if let Some(idx) = s.find(['e', 'E']) {
+            // A cap on |exponent| keeps a hostile `1e999999999` from turning
+            // exact scaling into a memory bomb; beyond it the lexeme is simply
+            // opaque (a safe Unknown), never wrong.
+            const MAX_EXPONENT: i32 = 10_000;
+            let exp: i32 = s[idx + 1..].parse().ok()?;
+            if exp.abs() > MAX_EXPONENT {
+                return None;
+            }
+            let mantissa = Rat::parse_plain(&s[..idx])?;
+            let mut pow = BigInt::from_i128(1);
+            let ten = BigInt::from_i128(10);
+            for _ in 0..exp.unsigned_abs() {
+                pow = pow.mul(&ten);
+            }
+            return Some(if exp >= 0 {
+                Rat::new(mantissa.num.mul(&pow), mantissa.den)
+            } else {
+                Rat::new(mantissa.num, mantissa.den.mul(&pow))
+            });
+        }
+        Rat::parse_plain(s)
+    }
+
+    /// Parse a plain (exponent-free) numeric lexeme.
+    fn parse_plain(s: &str) -> Option<Rat> {
         if let Some(n) = BigInt::from_decimal(s) {
             return Some(Rat {
                 num: n,
@@ -3698,6 +3740,21 @@ impl Rat {
             self.num.render()
         } else {
             format!("{}/{}", self.num.render(), self.den.render())
+        }
+    }
+
+    /// Render the rational as an SMT-LIB term: an integer prints bare (or
+    /// `(- n)`), a true fraction prints exact rational division `(/ n d)`.
+    fn render_smtlib(&self) -> String {
+        let mag = if self.den == BigInt::from_i128(1) {
+            self.num.abs_render()
+        } else {
+            format!("(/ {} {})", self.num.abs_render(), self.den.render())
+        };
+        if self.num.is_negative() {
+            format!("(- {mag})")
+        } else {
+            mag
         }
     }
 }
@@ -3870,6 +3927,27 @@ mod tests {
         // Exactly one push and one pop here (parity).
         assert_eq!(script.matches("(push 1)").count(), 1);
         assert_eq!(script.matches("(pop 1)").count(), 1);
+    }
+
+    /// Scientific-notation lexemes are exact to the embedded reasoner (they
+    /// used to be opaque ⇒ `Unknown`, a parity break against z3) and render
+    /// as valid SMT-LIB (`1e3` is not an SMT-LIB numeral).
+    #[test]
+    fn scientific_notation_is_decidable_and_renders_canonically() {
+        // x >= 1e3 ∧ x < 1000 is infeasible — decidable only if `1e3` parses.
+        let ge = Pred::Bin(BinOp::Ge, Box::new(var("x")), Box::new(num("1e3")));
+        let lt = Pred::Bin(BinOp::Lt, Box::new(var("x")), Box::new(num("1000")));
+        assert_eq!(check_sat(&[ge, lt]), Verdict::Unsat);
+
+        assert_eq!(render_smtlib(&num("1e3")), "1000");
+        assert_eq!(render_smtlib(&num("2.5E-2")), "(/ 1 40)");
+        assert_eq!(render_smtlib(&num("0.5")), "(/ 1 2)");
+        assert_eq!(render_smtlib(&num("-0.5")), "(- (/ 1 2))");
+        // A trailing-dot lexeme normalizes to the bare integer, never the
+        // invalid-SMT-LIB verbatim `1.`.
+        assert_eq!(render_smtlib(&num("1.")), "1");
+        // A hostile exponent stays opaque (safe), never a memory bomb.
+        assert_eq!(render_smtlib(&num("1e999999999")), "1e999999999");
     }
 
     /// Base-scope underflow is a hard, named panic in every build profile —
