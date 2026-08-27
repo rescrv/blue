@@ -913,7 +913,20 @@ where
         // Compose: unify the accumulator's output against this word's input, then
         // advance the output to the word's output (§5). A failure is enriched
         // with the live typing-frame breadcrumb (§7.2) before it escapes.
-        if let Err(e) = ctx.unify_stack(&acc.output, &word_arrow.input) {
+        //
+        // Use-site instantiation for quotation VALUES (§5/§8 completeness): a
+        // word whose input element is a `Quote` arrow (`CALL`/`DIP`/`IF`/`MAP`,
+        // …) *applies* the quotation sitting in that slot. A quotation value's
+        // type is parametric in the variables it alone owns (its literal was
+        // inferred from its body; a contract-produced quote promises its arrow
+        // for every instantiation), so the application unifies against a FRESH
+        // instance of those variables rather than the shared slot type. Without
+        // this, a `DUP`'d quotation carries one use's row instantiation into the
+        // next (`… [ 7 + ] DUP DIP … CALL`), manufacturing the spurious row
+        // equation `r = [Bool | r]` — a cyclic-type rejection of a program the
+        // runtime executes fine.
+        let use_output = freshen_quote_uses(ctx, &acc, &word_arrow.input, locals, def_env, poly);
+        if let Err(e) = ctx.unify_stack(&use_output, &word_arrow.input) {
             return Err(mismatch(ctx, e));
         }
         acc = WordTy::new(acc.input, word_arrow.output);
@@ -1780,6 +1793,113 @@ fn generalize(arrow: &WordTy) -> Scheme {
     Scheme::new(tyvars, rowvars, arrow.clone())
 }
 
+/// Use-site instantiation for quotation **values** (§5/§8 completeness; see the
+/// call site in [`infer_seq`]).
+///
+/// Returns the accumulator's resolved output stack with every element that is
+/// **applied** by this word — the aligned word-input element is a `Quote` arrow
+/// — replaced by a fresh instance of the quotation value's arrow, generalized
+/// over exactly the variables the value alone owns. A variable is the value's
+/// own iff it is free in the quote's arrow but **not** free anywhere else in
+/// the typing environment: the accumulator's input, the other output slots
+/// (slots resolving to the *same* quote type are other handles to the same
+/// value and are excluded together), the bound locals, the in-SCC monomorphic
+/// assumptions, and the rank-2 parameter schemes. Variables shared with the
+/// environment stay shared — their constraints must keep flowing — so this is
+/// standard let-generalization applied at the elimination site, and each
+/// application of a duplicated quotation may pick its own row.
+fn freshen_quote_uses(
+    ctx: &mut InferCtx,
+    acc: &WordTy,
+    word_input: &StackTy,
+    locals: &[Local],
+    def_env: &DefEnv,
+    poly: &HashMap<String, Scheme>,
+) -> StackTy {
+    let out = ctx.resolve_stack(&acc.output);
+    let win = ctx.resolve_stack(word_input);
+    let n = out.elems.len().min(win.elems.len());
+    if n == 0 {
+        return out;
+    }
+    let mut replaced = out.clone();
+    for k in 1..=n {
+        // Only a use position — the word's input element is a Quote arrow —
+        // instantiates; a pass-through position (a bare variable, like `DUP`'s)
+        // must keep the shared slot type.
+        let wi = ctx.resolve_ty(&win.elems[win.elems.len() - k]);
+        if !matches!(wi.kind, TyKind::Quote(_)) {
+            continue;
+        }
+        let idx = out.elems.len() - k;
+        let ai = ctx.resolve_ty_deep(&out.elems[idx]);
+        let TyKind::Quote(w) = &ai.kind else {
+            continue;
+        };
+
+        // The environment's free variables: everything except this value's
+        // own handles.
+        let mut env_ty: Vec<TyVar> = Vec::new();
+        let mut env_row: Vec<RowVar> = Vec::new();
+        let acc_in = ctx.resolve_stack_deep(&acc.input);
+        free_vars_stack(&acc_in, &mut env_ty, &mut env_row);
+        env_row.push(out.row);
+        for (j, e) in out.elems.iter().enumerate() {
+            if j == idx {
+                continue;
+            }
+            let e = ctx.resolve_ty_deep(e);
+            if e == ai {
+                // Another handle to the same value (a `DUP`/`OVER` copy):
+                // excluded from the environment exactly like the slot itself.
+                continue;
+            }
+            free_vars_ty(&e, &mut env_ty, &mut env_row);
+        }
+        for local in locals {
+            match local {
+                Local::Mono { ty, .. } => {
+                    let t = ctx.resolve_ty_deep(ty);
+                    free_vars_ty(&t, &mut env_ty, &mut env_row);
+                }
+                Local::Poly { scheme, .. } => {
+                    let a = ctx.resolve_word_deep(&scheme.ty);
+                    free_vars_stack(&a.input, &mut env_ty, &mut env_row);
+                    free_vars_stack(&a.output, &mut env_ty, &mut env_row);
+                }
+            }
+        }
+        for arrow in def_env.mono.values() {
+            let a = ctx.resolve_word_deep(arrow);
+            free_vars_stack(&a.input, &mut env_ty, &mut env_row);
+            free_vars_stack(&a.output, &mut env_ty, &mut env_row);
+        }
+        for scheme in poly.values() {
+            let a = ctx.resolve_word_deep(&scheme.ty);
+            free_vars_stack(&a.input, &mut env_ty, &mut env_row);
+            free_vars_stack(&a.output, &mut env_ty, &mut env_row);
+        }
+
+        // The value's own variables: free in its arrow, not free in the env.
+        let mut wty: Vec<TyVar> = Vec::new();
+        let mut wrow: Vec<RowVar> = Vec::new();
+        free_vars_stack(&w.input, &mut wty, &mut wrow);
+        free_vars_stack(&w.output, &mut wty, &mut wrow);
+        wty.sort_unstable();
+        wty.dedup();
+        wrow.sort_unstable();
+        wrow.dedup();
+        wty.retain(|v| !env_ty.contains(v));
+        wrow.retain(|v| !env_row.contains(v));
+        if wty.is_empty() && wrow.is_empty() {
+            continue;
+        }
+        let inst = ctx.instantiate(&Scheme::new(wty, wrow, WordTy::clone(w)));
+        replaced.elems[idx] = Ty::quote(inst, ai.span);
+    }
+    replaced
+}
+
 /// Accumulate the free type and row variables of a (resolved) stack type.
 fn free_vars_stack(s: &StackTy, tyvars: &mut Vec<TyVar>, rowvars: &mut Vec<RowVar>) {
     rowvars.push(s.row);
@@ -1965,6 +2085,30 @@ mod tests {
         assert!(
             check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
             "gate must verify the definition the runtime will actually call"
+        );
+    }
+
+    // =======================================================================
+    // Regression: spurious cyclic-type rejection (the
+    // `shadow_conforms_under_combinator_pressure` flake)
+    // =======================================================================
+
+    /// `DIP`'s relay scheme ties the quotation's row to the whole remaining
+    /// stack; the `DUP`'d quotation carries that instantiation into the later
+    /// `CALL`, producing the row equation `r = [Bool | r]` — reported as
+    /// "cyclic type: a stack that contains itself". The program runs fine
+    /// (result `[19]`); the checker must accept it.
+    #[test]
+    fn dup_dip_rot_drop_call_does_not_spuriously_cycle() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        // There is no core `+`; attest its contract, exactly as §12 says.
+        eval.register_operator_with_contract("+", plus_scheme());
+        let tokens =
+            parse_with_spans("[ true 5 [ 7 + ] DUP DIP ROT DROP CALL ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            type_check(&eval).is_ok(),
+            "runtime-fine program rejected with a spurious cyclic-type error"
         );
     }
 
