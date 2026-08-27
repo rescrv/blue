@@ -406,6 +406,7 @@ fn parse_error_is_incomplete(err: &ParseError) -> bool {
             message.contains("unclosed single quotes") || message.contains("unclosed double quotes")
         }
         ParseError::UnmatchedCloseBracket { .. } => false,
+        ParseError::NestingTooDeep { .. } => false,
     }
 }
 

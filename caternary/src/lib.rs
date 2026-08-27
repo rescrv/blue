@@ -45,6 +45,7 @@ pub use evaluator::Operator;
 pub use optimizer::Optimizer;
 pub use optimizer::Rule;
 pub use optimizer::RuleError;
+pub use parser::MAX_BRACKET_DEPTH;
 pub use parser::ParseError;
 pub use parser::Span;
 pub use parser::SpannedToken;

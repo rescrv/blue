@@ -24,20 +24,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   grammar that rejects `inf`/`NaN`; make `=` numeric (or add `eqv?`-style
   token equality under a separate name and keep `=` out of the solver's Eq).
 
-### Parser: no literal brackets in words; deep nesting aborts the process
-
-- Shell quotes/escapes are resolved before bracket processing, so a word can
-  never contain `[` or `]`: `parse(r#""a]b""#)`, `parse("'a]b'")`, and
-  `parse(r"a\]b")` all fail with `unmatched closing bracket`
-  (`src/parser.rs:177-230`).
-- Parsing is iterative, but `Token`'s `Drop`/`PartialEq`/`clone` and the
-  downstream walks recurse: a ~200k-deep nest of balanced brackets parses,
-  then aborts with a stack overflow when dropped. No nesting cap anywhere
-  (`UNIFY_MAX_DEPTH` only protects the type engine).
-- Fix direction: keep bracket decode state alongside shell-quote state so
-  quoted/escaped brackets stay literal; add a nesting-depth cap in
-  `parse_with_spans` (the cheap 80% fix for the crash).
-
 ## Medium
 
 ### Attestation hash omits Tier-1 content
@@ -116,3 +102,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 - `assume(...)` runtime no-op: pinned by
   `evaluator::tests::assume_word_is_a_runtime_no_op` and
   `check::tests::gate_passing_assume_program_runtime_matches_proven_effect`.
+- Parser literal brackets + nesting cap: pinned by
+  `parser::tests::{double,single}_quoted_brackets_stay_literal`,
+  `parser::tests::backslash_escaped_brackets_stay_literal`, and
+  `parser::tests::nesting_beyond_the_cap_is_a_clean_error`.
