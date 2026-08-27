@@ -1913,6 +1913,36 @@ mod tests {
         );
     }
 
+    // =======================================================================
+    // Regression: reasoner overflow at the gate
+    // =======================================================================
+
+    /// The assume chain's coefficients fit i128 individually but multiply past
+    /// it during elimination; the embedded reasoner then judged the *feasible*
+    /// chain infeasible, the `/` demand came back `Unsat` (discharged), and
+    /// the gate accepted a program that divides by zero at runtime (release;
+    /// debug panicked). With correct arithmetic the chain is feasible, the
+    /// divisor is opaque, and the honest verdict is Unknown ⇒ reject.
+    #[test]
+    fn gate_rejects_opaque_divisor_despite_large_assume_coefficients() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let src = "[ 5 ] :five\n\
+                   [ 0 ] :zero\n\
+                   [ five five five \
+                   \"assume(x1 <= 123456789123456789123456789 and \
+                   x2 <= 1000000000000 * x1 and x3 <= 1000000000000 * x2 and \
+                   x3 >= 100000000000000000000000000000000000000)\" \
+                   1 zero / ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_err(),
+            "gate must not verify a program whose `/` demand is undecidable"
+        );
+    }
+
+
     #[test]
     fn a_word_with_no_definition_or_contract_is_unresolved() {
         let mut eval: Evaluator<Value> = Evaluator::new();

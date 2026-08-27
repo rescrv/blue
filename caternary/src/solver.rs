@@ -3126,9 +3126,9 @@ fn fourier_motzkin_solve(mut constraints: Vec<Constraint>) -> (bool, Vec<(String
 
         let mut next = zero;
         for p in &pos {
-            let a = *p.expr.coeffs.get(&var).unwrap(); // > 0
+            let a = p.expr.coeffs.get(&var).unwrap().clone(); // > 0
             for n in &neg {
-                let b = *n.expr.coeffs.get(&var).unwrap(); // < 0
+                let b = n.expr.coeffs.get(&var).unwrap().clone(); // < 0
                 // Scale p by -b (>0) and n by a (>0); add to cancel `var`.
                 let p_scaled = p.expr.scale(&b.neg());
                 let n_scaled = n.expr.scale(&a);
@@ -3157,14 +3157,14 @@ fn fourier_motzkin_solve(mut constraints: Vec<Constraint>) -> (bool, Vec<(String
         let mut lower: Option<(Rat, bool)> = None; // (value, strict)
         let mut upper: Option<(Rat, bool)> = None;
         for c in involving {
-            let c_v = *c.expr.coeffs.get(var).unwrap();
+            let c_v = c.expr.coeffs.get(var).unwrap().clone();
             // rest = expr with `var` removed, evaluated under `model`.
-            let mut rest = c.expr.constant;
+            let mut rest = c.expr.constant.clone();
             for (name, coeff) in &c.expr.coeffs {
                 if name == var {
                     continue;
                 }
-                let val = match model.get(name).copied() {
+                let val = match model.get(name).cloned() {
                     Some(val) => val,
                     None => {
                         // A bound may mention a variable that was never
@@ -3173,7 +3173,7 @@ fn fourier_motzkin_solve(mut constraints: Vec<Constraint>) -> (bool, Vec<(String
                         // a neutral witness value so model construction remains
                         // total.
                         let val = Rat::int(0);
-                        model.insert(name.clone(), val);
+                        model.insert(name.clone(), val.clone());
                         val
                     }
                 };
@@ -3254,14 +3254,274 @@ fn pick_value(lower: Option<(Rat, bool)>, upper: Option<(Rat, bool)>) -> Rat {
 }
 
 // ===========================================================================
-// A tiny exact rational over i128 (enough for the M8 reasoner)
+// A tiny arbitrary-precision signed integer (enough for the M8 reasoner)
+// ===========================================================================
+
+/// A signed arbitrary-precision integer: sign + little-endian base-2^32 limbs.
+///
+/// Invariants: `mag` has no trailing zero limbs; zero is `mag == []` with
+/// `neg == false`. Fourier–Motzkin elimination multiplies constraint
+/// coefficients by each other, so products grow without bound — fixed-width
+/// arithmetic (the old i128 `Rat`) overflowed and produced false verdicts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BigInt {
+    neg: bool,
+    mag: Vec<u32>,
+}
+
+impl BigInt {
+    fn zero() -> BigInt {
+        BigInt {
+            neg: false,
+            mag: Vec::new(),
+        }
+    }
+
+    fn from_i128(n: i128) -> BigInt {
+        let neg = n < 0;
+        let mut u = n.unsigned_abs();
+        let mut mag = Vec::new();
+        while u != 0 {
+            mag.push((u & 0xffff_ffff) as u32);
+            u >>= 32;
+        }
+        BigInt { neg, mag }
+    }
+
+    /// Parse a decimal integer (optional leading `-`). Returns `None` on any
+    /// non-digit.
+    fn from_decimal(s: &str) -> Option<BigInt> {
+        let (neg, digits) = match s.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, s),
+        };
+        if digits.is_empty() {
+            return None;
+        }
+        let mut mag: Vec<u32> = Vec::new();
+        for ch in digits.bytes() {
+            if !ch.is_ascii_digit() {
+                return None;
+            }
+            // mag = mag * 10 + digit
+            let mut carry = u64::from(ch - b'0');
+            for limb in mag.iter_mut() {
+                let v = u64::from(*limb) * 10 + carry;
+                *limb = (v & 0xffff_ffff) as u32;
+                carry = v >> 32;
+            }
+            while carry != 0 {
+                mag.push((carry & 0xffff_ffff) as u32);
+                carry >>= 32;
+            }
+        }
+        let neg = neg && !mag.is_empty();
+        Some(BigInt { neg, mag })
+    }
+
+    fn is_zero(&self) -> bool {
+        self.mag.is_empty()
+    }
+
+    fn is_negative(&self) -> bool {
+        self.neg
+    }
+
+    fn neg(&self) -> BigInt {
+        if self.is_zero() {
+            self.clone()
+        } else {
+            BigInt {
+                neg: !self.neg,
+                mag: self.mag.clone(),
+            }
+        }
+    }
+
+    fn cmp_mag(a: &[u32], b: &[u32]) -> std::cmp::Ordering {
+        if a.len() != b.len() {
+            return a.len().cmp(&b.len());
+        }
+        for (x, y) in a.iter().rev().zip(b.iter().rev()) {
+            if x != y {
+                return x.cmp(y);
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    fn add_mag(a: &[u32], b: &[u32]) -> Vec<u32> {
+        let mut out = Vec::with_capacity(a.len().max(b.len()) + 1);
+        let mut carry = 0u64;
+        for i in 0..a.len().max(b.len()) {
+            let x = a.get(i).copied().unwrap_or(0) as u64;
+            let y = b.get(i).copied().unwrap_or(0) as u64;
+            let v = x + y + carry;
+            out.push((v & 0xffff_ffff) as u32);
+            carry = v >> 32;
+        }
+        if carry != 0 {
+            out.push(carry as u32);
+        }
+        out
+    }
+
+    /// `a - b`, requires `a >= b` (by magnitude).
+    fn sub_mag(a: &[u32], b: &[u32]) -> Vec<u32> {
+        debug_assert!(BigInt::cmp_mag(a, b) != std::cmp::Ordering::Less);
+        let mut out = Vec::with_capacity(a.len());
+        let mut borrow = 0i64;
+        for i in 0..a.len() {
+            let x = a[i] as i64;
+            let y = b.get(i).copied().unwrap_or(0) as i64;
+            let mut v = x - y - borrow;
+            if v < 0 {
+                v += 1 << 32;
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+            out.push(v as u32);
+        }
+        while out.last() == Some(&0) {
+            out.pop();
+        }
+        out
+    }
+
+    fn add(&self, other: &BigInt) -> BigInt {
+        if self.neg == other.neg {
+            let mag = BigInt::add_mag(&self.mag, &other.mag);
+            let neg = self.neg && !mag.is_empty();
+            BigInt { neg, mag }
+        } else {
+            match BigInt::cmp_mag(&self.mag, &other.mag) {
+                std::cmp::Ordering::Equal => BigInt::zero(),
+                std::cmp::Ordering::Greater => BigInt {
+                    neg: self.neg,
+                    mag: BigInt::sub_mag(&self.mag, &other.mag),
+                },
+                std::cmp::Ordering::Less => BigInt {
+                    neg: other.neg,
+                    mag: BigInt::sub_mag(&other.mag, &self.mag),
+                },
+            }
+        }
+    }
+
+    fn mul(&self, other: &BigInt) -> BigInt {
+        if self.is_zero() || other.is_zero() {
+            return BigInt::zero();
+        }
+        let mut mag = vec![0u32; self.mag.len() + other.mag.len()];
+        for (i, &x) in self.mag.iter().enumerate() {
+            let mut carry = 0u64;
+            for (j, &y) in other.mag.iter().enumerate() {
+                let v = u64::from(x) * u64::from(y) + u64::from(mag[i + j]) + carry;
+                mag[i + j] = (v & 0xffff_ffff) as u32;
+                carry = v >> 32;
+            }
+            let mut k = i + other.mag.len();
+            while carry != 0 {
+                let v = u64::from(mag[k]) + carry;
+                mag[k] = (v & 0xffff_ffff) as u32;
+                carry = v >> 32;
+                k += 1;
+            }
+        }
+        while mag.last() == Some(&0) {
+            mag.pop();
+        }
+        BigInt {
+            neg: self.neg != other.neg,
+            mag,
+        }
+    }
+
+    /// Magnitude divmod by binary long division: `a = q*b + r`, `0 <= r < b`.
+    fn divmod_mag(a: &[u32], b: &[u32]) -> (Vec<u32>, Vec<u32>) {
+        assert!(!b.is_empty(), "division by zero");
+        if BigInt::cmp_mag(a, b) == std::cmp::Ordering::Less {
+            return (Vec::new(), a.to_vec());
+        }
+        let bits = a.len() * 32;
+        let mut q = vec![0u32; a.len()];
+        let mut r: Vec<u32> = Vec::new();
+        for bit in (0..bits).rev() {
+            // r = (r << 1) | a[bit]
+            let mut carry = (a[bit / 32] >> (bit % 32)) & 1;
+            for limb in r.iter_mut() {
+                let v = (u64::from(*limb) << 1) | u64::from(carry);
+                *limb = (v & 0xffff_ffff) as u32;
+                carry = (v >> 32) as u32;
+            }
+            if carry != 0 {
+                r.push(carry);
+            }
+            if BigInt::cmp_mag(&r, b) != std::cmp::Ordering::Less {
+                r = BigInt::sub_mag(&r, b);
+                q[bit / 32] |= 1 << (bit % 32);
+            }
+        }
+        while q.last() == Some(&0) {
+            q.pop();
+        }
+        (q, r)
+    }
+
+    /// Exact division: requires `other` divides `self` evenly.
+    fn div_exact(&self, other: &BigInt) -> BigInt {
+        let (q, r) = BigInt::divmod_mag(&self.mag, &other.mag);
+        debug_assert!(r.is_empty(), "div_exact with a remainder");
+        let neg = (self.neg != other.neg) && !q.is_empty();
+        BigInt { neg, mag: q }
+    }
+
+    /// Greatest common divisor of the magnitudes (always non-negative).
+    fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
+        let mut a = a.mag.clone();
+        let mut b = b.mag.clone();
+        while !b.is_empty() {
+            let (_, r) = BigInt::divmod_mag(&a, &b);
+            a = b;
+            b = r;
+        }
+        BigInt { neg: false, mag: a }
+    }
+
+    /// Render as decimal.
+    fn render(&self) -> String {
+        if self.is_zero() {
+            return "0".to_string();
+        }
+        let mut mag = self.mag.clone();
+        let ten = vec![10u32];
+        let mut digits = Vec::new();
+        while !mag.is_empty() {
+            let (q, r) = BigInt::divmod_mag(&mag, &ten);
+            digits.push(b'0' + r.first().copied().unwrap_or(0) as u8);
+            mag = q;
+        }
+        let mut out = String::new();
+        if self.neg {
+            out.push('-');
+        }
+        for d in digits.iter().rev() {
+            out.push(*d as char);
+        }
+        out
+    }
+}
+
+// ===========================================================================
+// A tiny exact rational over BigInt (enough for the M8 reasoner)
 // ===========================================================================
 
 /// An exact rational number `num/den` with `den > 0`, always in lowest terms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Rat {
-    num: i128,
-    den: i128,
+    num: BigInt,
+    den: BigInt,
 }
 
 impl Default for Rat {
@@ -3270,100 +3530,110 @@ impl Default for Rat {
     }
 }
 
-fn gcd(a: i128, b: i128) -> i128 {
-    let (mut a, mut b) = (a.abs(), b.abs());
-    while b != 0 {
-        let t = a % b;
-        a = b;
-        b = t;
-    }
-    a
-}
-
 impl Rat {
-    fn new(mut num: i128, mut den: i128) -> Rat {
-        assert!(den != 0, "rational with zero denominator");
-        if den < 0 {
-            num = -num;
-            den = -den;
+    fn new(mut num: BigInt, mut den: BigInt) -> Rat {
+        assert!(!den.is_zero(), "rational with zero denominator");
+        if den.is_negative() {
+            num = num.neg();
+            den = den.neg();
         }
-        let g = gcd(num, den);
-        let g = if g == 0 { 1 } else { g };
+        let g = BigInt::gcd(&num, &den);
+        if g.is_zero() || g == BigInt::from_i128(1) {
+            return Rat { num, den };
+        }
         Rat {
-            num: num / g,
-            den: den / g,
+            num: num.div_exact(&g),
+            den: den.div_exact(&g),
         }
     }
 
     fn int(n: i128) -> Rat {
-        Rat { num: n, den: 1 }
+        Rat {
+            num: BigInt::from_i128(n),
+            den: BigInt::from_i128(1),
+        }
     }
 
     /// Parse a numeric lexeme (integer or simple decimal like `3.5`).
     fn parse(lexeme: &str) -> Option<Rat> {
         let s = lexeme.trim();
-        if let Ok(n) = s.parse::<i128>() {
-            return Some(Rat::int(n));
+        if let Some(n) = BigInt::from_decimal(s) {
+            return Some(Rat {
+                num: n,
+                den: BigInt::from_i128(1),
+            });
         }
         // Simple decimal: optional sign, digits, '.', digits.
-        let (sign, rest) = match s.strip_prefix('-') {
-            Some(r) => (-1i128, r),
-            None => (1i128, s),
+        let (negative, rest) = match s.strip_prefix('-') {
+            Some(r) => (true, r),
+            None => (false, s),
         };
         let (int_part, frac_part) = rest.split_once('.')?;
         if int_part.is_empty() && frac_part.is_empty() {
             return None;
         }
-        let int_val: i128 = if int_part.is_empty() {
-            0
+        let int_val = if int_part.is_empty() {
+            BigInt::zero()
         } else {
-            int_part.parse().ok()?
+            BigInt::from_decimal(int_part)?
         };
+        if int_val.is_negative() {
+            return None; // interior '-' is not a numeric lexeme
+        }
         if frac_part.is_empty() {
-            return Some(Rat::int(sign * int_val));
+            let num = if negative { int_val.neg() } else { int_val };
+            return Some(Rat {
+                num,
+                den: BigInt::from_i128(1),
+            });
         }
-        let frac_val: i128 = frac_part.parse().ok()?;
-        let mut den: i128 = 1;
+        let frac_val = BigInt::from_decimal(frac_part)?;
+        if frac_val.is_negative() {
+            return None;
+        }
+        let mut den = BigInt::from_i128(1);
+        let ten = BigInt::from_i128(10);
         for _ in 0..frac_part.len() {
-            den = den.checked_mul(10)?;
+            den = den.mul(&ten);
         }
-        let num = int_val.checked_mul(den)?.checked_add(frac_val)?;
-        Some(Rat::new(sign * num, den))
+        let num = int_val.mul(&den).add(&frac_val);
+        let num = if negative { num.neg() } else { num };
+        Some(Rat::new(num, den))
     }
 
     fn is_zero(&self) -> bool {
-        self.num == 0
+        self.num.is_zero()
     }
 
     fn is_positive(&self) -> bool {
-        self.num > 0
+        !self.num.is_zero() && !self.num.is_negative()
     }
 
     fn is_negative(&self) -> bool {
-        self.num < 0
+        self.num.is_negative()
     }
 
     fn add(&self, other: &Rat) -> Rat {
         Rat::new(
-            self.num * other.den + other.num * self.den,
-            self.den * other.den,
+            self.num.mul(&other.den).add(&other.num.mul(&self.den)),
+            self.den.mul(&other.den),
         )
     }
 
     fn neg(&self) -> Rat {
         Rat {
-            num: -self.num,
-            den: self.den,
+            num: self.num.neg(),
+            den: self.den.clone(),
         }
     }
 
     fn mul(&self, other: &Rat) -> Rat {
-        Rat::new(self.num * other.num, self.den * other.den)
+        Rat::new(self.num.mul(&other.num), self.den.mul(&other.den))
     }
 
     fn recip(&self) -> Rat {
-        assert!(self.num != 0, "reciprocal of zero");
-        Rat::new(self.den, self.num)
+        assert!(!self.num.is_zero(), "reciprocal of zero");
+        Rat::new(self.den.clone(), self.num.clone())
     }
 
     fn div(&self, other: &Rat) -> Rat {
@@ -3382,10 +3652,10 @@ impl Rat {
     /// Render the rational for a surfaced counterexample: an integer prints
     /// bare (`-1`, `3`), a true fraction prints `num/den` (`1/2`).
     fn render(&self) -> String {
-        if self.den == 1 {
-            format!("{}", self.num)
+        if self.den == BigInt::from_i128(1) {
+            self.num.render()
         } else {
-            format!("{}/{}", self.num, self.den)
+            format!("{}/{}", self.num.render(), self.den.render())
         }
     }
 }
@@ -3648,6 +3918,56 @@ mod tests {
         ];
         assert_eq!(check_sat(&f), Verdict::Unsat);
     }
+
+    // =======================================================================
+    // Regression: large coefficients must not overflow the reasoner
+    // (Rat is exact rational over i128 with UNCHECKED arithmetic; elimination
+    // scales constraints by each other's coefficients, so products overflow)
+    // =======================================================================
+
+    /// Regression for the i128 overflow in the Fourier–Motzkin reasoner
+    /// (`Rat::{add,mul}`). Each coefficient below fits i128 on its own; the
+    /// elimination-time products do not. Before the fix this panicked
+    /// (debug) or silently wrapped and answered `Sat` (release) — and `Sat`
+    /// for a genuinely infeasible negated goal is a false proof.
+    #[test]
+    fn check_sat_infeasible_chain_with_large_coefficients_is_unsat() {
+        // x1 >= 1 ∧ 1e19·x1 <= x2 ∧ 1e19·x2 <= x3 ∧ 1e19·x3 <= x4 ∧ x4 <= 1
+        // is infeasible: the chain forces x4 >= 1e57 > 1.
+        let le = |a: Pred, b: Pred| Pred::Bin(BinOp::Le, Box::new(a), Box::new(b));
+        let ge = |a: Pred, b: Pred| Pred::Bin(BinOp::Ge, Box::new(a), Box::new(b));
+        let mul = |a: Pred, b: Pred| Pred::Bin(BinOp::Mul, Box::new(a), Box::new(b));
+        let k = || num("10000000000000000000"); // 1e19
+        let f = vec![
+            le(mul(k(), var("x1")), var("x2")),
+            le(mul(k(), var("x2")), var("x3")),
+            le(mul(k(), var("x3")), var("x4")),
+            le(var("x4"), num("1")),
+            ge(var("x1"), num("1")),
+        ];
+        assert_eq!(check_sat(&f), Verdict::Unsat);
+    }
+
+    /// The other direction of the same overflow: a *feasible* system whose
+    /// wrapped elimination constant flipped sign and was judged `Unsat`
+    /// (release) — a spurious counterexample-free "refutation". Feasible
+    /// witness: x1 = 1e26, x2 = 1e38, x3 = 1e50.
+    #[test]
+    fn check_sat_feasible_chain_with_large_coefficients_is_sat() {
+        // x1 <= 1.2e26 ∧ x2 <= 1e12·x1 ∧ x3 <= 1e12·x2 ∧ x3 >= 1e38.
+        let le = |a: Pred, b: Pred| Pred::Bin(BinOp::Le, Box::new(a), Box::new(b));
+        let ge = |a: Pred, b: Pred| Pred::Bin(BinOp::Ge, Box::new(a), Box::new(b));
+        let mul = |a: Pred, b: Pred| Pred::Bin(BinOp::Mul, Box::new(a), Box::new(b));
+        let k = || num("1000000000000"); // 1e12
+        let f = vec![
+            le(var("x1"), num("123456789123456789123456789")),
+            le(var("x2"), mul(k(), var("x1"))),
+            le(var("x3"), mul(k(), var("x2"))),
+            ge(var("x3"), num("100000000000000000000000000000000000000")), // 1e38
+        ];
+        assert_eq!(check_sat(&f), Verdict::Sat);
+    }
+
 
     // =======================================================================
     // discharge + substitute (negated-goal, §10.5 minimal)
