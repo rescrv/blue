@@ -13,12 +13,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ### API sharp edges
 
-- Ghost annotations are silently ignored: `[ -- Num ] @ghost` with no
-  `:ghost` definition passes `check` (exit 0). A typo'd `@name` silently
-  unconstrains. Fix: reject an annotation whose definition is absent.
-- Duplicate annotations are first-wins silently:
-  `[ -- Num ] @foo [ -- Bool ] @foo` passes; `:name` redefinition is a hard
-  error. Fix: make duplicate `@name` an error, matching `:name`.
+(none open)
 
 ### Builtin contracts overpromise (green gate ≠ crash-free)
 
@@ -74,6 +69,9 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- Ghost / duplicate `@name` annotations rejected at load: pinned by
+  `evaluator::tests::ghost_annotation_is_rejected_at_load` and
+  `evaluator::tests::duplicate_annotation_is_rejected_at_load`.
 - Optimizer termination: iteration + program-size budgets, cycle detection
   by exact program equality. Pinned by
   `optimizer::tests::size_increasing_rule_terminates_at_the_size_cap` and
