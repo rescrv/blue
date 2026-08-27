@@ -2112,6 +2112,36 @@ mod tests {
     }
 
     // =======================================================================
+    // Regression: `assume(...)` must be a runtime no-op
+    // =======================================================================
+
+    /// A gate-passing program's runtime stack must match its proven effect.
+    /// Tier 0 gives `assume(...)` the identity effect and Tier 1 intercepts
+    /// it, but the runtime used to push the literal word — the stack ended as
+    /// `[5 "assume(x > 0)"]`, one more value than the proof says exists.
+    #[test]
+    fn gate_passing_assume_program_runtime_matches_proven_effect() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let src = "[ 5 ] :five [ five \"assume(x > 0)\" ] :main";
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
+            "the assume-bearing program passes the full gate"
+        );
+        // The proven effect of `main` is ( -- Num ): exactly one value.
+        let body = eval.definition_body("main").unwrap().to_vec();
+        let mut stack = Vec::new();
+        eval.eval_with_stack(&body, &mut stack).unwrap();
+        assert_eq!(
+            stack,
+            vec![Value::Word("5".to_string())],
+            "runtime stack must carry exactly the proven single value"
+        );
+    }
+
+    // =======================================================================
     // Regression: reasoner overflow at the gate
     // =======================================================================
 
