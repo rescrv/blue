@@ -539,6 +539,20 @@ where
 ///
 /// Arithmetic operators use the language's single `Num` type. Bitwise operators
 /// accept integer-valued `Num` lexemes at runtime and reject fractional values.
+///
+/// # Recorded limitation: bitwise contracts overpromise (gate-green ≠ crash-free)
+///
+/// The bitwise operators (`|`/`&`/`^`/`<<`/`>>`/`~`) are attested at
+/// `( Num Num -- Num )` — a consequence of the ratified single-`Num` decision
+/// (no Int/Float split) — but their runtime demands **integer-valued**
+/// operands: `[ 1 0.5 | ] :main` passes `caternary check` and then fails at
+/// runtime with ``expected integer value, found `0.5` ``. Nothing in Tier 1
+/// demands integrality (the predicate language has no floor/frac), so this is
+/// an **explicitly documented** soundness gap of the builtin contract set: a
+/// green gate proves shape and refinement obligations, not freedom from
+/// value-domain rejections by these operators. Embedders who need the gate to
+/// carry that guarantee should register bitwise operators under their own
+/// attested, integrality-aware contracts instead of these.
 pub fn register_scalar_builtins<T>(evaluator: &mut Evaluator<T>)
 where
     T: Quotable,

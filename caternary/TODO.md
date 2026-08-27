@@ -15,16 +15,13 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 (none open)
 
-### Builtin contracts overpromise (green gate ≠ crash-free)
+### Builtin contracts overpromise (green gate ≠ crash-free) — documented
 
-- Bitwise ops carry `( Num Num -- Num )` contracts but reject fractional
-  values at runtime: `[ 1 0.5 | ] :main` passes `caternary check`, then fails
-  with ``expected integer value, found `0.5` ``. Consequence of ratified
-  decision (a) (one `Num`, no Int/Float split), but currently undischarged:
-  nothing in Tier 1 demands "integer-valued" for `|`/`&`/`^`/`<<`/`>>`/`~`.
-- Fix direction: either attach Tier-1 refinements demanding integrality
-  (needs floor/frac predicates) or document explicitly that gate-green
-  programs can still fail at runtime on value domains.
+- Resolved by documentation (the ratified single-`Num` decision stands and
+  the predicate language has no floor/frac): the gap is recorded on
+  `register_scalar_builtins` and in the README's `caternary check` section.
+  Embedders needing integrality in the gate should attest their own bitwise
+  contracts. Revisit if the refinement language grows floor/frac predicates.
 
 ## Low / polish
 
