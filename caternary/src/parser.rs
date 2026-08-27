@@ -258,15 +258,23 @@ impl Parser {
     }
 
     fn finish(mut self) -> Result<Vec<SpannedToken>, ParseError> {
-        if let Some(frame) = self.frames.pop() {
-            if let Some(open_start) = frame.open_bracket {
-                return Err(ParseError::UnmatchedOpenBracket {
-                    span: Span::point(open_start),
-                });
-            }
-            return Ok(frame.tokens);
+        // Report the OUTERMOST unmatched `[`: with `[ [ [` open, the bracket
+        // the user must close (or that was opened by mistake) is the first
+        // one, and everything after it is properly nested inside.
+        if let Some(open_start) = self
+            .frames
+            .iter()
+            .find_map(|frame| frame.open_bracket)
+        {
+            return Err(ParseError::UnmatchedOpenBracket {
+                span: Span::point(open_start),
+            });
         }
-        unreachable!("parser always has a root frame");
+        let root = self.frames.drain(..).next();
+        match root {
+            Some(frame) => Ok(frame.tokens),
+            None => unreachable!("parser always has a root frame"),
+        }
     }
 
     fn current_tokens(&mut self) -> &mut Vec<SpannedToken> {
@@ -673,6 +681,15 @@ mod tests {
             err.to_string(),
             "unmatched opening bracket '[' at byte 0".to_string()
         );
+    }
+
+    /// With several brackets left open, the error names the OUTERMOST one —
+    /// the bracket the user must actually close — not the innermost.
+    #[test]
+    fn unmatched_open_bracket_reports_the_outermost() {
+        let err = parse("a [ b [ c [ d").unwrap_err();
+        assert!(matches!(err, ParseError::UnmatchedOpenBracket { .. }));
+        assert_eq!(err.span(), Span { start: 2, end: 3 });
     }
 
     #[test]

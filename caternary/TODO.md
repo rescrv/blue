@@ -39,7 +39,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 - `SmtLibSolver::pop_scope` / `Z3Solver::pop_scope` guard base-scope
   underflow only with `debug_assert` (release: silent base pop, later
   `unwrap` panic).
-- `Parser::finish` reports the *innermost* unmatched `[`, not the outermost.
+
 
 ## Fixed-or-pinned elsewhere
 
@@ -66,6 +66,8 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- `Parser::finish` reports the outermost unmatched `[`: pinned by
+  `parser::tests::unmatched_open_bracket_reports_the_outermost`.
 - Ghost / duplicate `@name` annotations rejected at load: pinned by
   `evaluator::tests::ghost_annotation_is_rejected_at_load` and
   `evaluator::tests::duplicate_annotation_is_rejected_at_load`.
