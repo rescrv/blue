@@ -13,9 +13,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ### API sharp edges
 
-- `Evaluator::load` is **non-atomic**: `[ 1 ] :a :2x` errors but `:a` stays
-  defined (`src/evaluator.rs:479-543`). The REPL is transactional only
-  because it clones first. Fix: validate everything, then insert.
 - Ghost annotations are silently ignored: `[ -- Num ] @ghost` with no
   `:ghost` definition passes `check` (exit 0). A typo'd `@name` silently
   unconstrains. Fix: reject an annotation whose definition is absent.
@@ -75,6 +72,8 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   `…::equality_is_numeric_not_rendering_dependent`, and neighbors. Remaining
   documented gap: fractional arithmetic rounds (f64) while the model's
   division is exact rational.
+- `Evaluator::load` atomicity: pinned by
+  `evaluator::tests::load_is_atomic_on_error`.
 - Optimizer termination: iteration + program-size budgets, cycle detection
   by exact program equality. Pinned by
   `optimizer::tests::size_increasing_rule_terminates_at_the_size_cap` and
