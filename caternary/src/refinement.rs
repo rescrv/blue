@@ -862,6 +862,21 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        // Validate the surface type name: only the recognized scalar surface
+        // types are admitted (`Quote` arrives via the arrow form above, never
+        // as a bare identifier). An unknown name (`n: Banana`) used to parse
+        // and be silently treated as a `Real` — a typo'd type must be a
+        // located error instead.
+        const SCALAR_SURFACE_TYPES: &[&str] = &["Num", "Bool", "List"];
+        if !SCALAR_SURFACE_TYPES.contains(&ty.as_str()) {
+            return Err(RefineParseError::new(
+                format!(
+                    "unknown binder type `{ty}`: expected one of \
+                     `Num`, `Bool`, `List`, or a `( … -- … )` quotation contract"
+                ),
+                ty_span,
+            ));
+        }
         Ok(Binder {
             name,
             ty,
@@ -1214,6 +1229,18 @@ mod tests {
             "error should be inside the quotation contract, got {:?}",
             err.span
         );
+    }
+
+    /// An unknown binder type name is a located error: `n: Banana` used to
+    /// parse and be silently treated as a `Real`, so a typo'd type never
+    /// surfaced.
+    #[test]
+    fn unknown_binder_type_is_rejected() {
+        let src = "f : ( n: Banana -- r: Num )";
+        let err = parse_signature(src).expect_err("unknown binder type must error");
+        assert!(err.to_string().contains("unknown binder type `Banana`"));
+        let start = src.find("Banana").unwrap();
+        assert_eq!(err.span, RefineSpan::new(start, start + "Banana".len()));
     }
 
     /// A trailing-dot literal (`1.`) is a located lex error: `render_smtlib`
