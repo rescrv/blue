@@ -375,7 +375,10 @@ impl Solver for SmtLibSolver {
     }
 
     fn pop_scope(&mut self) {
-        debug_assert!(
+        // A hard assert (not `debug_assert`): a release-mode base pop would
+        // silently drop the base scope and surface later as an unrelated
+        // `unwrap` panic. Fail here, at the misuse, with its name.
+        assert!(
             self.scopes.len() > 1,
             "pop_scope underflow: cannot pop the base scope"
         );
@@ -515,7 +518,9 @@ impl Solver for Z3Solver {
     }
 
     fn pop_scope(&mut self) {
-        debug_assert!(
+        // See `SmtLibSolver::pop_scope`: hard assert so release-mode misuse
+        // fails at the pop, not at a later unwrap.
+        assert!(
             self.scopes.len() > 1,
             "pop_scope underflow: cannot pop the base scope"
         );
@@ -3865,6 +3870,15 @@ mod tests {
         // Exactly one push and one pop here (parity).
         assert_eq!(script.matches("(push 1)").count(), 1);
         assert_eq!(script.matches("(pop 1)").count(), 1);
+    }
+
+    /// Base-scope underflow is a hard, named panic in every build profile —
+    /// never a silent base pop that surfaces later as an unrelated `unwrap`.
+    #[test]
+    #[should_panic(expected = "pop_scope underflow")]
+    fn smtlib_pop_scope_underflow_panics_with_its_name() {
+        let mut s = SmtLibSolver::new();
+        s.pop_scope();
     }
 
     #[test]
