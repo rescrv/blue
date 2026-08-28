@@ -170,8 +170,8 @@ fn mash(x: u64, output: &mut [u32; 16]) {
 #[cfg(target_arch = "aarch64")]
 mod aarch64_simd {
     use core::arch::aarch64::{
-        uint32x4_t, vaddq_u32, vdupq_n_u32, veorq_u32, vextq_u32, vshlq_n_u32, vsriq_n_u32,
-        vst1q_u32,
+        uint32x4_t, uint32x4x4_t, vaddq_u32, vdupq_n_u32, veorq_u32, vextq_u32, vshlq_n_u32,
+        vsriq_n_u32, vst1q_u32, vst4q_lane_u32,
     };
 
     use super::{MASH_C0, MASH_C5, MASH_C10, MASH_C15};
@@ -235,6 +235,134 @@ mod aarch64_simd {
             vst1q_u32(output.as_mut_ptr().add(8), c);
             vst1q_u32(output.as_mut_ptr().add(12), d);
         }
+    }
+
+    #[target_feature(enable = "neon")]
+    pub(super) unsafe fn mash4_neon(x: u64, output: *mut u32) {
+        macro_rules! mix {
+            ($x:ident, $y:ident, $z:ident, $l:literal, $r:literal) => {{
+                let sum = vaddq_u32($y, $z);
+                $x = veorq_u32($x, vsriq_n_u32::<$r>(vshlq_n_u32::<$l>(sum), sum));
+            }};
+        }
+        macro_rules! store_group {
+            ($offset:literal, $a:ident, $b:ident, $c:ident, $d:ident) => {{
+                let group = uint32x4x4_t($a, $b, $c, $d);
+                unsafe {
+                    vst4q_lane_u32::<0>(output.add($offset), group);
+                    vst4q_lane_u32::<1>(output.add($offset + 16), group);
+                    vst4q_lane_u32::<2>(output.add($offset + 32), group);
+                    vst4q_lane_u32::<3>(output.add($offset + 48), group);
+                }
+            }};
+        }
+        macro_rules! double_round {
+            (
+                $x0:ident, $x1:ident, $x2:ident, $x3:ident,
+                $x4:ident, $x5:ident, $x6:ident, $x7:ident,
+                $x8:ident, $x9:ident, $x10:ident, $x11:ident,
+                $x12:ident, $x13:ident, $x14:ident, $x15:ident
+            ) => {{
+                mix!($x4, $x8, $x12, 7, 25);
+                mix!($x9, $x13, $x1, 7, 25);
+                mix!($x14, $x2, $x6, 7, 25);
+                mix!($x3, $x7, $x11, 7, 25);
+                mix!($x8, $x12, $x0, 9, 23);
+                mix!($x13, $x1, $x5, 9, 23);
+                mix!($x2, $x6, $x10, 9, 23);
+                mix!($x7, $x11, $x15, 9, 23);
+                mix!($x12, $x0, $x4, 13, 19);
+                mix!($x1, $x5, $x9, 13, 19);
+                mix!($x6, $x10, $x14, 13, 19);
+                mix!($x11, $x15, $x3, 13, 19);
+                mix!($x0, $x4, $x8, 18, 14);
+                mix!($x5, $x9, $x13, 18, 14);
+                mix!($x10, $x14, $x2, 18, 14);
+                mix!($x15, $x3, $x7, 18, 14);
+                mix!($x1, $x2, $x3, 7, 25);
+                mix!($x6, $x7, $x4, 7, 25);
+                mix!($x11, $x8, $x9, 7, 25);
+                mix!($x12, $x13, $x14, 7, 25);
+                mix!($x2, $x3, $x0, 9, 23);
+                mix!($x7, $x4, $x5, 9, 23);
+                mix!($x8, $x9, $x10, 9, 23);
+                mix!($x13, $x14, $x15, 9, 23);
+                mix!($x3, $x0, $x1, 13, 19);
+                mix!($x4, $x5, $x6, 13, 19);
+                mix!($x9, $x10, $x11, 13, 19);
+                mix!($x14, $x15, $x12, 13, 19);
+                mix!($x0, $x1, $x2, 18, 14);
+                mix!($x5, $x6, $x7, 18, 14);
+                mix!($x10, $x11, $x8, 18, 14);
+                mix!($x15, $x12, $x13, 18, 14);
+            }};
+        }
+
+        let seeds = [x, x.wrapping_add(1), x.wrapping_add(2), x.wrapping_add(3)];
+        let low = unsafe {
+            core::mem::transmute::<[u32; 4], uint32x4_t>([
+                seeds[0] as u32,
+                seeds[1] as u32,
+                seeds[2] as u32,
+                seeds[3] as u32,
+            ])
+        };
+        let high = unsafe {
+            core::mem::transmute::<[u32; 4], uint32x4_t>([
+                (seeds[0] >> 32) as u32,
+                (seeds[1] >> 32) as u32,
+                (seeds[2] >> 32) as u32,
+                (seeds[3] >> 32) as u32,
+            ])
+        };
+
+        let c0 = vdupq_n_u32(MASH_C0);
+        let c5 = vdupq_n_u32(MASH_C5);
+        let c10 = vdupq_n_u32(MASH_C10);
+        let c15 = vdupq_n_u32(MASH_C15);
+        let zero = vdupq_n_u32(0);
+
+        let mut x0 = c0;
+        let mut x1 = zero;
+        let mut x2 = zero;
+        let mut x3 = zero;
+        let mut x4 = zero;
+        let mut x5 = c5;
+        let mut x6 = low;
+        let mut x7 = high;
+        let mut x8 = zero;
+        let mut x9 = zero;
+        let mut x10 = c10;
+        let mut x11 = zero;
+        let mut x12 = zero;
+        let mut x13 = zero;
+        let mut x14 = zero;
+        let mut x15 = c15;
+
+        double_round!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+        double_round!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+        double_round!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+        double_round!(
+            x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15
+        );
+
+        x0 = vaddq_u32(x0, c0);
+        x5 = vaddq_u32(x5, c5);
+        x6 = vaddq_u32(x6, low);
+        x7 = vaddq_u32(x7, high);
+        x10 = vaddq_u32(x10, c10);
+        x15 = vaddq_u32(x15, c15);
+
+        store_group!(0, x4, x9, x14, x3);
+        store_group!(4, x8, x13, x2, x7);
+        store_group!(8, x12, x1, x6, x11);
+        store_group!(12, x0, x5, x10, x15);
     }
 }
 
@@ -403,23 +531,63 @@ impl Guacamole {
     /// Fill `bytes` with the next `bytes.len()` random bytes from the stream.
     pub fn generate(&mut self, bytes: &mut [u8]) {
         let mut bytes = bytes;
-        while bytes.len() >= self.remaining_len() {
-            let rem = self.remaining_len();
-            bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..]);
-            bytes = &mut bytes[rem..];
-            let (nonce, _) = self.nonce.overflowing_add(1);
-            self.seek(nonce);
+        assert!(self.index <= 64);
+
+        let rem = 64 - self.index;
+        if bytes.len() < rem {
+            let index = self.index;
+            let rem = bytes.len();
+            bytes.copy_from_slice(&self.buffer.as_bytes()[index..index + rem]);
+            self.index = index + rem;
+            assert!(self.index < 64);
+            return;
         }
-        assert!(bytes.len() < self.remaining_len());
-        let rem = bytes.len();
-        bytes[..rem].copy_from_slice(&self.buffer.as_bytes()[self.index..self.index + rem]);
-        self.index += rem;
+
+        let (prefix, suffix) = bytes.split_at_mut(rem);
+        prefix.copy_from_slice(&self.buffer.as_bytes()[self.index..]);
+        bytes = suffix;
+        self.nonce = self.nonce.wrapping_add(1);
+        self.index = 0;
+
+        #[cfg(target_arch = "aarch64")]
+        while bytes.len() >= 4 * 64 {
+            let (prefix, suffix) = bytes.split_at_mut(4 * 64);
+            let mut blocks = std::mem::MaybeUninit::<[u32; 4 * 16]>::uninit();
+            unsafe { aarch64_simd::mash4_neon(self.nonce, blocks.as_mut_ptr().cast::<u32>()) };
+            let block_bytes =
+                unsafe { std::slice::from_raw_parts(blocks.as_ptr().cast::<u8>(), 4 * 64) };
+            prefix.copy_from_slice(block_bytes);
+            self.nonce = self.nonce.wrapping_add(4);
+            bytes = suffix;
+        }
+
+        while bytes.len() >= 64 {
+            let (prefix, suffix) = bytes.split_at_mut(64);
+            mash(self.nonce, self.buffer.as_blocks());
+            prefix.copy_from_slice(self.buffer.as_bytes());
+            self.nonce = self.nonce.wrapping_add(1);
+            bytes = suffix;
+        }
+
+        mash(self.nonce, self.buffer.as_blocks());
+        bytes.copy_from_slice(&self.buffer.as_bytes()[..bytes.len()]);
+        self.index = bytes.len();
         assert!(self.index < 64);
     }
 
-    fn remaining_len(&self) -> usize {
+    #[inline(always)]
+    fn generate_array<const SZ: usize>(&mut self) -> [u8; SZ] {
         assert!(self.index <= 64);
-        64 - self.index
+        let rem = 64 - self.index;
+        let mut buf = [0u8; SZ];
+        if SZ < rem {
+            let index = self.index;
+            buf.copy_from_slice(&self.buffer.as_bytes()[index..index + SZ]);
+            self.index = index + SZ;
+        } else {
+            self.generate(&mut buf);
+        }
+        buf
     }
 }
 
@@ -453,8 +621,7 @@ macro_rules! guacamole_from_le_bytes {
         impl FromGuacamole<()> for $what {
             fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
                 const SZ: usize = std::mem::size_of::<$what>();
-                let mut buf: [u8; SZ] = [0; SZ];
-                guac.generate(&mut buf);
+                let buf = guac.generate_array::<SZ>();
                 <$what>::from_le_bytes(buf)
             }
         }
@@ -486,8 +653,8 @@ guacamole_from_le_bytes!(usize);
 
 impl FromGuacamole<()> for f32 {
     fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
-        let mut buf = [0u8; 4];
-        guac.generate(&mut buf[0..3]);
+        let [a, b, c] = guac.generate_array::<3>();
+        let buf = [a, b, c, 0];
         let x = u32::from_le_bytes(buf);
         (x & 0xffffffu32) as f32 / (1u32 << f32::MANTISSA_DIGITS) as f32
     }
@@ -495,8 +662,8 @@ impl FromGuacamole<()> for f32 {
 
 impl FromGuacamole<()> for f64 {
     fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
-        let mut buf = [0u8; 8];
-        guac.generate(&mut buf[0..7]);
+        let [a, b, c, d, e, f, g] = guac.generate_array::<7>();
+        let buf = [a, b, c, d, e, f, g, 0];
         let x = u64::from_le_bytes(buf);
         (x & 0x1fffffffffffffu64) as f64 / (1u64 << f64::MANTISSA_DIGITS) as f64
     }
@@ -614,8 +781,8 @@ fn char_from_u24(x: u32) -> char {
 
 impl FromGuacamole<()> for char {
     fn from_guacamole(_: &mut (), guac: &mut Guacamole) -> Self {
-        let mut buf = [0u8; 4];
-        guac.generate(&mut buf[0..3]);
+        let [a, b, c] = guac.generate_array::<3>();
+        let buf = [a, b, c, 0];
         let x = u32::from_le_bytes(buf);
         char_from_u24(x)
     }
@@ -740,6 +907,29 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn mash4_optimized_matches_scalar() {
+        let mut seed = 0u64;
+        for _ in 0..1024 {
+            let mut optimized = [0u32; 64];
+            unsafe { crate::aarch64_simd::mash4_neon(seed, optimized.as_mut_ptr()) };
+            for lane in 0..4 {
+                let mut scalar = [0u32; 16];
+                crate::mash_scalar(seed.wrapping_add(lane as u64), &mut scalar);
+                assert_eq!(
+                    scalar,
+                    optimized[lane * 16..(lane + 1) * 16],
+                    "seed = {:#x}, lane = {lane}",
+                    seed.wrapping_add(lane as u64)
+                );
+            }
+            seed = seed
+                .wrapping_mul(0x9e3779b97f4a7c15)
+                .wrapping_add(0xda3e39cb94b95bdb);
+        }
+    }
+
     #[derive(Clone, Copy, Debug)]
     struct BenchResult {
         ns_per_mash: f64,
@@ -807,6 +997,68 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn benchmark_mash4_variant<F>(mut f: F) -> BenchResult
+    where
+        F: FnMut(u64, *mut u32),
+    {
+        const SEED_COUNT: usize = 4096;
+        const SAMPLE_COUNT: usize = 7;
+        const TARGET_TIME: Duration = Duration::from_millis(250);
+
+        fn run_rounds<F>(f: &mut F, seeds: &[u64], rounds: usize) -> (Duration, u64)
+        where
+            F: FnMut(u64, *mut u32),
+        {
+            let mut output = [0u32; 64];
+            let mut checksum = 0u64;
+            let start = Instant::now();
+            for _ in 0..rounds {
+                for &seed in seeds {
+                    f(black_box(seed), output.as_mut_ptr());
+                    let lane = ((seed >> 32) & 63) as usize;
+                    checksum = checksum.wrapping_add(u64::from(black_box(output[lane])));
+                }
+            }
+            (start.elapsed(), checksum)
+        }
+
+        let mut seeds = [0u64; SEED_COUNT];
+        let mut state = 0x243f6a8885a308d3u64;
+        for seed in &mut seeds {
+            *seed = state;
+            state = state
+                .wrapping_mul(0x9e3779b97f4a7c15)
+                .wrapping_add(0xda3e39cb94b95bdb);
+        }
+
+        let mut rounds = 1usize;
+        loop {
+            let (elapsed, checksum) = run_rounds(&mut f, &seeds, rounds);
+            black_box(checksum);
+            if elapsed >= TARGET_TIME {
+                break;
+            }
+            rounds = rounds.saturating_mul(2);
+        }
+
+        let calls = rounds * SEED_COUNT * 4;
+        let mut samples = [0.0f64; SAMPLE_COUNT];
+        for sample in &mut samples {
+            let (elapsed, checksum) = run_rounds(&mut f, &seeds, rounds);
+            black_box(checksum);
+            *sample = elapsed.as_secs_f64() * 1e9 / calls as f64;
+        }
+        samples.sort_by(|a, b| a.total_cmp(b));
+        let ns_per_mash = samples[SAMPLE_COUNT / 2];
+        let gib_per_s = (64.0 * 1e9 / ns_per_mash) / (1024.0 * 1024.0 * 1024.0);
+
+        BenchResult {
+            ns_per_mash,
+            gib_per_s,
+        }
+    }
+
     fn print_bench_result(name: &str, result: BenchResult, baseline: Option<BenchResult>) {
         match baseline {
             Some(baseline) => {
@@ -837,7 +1089,11 @@ mod tests {
             let neon = benchmark_mash_variant(|seed, output| unsafe {
                 crate::aarch64_simd::mash_neon(seed, output)
             });
+            let neon4 = benchmark_mash4_variant(|seed, output| unsafe {
+                crate::aarch64_simd::mash4_neon(seed, output)
+            });
             print_bench_result("neon", neon, Some(reference));
+            print_bench_result("neon4", neon4, Some(reference));
             eprintln!("{:>10}: unsupported on aarch64", "sse2");
         }
 
@@ -1080,5 +1336,40 @@ mod tests {
         g2.generate(&mut bytes2);
 
         assert_eq!(bytes1, bytes2);
+    }
+
+    #[test]
+    fn generate_chunking_preserves_stream_and_state() {
+        const SEEDS: &[u64] = &[0, 1, 0xc0ffee, u64::MAX];
+        const LENS: &[usize] = &[
+            0, 1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129, 255,
+        ];
+        const CHUNKS: &[usize] = &[1, 2, 3, 7, 16, 63, 64, 65];
+
+        for &seed in SEEDS {
+            for &len in LENS {
+                let mut expected = vec![0u8; len];
+                let mut one_shot = Guacamole::new(seed);
+                one_shot.generate(&mut expected);
+                let expected_state = one_shot.save();
+
+                for &chunk in CHUNKS {
+                    let mut chunked = Guacamole::new(seed);
+                    let mut actual = vec![0u8; len];
+                    for bytes in actual.chunks_mut(chunk) {
+                        chunked.generate(bytes);
+                    }
+                    assert_eq!(
+                        expected, actual,
+                        "seed = {seed:#x}, len = {len}, chunk = {chunk}"
+                    );
+                    assert_eq!(
+                        expected_state,
+                        chunked.save(),
+                        "seed = {seed:#x}, len = {len}, chunk = {chunk}"
+                    );
+                }
+            }
+        }
     }
 }
