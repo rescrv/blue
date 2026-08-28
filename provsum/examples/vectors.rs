@@ -9,13 +9,21 @@ fn main() {
         ("origin_a", Digest::origin(&a)),
         ("wrap", Digest::origin(&a).wrap(&w1)),
         ("merge", Digest::origin(&a).merge(&Digest::origin(&b))),
-        ("pick_ab", Digest::pick2(&ch, &Digest::origin(&a), &Digest::origin(&b))),
-        ("pick_ba", Digest::pick2(&ch, &Digest::origin(&b), &Digest::origin(&a))),
+        (
+            "pick_ab",
+            Digest::pick2(&ch, &Digest::origin(&a), &Digest::origin(&b)),
+        ),
+        (
+            "pick_ba",
+            Digest::pick2(&ch, &Digest::origin(&b), &Digest::origin(&a)),
+        ),
         (
             "nested",
             Digest::pick2(
                 &ch,
-                &Digest::origin(&a).wrap(&w1).merge(&Digest::origin(&b).wrap(&w1)),
+                &Digest::origin(&a)
+                    .wrap(&w1)
+                    .merge(&Digest::origin(&b).wrap(&w1)),
                 &Digest::origin(&c).wrap(&w2),
             )
             .wrap(&w2),

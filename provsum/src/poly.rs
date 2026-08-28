@@ -8,7 +8,7 @@
 //! `poly.digest() == streaming_digest` is a checkable invariant, and
 //! `Poly::diff` localizes divergence between two implementations.
 
-use crate::{fadd, fmul, point, Digest, Site, LANES, NO_SLOT};
+use crate::{Digest, LANES, NO_SLOT, Site, fadd, fmul, point};
 use std::collections::BTreeMap;
 
 /// A variable: a site, optionally with a positional slot.
@@ -99,7 +99,7 @@ impl Poly {
         let mut lanes = [0u64; LANES];
         for (m, c) in &self.0 {
             let c = c % crate::P;
-            for lane in 0..LANES {
+            for (lane, lane_acc) in lanes.iter_mut().enumerate() {
                 let mut term = c;
                 for (v, e) in m {
                     let r = point(&v.site, v.slot, lane as u32);
@@ -107,7 +107,7 @@ impl Poly {
                         term = fmul(term, r);
                     }
                 }
-                lanes[lane] = fadd(lanes[lane], term);
+                *lane_acc = fadd(*lane_acc, term);
             }
         }
         // Reconstruct through the public API so `depth` is populated
@@ -152,14 +152,18 @@ mod tests {
 
         let d = Digest::pick2(
             &ch,
-            &Digest::origin(&a).wrap(&w1).merge(&Digest::origin(&b).wrap(&w1)),
+            &Digest::origin(&a)
+                .wrap(&w1)
+                .merge(&Digest::origin(&b).wrap(&w1)),
             &Digest::origin(&c).wrap(&w2),
         )
         .wrap(&w2);
 
         let p = Poly::pick2(
             &ch,
-            &Poly::origin(&a).wrap(&w1).merge(&Poly::origin(&b).wrap(&w1)),
+            &Poly::origin(&a)
+                .wrap(&w1)
+                .merge(&Poly::origin(&b).wrap(&w1)),
             &Poly::origin(&c).wrap(&w2),
         )
         .wrap(&w2);
@@ -189,33 +193,37 @@ mod tests {
         let sites: Vec<Site> = (0..32).map(|i| s(&format!("s{i}"))).collect();
         let mut seen: Vec<(Poly, Digest)> = Vec::new();
         for _ in 0..300 {
-            let (p, d) = gen(&mut rng, &sites, 4);
+            let (p, d) = gen_poly(&mut rng, &sites, 4);
             assert_eq!(p.digest(), d, "expanded != streaming");
             for (q, e) in &seen {
-                assert_eq!(&p == q, &d == e, "digest equality disagrees with polynomial equality");
+                assert_eq!(
+                    &p == q,
+                    &d == e,
+                    "digest equality disagrees with polynomial equality"
+                );
             }
             seen.push((p, d));
         }
     }
 
-    fn gen(rng: &mut impl FnMut() -> u64, sites: &[Site], depth: u32) -> (Poly, Digest) {
+    fn gen_poly(rng: &mut impl FnMut() -> u64, sites: &[Site], depth: u32) -> (Poly, Digest) {
         let site = sites[(rng() % sites.len() as u64) as usize];
-        if depth == 0 || rng() % 4 == 0 {
+        if depth == 0 || rng().is_multiple_of(4) {
             return (Poly::origin(&site), Digest::origin(&site));
         }
         match rng() % 3 {
             0 => {
-                let (p, d) = gen(rng, sites, depth - 1);
+                let (p, d) = gen_poly(rng, sites, depth - 1);
                 (p.wrap(&site), d.wrap(&site))
             }
             1 => {
-                let (p1, d1) = gen(rng, sites, depth - 1);
-                let (p2, d2) = gen(rng, sites, depth - 1);
+                let (p1, d1) = gen_poly(rng, sites, depth - 1);
+                let (p2, d2) = gen_poly(rng, sites, depth - 1);
                 (p1.merge(&p2), d1.merge(&d2))
             }
             _ => {
-                let (p1, d1) = gen(rng, sites, depth - 1);
-                let (p2, d2) = gen(rng, sites, depth - 1);
+                let (p1, d1) = gen_poly(rng, sites, depth - 1);
+                let (p2, d2) = gen_poly(rng, sites, depth - 1);
                 (Poly::pick2(&site, &p1, &p2), Digest::pick2(&site, &d1, &d2))
             }
         }

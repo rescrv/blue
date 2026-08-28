@@ -72,22 +72,14 @@ pub(crate) fn reduce128(x: u128) -> u64 {
     let hi = (x >> 61) as u64; // < 2^61
     let s = lo + hi; // < 2^62
     let s = (s & P) + (s >> 61);
-    if s >= P {
-        s - P
-    } else {
-        s
-    }
+    if s >= P { s - P } else { s }
 }
 
 #[inline]
 pub(crate) fn fadd(a: u64, b: u64) -> u64 {
     let s = a + b; // < 2^62
     let s = (s & P) + (s >> 61);
-    if s >= P {
-        s - P
-    } else {
-        s
-    }
+    if s >= P { s - P } else { s }
 }
 
 #[inline]
@@ -204,8 +196,8 @@ impl Digest {
     #[must_use]
     pub fn merge(&self, other: &Digest) -> Digest {
         let mut lanes = [0u64; LANES];
-        for i in 0..LANES {
-            lanes[i] = fadd(self.lanes[i], other.lanes[i]);
+        for (i, lane) in lanes.iter_mut().enumerate() {
+            *lane = fadd(self.lanes[i], other.lanes[i]);
         }
         Digest {
             lanes,
