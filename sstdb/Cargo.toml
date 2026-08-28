@@ -1,6 +1,6 @@
 [package]
 name = "sstdb"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "sstdb: a single-SST linearizable key-value database on object storage."
 license = "Apache-2.0"
