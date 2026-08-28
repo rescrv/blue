@@ -7,4 +7,12 @@ description = "Fixed-size provenance digests for computation equivalence"
 license = "Apache-2.0"
 repository = "https://github.com/rescrv/blue"
 
+[features]
+default = ["binaries"]
+
 [dependencies]
+
+[examples]
+name = "vectors"
+path = "examples/vectors.rs"
+required-features=["binaries"]
