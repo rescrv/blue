@@ -2402,19 +2402,18 @@ fn divide_keys(
         shared += 1;
     }
     let mut d_key: Vec<u8> = Vec::with_capacity(shared + 1);
-    let d_timestamp: u64;
-    if shared < max_shared && key_lhs[shared] + 1 < key_rhs[shared] {
+    let d_timestamp = if shared < max_shared && key_lhs[shared] + 1 < key_rhs[shared] {
         assert!(key_lhs.len() > shared);
         assert!(key_rhs.len() > shared);
         assert!(key_lhs[shared] < key_rhs[shared]);
         assert!(key_lhs[shared] < 0xff);
         d_key.extend_from_slice(&key_lhs[0..shared + 1]);
         d_key[shared] = key_lhs[shared] + 1;
-        d_timestamp = 0;
+        0
     } else {
         d_key.extend_from_slice(key_lhs);
-        d_timestamp = timestamp_lhs;
-    }
+        timestamp_lhs
+    };
     let cmp_lhs = KeyRef::new(key_lhs, timestamp_lhs).cmp(&KeyRef::new(&d_key, d_timestamp));
     let cmp_rhs = KeyRef::new(&d_key, d_timestamp).cmp(&KeyRef::new(key_rhs, timestamp_rhs));
     assert!(cmp_lhs == Ordering::Less || cmp_lhs == Ordering::Equal);
