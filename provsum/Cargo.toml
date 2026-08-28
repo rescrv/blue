@@ -10,9 +10,11 @@ repository = "https://github.com/rescrv/blue"
 [features]
 default = ["binaries"]
 
+binaries = []
+
 [dependencies]
 
-[examples]
+[[example]]
 name = "vectors"
 path = "examples/vectors.rs"
 required-features=["binaries"]
