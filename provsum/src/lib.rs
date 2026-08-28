@@ -40,7 +40,9 @@ pub const P: u64 = (1u64 << 61) - 1;
 pub const DIGEST_BYTES: usize = LANES * 8 + 2;
 
 /// A 16-byte site identifier.  Assign one per error-origin / wrap / pick site
-/// in the source, and carry the same value across implementations.
+/// in the source, and carry the same bytes in the same order across
+/// implementations.  Point derivation interprets each consecutive 8-byte
+/// chunk as little-endian; it never uses the host's native byte order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Site(pub [u8; 16]);
 

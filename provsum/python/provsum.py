@@ -118,6 +118,7 @@ if __name__ == "__main__":
     a, b, c = (site_from_label(x) for x in ("a", "b", "c"))
     w1, w2, ch = (site_from_label(x) for x in ("w1", "w2", "choose"))
     vectors = {
+        "origin_raw_bytes": Digest.origin(bytes(range(16))),
         "origin_a": Digest.origin(a),
         "wrap": Digest.origin(a).wrap(w1),
         "merge": Digest.origin(a).merge(Digest.origin(b)),

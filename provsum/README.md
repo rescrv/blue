@@ -10,6 +10,14 @@ carried verbatim across both implementations. Each GUID is hashed to a nonzero
 point in F_p (p = 2^61−1) per lane (two lanes). The digest of an error is its
 N[X] provenance polynomial evaluated at those points:
 
+`Site` is the GUID's 16 bytes in canonical order, not a native-endian integer.
+Point derivation reads its two consecutive 8-byte chunks as little-endian, and
+digest serialization is little-endian too, so neither operation depends on the
+host architecture. A byte-array literal therefore produces the same result on
+every supported platform. When starting from textual UUID syntax, use the
+parser's canonical/RFC byte sequence in every language; in particular, do not
+mix a Windows GUID's field-wise little-endian representation with RFC bytes.
+
 | operation                      | polynomial                 | digest      |
 |--------------------------------|----------------------------|-------------|
 | `Digest::origin(site)`         | `x_site`                   | `r_site`    |
