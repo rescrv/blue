@@ -32,6 +32,7 @@ members = [
     "protoql",
     "prototk",
     "prototk_derive",
+    "provsum",
     "rc_conf",
     "rc_conf/demo_crate",
     "rpc_pb",

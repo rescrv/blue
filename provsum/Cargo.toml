@@ -1,0 +1,10 @@
+[package]
+name = "provsum"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "Fixed-size provenance digests for computation equivalence"
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[dependencies]
