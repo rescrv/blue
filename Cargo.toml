@@ -28,6 +28,7 @@ members = [
     "meta",
     "minimal_signals",
     "one_two_eight",
+    "ordsum",
     "paxos_pb",
     "protoql",
     "prototk",

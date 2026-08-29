@@ -1,0 +1,17 @@
+[package]
+name = "ordsum"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+version = "0.1.0"
+edition = "2021"
+description = "An order-sensitive, concatenation-composable checksum over the affine group of F_(2^127 - 1)."
+license = "Apache-2.0"
+keywords = ["checksum", "digest", "sequence", "homomorphic"]
+categories = ["algorithms", "data-structures"]
+
+[dependencies]
+sha3 = "0.10"
+
+[dev-dependencies]
+proptest = "1"
+num-bigint = "0.4"
+num-traits = "0.2"
