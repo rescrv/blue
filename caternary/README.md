@@ -150,6 +150,32 @@ single-`Num` decision but demand integer-valued operands at runtime, so
 `[ 1 0.5 | ] :main` passes `check` and fails when run (documented on
 `register_scalar_builtins`).
 
+Beyond value-domain rejections, the type system itself over-rejects runnable
+code: it exposes only the `Num` and `Bool` base types, with no `Word` (or top)
+type, so a bare word that is not a definition, a registered operator, a numeric
+literal, or a bound local — which the runtime pushes as a literal `Word` value
+— is typed as unresolved and rejected by `check`. `[ foo ] :main` runs (leaving
+`[:foo]` on the stack) but fails `check`. Closing it is a structural decision
+(introducing a `Word`/top base type), recorded here alongside the bitwise case
+as a documented gate hole rather than silently fixed.
+
+`=`/`==`/`!=` are a third documented gap, in the opposite direction: their
+contract is the same-type `( a a -- Bool )` (both operands must share a type),
+but the runtime falls back to token equality for any pair, so
+`[ 1 true = ] :main` runs (yielding `false`) while `check` rejects
+`Num`-versus-`Bool`. The same-type requirement is an intentional gate
+tightening — the contract promises same-type polymorphic equality, not
+heterogeneous token equality — not an oversight.
+
+The conditional words and boolean connectives are the same family of
+intentional tightening: `IF`/`WHEN`/`UNLESS` demand a `Bool` condition and
+`&&`/`||`/`!`/`and`/`or`/`not` demand `Bool` operands, while the runtime is
+truthy-generic (`is_truthy` is total — any value is a valid runtime
+condition). So `[ 1 [ 2 ] [ 3 ] IF ] :main` runs (yielding `2`) and
+`[ 5 ! ] :main` runs (yielding `false`), but `check` rejects both
+`Num`-versus-`Bool`. The contracts promise boolean control flow; truthiness
+is the runtime's escape hatch, not a typed promise.
+
 `caternary repl` starts the development REPL. Normal input is parsed, loaded,
 and evaluated against a persistent definition table and stack. Definition pairs
 such as `[ 1 + ] :inc` are loaded but not pushed onto the runtime stack.
@@ -228,6 +254,15 @@ a host predicate with that name is also registered.
 | `IF` | `0 [10] [20] IF` | `20` |
 | `WHEN` | `true [99] WHEN` | `99` |
 | `UNLESS` | `false [99] UNLESS` | `99` |
+
+`WHEN`/`UNLESS` share a recorded `caternary check` limitation: their scheme
+forces both control paths to the same stack depth. With a *statically-known*
+literal condition the runtime only ever runs the taken branch and is fine, but
+`check` cannot specialize on the literal, so it over-rejects — e.g.
+`[ 5 true [ DROP ] WHEN ] :main` runs to an empty stack yet fails `check` (the
+unused branch's depth mismatch surfaces as a cyclic-type error). For a dynamic
+condition the two branches really would leave different depths, so the
+rejection is correct; it over-rejects only when the condition is known.
 
 ### Sequence Combinators
 

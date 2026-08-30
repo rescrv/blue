@@ -296,6 +296,7 @@ enum Tok {
     Minus,
     Star,
     Slash,
+    Percent,
     Ge,
     Le,
     Gt,
@@ -365,6 +366,13 @@ fn lex(src: &str) -> Result<Vec<Spanned>, RefineParseError> {
             b'/' => {
                 out.push(Spanned {
                     tok: Tok::Slash,
+                    span: RefineSpan::new(start, i + 1),
+                });
+                i += 1;
+            }
+            b'%' => {
+                out.push(Spanned {
+                    tok: Tok::Percent,
                     span: RefineSpan::new(start, i + 1),
                 });
                 i += 1;
@@ -523,6 +531,16 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
         t
+    }
+
+    /// Is the next token `want`, starting exactly where `prev` ended (no
+    /// intervening whitespace)? Used to join the lexer's two angle tokens into
+    /// the `<<`/`>>` signature-head names.
+    fn peek_contiguous_angle(&self, prev: RefineSpan, want: &Tok) -> bool {
+        match self.toks.get(self.pos) {
+            Some(s) => s.tok == *want && s.span.start == prev.end,
+            None => false,
+        }
     }
 
     fn expect(&mut self, want: &Tok, what: &str) -> Result<RefineSpan, RefineParseError> {
@@ -760,21 +778,34 @@ impl<'a> Parser<'a> {
                 self.peek_span(),
             ));
         };
-        let name = match &spanned.tok {
+        let (head, head_span) = (spanned.tok.clone(), spanned.span);
+        let name = match &head {
             Tok::Ident(n) => n.clone(),
             Tok::Plus => "+".to_string(),
             Tok::Minus => "-".to_string(),
             Tok::Star => "*".to_string(),
             Tok::Slash => "/".to_string(),
+            Tok::Percent => "%".to_string(),
             Tok::Ge => ">=".to_string(),
             Tok::Le => "<=".to_string(),
+            // The predicate grammar has no shift operator, so the lexer emits
+            // `<<`/`>>` as two adjacent angle tokens; as a signature HEAD the
+            // contiguous pair is the shift word's name (`<< : ( ... )`).
+            Tok::Gt if self.peek_contiguous_angle(head_span, &Tok::Gt) => {
+                self.bump();
+                ">>".to_string()
+            }
+            Tok::Lt if self.peek_contiguous_angle(head_span, &Tok::Lt) => {
+                self.bump();
+                "<<".to_string()
+            }
             Tok::Gt => ">".to_string(),
             Tok::Lt => "<".to_string(),
             Tok::Eq => "=".to_string(),
             _ => {
                 return Err(RefineParseError::new(
                     "expected the definition or operator name a refinement signature attaches to",
-                    spanned.span,
+                    head_span,
                 ));
             }
         };
@@ -1251,6 +1282,23 @@ mod tests {
         assert!(err.to_string().contains("malformed numeric literal `1.`"));
         // Proper decimals still lex.
         assert!(parse_predicate("x > 1.5").is_ok());
+    }
+
+    /// The shift operators are legal signature heads: the lexer emits two
+    /// angle tokens, and the head parser joins a **contiguous** pair into
+    /// `<<`/`>>` (BUGS §A5 needs shift-range demands attachable). A spaced
+    /// `< <` stays two tokens — the head is `<` and the second angle errors.
+    #[test]
+    fn shift_operators_are_signature_heads() {
+        let sig = parse_signature("<< : ( a: Num b: Num where b >= 0 -- c: Num )")
+            .expect("<< signature parses");
+        assert_eq!(sig.name, "<<");
+        let sig = parse_signature(">> : ( a: Num b: Num -- c: Num )").expect(">> parses");
+        assert_eq!(sig.name, ">>");
+        assert!(
+            parse_signature("< < : ( a: Num -- c: Num )").is_err(),
+            "a spaced angle pair is not a shift head"
+        );
     }
 
     #[test]
