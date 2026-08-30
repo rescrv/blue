@@ -4065,9 +4065,8 @@ mod tests {
         // as a quotation by the other) then died structurally in the shadow
         // evaluator. The fix: an unrefined word with a known Tier 0 arrow moves
         // data opaquely per that arrow.
-        let eval = arrow_seam_program(
-            "[ [ 1 2 3 ] DUP [ 1 + ] MAP DROP CALL DROP DROP DROP ] :main",
-        );
+        let eval =
+            arrow_seam_program("[ [ 1 2 3 ] DUP [ 1 + ] MAP DROP CALL DROP DROP DROP ] :main");
         let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
             .expect("shadow data flow must mirror MAP's Tier 0 arrow (pop 2, push 1)");
         assert!(ledger.is_clean());
@@ -4080,9 +4079,8 @@ mod tests {
         // NEXT refined demand to the right term. `need5` demands `n >= 5`; the
         // slot under the MAP result must still be the literal it was.
         let with = |n: &str| {
-            let mut eval = arrow_seam_program(&format!(
-                "[ {n} [ 1 2 3 ] [ 1 + ] MAP DROP need5 ] :main"
-            ));
+            let mut eval =
+                arrow_seam_program(&format!("[ {n} [ 1 2 3 ] [ 1 + ] MAP DROP need5 ] :main"));
             eval.register_operator_with_contract("need5", num_scheme(1, 0));
             eval.attach_refinement("need5 : ( n: Num where n >= 5 -- )")
                 .expect("need5 refinement attaches");
@@ -4177,9 +4175,11 @@ mod tests {
         match err {
             GateError::Tier1Violated(violations) => {
                 assert!(
-                    violations.iter().any(|o| o.word.contains("declared guarantee")
-                        && o.word.contains("lucky")
-                        && o.verdict == crate::Verdict::Sat),
+                    violations
+                        .iter()
+                        .any(|o| o.word.contains("declared guarantee")
+                            && o.word.contains("lucky")
+                            && o.verdict == crate::Verdict::Sat),
                     "the refuted obligation is lucky's declared guarantee: {violations:?}"
                 );
             }

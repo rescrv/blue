@@ -5470,9 +5470,7 @@ mod tests {
             StackTy::new(vec![Ty::num(s), Ty::num(s)], 0, s),
             StackTy::new(vec![Ty::num(s)], 0, s),
         );
-        let arrows = move |w: &str| -> Option<WordTy> {
-            (w == "add2").then(|| arrow.clone())
-        };
+        let arrows = move |w: &str| -> Option<WordTy> { (w == "add2").then(|| arrow.clone()) };
         let resolve = SigResolver::with_arrows(&lookup, &arrows);
         let mut stack = ShadowStack::new();
         let mut solver = SmtLibSolver::new();
