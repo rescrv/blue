@@ -4157,9 +4157,8 @@ mod tests {
         // moves data per its Tier 0 arrow, the §10.2 zip must still bind `need5`'s
         // demand to the literal beneath the fold result.
         let with = |n: &str| {
-            let mut eval = arrow_seam_program(&format!(
-                "[ {n} [ 1 2 3 ] 0 [ + ] FOLD DROP need5 ] :main"
-            ));
+            let mut eval =
+                arrow_seam_program(&format!("[ {n} [ 1 2 3 ] 0 [ + ] FOLD DROP need5 ] :main"));
             eval.register_operator_with_contract("need5", num_scheme(1, 0));
             eval.attach_refinement("need5 : ( n: Num where n >= 5 -- )")
                 .expect("need5 refinement attaches");
