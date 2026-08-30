@@ -780,12 +780,25 @@ fn literal_list_elem(body: &[SpannedToken], span: Span, ctx: &mut InferCtx) -> O
         // fresh variable that unifies with whatever the consumer demands.
         return Some(Box::new(Ty::var(ctx.fresh_ty(), span)));
     }
+    // This walk is **speculative**: it unifies candidate element types against
+    // the shared substitution, and any failure discards the whole candidate.
+    // Checkpoint the trail so the rejection paths leave no partial bindings
+    // behind (§3 invariant 1 — the trail exists for exactly this inference-time
+    // backtracking). Unwinding is safe because every variable minted below is
+    // local to the candidate: it escapes only through the returned tag, which
+    // the rejection paths discard. On success the bindings are kept — the
+    // polymorphic-empty-list tag can reference a still-live variable.
+    let checkpoint = ctx.subst.checkpoint();
     let mut elem: Option<Ty> = None;
     for token in body {
-        let next = literal_token_elem(token, ctx)?;
+        let Some(next) = literal_token_elem(token, ctx) else {
+            ctx.subst.rewind(checkpoint);
+            return None;
+        };
         match &elem {
             Some(prev) => {
                 if ctx.unify_ty(prev, &next).is_err() {
+                    ctx.subst.rewind(checkpoint);
                     return None;
                 }
             }
@@ -2784,6 +2797,32 @@ mod tests {
     }
 
     #[test]
+    fn rejected_tag_candidate_leaves_the_trail_clean() {
+        // REGRESSION (§3 invariant 1). `literal_list_elem` unifies candidate
+        // element types against the **shared** substitution before it knows the
+        // candidate will be accepted. `[ [ ] [ 1 ] true ]` first unifies the
+        // polymorphic-empty-list variable against `List Num` (a real trail
+        // entry), then fails on `true` — the rejection path must rewind to its
+        // checkpoint so a discarded candidate leaves no partial bindings behind.
+        // Today the leaked bindings are unreachable garbage (every variable
+        // minted in the walk is local to the candidate); the guard is against
+        // the first literal-grammar extension that makes them reachable.
+        let tokens = parse_with_spans("[ [ ] [ 1 ] true ]").unwrap();
+        let SpannedTokenKind::Bracket(body) = &tokens[0].kind else {
+            panic!("expected a bracket token");
+        };
+        let mut ctx = InferCtx::new();
+        let before = ctx.subst.checkpoint();
+        let tag = literal_list_elem(body, tokens[0].span, &mut ctx);
+        assert!(tag.is_none(), "a heterogeneous body earns no tag");
+        assert_eq!(
+            ctx.subst.checkpoint(),
+            before,
+            "a rejected tag candidate must not leave bindings on the trail"
+        );
+    }
+
+    #[test]
     fn tagged_bracket_still_serves_as_a_code_quotation() {
         // Dual purpose is preserved: a tagged literal bracket is still a
         // quotation, so `IF`'s branch slots (which demand `( 'S -- 'T )` arrows,
@@ -4093,6 +4132,45 @@ mod tests {
         assert!(ledger.is_clean());
         // 3 >= 5 is refuted — proving the pass above is not vacuous: the same
         // slot is bound, and the VC genuinely depends on its term.
+        let err = check_whole_program(&with("3"), crate::SmtLibSolver::new)
+            .expect_err("3 >= 5 is refuted; the gate fails closed");
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert!(
+                    violations
+                        .iter()
+                        .any(|o| o.word == "need5" && o.verdict == crate::Verdict::Sat),
+                    "the refuted demand is need5's: {violations:?}"
+                );
+            }
+            other => panic!("expected Tier1Violated, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn gate_binds_refined_demands_to_the_right_slots_after_a_net_negative_operator() {
+        // The other direction of the arity-conformance class the MAP regression
+        // pins. MAP is net −1; `FOLD : ( 'S (List a) b ( 'r b a -- 'r b ) -- 'S b )`
+        // is net −2 (pops the list, the seed, and the quotation; pushes one
+        // accumulator). A misread arity here shifts every slot beneath by a
+        // *different* offset than the MAP case, so pin it separately: after FOLD
+        // moves data per its Tier 0 arrow, the §10.2 zip must still bind `need5`'s
+        // demand to the literal beneath the fold result.
+        let with = |n: &str| {
+            let mut eval =
+                arrow_seam_program(&format!("[ {n} [ 1 2 3 ] 0 [ + ] FOLD DROP need5 ] :main"));
+            eval.register_operator_with_contract("need5", num_scheme(1, 0));
+            eval.attach_refinement("need5 : ( n: Num where n >= 5 -- )")
+                .expect("need5 refinement attaches");
+            eval
+        };
+        // 7 >= 5: the demand binds the `7` two-slots-deep at FOLD time, not the
+        // seed, the quotation, or a phantom Var — and discharges.
+        let ledger = check_whole_program(&with("7"), crate::SmtLibSolver::new)
+            .expect("the demand binds the literal beneath the fold result");
+        assert!(ledger.is_clean());
+        // 3 >= 5 is refuted — the pass above is not vacuous: the same slot is
+        // bound, and the VC genuinely depends on its term.
         let err = check_whole_program(&with("3"), crate::SmtLibSolver::new)
             .expect_err("3 >= 5 is refuted; the gate fails closed");
         match err {
