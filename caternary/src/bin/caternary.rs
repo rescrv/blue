@@ -69,6 +69,10 @@ impl From<Token> for Value {
             Token::Word(w) => {
                 if let Ok(n) = w.parse::<i128>() {
                     Value::Int(n)
+                } else if caternary::is_integer_literal(&w) {
+                    // An out-of-range integer lexeme stays a Word (exact,
+                    // rejected loudly by the operators) — never a rounded f64.
+                    Value::Word(w)
                 } else if let Ok(f) = w.parse::<f64>()
                     && f.is_finite()
                 {
