@@ -800,6 +800,11 @@ where
     }
 }
 
+/// A whole-program **Tier 0 arrow** lookup (§10.3 / invariant 7): resolves a
+/// word to its inferred/registered Tier 0 arrow, or `None` for a genuinely
+/// free word.
+pub type ArrowLookup<'a> = &'a dyn Fn(&str) -> Option<WordTy>;
+
 /// A [`VerifyResolve`] that resolves both a word's verification action **and** its
 /// full refinement signature from a single `lookup: Fn(&str) -> Option<RefinementSig>`.
 ///
@@ -811,15 +816,52 @@ where
 pub struct SigResolver<'a, L> {
     /// The whole-program signature lookup (callees + operators).
     lookup: &'a L,
+    /// The whole-program **Tier 0 arrow** lookup (definitions' inferred schemes
+    /// plus the embedder's registered contracts). §10.3 / invariant 7: for
+    /// every opaque word the shadow evaluator reads the *already-inferred Tier
+    /// 0 arrow* to know how many terms to pop and push — it owns no independent
+    /// notion of arity. Without this, an unrefined registered operator or
+    /// definition falls through to [`ShadowWord::Var`] (pop 0, push 1), and the
+    /// shadow data flow silently diverges from the runtime's — the §10.3
+    /// mis-shuffle failure class (wrong slots zipped at the next §10.2 binding).
+    arrows: Option<ArrowLookup<'a>>,
 }
 
 impl<'a, L> SigResolver<'a, L>
 where
     L: Fn(&str) -> Option<RefinementSig>,
 {
-    /// Build a resolver over a whole-program signature `lookup`.
+    /// Build a resolver over a whole-program signature `lookup`. Language-core
+    /// operator arrows ([`crate::core_scheme`]) are always available; supply
+    /// [`SigResolver::with_arrows`] to add definition/embedder arrows.
     pub fn new(lookup: &'a L) -> Self {
-        SigResolver { lookup }
+        SigResolver {
+            lookup,
+            arrows: None,
+        }
+    }
+
+    /// Build a resolver that also resolves **Tier 0 arrows** — the whole-program
+    /// gate path, where the evaluator's definition schemes and registered
+    /// operator contracts are in hand.
+    pub fn with_arrows(lookup: &'a L, arrows: ArrowLookup<'a>) -> Self {
+        SigResolver {
+            lookup,
+            arrows: Some(arrows),
+        }
+    }
+
+    /// The Tier 0 arrow of `word`, if one is known: the supplied lookup first
+    /// (definitions + embedder contracts), then the language-core schemes.
+    /// A genuinely free word (the unit-test symbolic-variable case) has neither
+    /// and stays a [`ShadowWord::Var`].
+    fn tier0_arrow(&self, word: &str) -> Option<WordTy> {
+        if let Some(arrows) = self.arrows
+            && let Some(arrow) = arrows(word)
+        {
+            return Some(arrow);
+        }
+        crate::types::core_scheme(word).map(|s| s.ty)
     }
 }
 
@@ -828,7 +870,19 @@ where
     L: Fn(&str) -> Option<RefinementSig>,
 {
     fn resolve(&self, word: &str) -> VerifyWord {
-        refinement_verify_word(word, (self.lookup)(word).as_ref())
+        let resolved = refinement_verify_word(word, (self.lookup)(word).as_ref());
+        // The Var fallback is only honest for a word with NO known Tier 0
+        // arrow (a free symbolic variable). A word that Tier 0 typed — an
+        // unrefined registered operator (MAP/FILTER/FOLD/EACH, embedder ops)
+        // or an unrefined definition — must move data per that arrow
+        // (§10.3 / invariant 7), opaquely: pops from the arrow, fresh
+        // literals pushed.
+        if let VerifyWord::Core(ShadowWord::Var(_)) = &resolved
+            && let Some(arrow) = self.tier0_arrow(word)
+        {
+            return VerifyWord::Core(ShadowWord::Opaque(arrow));
+        }
+        resolved
     }
 
     fn signature(&self, word: &str) -> Option<RefinementSig> {
@@ -2068,6 +2122,114 @@ fn collect_called_words(tokens: &[Token], out: &mut BTreeSet<String>) {
 pub fn check_program<S, MkSolver, L>(
     defs: &[Definition],
     lookup: &L,
+    mk_solver: MkSolver,
+) -> Result<Ledger, ShadowError>
+where
+    S: Solver + CounterModel + FactSnapshot,
+    MkSolver: FnMut() -> S,
+    L: Fn(&str) -> Option<RefinementSig>,
+{
+    check_program_with_arrows(defs, lookup, &|_| None, mk_solver)
+}
+
+/// Verify one definition's body in its own solver session, **under its declared
+/// contract** (§10.1 read at the definition, not only at call sites):
+///
+/// 1. **Seed the inputs from the Tier 0 arrow** (§10.3 / invariant 7): the body
+///    of `add2 : ( 'S Num Num -- 'S Num )` begins with two opaque terms on the
+///    shadow stack, exactly as the runtime begins with two values. Without this,
+///    any definition that consumes inputs underflows the empty shadow stack and
+///    the gate rejects a Tier-0-green program structurally. When no arrow is
+///    known the demand's binder count stands in (the bare-`check_program` path).
+/// 2. **Assert the demand as an in-scope fact**: input predicates are
+///    obligations on the *caller* (discharged at every call site), so inside
+///    the body they are gifts — bind the demand's named parameters to the
+///    seeded terms (§10.2, right-to-left from the top) and assert.
+/// 3. Verify the body (VCs at each call site, path conditions, subsumption,
+///    `assume` ledger — the existing [`verify_ctx`] machinery).
+/// 4. **Discharge the guarantee against the body**: bind the guarantee's output
+///    binders to the final top-of-stack terms and prove it as a VC. A
+///    definition's declared guarantee is *proven through its body* (§8 —
+///    transparent definitions carry no authored contract); only the two
+///    registrants may attest (invariant 16). Taking it on faith would let a
+///    user mint an axiom by attaching a `where` clause to `[ 1 ]`.
+fn check_definition_ctx<L, S>(
+    def: &Definition,
+    lookup: &L,
+    arrows: ArrowLookup<'_>,
+    solver: &mut S,
+) -> Result<VerifyCtx, ShadowError>
+where
+    L: Fn(&str) -> Option<RefinementSig>,
+    S: Solver + CounterModel + FactSnapshot,
+{
+    let resolve = SigResolver::with_arrows(lookup, arrows);
+    let mut stack = ShadowStack::new();
+    let mut ctx = VerifyCtx::with_site(&def.name);
+
+    // (1) Seed: the **max** of the Tier 0 arrow's explicit inputs and the
+    // sig's declared demand binders. The arrow's explicit elems are what the
+    // body observably consumes; the sig may declare *more* inputs the body
+    // never touches — those live in the arrow's row tail, but the caller
+    // supplies them, so at body entry they are on the stack and the demand's
+    // binders must have slots to zip against (§10.2, top-anchored: the sig
+    // names the topmost inputs).
+    let arrow = arrows(&def.name);
+    let arrow_inputs = arrow.as_ref().map(|a| a.input.elems.len()).unwrap_or(0);
+    let declared_inputs = def
+        .sig
+        .as_ref()
+        .map(|s| s.demands.binders.len())
+        .unwrap_or(0);
+    stack.seed_opaque_inputs(arrow_inputs.max(declared_inputs));
+
+    // (2) Demand-as-fact: zip the demand binders against the seeded top slots
+    // and assert the predicate into the session scope.
+    let demand_bindings = match &def.sig {
+        Some(sig) => {
+            let bindings = bind_positional(&sig.demands.binders, &stack)?;
+            if let Some(demand) = &sig.demands.predicate {
+                solver.assert(&substitute(demand, &bindings));
+            }
+            bindings
+        }
+        None => Vec::new(),
+    };
+
+    // (3) The body.
+    verify_ctx(&def.body, &mut stack, solver, &resolve, &mut ctx)?;
+
+    // (4) Guarantee-as-obligation: the body must establish what the signature
+    // publishes at call sites. Discharged under everything the body proved
+    // (facts, path-free tail) plus the asserted demand; recorded like any other
+    // obligation so a refuted/undecided guarantee lands in the ledger's
+    // violations and the gate fails closed.
+    if let Some(sig) = &def.sig
+        && let Some(guarantee) = &sig.guarantees.predicate
+    {
+        let mut bindings = demand_bindings;
+        bindings.extend(bind_positional(&sig.guarantees.binders, &stack)?);
+        let goal = substitute(guarantee, &bindings);
+        let (verdict, model) = discharge_with_model(solver, &goal);
+        ctx.obligations.push(Obligation {
+            word: format!("{} (declared guarantee)", def.name),
+            goal,
+            verdict,
+            model,
+            message: None,
+        });
+    }
+    Ok(ctx)
+}
+
+/// [`check_program`] with a whole-program **Tier 0 arrow** lookup — the gate
+/// path (§10.3 / invariant 7): opaque words move data per their inferred
+/// arrows, and each definition's body is verified under its own contract
+/// (inputs seeded, demand assumed, guarantee proven — [`check_definition_ctx`]).
+pub fn check_program_with_arrows<S, MkSolver, L>(
+    defs: &[Definition],
+    lookup: &L,
+    arrows: ArrowLookup<'_>,
     mut mk_solver: MkSolver,
 ) -> Result<Ledger, ShadowError>
 where
@@ -2081,7 +2243,7 @@ where
     // Pass 1: verify each body; collect its own accepted/rejected assumes.
     for def in defs {
         let mut solver = mk_solver();
-        let ctx = check_refinements_ctx(&def.body, lookup, &mut solver, &def.name)?;
+        let ctx = check_definition_ctx(def, lookup, arrows, &mut solver)?;
         // Fail closed on any UNDISCHARGED obligation (§10.5/§10.7 Situation B):
         // `verify` records a `Sat` (refuted demand/guarantee, with a
         // counterexample model) or `Unknown` (undecided — fails closed for
@@ -5256,6 +5418,74 @@ mod tests {
         assert!(
             M13_NATIVE_PARITY_NOTE.contains("z3 crate's check-sat"),
             "the note records how native parity is discharged"
+        );
+    }
+
+    // =======================================================================
+    // The arrow-aware resolver (§10.3 / invariant 7): unrefined words with a
+    // known Tier 0 arrow move data opaquely per that arrow; only a genuinely
+    // free word (no sig, no arrow) is a symbolic Var.
+    // =======================================================================
+
+    #[test]
+    fn resolver_falls_back_to_the_core_tier0_arrow_before_var() {
+        // `MAP` has a core Tier-0 scheme ( 'S (List a) ('r a -- 'r b) -- 'S
+        // (List b) ) but no shadow word and no sig: it must resolve Opaque with
+        // that arrow's arity (pop 2, push 1) — never Var (pop 0, push 1).
+        let lookup = |_: &str| None;
+        let resolve = SigResolver::new(&lookup);
+        match resolve.resolve("MAP") {
+            VerifyWord::Core(ShadowWord::Opaque(arrow)) => {
+                assert_eq!(arrow.input.elems.len(), 2, "MAP pops the list and the fn");
+                assert_eq!(arrow.output.elems.len(), 1, "MAP pushes the mapped list");
+            }
+            other => panic!("MAP must be Opaque per its core Tier 0 arrow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolver_keeps_var_for_a_genuinely_free_word() {
+        // The Var fallback is load-bearing for symbolic free variables (the
+        // M8-style `x`): a word with no sig and no arrow must stay a Var.
+        let lookup = |_: &str| None;
+        let resolve = SigResolver::new(&lookup);
+        assert!(
+            matches!(
+                resolve.resolve("x"),
+                VerifyWord::Core(ShadowWord::Var(name)) if name == "x"
+            ),
+            "a free word with no Tier 0 arrow stays a symbolic Var"
+        );
+    }
+
+    #[test]
+    fn resolver_uses_a_supplied_arrow_for_an_unrefined_definition() {
+        // The gate path: a definition's inferred scheme reaches the resolver
+        // through `with_arrows`, and its shadow effect matches the runtime's
+        // data flow — here `add2 : ( Num Num -- Num )`, net −1, leaving the
+        // slot beneath it where the runtime leaves it.
+        let lookup = |_: &str| None;
+        let s = crate::Span { start: 0, end: 0 };
+        let arrow = WordTy::new(
+            StackTy::new(vec![Ty::num(s), Ty::num(s)], 0, s),
+            StackTy::new(vec![Ty::num(s)], 0, s),
+        );
+        let arrows = move |w: &str| -> Option<WordTy> { (w == "add2").then(|| arrow.clone()) };
+        let resolve = SigResolver::with_arrows(&lookup, &arrows);
+        let mut stack = ShadowStack::new();
+        let mut solver = SmtLibSolver::new();
+        let mut ctx = VerifyCtx::new();
+        let tokens = parse("7 1 2 add2").unwrap();
+        verify_ctx(&tokens, &mut stack, &mut solver, &resolve, &mut ctx)
+            .expect("add2 moves data per its supplied arrow");
+        assert_eq!(stack.len(), 2, "7 and add2's one opaque result");
+        // The slot beneath the result is still the literal 7 — the conformance
+        // point (§10.2): a following refined demand binds the right term.
+        let below = &stack.slots()[0];
+        assert_eq!(
+            below.as_term().expect("a value term"),
+            &Pred::Num("7".to_string()),
+            "the untouched slot beneath the opaque call is byte-identical"
         );
     }
 }

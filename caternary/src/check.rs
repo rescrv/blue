@@ -525,7 +525,25 @@ where
         .collect();
     let lookup = |w: &str| evaluator.refinement(w).cloned();
 
-    let ledger = crate::check_program(&defs, &lookup, mk_solver).map_err(GateError::Tier1)?;
+    // The whole-program **Tier 0 arrow** lookup (§10.3 / invariant 7: arity
+    // comes from the Tier 0 arrow — the shadow evaluator owns no independent
+    // notion of it). Definitions contribute their inferred, generalized schemes;
+    // the embedder its registered contracts; the language core its baked-in
+    // schemes. Tier 0 is green here, so the schemes exist; the recomputation is
+    // read-only against the frozen result (invariant 18).
+    let schemes = definition_schemes(evaluator).map_err(GateError::Tier0)?;
+    let arrows = |w: &str| -> Option<WordTy> {
+        if let Some(scheme) = schemes.get(w) {
+            return Some(scheme.ty.clone());
+        }
+        if let Some(scheme) = evaluator.contract(w) {
+            return Some(scheme.ty.clone());
+        }
+        crate::types::core_scheme(w).map(|s| s.ty)
+    };
+
+    let ledger = crate::check_program_with_arrows(&defs, &lookup, &arrows, mk_solver)
+        .map_err(GateError::Tier1)?;
 
     // Fail closed on an UNDISCHARGED obligation (§10.5/§10.7 Situation B):
     // `check_program` records every refuted (`Sat`, with a counterexample) or
@@ -4018,5 +4036,158 @@ mod tests {
             );
         }
         assert_eq!(separate.is_clean(), combined.is_clean());
+    }
+
+    // -----------------------------------------------------------------------
+    // The Tier 0 → Tier 1 arrow seam (§10.3 / invariant 7): the shadow
+    // evaluator reads every opaque word's inferred Tier 0 arrow — it owns no
+    // independent notion of arity — and a definition's body is verified under
+    // its own contract (inputs seeded, demand assumed, guarantee proven).
+    // -----------------------------------------------------------------------
+
+    /// An evaluator with `+` registered (scalar ops are registered builtins,
+    /// not core schemes) and `src` loaded — the minimal arrow-seam harness.
+    fn arrow_seam_program(src: &str) -> Evaluator<Value> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        eval.register_operator_with_contract("+", plus_scheme());
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        eval
+    }
+
+    #[test]
+    fn gate_moves_data_per_tier0_arrows_for_unrefined_core_operators() {
+        // REGRESSION (§10.3 / invariant 7). `MAP` carries a core Tier-0 scheme
+        // but no shadow word and no refinement sig; it used to fall through to
+        // `ShadowWord::Var` — pop 0, push 1, net +1 against the runtime's net
+        // −1 — misaligning every slot beneath it. This Tier-0-green program
+        // (the dual-purpose bracket used as a List by one `DUP` copy and CALLed
+        // as a quotation by the other) then died structurally in the shadow
+        // evaluator. The fix: an unrefined word with a known Tier 0 arrow moves
+        // data opaquely per that arrow.
+        let eval =
+            arrow_seam_program("[ [ 1 2 3 ] DUP [ 1 + ] MAP DROP CALL DROP DROP DROP ] :main");
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("shadow data flow must mirror MAP's Tier 0 arrow (pop 2, push 1)");
+        assert!(ledger.is_clean());
+    }
+
+    #[test]
+    fn gate_binds_refined_demands_to_the_right_slots_after_an_opaque_operator() {
+        // The §10.3 conformance point behind the regression above: after an
+        // opaque operator moves data, the §10.2 positional zip must bind the
+        // NEXT refined demand to the right term. `need5` demands `n >= 5`; the
+        // slot under the MAP result must still be the literal it was.
+        let with = |n: &str| {
+            let mut eval =
+                arrow_seam_program(&format!("[ {n} [ 1 2 3 ] [ 1 + ] MAP DROP need5 ] :main"));
+            eval.register_operator_with_contract("need5", num_scheme(1, 0));
+            eval.attach_refinement("need5 : ( n: Num where n >= 5 -- )")
+                .expect("need5 refinement attaches");
+            eval
+        };
+        // 7 >= 5: the demand binds the `7` (not MAP's function quotation, which
+        // is what the pre-fix misalignment handed it) and discharges.
+        let ledger = check_whole_program(&with("7"), crate::SmtLibSolver::new)
+            .expect("the demand binds the literal beneath the MAP result");
+        assert!(ledger.is_clean());
+        // 3 >= 5 is refuted — proving the pass above is not vacuous: the same
+        // slot is bound, and the VC genuinely depends on its term.
+        let err = check_whole_program(&with("3"), crate::SmtLibSolver::new)
+            .expect_err("3 >= 5 is refuted; the gate fails closed");
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert!(
+                    violations
+                        .iter()
+                        .any(|o| o.word == "need5" && o.verdict == crate::Verdict::Sat),
+                    "the refuted demand is need5's: {violations:?}"
+                );
+            }
+            other => panic!("expected Tier1Violated, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn gate_seeds_definition_inputs_from_the_tier0_arrow() {
+        // REGRESSION. A definition body was verified against an EMPTY shadow
+        // stack, so any definition that consumes inputs (`[ + ] :add2`) failed
+        // the gate structurally despite being Tier-0 green. The body must begin
+        // with its Tier-0 arrow's inputs seeded as opaque terms, exactly as the
+        // runtime begins with the caller's values.
+        let eval = arrow_seam_program("[ + ] :add2 [ 1 2 add2 DROP ] :main");
+        let ledger = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .expect("add2's body verifies against its seeded ( Num Num -- Num ) inputs");
+        assert!(ledger.is_clean());
+    }
+
+    #[test]
+    fn gate_asserts_a_definitions_demand_as_a_fact_inside_its_body() {
+        // §10.1 read at the definition: input predicates are obligations on the
+        // CALLER, so inside the body they are facts. `safe`'s declared demand
+        // `n >= 0` must be in scope for its body, discharging `sqrt`'s demand.
+        let mk = |attach_safe_sig: bool| {
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            eval.register_operator_with_contract("sqrt", num_scheme(1, 1));
+            eval.attach_refinement("sqrt : ( n: Num where n >= 0  --  r: Num )")
+                .expect("sqrt refinement attaches");
+            if attach_safe_sig {
+                eval.attach_refinement("safe : ( n: Num where n >= 0  --  r: Num )")
+                    .expect("safe refinement attaches");
+            }
+            let src = "[ sqrt ] :safe [ 1 safe DROP ] :main";
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            eval
+        };
+        // With the demand: `n >= 0` is asserted over the seeded input, so the
+        // inner `sqrt` demand discharges; `main` discharges `1 >= 0` at the
+        // call site. Clean.
+        let ledger = check_whole_program(&mk(true), crate::SmtLibSolver::new)
+            .expect("the declared demand is a fact inside the body");
+        assert!(ledger.is_clean());
+        // Without it, the seed is bare opaque: `sqrt`'s demand over an unknown
+        // term fails closed (§10.7 Situation B) — the honest verdict, and proof
+        // the passing case above rests on the asserted demand, not vacuity.
+        let err = check_whole_program(&mk(false), crate::SmtLibSolver::new)
+            .expect_err("an unconstrained opaque input cannot discharge sqrt's demand");
+        assert!(matches!(err, GateError::Tier1Violated(_)));
+    }
+
+    #[test]
+    fn gate_discharges_a_definitions_declared_guarantee_against_its_body() {
+        // SOUNDNESS. A definition's guarantee is published as a fact at every
+        // call site; only the two registrants may attest contracts (invariant
+        // 16), so a definition's `where` must be PROVEN through its body —
+        // otherwise attaching `r >= 100` to `[ 1 ]` mints a user axiom.
+        let mk = |bound: &str| {
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            eval.attach_refinement(&format!("lucky : ( -- r: Num where r >= {bound} )"))
+                .expect("lucky refinement attaches");
+            let src = "[ 1 ] :lucky [ lucky DROP ] :main";
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            eval
+        };
+        // `[ 1 ]` does not establish `r >= 100`: refuted, gate fails closed.
+        let err = check_whole_program(&mk("100"), crate::SmtLibSolver::new)
+            .expect_err("a guarantee the body does not establish must fail closed");
+        match err {
+            GateError::Tier1Violated(violations) => {
+                assert!(
+                    violations
+                        .iter()
+                        .any(|o| o.word.contains("declared guarantee")
+                            && o.word.contains("lucky")
+                            && o.verdict == crate::Verdict::Sat),
+                    "the refuted obligation is lucky's declared guarantee: {violations:?}"
+                );
+            }
+            other => panic!("expected Tier1Violated, got: {other}"),
+        }
+        // `[ 1 ]` does establish `r >= 1`: discharged, clean.
+        let ledger = check_whole_program(&mk("1"), crate::SmtLibSolver::new)
+            .expect("a guarantee the body establishes discharges");
+        assert!(ledger.is_clean());
     }
 }

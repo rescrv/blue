@@ -409,6 +409,22 @@ impl ShadowStack {
         p
     }
 
+    /// Seed the stack with `n` **opaque input terms** — the shadow image of a
+    /// definition's inputs at body entry (§10.3: arity comes from the Tier 0
+    /// arrow; the caller supplies `n` from the definition's inferred arrow).
+    ///
+    /// Each seed is a fresh literal: sound (the body may assume nothing about
+    /// its inputs beyond its declared demand, which the caller asserts
+    /// separately after binding the demand's named parameters to these seeds).
+    /// A quotation-typed input is seeded as a term too — a body that `CALL`s it
+    /// fails visibly (fail-closed) rather than running an invented body.
+    pub(crate) fn seed_opaque_inputs(&mut self, n: usize) {
+        for _ in 0..n {
+            let t = self.fresh_literal();
+            self.push_term(t);
+        }
+    }
+
     pub(crate) fn require(&self, need: usize) -> Result<(), ShadowError> {
         if self.slots.len() < need {
             return Err(underflow(need, self.slots.len()));
