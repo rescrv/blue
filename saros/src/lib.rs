@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::time::Duration;
 
+use buffertk::{Unpacker, stack_pack};
 use chrono::{DateTime, Utc};
 
 use biometrics::Counter;
@@ -19,6 +20,7 @@ pub mod prometheus;
 pub mod query;
 pub mod querylang;
 pub mod recovery;
+pub mod store;
 pub mod support_nom;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
@@ -139,7 +141,7 @@ generate_id! {MetricID, "metric:"}
 //////////////////////////////////////////// MetricType ////////////////////////////////////////////
 
 /// The type of metric being requested.  A switch over biometrics sensor types.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum MetricType {
     #[default]
     Counter,
@@ -148,13 +150,42 @@ pub enum MetricType {
     Histogram,
 }
 
+impl MetricType {
+    pub fn to_u8(self) -> u8 {
+        match self {
+            Self::Counter => 0,
+            Self::Gauge => 1,
+            Self::Moments => 2,
+            Self::Histogram => 3,
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Counter),
+            1 => Some(Self::Gauge),
+            2 => Some(Self::Moments),
+            3 => Some(Self::Histogram),
+            _ => None,
+        }
+    }
+
+    pub fn to_u32(self) -> u32 {
+        self.to_u8() as u32
+    }
+
+    pub fn from_u32(value: u32) -> Option<Self> {
+        u8::try_from(value).ok().and_then(Self::from_u8)
+    }
+}
+
 /////////////////////////////////////////////// Time ///////////////////////////////////////////////
 
 /// Time since UNIX epoch, in microseconds.
 #[derive(
     Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, prototk_derive::Message,
 )]
-pub struct Time(i64);
+pub struct Time(#[prototk(1, sfixed64)] i64);
 
 impl Time {
     pub const ONE_SECOND: Time = Time(1_000_000);
@@ -185,6 +216,11 @@ impl Time {
     /// Convert the time to the number of seconds it represents.
     pub fn to_secs(self) -> f64 {
         self.0 as f64 / 1_000_000.0
+    }
+
+    /// Convert the time to the number of microseconds since the UNIX epoch.
+    pub fn to_micros(self) -> i64 {
+        self.0
     }
 
     /// Construct a new time from an RFC3339-formatted date time.
@@ -613,8 +649,74 @@ impl Series {
         })
     }
 
+    pub fn decode_chunks(
+        label: Option<Tags<'static>>,
+        window: Window,
+        step: Time,
+        chunks: &[SeriesChunk],
+    ) -> Result<Option<Self>, SError> {
+        if !window.can_be_divided_by(step) {
+            return Err(non_multiple_parameter());
+        }
+        let mut samples = std::collections::BTreeMap::new();
+        for chunk in chunks {
+            for (time, point) in chunk.decode_samples()? {
+                samples.insert(time, point);
+            }
+        }
+        if samples.is_empty() {
+            return Ok(None);
+        }
+        let mut points = Vec::with_capacity(window.divide_by(step));
+        let mut sample_iter = samples.into_iter().peekable();
+        let mut carry = None;
+        for bucket in QueryStepIter::new(window, step) {
+            while sample_iter.peek().is_some_and(|(time, _)| *time <= bucket) {
+                let (_, point) = sample_iter.next().expect("peek said sample exists");
+                carry = Some(point);
+            }
+            points.push(carry.unwrap_or(Point::NAN));
+        }
+        Ok(Some(Series {
+            label,
+            start: window.start,
+            step,
+            points,
+        }))
+    }
+
     pub fn points(&self) -> &[Point] {
         &self.points
+    }
+}
+
+struct QueryStepIter {
+    next: Time,
+    limit: Time,
+    step: Time,
+}
+
+impl QueryStepIter {
+    fn new(window: Window, step: Time) -> Self {
+        Self {
+            next: window.start,
+            limit: window.limit,
+            step,
+        }
+    }
+}
+
+impl Iterator for QueryStepIter {
+    type Item = Time;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next < self.limit {
+            let next = self.next;
+            self.next = self.next + self.step;
+            Some(next)
+        } else {
+            None
+        }
     }
 }
 
@@ -625,6 +727,204 @@ impl std::fmt::Display for Series {
             .field("start", &self.start.0)
             .field("step", &self.step.0)
             .finish()
+    }
+}
+
+/////////////////////////////////////////// SeriesChunk ////////////////////////////////////////////
+
+pub const SERIES_CHUNK_VERSION: u32 = 1;
+
+/// Encodes one contiguous run of samples for a physical series.
+///
+/// The first sample is stored explicitly in the header.  Remaining timestamps
+/// are encoded as one delta followed by delta-deltas, and remaining values are
+/// encoded as Gorilla XORs over exact `f64` bit patterns.
+#[derive(Clone, Debug, Default, PartialEq, prototk_derive::Message)]
+pub struct SeriesChunk {
+    /// Chunk format version.
+    #[prototk(1, uint32)]
+    pub version: u32,
+    /// Numeric [`MetricType`] for the chunk.
+    #[prototk(2, uint32)]
+    pub metric_type: u32,
+    /// Timestamp of the first sample in microseconds since the UNIX epoch.
+    #[prototk(3, message)]
+    pub first_sample_ts: Time,
+    /// Timestamp of the last sample in microseconds since the UNIX epoch.
+    #[prototk(4, message)]
+    pub last_sample_ts: Time,
+    /// Number of samples represented by the chunk.
+    #[prototk(5, uint64)]
+    pub sample_count: u64,
+    /// Exact `f64::to_bits()` representation of the first sample value.
+    #[prototk(6, fixed64)]
+    pub first_value_bits: u64,
+    /// Encoded timestamps after the first sample.
+    #[prototk(7, bytes)]
+    pub timestamp_stream: Vec<u8>,
+    /// Gorilla XOR stream for values after the first sample.
+    #[prototk(8, bytes)]
+    pub value_stream: Vec<u8>,
+}
+
+impl SeriesChunk {
+    /// Encode sorted samples into one chunk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for empty input, unsorted timestamps, arithmetic
+    /// overflow, or timestamp deltas that cannot be represented by the stream.
+    pub fn from_samples(
+        metric_type: MetricType,
+        samples: &[(Time, Point)],
+    ) -> Result<Self, SError> {
+        if samples.is_empty() {
+            return Err(coding_error("cannot encode empty chunk"));
+        }
+        let first_sample_ts = samples[0].0;
+        let last_sample_ts = samples[samples.len() - 1].0;
+        let sample_count =
+            u64::try_from(samples.len()).map_err(|_| coding_error("sample count exceeds u64"))?;
+        let first_value_bits = samples[0].1.0.to_bits();
+        let mut timestamp_encoder = delta_array::DeltaEncoder::default();
+        let mut value_encoder = coding::GorillaEncoder::new(first_value_bits);
+        let mut prev_prev_ts: Option<Time> = None;
+        let mut prev_ts = first_sample_ts;
+        for (idx, (ts, point)) in samples.iter().copied().enumerate().skip(1) {
+            let delta =
+                ts.0.checked_sub(prev_ts.0)
+                    .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
+            if delta < 0 {
+                return Err(time_error("samples are not sorted by timestamp"));
+            }
+            if idx == 1 {
+                timestamp_encoder.push(delta as u64)?;
+            } else {
+                let prev_prev_ts = prev_prev_ts.expect("idx >= 2 has prev_prev_ts");
+                let prev_delta = prev_ts
+                    .0
+                    .checked_sub(prev_prev_ts.0)
+                    .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
+                let dd = delta
+                    .checked_sub(prev_delta)
+                    .ok_or_else(|| arithmetic_error("timestamp delta-delta underflow"))?;
+                timestamp_encoder.push(prototk::zigzag(dd))?;
+            }
+            value_encoder.push(point.0.to_bits());
+            prev_prev_ts = Some(prev_ts);
+            prev_ts = ts;
+        }
+        Ok(Self {
+            version: SERIES_CHUNK_VERSION,
+            metric_type: metric_type.to_u32(),
+            first_sample_ts,
+            last_sample_ts,
+            sample_count,
+            first_value_bits,
+            timestamp_stream: timestamp_encoder.as_ref().to_vec(),
+            value_stream: value_encoder.seal(),
+        })
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        stack_pack(self).to_vec()
+    }
+
+    /// Decode one serialized chunk message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the buffer is not exactly one protobuf-compatible
+    /// `SeriesChunk` message.
+    pub fn decode(buf: &[u8]) -> Result<Self, SError> {
+        let mut unpacker = Unpacker::new(buf);
+        let chunk: Self = unpacker
+            .unpack()
+            .map_err(|err: prototk::SError| coding_error(err.to_string()))?;
+        if !unpacker.is_empty() {
+            return Err(coding_error("trailing bytes after series chunk"));
+        }
+        Ok(chunk)
+    }
+
+    /// Decode this chunk into timestamped points.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the version or metric type is unsupported, if a
+    /// stream is truncated or malformed, or if decoded timestamps disagree with
+    /// the header.
+    pub fn decode_samples(&self) -> Result<Vec<(Time, Point)>, SError> {
+        if self.version != SERIES_CHUNK_VERSION {
+            return Err(coding_error(format!(
+                "unsupported series chunk version: {}",
+                self.version
+            )));
+        }
+        if MetricType::from_u32(self.metric_type).is_none() {
+            return Err(coding_error(format!(
+                "unsupported metric type: {}",
+                self.metric_type
+            )));
+        }
+        if self.sample_count == 0 {
+            return Err(coding_error("chunk has zero samples"));
+        }
+        let sample_count = usize::try_from(self.sample_count)
+            .map_err(|_| coding_error("sample count exceeds usize"))?;
+        let mut times = Vec::with_capacity(sample_count);
+        times.push(self.first_sample_ts);
+        let mut timestamp_decoder = delta_array::DeltaDecoder::new(&self.timestamp_stream);
+        let mut prev_prev_ts = None;
+        let mut prev_ts = self.first_sample_ts;
+        for idx in 1..sample_count {
+            let encoded = timestamp_decoder
+                .next()
+                .ok_or_else(|| coding_error("timestamp stream ended early"))??;
+            let ts = if idx == 1 {
+                Time(
+                    prev_ts
+                        .0
+                        .checked_add(
+                            i64::try_from(encoded)
+                                .map_err(|_| coding_error("timestamp delta exceeds i64"))?,
+                        )
+                        .ok_or_else(|| arithmetic_error("timestamp delta overflow"))?,
+                )
+            } else {
+                let dd = prototk::unzigzag(encoded);
+                let prev_prev_ts = prev_prev_ts.expect("idx >= 2 has prev_prev_ts");
+                Time::undelta_undelta(&prev_prev_ts, &prev_ts, &Time(dd))?
+            };
+            prev_prev_ts = Some(prev_ts);
+            prev_ts = ts;
+            times.push(ts);
+        }
+        if timestamp_decoder.next().is_some() {
+            return Err(coding_error("timestamp stream has trailing data"));
+        }
+        if times.first() != Some(&self.first_sample_ts)
+            || times.last() != Some(&self.last_sample_ts)
+        {
+            return Err(coding_error(format!(
+                "chunk timestamp header mismatch: expected {:?}..{:?}, got {:?}..{:?}",
+                self.first_sample_ts,
+                self.last_sample_ts,
+                times.first(),
+                times.last()
+            )));
+        }
+        let mut values = Vec::with_capacity(sample_count);
+        values.push(Point(f64::from_bits(self.first_value_bits)));
+        let mut value_decoder =
+            coding::GorillaDecoder::new(self.first_value_bits, &self.value_stream);
+        for _ in 1..sample_count {
+            let bits = value_decoder
+                .next()
+                .ok_or_else(|| coding_error("value stream ended early"))?;
+            values.push(Point(f64::from_bits(bits)));
+        }
+        Ok(std::iter::zip(times, values).collect())
     }
 }
 
@@ -835,10 +1135,21 @@ pub struct FetchCountersRequest {
 
 /////////////////////////////////////// FetchCountersResponse //////////////////////////////////////
 
+/// Groups fetched chunks with the canonical tags for their physical series.
+#[derive(Clone, Debug, Default, prototk_derive::Message)]
+pub struct FetchedSeries {
+    /// Canonical tag string for this physical series.
+    #[prototk(1, string)]
+    pub tags: String,
+    /// On-disk chunks that intersect the requested materialization range.
+    #[prototk(2, message)]
+    pub chunks: Vec<SeriesChunk>,
+}
+
 #[derive(Clone, Debug, Default, prototk_derive::Message)]
 pub struct FetchCountersResponse {
     #[prototk(1, message)]
-    pub serieses: Vec<EncodedSeries>,
+    pub serieses: Vec<FetchedSeries>,
 }
 
 //////////////////////////////////////// FetchGaugesRequest ////////////////////////////////////////
@@ -1100,5 +1411,88 @@ mod tests {
                 assert_eq!(e, r, "idx = {idx}");
             }
         }
+    }
+
+    #[test]
+    fn series_chunk_round_trips_samples() {
+        let samples = vec![
+            (Time::from_micros(1_000_000).unwrap(), Point(1.0)),
+            (Time::from_micros(2_000_000).unwrap(), Point(1.0)),
+            (Time::from_micros(4_000_000).unwrap(), Point(-0.0)),
+            (
+                Time::from_micros(7_000_000).unwrap(),
+                Point(f64::from_bits(0x7ff8_1234_5678_9abc)),
+            ),
+        ];
+        let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples).unwrap();
+        let encoded = chunk.encode();
+        let chunk = SeriesChunk::decode(&encoded).unwrap();
+        let decoded = chunk.decode_samples().unwrap();
+        assert_eq!(samples.len(), decoded.len());
+        for ((exp_time, exp_point), (got_time, got_point)) in samples.iter().zip(decoded.iter()) {
+            assert_eq!(exp_time, got_time);
+            assert_eq!(exp_point.0.to_bits(), got_point.0.to_bits());
+        }
+    }
+
+    #[test]
+    fn decode_chunks_carries_predecessor_through_window() {
+        let samples = vec![
+            (Time::from_secs(0).unwrap(), Point(5.0)),
+            (Time::from_secs(10).unwrap(), Point(7.0)),
+        ];
+        let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples).unwrap();
+        let window =
+            Window::new(Time::from_secs(20).unwrap(), Time::from_secs(50).unwrap()).unwrap();
+        let step = Time::from_secs(10).unwrap();
+        let series = Series::decode_chunks(None, window, step, &[chunk])
+            .unwrap()
+            .unwrap();
+        assert_eq!(window.start(), series.start);
+        assert_eq!(vec![Point(7.0), Point(7.0), Point(7.0)], series.points);
+    }
+
+    #[test]
+    fn decode_chunks_uses_nan_until_first_sample() {
+        let samples = vec![(Time::from_secs(30).unwrap(), Point(9.0))];
+        let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples).unwrap();
+        let window =
+            Window::new(Time::from_secs(20).unwrap(), Time::from_secs(50).unwrap()).unwrap();
+        let step = Time::from_secs(10).unwrap();
+        let series = Series::decode_chunks(None, window, step, &[chunk])
+            .unwrap()
+            .unwrap();
+        assert!(series.points[0].0.is_nan());
+        assert_eq!(Point(9.0), series.points[1]);
+        assert_eq!(Point(9.0), series.points[2]);
+    }
+
+    #[test]
+    fn decode_chunks_includes_sample_at_window_start() {
+        let samples = vec![(Time::from_secs(20).unwrap(), Point(9.0))];
+        let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples).unwrap();
+        let window =
+            Window::new(Time::from_secs(20).unwrap(), Time::from_secs(40).unwrap()).unwrap();
+        let step = Time::from_secs(10).unwrap();
+        let series = Series::decode_chunks(None, window, step, &[chunk])
+            .unwrap()
+            .unwrap();
+        assert_eq!(vec![Point(9.0), Point(9.0)], series.points);
+    }
+
+    #[test]
+    fn decode_chunks_excludes_sample_at_window_limit() {
+        let samples = vec![
+            (Time::from_secs(20).unwrap(), Point(9.0)),
+            (Time::from_secs(40).unwrap(), Point(99.0)),
+        ];
+        let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples).unwrap();
+        let window =
+            Window::new(Time::from_secs(20).unwrap(), Time::from_secs(40).unwrap()).unwrap();
+        let step = Time::from_secs(10).unwrap();
+        let series = Series::decode_chunks(None, window, step, &[chunk])
+            .unwrap()
+            .unwrap();
+        assert_eq!(vec![Point(9.0), Point(9.0)], series.points);
     }
 }

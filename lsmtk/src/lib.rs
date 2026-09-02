@@ -333,6 +333,15 @@ impl LsmtkOptions {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    pub fn set_path(&mut self, path: impl Into<String>) {
+        self.path = path.into();
+    }
+
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.set_path(path);
+        self
+    }
 }
 
 impl Default for LsmtkOptions {

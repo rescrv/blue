@@ -75,6 +75,209 @@ pub fn is_delta(x: u128, x_sz: usize) -> bool {
     }
 }
 
+//////////////////////////////////////////// bit stream ////////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct BitWriter {
+    bytes: Vec<u8>,
+    byte: u8,
+    bits: usize,
+}
+
+impl BitWriter {
+    pub fn push_bit(&mut self, bit: bool) {
+        if bit {
+            self.byte |= 1 << self.bits;
+        }
+        self.bits += 1;
+        if self.bits == 8 {
+            self.bytes.push(self.byte);
+            self.byte = 0;
+            self.bits = 0;
+        }
+    }
+
+    pub fn push_bits(&mut self, mut word: u64, mut bits: usize) {
+        assert!(bits <= 64);
+        while bits > 0 {
+            let available = 8 - self.bits;
+            let take = std::cmp::min(available, bits);
+            let mask = if take == 64 {
+                u64::MAX
+            } else {
+                (1u64 << take) - 1
+            };
+            self.byte |= ((word & mask) as u8) << self.bits;
+            self.bits += take;
+            word >>= take;
+            bits -= take;
+            if self.bits == 8 {
+                self.bytes.push(self.byte);
+                self.byte = 0;
+                self.bits = 0;
+            }
+        }
+    }
+
+    pub fn seal(mut self) -> Vec<u8> {
+        if self.bits > 0 {
+            self.bytes.push(self.byte);
+        }
+        self.bytes
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BitReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> BitReader<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    pub fn read_bit(&mut self) -> Option<bool> {
+        let byte = *self.bytes.get(self.offset >> 3)?;
+        let bit = byte & (1 << (self.offset & 7)) != 0;
+        self.offset += 1;
+        Some(bit)
+    }
+
+    pub fn read_bits(&mut self, mut bits: usize) -> Option<u64> {
+        assert!(bits <= 64);
+        let mut word = 0u64;
+        let mut shift = 0usize;
+        while bits > 0 {
+            let byte = *self.bytes.get(self.offset >> 3)?;
+            let bit_offset = self.offset & 7;
+            let available = 8 - bit_offset;
+            let take = std::cmp::min(available, bits);
+            let mask = (1u64 << take) - 1;
+            let piece = ((byte >> bit_offset) as u64) & mask;
+            word |= piece << shift;
+            self.offset += take;
+            shift += take;
+            bits -= take;
+        }
+        Some(word)
+    }
+}
+
+//////////////////////////////////////////// gorilla f64 ///////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct GorillaEncoder {
+    writer: BitWriter,
+    prev: u64,
+    leading: usize,
+    trailing: usize,
+    have_window: bool,
+}
+
+impl GorillaEncoder {
+    pub fn new(first: u64) -> Self {
+        Self {
+            writer: BitWriter::default(),
+            prev: first,
+            leading: 0,
+            trailing: 0,
+            have_window: false,
+        }
+    }
+
+    pub fn push(&mut self, value: u64) {
+        let xor = self.prev ^ value;
+        if xor == 0 {
+            self.writer.push_bit(false);
+            self.prev = value;
+            return;
+        }
+        let mut leading = xor.leading_zeros() as usize;
+        let trailing = xor.trailing_zeros() as usize;
+        if self.have_window && self.leading <= leading && self.trailing <= trailing {
+            self.writer.push_bits(0b01, 2);
+            let width = 64 - self.leading - self.trailing;
+            self.writer.push_bits(xor >> self.trailing, width);
+        } else {
+            leading = std::cmp::min(leading, 31);
+            let width = 64 - leading - trailing;
+            self.writer.push_bits(0b11, 2);
+            self.writer.push_bits(leading as u64, 5);
+            self.writer
+                .push_bits(if width == 64 { 0 } else { width as u64 }, 6);
+            self.writer.push_bits(xor >> trailing, width);
+            self.leading = leading;
+            self.trailing = trailing;
+            self.have_window = true;
+        }
+        self.prev = value;
+    }
+
+    pub fn seal(self) -> Vec<u8> {
+        self.writer.seal()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GorillaDecoder<'a> {
+    reader: BitReader<'a>,
+    prev: u64,
+    leading: usize,
+    trailing: usize,
+    have_window: bool,
+}
+
+impl<'a> GorillaDecoder<'a> {
+    pub fn new(first: u64, bytes: &'a [u8]) -> Self {
+        Self {
+            reader: BitReader::new(bytes),
+            prev: first,
+            leading: 0,
+            trailing: 0,
+            have_window: false,
+        }
+    }
+}
+
+impl Iterator for GorillaDecoder<'_> {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.reader.read_bit()? {
+            return Some(self.prev);
+        }
+        let reuse_window = !self.reader.read_bit()?;
+        let (leading, trailing, width) = if reuse_window {
+            if !self.have_window {
+                return None;
+            }
+            let width = 64 - self.leading - self.trailing;
+            (self.leading, self.trailing, width)
+        } else {
+            let leading = self.reader.read_bits(5)? as usize;
+            let width = match self.reader.read_bits(6)? as usize {
+                0 => 64,
+                width => width,
+            };
+            if leading + width > 64 {
+                return None;
+            }
+            let trailing = 64 - leading - width;
+            self.leading = leading;
+            self.trailing = trailing;
+            self.have_window = true;
+            (leading, trailing, width)
+        };
+        debug_assert!(leading + trailing + width == 64);
+        let meaningful = self.reader.read_bits(width)?;
+        let value = self.prev ^ (meaningful << trailing);
+        self.prev = value;
+        Some(value)
+    }
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -247,5 +450,302 @@ mod tests {
         let (decoded, width) = undelta(147573952589676413376);
         assert_eq!(TICKLER, decoded);
         assert_eq!(66, width);
+    }
+
+    #[test]
+    fn bit_stream_round_trips_words() {
+        let mut writer = BitWriter::default();
+        writer.push_bit(true);
+        writer.push_bits(0b101, 3);
+        writer.push_bits(u64::MAX, 64);
+        writer.push_bits(0x1234, 16);
+        let bytes = writer.seal();
+        let mut reader = BitReader::new(&bytes);
+        assert_eq!(Some(true), reader.read_bit());
+        assert_eq!(Some(0b101), reader.read_bits(3));
+        assert_eq!(Some(u64::MAX), reader.read_bits(64));
+        assert_eq!(Some(0x1234), reader.read_bits(16));
+    }
+
+    #[test]
+    fn gorilla_round_trips_f64_bits() {
+        let values = [
+            0.0f64.to_bits(),
+            0.0f64.to_bits(),
+            (-0.0f64).to_bits(),
+            1.5f64.to_bits(),
+            f64::INFINITY.to_bits(),
+            f64::NEG_INFINITY.to_bits(),
+            0x7ff8_1234_5678_9abcu64,
+            0x7ff8_1234_5678_9abcu64,
+            42.0f64.to_bits(),
+        ];
+        let mut encoder = GorillaEncoder::new(values[0]);
+        for value in values.iter().copied().skip(1) {
+            encoder.push(value);
+        }
+        let bytes = encoder.seal();
+        let mut decoder = GorillaDecoder::new(values[0], &bytes);
+        let mut decoded = vec![values[0]];
+        for _ in 1..values.len() {
+            decoded.push(decoder.next().unwrap());
+        }
+        assert_eq!(values.as_slice(), decoded.as_slice());
+    }
+
+    ////////////////////////////////////////////// proptests //////////////////////////////////////////////
+
+    /// Round-trips a gorilla series through the encoder and decoder.
+    ///
+    /// The first sample seeds both `GorillaEncoder` and `GorillaDecoder` and is
+    /// never written into the bit stream; the decoder reproduces only the
+    /// remainder, so we re-prepend the seed before comparing to the original.
+    fn gorilla_round_trip(values: &[u64]) -> Result<(), proptest::test_runner::TestCaseError> {
+        let first = values[0];
+        let mut encoder = GorillaEncoder::new(first);
+        for &value in values.iter().skip(1) {
+            encoder.push(value);
+        }
+        let bytes = encoder.seal();
+        let mut decoder = GorillaDecoder::new(first, &bytes);
+        let mut decoded = vec![first];
+        // The gorilla stream carries no end-marker: seal() zero-pads the final
+        // byte, so the decoder must be driven by the known sample count
+        // (mirroring how the store pairs values with timestamps) rather than by
+        // iterator exhaustion, which would read padding bits as repeated values.
+        for _ in 1..values.len() {
+            let value = decoder
+                .next()
+                .expect("decoder exhausted before reproducing all samples");
+            decoded.push(value);
+        }
+        proptest::prop_assert_eq!(values, decoded.as_slice());
+        Ok(())
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_gamma_value()(x in 0u64..u64::MAX) -> u64 {
+            x
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_gamma_round_trip(x in arb_gamma_value()) {
+            // gamma() panics on u64::MAX, so the strategy spans [0, u64::MAX);
+            // every value must round-trip and satisfy the is_gamma prefix test.
+            let (g, w) = gamma(x);
+            let (x2, w2) = ungamma(g);
+            proptest::prop_assert_eq!(x, x2);
+            proptest::prop_assert_eq!(w, w2);
+            for sz in 0..w {
+                proptest::prop_assert!(
+                    !is_gamma(g, sz),
+                    "is_gamma({:#x}, {}) should be false (w={})",
+                    g, sz, w
+                );
+            }
+            for sz in w..=128 {
+                proptest::prop_assert!(
+                    is_gamma(g, sz),
+                    "is_gamma({:#x}, {}) should be true (w={})",
+                    g, sz, w
+                );
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_delta_value()(x in proptest::arbitrary::any::<u64>()) -> u64 {
+            x
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_delta_round_trip(x in arb_delta_value()) {
+            // delta() accepts the whole u64 domain, u64::MAX included.
+            let (d, w) = delta(x);
+            let (x2, w2) = undelta(d);
+            proptest::prop_assert_eq!(x, x2);
+            proptest::prop_assert_eq!(w, w2);
+            for sz in 0..w {
+                proptest::prop_assert!(
+                    !is_delta(d, sz),
+                    "is_delta({:#x}, {}) should be false (w={})",
+                    d, sz, w
+                );
+            }
+            for sz in w..=128 {
+                proptest::prop_assert!(
+                    is_delta(d, sz),
+                    "is_delta({:#x}, {}) should be true (w={})",
+                    d, sz, w
+                );
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_bits()(bits in proptest::collection::vec(
+            proptest::arbitrary::any::<bool>(), 0..1024)) -> Vec<bool> {
+            bits
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_bit_stream_bits(bits in arb_bits()) {
+            let mut writer = BitWriter::default();
+            for &bit in bits.iter() {
+                writer.push_bit(bit);
+            }
+            let bytes = writer.seal();
+            let mut reader = BitReader::new(&bytes);
+            for (idx, &expected) in bits.iter().enumerate() {
+                let got = reader.read_bit().expect("reader ran out before writer");
+                proptest::prop_assert_eq!(expected, got, "idx={}", idx);
+            }
+            // seal() zero-pads the final byte, so bits past the pushed run are
+            // readable padding; the round-trip property is that the first
+            // `bits` reads reproduce the pushed stream, which the loop above
+            // checks.  (The gorilla decoder relies on this same count-driven
+            // discipline rather than an end-marker.)
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_words()(words in proptest::collection::vec(
+            (proptest::arbitrary::any::<u64>(), 1usize..=64usize), 0..256)) -> Vec<(u64, usize)> {
+            words
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_bit_stream_words(words in arb_words()) {
+            let mut writer = BitWriter::default();
+            for &(word, bits) in words.iter() {
+                writer.push_bits(word, bits);
+            }
+            let bytes = writer.seal();
+            let mut reader = BitReader::new(&bytes);
+            for (idx, &(word, bits)) in words.iter().enumerate() {
+                let got = reader.read_bits(bits).expect("reader ran out before writer");
+                // push_bits emits only the low `bits` bits of `word`.
+                let expected = if bits == 64 {
+                    word
+                } else {
+                    word & ((1u64 << bits) - 1)
+                };
+                proptest::prop_assert_eq!(
+                    expected, got,
+                    "idx={} bits={} word={:#x}",
+                    idx, bits, word
+                );
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_bit_ops()(ops in proptest::collection::vec(
+            (proptest::arbitrary::any::<u8>(),
+             proptest::arbitrary::any::<u64>(),
+             1usize..=64usize),
+            0..256)) -> Vec<(u8, u64, usize)> {
+            ops
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_bit_stream_mixed(ops in arb_bit_ops()) {
+            // Each triple is (kind, word, bits).  An even `kind` emits a single
+            // bit (the low bit of `word`); an odd `kind` emits `bits` bits of
+            // `word`.  This interleaves push_bit and push_bits across byte
+            // boundaries, which the gorilla codec relies on.
+            let mut writer = BitWriter::default();
+            for &(kind, word, bits) in ops.iter() {
+                if kind % 2 == 0 {
+                    writer.push_bit(word & 1 != 0);
+                } else {
+                    writer.push_bits(word, bits);
+                }
+            }
+            let bytes = writer.seal();
+            let mut reader = BitReader::new(&bytes);
+            for (idx, &(kind, word, bits)) in ops.iter().enumerate() {
+                if kind % 2 == 0 {
+                    let got = reader.read_bit().expect("reader ran out before writer");
+                    proptest::prop_assert_eq!(word & 1 != 0, got, "idx={}", idx);
+                } else {
+                    let got = reader.read_bits(bits).expect("reader ran out before writer");
+                    let expected = if bits == 64 {
+                        word
+                    } else {
+                        word & ((1u64 << bits) - 1)
+                    };
+                    proptest::prop_assert_eq!(
+                        expected, got,
+                        "idx={} bits={} word={:#x}",
+                        idx, bits, word
+                    );
+                }
+            }
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_gorilla_series()(values in proptest::collection::vec(
+            proptest::arbitrary::any::<u64>(), 1..512)) -> Vec<u64> {
+            values
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_gorilla_round_trip(values in arb_gorilla_series()) {
+            gorilla_round_trip(&values)?;
+        }
+    }
+
+    proptest::prop_compose! {
+        pub fn arb_gorilla_clustered_series()(
+            base in proptest::arbitrary::any::<u64>(),
+            perturbations in proptest::collection::vec(
+                proptest::arbitrary::any::<u64>(), 0..512),
+        ) -> Vec<u64> {
+            // Perturb only the low 16 bits so consecutive XORs share a large
+            // leading-zero run; this repeatedly drives the decoder through the
+            // "reuse the previous window" path, not just the "open a new window"
+            // path that uniformly-random data mostly hits.
+            let mut values = vec![base];
+            let mut cur = base;
+            for &p in perturbations.iter() {
+                cur ^= p & 0xffff;
+                values.push(cur);
+            }
+            values
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_gorilla_clustered_series(values in arb_gorilla_clustered_series()) {
+            gorilla_round_trip(&values)?;
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_gorilla_constant_series(
+            value in proptest::arbitrary::any::<u64>(),
+            count in 1usize..512,
+        ) {
+            // A run of identical samples exercises the xor == 0 fast path, which
+            // emits a single zero control bit per sample.
+            let values = vec![value; count];
+            gorilla_round_trip(&values)?;
+        }
     }
 }

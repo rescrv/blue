@@ -106,14 +106,14 @@ impl BiometricsStore for RecoveryBiometricsStore {
             if req_tags.tags().all(|tag| tags.tags().any(|t| t == tag)) {
                 let mut se = SeriesEncoder::default();
                 let mut first = None;
-                let mut points_pushed = 0;
+                let mut samples = vec![];
                 for (ts, point) in data.iter() {
                     if (req.params.window().start..req.params.window().limit).contains(ts) {
                         if first.is_none() {
                             first = Some((*ts, *point));
                         }
                         se.push(*ts, *point)?;
-                        points_pushed += 1;
+                        samples.push((*ts, *point));
                     }
                 }
                 let Some(first) = first else {
@@ -122,8 +122,12 @@ impl BiometricsStore for RecoveryBiometricsStore {
                 let series = EncodedSeries::new(first.1, se.as_ref().to_vec());
                 let decoder: SeriesDecoder = SeriesDecoder::from(series.bytes.as_ref());
                 let returned = decoder.into_iter().collect::<Result<Vec<_>, _>>()?;
-                assert_eq!(returned.len(), points_pushed);
-                serieses.push(series);
+                assert_eq!(returned.len(), samples.len());
+                let chunk = SeriesChunk::from_samples(MetricType::Counter, &samples)?;
+                serieses.push(FetchedSeries {
+                    tags: tags.to_string(),
+                    chunks: vec![chunk],
+                });
             }
         }
         Ok(FetchCountersResponse { serieses })

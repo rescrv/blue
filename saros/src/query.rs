@@ -131,14 +131,16 @@ pub fn counters<'a>(
                 tags: tags.to_string(),
             },
         )?;
-        for series in resp.serieses {
-            let series = Series::decode(
-                Some(tags.clone().into_owned()),
-                params.window,
-                params.step,
-                &series,
-            )?;
-            results.push(series);
+        let window = params.window_including_lookback();
+        for fetched in resp.serieses {
+            let label = Tags::new(fetched.tags)
+                .map(Tags::into_owned)
+                .ok_or_else(|| internal_error("fetched series tags did not parse"))?;
+            if let Some(series) =
+                Series::decode_chunks(Some(label), window, params.step, &fetched.chunks)?
+            {
+                results.push(series);
+            }
         }
         Ok(results)
     }
