@@ -508,6 +508,10 @@ impl<T> Evaluator<T> {
         reject_nested(tokens)?;
 
         // Walk the top level, pairing each binder with the quotation before it.
+        // The walk **stages** every definition and inserts only after the whole
+        // stream validates: `load` is atomic — a stream with any invalid binder
+        // (`[ 1 ] :a :2x`) defines nothing, rather than leaving `:a` behind.
+        let mut staged: Vec<(String, Vec<Token>)> = Vec::new();
         let mut i = 0;
         while i < tokens.len() {
             if let Token::Word(w) = &tokens[i]
@@ -531,14 +535,19 @@ impl<T> Evaluator<T> {
                         )));
                     }
                 };
-                if self.definitions.contains_key(name) {
+                if self.definitions.contains_key(name)
+                    || staged.iter().any(|(staged_name, _)| staged_name == name)
+                {
                     return Err(definition_error(format!(
                         "redefinition: `:{name}` is already defined"
                     )));
                 }
-                self.definitions.insert(name.to_string(), body);
+                staged.push((name.to_string(), body));
             }
             i += 1;
+        }
+        for (name, body) in staged {
+            self.definitions.insert(name, body);
         }
         Ok(())
     }
@@ -1468,6 +1477,25 @@ mod tests {
             "[first] :x [second] :x",
             "redefinition: `:x` is already defined",
         );
+    }
+
+    /// `load` is atomic: a stream with any invalid binder defines nothing.
+    /// Before the fix `[ 1 ] :a :2x` errored but left `:a` defined, so an
+    /// erroring `load` mutated the evaluator (the REPL was transactional only
+    /// because it cloned first).
+    #[test]
+    fn load_is_atomic_on_error() {
+        let mut eval = locals_eval();
+        let tokens = parse("[ 1 ] :a :2x").unwrap();
+        assert!(eval.load(&tokens).is_err());
+        assert!(
+            !eval.has_definition("a"),
+            "a failed load must not leave earlier definitions behind"
+        );
+
+        let tokens = parse("[first] :x [second] :x").unwrap();
+        assert!(eval.load(&tokens).is_err());
+        assert!(!eval.has_definition("x"));
     }
 
     #[test]
