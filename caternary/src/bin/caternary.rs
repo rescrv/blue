@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use arrrg::CommandLine;
 use caternary::{
-    CODE_OPERATOR_ERROR, EvalError, Evaluator, ParseError, Quotable, QuoteItem, Scheme,
-    SmtLibSolver, Span, SpannedToken, SpannedTokenKind, StackTy, Token, Ty, WordTy,
-    check_whole_program, core_scheme, format_word_type, infer_quote_type, parse_with_spans,
+    CODE_OPERATOR_ERROR, EvalError, Evaluator, OperatorTable, ParseError, Quotable, QuoteItem,
+    Scheme, SmtLibSolver, Span, SpannedToken, SpannedTokenKind, StackTy, Token, Ty, WordTy,
+    check_whole_program, format_word_type, infer_quote_type, parse_with_spans,
     quote_items_from_tokens, quote_items_to_tokens, quote_items_to_values, register_all_builtins,
 };
 use handled::SError;
@@ -55,13 +55,6 @@ enum Value {
     Bool(bool),
     Quotation(Vec<QuoteItem<Value>>),
 }
-
-const CORE_OPERATOR_NAMES: &[&str] = &[
-    "DUP", "DROP", "SWAP", "OVER", "ROT", "-ROT", "NIP", "TUCK", "2DUP", "2DROP", "2SWAP", "2OVER",
-    "2ROT", "CALL", "DIP", "2DIP", "3DIP", "IF", "KEEP", "2KEEP", "3KEEP", "BI", "BI*", "BI@",
-    "TRI", "TRI*", "TRI@", "COMPOSE", "CURRY", "2CURRY", "3CURRY", "WHEN", "UNLESS", "MAP",
-    "FILTER", "FOLD", "EACH",
-];
 
 impl From<Token> for Value {
     fn from(token: Token) -> Self {
@@ -321,17 +314,11 @@ impl ReplState {
     }
 
     fn operator_lines(&self) -> Vec<String> {
-        let mut ops: Vec<(String, String)> = CORE_OPERATOR_NAMES
+        let mut ops: Vec<(String, String)> = OperatorTable::of(&self.evaluator)
+            .entries()
             .iter()
-            .filter_map(|name| {
-                core_scheme(name).map(|scheme| (name.to_string(), format_word_type(&scheme.ty)))
-            })
+            .map(|op| (op.name.clone(), format_word_type(&op.scheme.ty)))
             .collect();
-        ops.extend(self.evaluator.contract_names().filter_map(|name| {
-            self.evaluator
-                .contract(name)
-                .map(|scheme| (name.to_string(), format_word_type(&scheme.ty)))
-        }));
         ops.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         ops.dedup_by(|left, right| left.0 == right.0);
         ops.into_iter()
