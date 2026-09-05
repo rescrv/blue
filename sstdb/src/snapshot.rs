@@ -171,7 +171,9 @@ impl Snapshot {
 
     /// Iterate over all live user key/value pairs in sorted order.
     pub fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> {
-        self.map.iter().map(|(k, (_, v))| (k.as_slice(), v.as_slice()))
+        self.map
+            .iter()
+            .map(|(k, (_, v))| (k.as_slice(), v.as_slice()))
     }
 
     /// Produce a new snapshot with `batch` applied and `log_hi` advanced to `offset`.
@@ -199,7 +201,9 @@ impl Snapshot {
             high_water_mark = kvr.timestamp;
             match kvr.value {
                 Some(value) => {
-                    if let Some((_, old)) = map.insert(kvr.key.to_vec(), (kvr.timestamp, value.to_vec())) {
+                    if let Some((_, old)) =
+                        map.insert(kvr.key.to_vec(), (kvr.timestamp, value.to_vec()))
+                    {
                         setsum.remove(&setsum_item(kvr.key, &old));
                     }
                     setsum.insert(&setsum_item(kvr.key, value));

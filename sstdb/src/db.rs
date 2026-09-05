@@ -457,4 +457,3 @@ mod tests {
         assert_eq!(db.snapshot().await.unwrap().timestamp_hi(), 2);
     }
 }
-
