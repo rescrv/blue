@@ -95,7 +95,21 @@ pub enum ParseError {
         /// Span of the unmatched closing bracket.
         span: Span,
     },
+    /// Bracket nesting exceeded [`MAX_BRACKET_DEPTH`]. The parser itself is
+    /// iterative, but the token tree's derived `Drop`/`Clone`/`PartialEq` and
+    /// the downstream walks recurse per level, so unbounded nesting would parse
+    /// and then abort the process; the cap turns that into a clean error.
+    NestingTooDeep {
+        /// Span of the opening bracket that exceeded the cap.
+        span: Span,
+    },
 }
+
+/// The maximum bracket nesting depth [`parse`]/[`parse_with_spans`] accept.
+/// Deep enough for any honest program; shallow enough that every recursive
+/// walk over the token tree (including drop glue) stays far from the stack
+/// limit.
+pub const MAX_BRACKET_DEPTH: usize = 4_096;
 
 impl ParseError {
     /// Returns the source span associated with this parse error.
@@ -104,6 +118,7 @@ impl ParseError {
             ParseError::Tokenization { .. } => Span { start: 0, end: 0 },
             ParseError::UnmatchedOpenBracket { span } => *span,
             ParseError::UnmatchedCloseBracket { span } => *span,
+            ParseError::NestingTooDeep { span } => *span,
         }
     }
 }
@@ -119,6 +134,13 @@ impl std::fmt::Display for ParseError {
             }
             ParseError::UnmatchedCloseBracket { span } => {
                 write!(f, "unmatched closing bracket ']' at byte {}", span.start)
+            }
+            ParseError::NestingTooDeep { span } => {
+                write!(
+                    f,
+                    "bracket nesting exceeds the maximum depth of {MAX_BRACKET_DEPTH} at byte {}",
+                    span.start
+                )
             }
         }
     }
@@ -151,6 +173,11 @@ struct ShellWord {
 
 #[derive(Clone, Copy)]
 struct EmittedChar {
+    /// `true` when the character came through single/double quotes or a
+    /// backslash escape. A literal `[`/`]` is word content, never structure:
+    /// shell quoting is resolved *before* bracket processing, so quoting is
+    /// the only way to spell a bracket inside a word.
+    literal: bool,
     ch: char,
     span: Span,
 }
@@ -185,15 +212,24 @@ impl Parser {
 
         for emitted in shell_word.emitted {
             match emitted.ch {
-                '[' => {
+                '[' if !emitted.literal => {
                     self.flush_segment(&mut segment, segment_start, emitted.span.start);
+                    // Parsing is iterative, but `Token`'s derived
+                    // `Drop`/`Clone`/`PartialEq` and the downstream walks
+                    // recurse per nesting level, so an unbounded nest parses
+                    // and then aborts the process (stack overflow) when
+                    // dropped. Cap the depth here, at the only place structure
+                    // is created.
+                    if self.frames.len() > MAX_BRACKET_DEPTH {
+                        return Err(ParseError::NestingTooDeep { span: emitted.span });
+                    }
                     self.frames.push(Frame {
                         open_bracket: Some(emitted.span.start),
                         tokens: Vec::new(),
                     });
                     segment_start = emitted.span.end;
                 }
-                ']' => {
+                ']' if !emitted.literal => {
                     self.flush_segment(&mut segment, segment_start, emitted.span.start);
                     let Some(frame) = self.frames.pop() else {
                         unreachable!("parser always has a root frame");
@@ -312,6 +348,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
         match (state, ch) {
             (SplitState::Double, '$') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '$',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -321,6 +358,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Double, '`') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '`',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -330,6 +368,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Double, '"') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '"',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -339,6 +378,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Double, '\\') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\\',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -348,6 +388,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Double, '\n') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\n',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -357,6 +398,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Double, 'n') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\n',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -373,6 +415,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             (SplitState::Double, c) if whack_start.is_some() => {
                 let whack = whack_start.take().unwrap_or(start);
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\\',
                     span: Span {
                         start: whack,
@@ -380,12 +423,14 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
                     },
                 });
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: c,
                     span: Span { start, end },
                 });
             }
             (SplitState::Double, c) => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: c,
                     span: Span { start, end },
                 });
@@ -395,12 +440,14 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Single, c) => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: c,
                     span: Span { start, end },
                 });
             }
             (SplitState::Unquoted, c) if c.is_whitespace() && whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: c,
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -410,6 +457,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Unquoted, '\'') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\'',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -422,6 +470,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             }
             (SplitState::Unquoted, '"') if whack_start.is_some() => {
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '"',
                     span: Span {
                         start: whack_start.take().unwrap_or(start),
@@ -438,6 +487,7 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
             (SplitState::Unquoted, c) if whack_start.is_some() => {
                 let whack = whack_start.take().unwrap_or(start);
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: '\\',
                     span: Span {
                         start: whack,
@@ -445,12 +495,16 @@ fn decode_shell_word(input: &str, base: usize) -> Vec<EmittedChar> {
                     },
                 });
                 emitted.push(EmittedChar {
+                    literal: true,
                     ch: c,
                     span: Span { start, end },
                 });
             }
             (SplitState::Unquoted, c) => {
+                // The only unquoted, unescaped emission: brackets here are
+                // structural; everything above stays literal.
                 emitted.push(EmittedChar {
+                    literal: false,
                     ch: c,
                     span: Span { start, end },
                 });
@@ -476,6 +530,68 @@ mod tests {
                 Token::Word("scan".to_string()),
             ]
         );
+    }
+
+    // =======================================================================
+    // Regression: quoted/escaped brackets are word content, not structure
+    // (shell quotes/escapes resolve before bracket processing, so quoting is
+    // the only way to spell a literal bracket in a word)
+    // =======================================================================
+
+    #[test]
+    fn double_quoted_brackets_stay_literal() {
+        let tokens = parse(r#""a]b""#).unwrap();
+        assert_eq!(tokens, vec![Token::Word("a]b".to_string())]);
+        let tokens = parse(r#""[ 1 ]""#).unwrap();
+        assert_eq!(tokens, vec![Token::Word("[ 1 ]".to_string())]);
+    }
+
+    #[test]
+    fn single_quoted_brackets_stay_literal() {
+        let tokens = parse("'a]b'").unwrap();
+        assert_eq!(tokens, vec![Token::Word("a]b".to_string())]);
+        let tokens = parse("'a[b'").unwrap();
+        assert_eq!(tokens, vec![Token::Word("a[b".to_string())]);
+    }
+
+    #[test]
+    fn backslash_escaped_brackets_stay_literal() {
+        // An unquoted backslash escape keeps both characters (shvar semantics);
+        // the escaped bracket must not open/close structure.
+        let tokens = parse(r"a\]b").unwrap();
+        assert_eq!(tokens, vec![Token::Word(r"a\]b".to_string())]);
+        let tokens = parse(r"a\[b").unwrap();
+        assert_eq!(tokens, vec![Token::Word(r"a\[b".to_string())]);
+    }
+
+    #[test]
+    fn unquoted_brackets_remain_structural_around_quoted_ones() {
+        let tokens = parse(r#"[ "]" ]"#).unwrap();
+        assert_eq!(
+            tokens,
+            vec![Token::Bracket(vec![Token::Word("]".to_string())])]
+        );
+    }
+
+    // =======================================================================
+    // Regression: unbounded nesting parsed, then aborted the process (stack
+    // overflow in the token tree's recursive drop) — the cap rejects cleanly
+    // =======================================================================
+
+    #[test]
+    fn nesting_below_the_cap_parses() {
+        let depth = MAX_BRACKET_DEPTH;
+        let src = "[".repeat(depth) + &"]".repeat(depth);
+        let tokens = parse(&src).unwrap();
+        assert_eq!(tokens.len(), 1);
+    }
+
+    #[test]
+    fn nesting_beyond_the_cap_is_a_clean_error() {
+        let depth = 200_000;
+        let src = "[".repeat(depth) + &"]".repeat(depth);
+        let err = parse(&src).unwrap_err();
+        assert!(matches!(err, ParseError::NestingTooDeep { .. }));
     }
 
     #[test]
