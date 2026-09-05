@@ -2103,8 +2103,7 @@ mod tests {
         let mut eval: Evaluator<Value> = Evaluator::new();
         // There is no core `+`; attest its contract, exactly as §12 says.
         eval.register_operator_with_contract("+", plus_scheme());
-        let tokens =
-            parse_with_spans("[ true 5 [ 7 + ] DUP DIP ROT DROP CALL ] :main").unwrap();
+        let tokens = parse_with_spans("[ true 5 [ 7 + ] DUP DIP ROT DROP CALL ] :main").unwrap();
         eval.load_with_spans(&tokens).unwrap();
         assert!(
             type_check(&eval).is_ok(),
