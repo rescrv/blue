@@ -28,16 +28,17 @@
 //! a shadow action (core shadow word, interpreted op, or `Opaque` via the
 //! arrow), and a runtime builtin:
 //!
-//! - literals: numeric pushes, literal brackets, the three function quotations
+//! - literals: numeric pushes, `true`/`false`, literal brackets, the four
+//!   function quotations (`FnFilter : (Num -- Bool)` joined in with `Bool`)
 //! - shuffles: `DUP DROP SWAP OVER ROT NIP TUCK`
-//! - arithmetic: `+ - *` (`/` and `%` are excluded — the generator would have
-//!   to prove nonzero divisors; a refinement-aware extension can add them)
+//! - arithmetic and comparison: `+ - * < >` (`/` and `%` remain excluded — the
+//!   generator would have to prove nonzero divisors; a refinement-aware
+//!   extension can add them)
 //! - combinators: `CALL` (on literal brackets and on each function kind),
-//!   `DIP`, `MAP`, `FOLD`, `EACH`
-//!
-//! `FILTER` is excluded from v1: it needs an `(a -- Bool)` function kind and a
-//! `Bool`-aware simulated stack; nothing about the conformance relation changes,
-//! so it is deferred rather than designed around.
+//!   `DIP`, `MAP`, `FOLD`, `EACH`, `FILTER`, and `IF` in two arm families —
+//!   `[ a ] [ b ] IF : ( 'S Bool -- 'S Num )` and
+//!   `[ a + ] [ b * ] IF : ( 'S Num Bool -- 'S Num )` — with arm literals drawn
+//!   from the seed so agreed and disagreed arms both occur.
 //!
 //! ## The property (three conformance relations, one per strength)
 //!
@@ -66,6 +67,14 @@
 //! class (mis-shuffled slots) can conspire to preserve depth while binding the
 //! wrong term, which C3 catches whenever either the misplaced or the displaced
 //! slot is a known numeric.
+//!
+//! Under `IF`, C3 is exactly the relation that demands the **branch join**
+//! (§10.4, `ShadowStack::join_branch_states`): the shadow's post-IF stack may
+//! keep a `Pred::Num` only where the branches agree on it, because the runtime
+//! is free to take either branch. Advancing with one branch's concrete
+//! post-state (the pre-join behavior) is refuted by any generated
+//! `false [ a ] [ b ] IF` with `a != b` — and, one level up, let the gate
+//! certify demands the runtime violates.
 
 use caternary::*;
 use proptest::prelude::*;
@@ -111,6 +120,12 @@ impl Quotable for Value {
         }
     }
 
+    fn is_truthy(&self) -> bool {
+        // Comparisons render booleans as their lexemes (`numeric_cmp` pushes
+        // `true`/`false` words); IF and FILTER branch on this.
+        !matches!(self, Value::Word(w) if w == "false")
+    }
+
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
             Value::Bracket(b) => Some(quote_items_to_values(b)),
@@ -153,8 +168,12 @@ enum K {
     FnFold(u32),
     /// `[ DROP ] : (a -- )` — an EACH/CALL-able consumer.
     FnEach(u32),
+    /// `[ k > ] : (Num -- Bool)` — a FILTER/CALL-able predicate.
+    FnFilter(u32),
     /// An opaque sequence-combinator output (`List Num` to Tier 0).
     List,
+    /// A boolean (`true`/`false` literal or a comparison's result).
+    Bool,
 }
 
 impl K {
@@ -165,8 +184,10 @@ impl K {
     /// The origin id, for quote kinds.
     fn origin(self) -> Option<u32> {
         match self {
-            K::Lit(_, id) | K::FnMap(id) | K::FnFold(id) | K::FnEach(id) => Some(id),
-            K::Num | K::List => None,
+            K::Lit(_, id) | K::FnMap(id) | K::FnFold(id) | K::FnEach(id) | K::FnFilter(id) => {
+                Some(id)
+            }
+            K::Num | K::List | K::Bool => None,
         }
     }
 }
@@ -188,6 +209,8 @@ enum Move {
     PushFnMap(u8),
     PushFnFold,
     PushFnEach,
+    PushFnFilter(u8),
+    PushBool(u8),
     Dup,
     Drop,
     Swap,
@@ -198,11 +221,19 @@ enum Move {
     Add,
     Sub,
     Mul,
+    Lt,
+    Gt,
     Call,
     Dip,
     Map,
     Fold,
     Each,
+    Filter,
+    /// `[ a ] [ b ] IF` — arms of effect `( 'S -- 'S Num )`; the two 4-bit arm
+    /// literals ride in the payload, so agreed and disagreed arms both occur.
+    IfConst(u8),
+    /// `[ a + ] [ b * ] IF` — arms of effect `( 'S Num -- 'S Num )`.
+    IfXform(u8),
 }
 
 const ALL_MOVES: &[Move] = &[
@@ -211,6 +242,8 @@ const ALL_MOVES: &[Move] = &[
     Move::PushFnMap(0),
     Move::PushFnFold,
     Move::PushFnEach,
+    Move::PushFnFilter(0),
+    Move::PushBool(0),
     Move::Dup,
     Move::Drop,
     Move::Swap,
@@ -221,11 +254,16 @@ const ALL_MOVES: &[Move] = &[
     Move::Add,
     Move::Sub,
     Move::Mul,
+    Move::Lt,
+    Move::Gt,
     Move::Call,
     Move::Dip,
     Move::Map,
     Move::Fold,
     Move::Each,
+    Move::Filter,
+    Move::IfConst(0),
+    Move::IfXform(0),
 ];
 
 impl Move {
@@ -240,11 +278,15 @@ impl Move {
             | Move::PushLit(_)
             | Move::PushFnMap(_)
             | Move::PushFnFold
-            | Move::PushFnEach => true,
+            | Move::PushFnEach
+            | Move::PushFnFilter(_)
+            | Move::PushBool(_) => true,
             Move::Dup | Move::Drop => n >= 1,
             Move::Swap | Move::Nip | Move::Tuck | Move::Over => n >= 2,
             Move::Rot => n >= 3,
-            Move::Add | Move::Sub | Move::Mul => n >= 2 && top(0) == K::Num && top(1) == K::Num,
+            Move::Add | Move::Sub | Move::Mul | Move::Lt | Move::Gt => {
+                n >= 2 && top(0) == K::Num && top(1) == K::Num
+            }
             // CALL binds the quotation's input row against everything beneath
             // it — a same-origin copy in that row trips the occurs check.
             Move::Call => {
@@ -260,8 +302,22 @@ impl Move {
                                 && top(2) == K::Num
                                 && !origin_in_row(q, &sim[..n - 1])
                         }
-                        q @ K::FnEach(_) => n >= 2 && !origin_in_row(q, &sim[..n - 1]),
-                        K::Num | K::List => false,
+                        // `[ DROP ] : ('q a -- 'q)` is the one *polymorphic*
+                        // function kind, and copies share a monomorphic type:
+                        // an EACH on one copy pins `a := Num` (every generated
+                        // list is `List Num`), and a CALL on a surviving copy
+                        // inherits that pin. Requiring a `Num` beneath makes
+                        // every use pin `a` identically, so shared copies never
+                        // conflict. (Double-CALL row conflicts are already
+                        // impossible: the occurs rule blocks a CALL while a
+                        // same-origin copy sits in the bound row.)
+                        q @ K::FnEach(_) => {
+                            n >= 2 && top(1) == K::Num && !origin_in_row(q, &sim[..n - 1])
+                        }
+                        q @ K::FnFilter(_) => {
+                            n >= 2 && top(1) == K::Num && !origin_in_row(q, &sim[..n - 1])
+                        }
+                        K::Num | K::List | K::Bool => false,
                     }
             }
             // `DIP : ('S x q -- 'T x)` with q = FnMap needs a Num beneath the
@@ -278,6 +334,11 @@ impl Move {
                 n >= 3 && matches!(top(0), K::FnFold(_)) && top(1) == K::Num && top(2).list_like()
             }
             Move::Each => n >= 2 && matches!(top(0), K::FnEach(_)) && top(1).list_like(),
+            Move::Filter => n >= 2 && matches!(top(0), K::FnFilter(_)) && top(1).list_like(),
+            // Both IF families emit their arms inline (freshly typed, so no
+            // occurs concern); the condition must sit on top.
+            Move::IfConst(_) => n >= 1 && top(0) == K::Bool,
+            Move::IfXform(_) => n >= 2 && top(0) == K::Bool && top(1) == K::Num,
         }
     }
 
@@ -296,6 +357,8 @@ impl Move {
             Move::PushFnMap(_) => sim.push(K::FnMap(fresh())),
             Move::PushFnFold => sim.push(K::FnFold(fresh())),
             Move::PushFnEach => sim.push(K::FnEach(fresh())),
+            Move::PushFnFilter(_) => sim.push(K::FnFilter(fresh())),
+            Move::PushBool(_) => sim.push(K::Bool),
             Move::Dup => sim.push(sim[n - 1]),
             Move::Drop => {
                 sim.pop();
@@ -318,6 +381,11 @@ impl Move {
                 sim.pop();
                 sim.push(K::Num);
             }
+            Move::Lt | Move::Gt => {
+                sim.pop();
+                sim.pop();
+                sim.push(K::Bool);
+            }
             Move::Call => match sim.pop().expect("legal checked") {
                 K::Lit(sz, _) => sim.extend(std::iter::repeat_n(K::Num, sz)),
                 K::FnMap(_) => {
@@ -329,7 +397,11 @@ impl Move {
                 K::FnEach(_) => {
                     sim.pop();
                 }
-                K::Num | K::List => unreachable!("legal checked"),
+                K::FnFilter(_) => {
+                    sim.pop();
+                    sim.push(K::Bool);
+                }
+                K::Num | K::List | K::Bool => unreachable!("legal checked"),
             },
             Move::Dip => {
                 // pops the quote; transforms the Num two-under (Num → Num, so
@@ -351,6 +423,19 @@ impl Move {
                 sim.pop();
                 sim.pop();
             }
+            Move::Filter => {
+                sim.pop();
+                sim.pop();
+                sim.push(K::List);
+            }
+            Move::IfConst(_) => {
+                sim.pop();
+                sim.push(K::Num);
+            }
+            Move::IfXform(_) => {
+                sim.pop();
+                // the Num beneath is transformed Num -> Num: kind-invisible.
+            }
         }
     }
 
@@ -369,6 +454,8 @@ impl Move {
             Move::PushFnMap(k) => out.push_str(&format!(" [ {} + ]", k % 10)),
             Move::PushFnFold => out.push_str(" [ + ]"),
             Move::PushFnEach => out.push_str(" [ DROP ]"),
+            Move::PushFnFilter(k) => out.push_str(&format!(" [ {} > ]", k % 10)),
+            Move::PushBool(k) => out.push_str(if k % 2 == 0 { " true" } else { " false" }),
             Move::Dup => out.push_str(" DUP"),
             Move::Drop => out.push_str(" DROP"),
             Move::Swap => out.push_str(" SWAP"),
@@ -379,11 +466,20 @@ impl Move {
             Move::Add => out.push_str(" +"),
             Move::Sub => out.push_str(" -"),
             Move::Mul => out.push_str(" *"),
+            Move::Lt => out.push_str(" <"),
+            Move::Gt => out.push_str(" >"),
             Move::Call => out.push_str(" CALL"),
             Move::Dip => out.push_str(" DIP"),
             Move::Map => out.push_str(" MAP"),
             Move::Fold => out.push_str(" FOLD"),
             Move::Each => out.push_str(" EACH"),
+            Move::Filter => out.push_str(" FILTER"),
+            Move::IfConst(p) => {
+                out.push_str(&format!(" [ {} ] [ {} ] IF", p & 0xf, (p >> 4) & 0xf))
+            }
+            Move::IfXform(p) => {
+                out.push_str(&format!(" [ {} + ] [ {} * ] IF", p & 0xf, (p >> 4) & 0xf))
+            }
         }
     }
 }
@@ -404,16 +500,25 @@ fn seeds_to_source(seeds: &[u64]) -> String {
         debug_assert!(!legal.is_empty(), "pushes are always legal");
         let payload = (seed >> 32) as u8;
         let mut mv = legal[(seed as usize) % legal.len()];
-        mv = match mv {
-            Move::PushNum(_) => Move::PushNum(payload),
-            Move::PushLit(_) => Move::PushLit(payload),
-            Move::PushFnMap(_) => Move::PushFnMap(payload),
-            other => other,
-        };
+        mv = with_payload(mv, payload);
         mv.apply(&mut sim, &mut origin);
         mv.emit(&mut src);
     }
     src.trim().to_string()
+}
+
+/// Thread the seed's payload byte into the payload-carrying moves.
+fn with_payload(mv: Move, payload: u8) -> Move {
+    match mv {
+        Move::PushNum(_) => Move::PushNum(payload),
+        Move::PushLit(_) => Move::PushLit(payload),
+        Move::PushFnMap(_) => Move::PushFnMap(payload),
+        Move::PushFnFilter(_) => Move::PushFnFilter(payload),
+        Move::PushBool(_) => Move::PushBool(payload),
+        Move::IfConst(_) => Move::IfConst(payload),
+        Move::IfXform(_) => Move::IfXform(payload),
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +670,16 @@ proptest! {
         let mut origin: u32 = 0;
         let mut src = String::new();
         for (i, &seed) in seeds.iter().enumerate() {
-            let combinators = [Move::Call, Move::Dip, Move::Map, Move::Fold, Move::Each];
+            let combinators = [
+                Move::Call,
+                Move::Dip,
+                Move::Map,
+                Move::Fold,
+                Move::Each,
+                Move::Filter,
+                Move::IfConst(0),
+                Move::IfXform(0),
+            ];
             let pool: Vec<Move> = if i % 3 == 2 {
                 let hot: Vec<Move> = combinators
                     .iter()
@@ -581,13 +695,7 @@ proptest! {
                 ALL_MOVES.iter().copied().filter(|m| m.legal(&sim)).collect()
             };
             let payload = (seed >> 32) as u8;
-            let mut mv = pool[(seed as usize) % pool.len()];
-            mv = match mv {
-                Move::PushNum(_) => Move::PushNum(payload),
-                Move::PushLit(_) => Move::PushLit(payload),
-                Move::PushFnMap(_) => Move::PushFnMap(payload),
-                other => other,
-            };
+            let mv = with_payload(pool[(seed as usize) % pool.len()], payload);
             mv.apply(&mut sim, &mut origin);
             mv.emit(&mut src);
         }
@@ -620,4 +728,30 @@ fn anchor_fold_preserves_the_slot_beneath() {
 #[test]
 fn anchor_each_drains_and_dip_shields() {
     check_conformance("7 [ 1 2 ] [ DROP ] EACH 5 [ 3 + ] DIP").expect("conformant");
+}
+
+#[test]
+fn anchor_if_join_hides_branch_conditional_values() {
+    // SOUNDNESS anchor (§10.4). The runtime takes the else branch; the shadow
+    // must not claim the then-branch's `5` — pre-join, C3 refutes this program
+    // directly (shadow `Num("5")` over runtime `Word("0")`).
+    check_conformance("false [ 5 ] [ 0 ] IF").expect("conformant");
+    check_conformance("true [ 5 ] [ 0 ] IF").expect("conformant");
+}
+
+#[test]
+fn anchor_if_join_keeps_branch_agreed_values() {
+    // The join costs nothing where the branches agree: the shadow still knows
+    // `5` (C3 compares it against whichever branch the runtime ran), and the
+    // slot beneath the condition survives untouched.
+    check_conformance("7 false [ 5 ] [ 5 ] IF").expect("conformant");
+}
+
+#[test]
+fn anchor_filter_and_predicate_call() {
+    // FILTER's output is opaque to the shadow but depth-1 regardless of how
+    // many elements survive the predicate at runtime; CALLing the predicate
+    // directly produces a Bool the next IF can branch on.
+    check_conformance("[ 1 2 3 ] [ 2 > ] FILTER DROP 9 [ 2 > ] CALL [ 1 ] [ 2 ] IF")
+        .expect("conformant");
 }
