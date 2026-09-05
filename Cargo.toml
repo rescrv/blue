@@ -84,6 +84,7 @@ handled = { path = "handled", version = "0.10.0" }
 indicio = { path = "indicio", version = "0.17.0" }
 k8src = { path = "k8src", version = "0.21.0" }
 listfree = { path = "listfree", version = "0.10.0" }
+lsmtk = { path = "lsmtk", version = "0.21.0" }
 mani = { path = "mani", version = "0.16.0" }
 minimal_signals = { path = "minimal_signals", version = "0.7.0" }
 one_two_eight = { path = "one_two_eight", version = "0.15.0" }
@@ -102,6 +103,7 @@ sync42 = { path = "sync42", version = "0.19.0" }
 tag_index = { path = "tag_index", version = "0.13.0" }
 tatl = { path = "tatl", version = "0.18.0" }
 tuple_key = { path = "tuple_key", version = "0.18.0" }
+tuple_key2 = { path = "tuple_key2", version = "0.3.0" }
 tuple_key_derive = { path = "tuple_key_derive", version = "0.16.0" }
 tuple_routing = { path = "tuple_routing", version = "0.15.0" }
 unix_sock = { path = "unix_sock", version = "0.11.0" }

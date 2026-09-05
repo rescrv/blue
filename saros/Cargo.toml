@@ -23,19 +23,24 @@ biometrics = { workspace = true }
 buffertk = { workspace = true }
 handled = { workspace = true }
 indicio = { workspace = true }
+lsmtk = { workspace = true }
 one_two_eight = { workspace = true }
 prototk = { workspace = true }
 prototk_derive = { workspace = true }
 rpc_pb = { workspace = true }
+setsum = { workspace = true }
+sha3 = { workspace = true }
 shvar = { workspace = true }
+sst = { workspace = true }
 tag_index = { workspace = true }
 tatl = { workspace = true }
+tuple_key2 = { workspace = true }
 utf8path = { workspace = true }
+biometrics_prometheus = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 
-biometrics_prometheus = { workspace = true }
 guacamole = { workspace = true }
 sig_fig_histogram = { workspace = true }
 
