@@ -18,7 +18,7 @@ use std::time::Duration;
 use sst::Builder;
 use sst::log::WriteBatch;
 
-use crate::fragment::{SSTDB_TIMESTAMP, check_batch, decode, encode};
+use crate::fragment::{check_batch, decode, encode};
 use crate::reader::{DEFAULT_WINDOW, Reader};
 use crate::snapshot::Snapshot;
 use crate::store::{ConditionalStore, WriteOutcome};
@@ -160,24 +160,29 @@ impl Database {
         }
     }
 
-    /// Convenience: write a single key/value.
+    /// Convenience: write a single key/value at a client-supplied `timestamp`.  The timestamp must
+    /// be strictly greater than the highest timestamp the database has incorporated; `write`
+    /// enforces this and returns an `invalid-timestamp` [`SError`] otherwise.
     pub async fn put(
         &self,
         key: impl Into<Vec<u8>>,
         value: impl Into<Vec<u8>>,
+        timestamp: u64,
     ) -> Result<LogPosition> {
         let key = key.into();
         let value = value.into();
         let mut batch = WriteBatch::new();
-        batch.put(&key, SSTDB_TIMESTAMP, &value)?;
+        batch.put(&key, timestamp, &value)?;
         self.write(&batch).await
     }
 
-    /// Convenience: delete a single key.
-    pub async fn delete(&self, key: impl Into<Vec<u8>>) -> Result<LogPosition> {
+    /// Convenience: delete a single key at a client-supplied `timestamp`.  The timestamp must be
+    /// strictly greater than the highest timestamp the database has incorporated; `write` enforces
+    /// this and returns an `invalid-timestamp` [`SError`] otherwise.
+    pub async fn delete(&self, key: impl Into<Vec<u8>>, timestamp: u64) -> Result<LogPosition> {
         let key = key.into();
         let mut batch = WriteBatch::new();
-        batch.del(&key, SSTDB_TIMESTAMP)?;
+        batch.del(&key, timestamp)?;
         self.write(&batch).await
     }
 
@@ -313,18 +318,28 @@ impl Transaction {
         self.snapshot.get(key)
     }
 
-    /// Stage a put.
-    pub fn put(&mut self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) -> Result<&mut Self> {
+    /// Stage a put at a client-supplied `timestamp`.  The timestamp must be strictly greater than
+    /// the highest timestamp incorporated at the transaction's read-version; `commit` enforces this
+    /// (against the captured snapshot's high-water mark) and returns an `invalid-timestamp`
+    /// [`SError`] otherwise.
+    pub fn put(
+        &mut self,
+        key: impl Into<Vec<u8>>,
+        value: impl Into<Vec<u8>>,
+        timestamp: u64,
+    ) -> Result<&mut Self> {
         let key = key.into();
         let value = value.into();
-        self.batch.put(&key, SSTDB_TIMESTAMP, &value)?;
+        self.batch.put(&key, timestamp, &value)?;
         Ok(self)
     }
 
-    /// Stage a delete.
-    pub fn delete(&mut self, key: impl Into<Vec<u8>>) -> Result<&mut Self> {
+    /// Stage a delete at a client-supplied `timestamp`.  The timestamp must be strictly greater
+    /// than the highest timestamp incorporated at the transaction's read-version; `commit` enforces
+    /// this and returns an `invalid-timestamp` [`SError`] otherwise.
+    pub fn delete(&mut self, key: impl Into<Vec<u8>>, timestamp: u64) -> Result<&mut Self> {
         let key = key.into();
-        self.batch.del(&key, SSTDB_TIMESTAMP)?;
+        self.batch.del(&key, timestamp)?;
         Ok(self)
     }
 
@@ -380,5 +395,65 @@ impl Transaction {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::ObjectStoreConditional;
+
+    fn db() -> Database {
+        Database::open(
+            Arc::new(ObjectStoreConditional::in_memory()),
+            DatabaseOptions {
+                window: Duration::from_millis(0),
+                ..DatabaseOptions::default()
+            },
+        )
+    }
+
+    /// The full S-expression [`handled::SError`] emits for an `invalid-timestamp` rejection, with
+    /// `ts` the offending entry's timestamp and `hwm` the high-water mark it failed to beat.  We
+    /// assert the exact serialized form rather than a substring, so a wrong code or field shows up
+    /// as a concrete diff.
+    fn invalid_timestamp_sexp(ts: u64, hwm: u64) -> String {
+        format!(
+            "(error (phase sstdb) (code invalid-timestamp) \
+             (message \"sstdb write batches must use strictly-increasing timestamps\") \
+             (timestamp {ts}) (high-water-mark {hwm}))"
+        )
+    }
+
+    #[tokio::test]
+    async fn put_enforces_strictly_increasing_timestamps() {
+        let db = db();
+        // The genesis high-water mark is 0, so timestamp 0 is rejected.
+        let err = db.put(b"k", b"v", 0).await.unwrap_err();
+        assert_eq!(format!("{err}"), invalid_timestamp_sexp(0, 0));
+        // A strictly-increasing sequence is accepted and readable.
+        let p1 = db.put(b"k", b"v1", 1).await.unwrap();
+        assert_eq!(p1.offset, 1);
+        assert_eq!(db.get(b"k").await.unwrap(), Some(b"v1".to_vec()));
+        let p2 = db.put(b"k", b"v2", 2).await.unwrap();
+        assert_eq!(p2.offset, 2);
+        assert_eq!(db.get(b"k").await.unwrap(), Some(b"v2".to_vec()));
+        assert_eq!(db.snapshot().await.unwrap().timestamp_hi(), 2);
+        // Reusing the last timestamp is rejected.
+        let err = db.put(b"k", b"v3", 2).await.unwrap_err();
+        assert_eq!(format!("{err}"), invalid_timestamp_sexp(2, 2));
+        // Going backwards is rejected.
+        let err = db.put(b"k", b"v3", 1).await.unwrap_err();
+        assert_eq!(format!("{err}"), invalid_timestamp_sexp(1, 2));
+    }
+
+    #[tokio::test]
+    async fn delete_carries_a_timestamp() {
+        let db = db();
+        db.put(b"k", b"v", 1).await.unwrap();
+        assert_eq!(db.get(b"k").await.unwrap(), Some(b"v".to_vec()));
+        db.delete(b"k", 2).await.unwrap();
+        assert_eq!(db.get(b"k").await.unwrap(), None);
+        assert_eq!(db.snapshot().await.unwrap().timestamp_hi(), 2);
     }
 }

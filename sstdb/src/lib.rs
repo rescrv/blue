@@ -68,13 +68,17 @@ pub(crate) fn reserved_key() -> SError {
         .with_message("key is in the reserved meta-key range")
 }
 
-/// A client-supplied [`WriteBatch`] used a timestamp other than sstdb's materialized timestamp 0
-/// (code `invalid-timestamp`).
-pub(crate) fn invalid_timestamp(timestamp: u64) -> SError {
+/// A client-supplied [`WriteBatch`] used a timestamp that was not strictly greater than the
+/// database's high-water mark (code `invalid-timestamp`).  sstdb requires every write's timestamp
+/// to exceed the highest timestamp it has incorporated, so the timestamps form a strictly
+/// increasing total order supplied by the client and enforced by the database.  `timestamp` is the
+/// offending entry's timestamp; `high_water_mark` is the value it had to beat.
+pub(crate) fn invalid_timestamp(timestamp: u64, high_water_mark: u64) -> SError {
     SError::new(ERROR_PHASE)
         .with_code("invalid-timestamp")
-        .with_message("sstdb write batches must use timestamp 0")
+        .with_message("sstdb write batches must use strictly-increasing timestamps")
         .with_atom_field("timestamp", timestamp)
+        .with_atom_field("high-water-mark", high_water_mark)
 }
 
 /// A loaded SST's recomputed setsum did not match its stamped setsum: corruption (code
