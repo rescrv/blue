@@ -282,6 +282,39 @@ fn attestation_hash_changes_when_the_contract_set_changes() {
 }
 
 #[test]
+fn attestation_hash_covers_refinement_signatures() {
+    // (TODO "Attestation hash omits Tier-1 content") Two builds differing only
+    // in refinement axioms are different trusted bases and must hash
+    // differently — "all definition signatures" includes the Tier-1 axiom.
+    let src = "[ 1 + ] :incr [ 2 incr ] :main";
+    let base = attestation_hash(&build(src)).unwrap();
+
+    let mut refined = build(src);
+    refined
+        .attach_refinement("incr : ( n: Num -- r: Num where r = n + 1 )")
+        .unwrap();
+    let with_axiom = attestation_hash(&refined).unwrap();
+    assert_ne!(base, with_axiom, "a refinement axiom must change the hash");
+
+    let mut other = build(src);
+    other
+        .attach_refinement("incr : ( n: Num -- r: Num where r > n )")
+        .unwrap();
+    let with_other_axiom = attestation_hash(&other).unwrap();
+    assert_ne!(
+        with_axiom, with_other_axiom,
+        "different axioms are different trusted bases"
+    );
+
+    // Stability is preserved: the same source + the same axiom rehashes equal.
+    let mut again = build(src);
+    again
+        .attach_refinement("incr : ( n: Num -- r: Num where r = n + 1 )")
+        .unwrap();
+    assert_eq!(with_axiom, attestation_hash(&again).unwrap());
+}
+
+#[test]
 fn attestation_hash_ignores_internal_variable_ids() {
     // The canonical rendering renumbers variables in first-appearance order, so a
     // scheme's hash does not depend on the ids inference happened to assign — this

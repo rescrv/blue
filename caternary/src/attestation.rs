@@ -194,6 +194,12 @@ pub struct ContractSet {
     pub definitions: BTreeMap<String, Scheme>,
     /// The operator table (the modulo).
     pub operators: OperatorTable,
+    /// Every attached **Tier-1 refinement signature** (definitions' contracts
+    /// and operator axioms alike), keyed by name (sorted iteration). The
+    /// architecture section's "all definition signatures" includes the Tier-1
+    /// axiom a name carries: two builds differing only in refinement axioms
+    /// are different trusted bases and must hash differently.
+    pub refinements: BTreeMap<String, crate::RefinementSig>,
 }
 
 impl ContractSet {
@@ -209,6 +215,10 @@ impl ContractSet {
         Ok(ContractSet {
             definitions: schemes.into_iter().collect(),
             operators: OperatorTable::of(evaluator),
+            refinements: evaluator
+                .refinements()
+                .map(|sig| (sig.name.clone(), sig.clone()))
+                .collect(),
         })
     }
 
@@ -233,6 +243,14 @@ impl ContractSet {
             entry.name.hash(&mut h);
             entry.origin.tag().hash(&mut h);
             canonical_scheme(&entry.scheme).hash(&mut h);
+        }
+        // Tier-1 refinement signatures (definition contracts + operator
+        // axioms), in sorted name order. A build that differs only in a
+        // refinement axiom differs in its trusted base, so it must differ here.
+        h.write_usize(self.refinements.len());
+        for (name, sig) in &self.refinements {
+            name.hash(&mut h);
+            canonical_sig(sig).hash(&mut h);
         }
         h.finish()
     }
@@ -259,6 +277,57 @@ fn canonical_scheme(scheme: &Scheme) -> String {
     let mut tymap: BTreeMap<u32, usize> = BTreeMap::new();
     let mut rowmap: BTreeMap<u32, usize> = BTreeMap::new();
     render_word(&scheme.ty, &mut tymap, &mut rowmap)
+}
+
+// ---- canonical refinement rendering (stable: spans dropped) -----------------
+
+/// Canonicalize a [`crate::RefinementSig`] to a stable string: binder names,
+/// surface types, nested quote contracts, and the demand/guarantee predicates
+/// — with source spans dropped, so the hash is a property of the *axiom*, not
+/// of where it happened to be written.
+fn canonical_sig(sig: &crate::RefinementSig) -> String {
+    format!(
+        "({} -- {})",
+        canonical_side(&sig.demands),
+        canonical_side(&sig.guarantees)
+    )
+}
+
+fn canonical_side(side: &crate::RefinementSide) -> String {
+    let binders: Vec<String> = side.binders.iter().map(canonical_binder).collect();
+    let pred = side
+        .predicate
+        .as_ref()
+        .map(canonical_pred)
+        .unwrap_or_else(|| "true".to_string());
+    format!("[{}] where {}", binders.join(" "), pred)
+}
+
+fn canonical_binder(b: &crate::Binder) -> String {
+    match &b.quote {
+        None => format!("{}:{}", b.name, b.ty),
+        Some(q) => format!(
+            "{}:({} -- {})",
+            b.name,
+            canonical_side(&q.demands),
+            canonical_side(&q.guarantees)
+        ),
+    }
+}
+
+fn canonical_pred(p: &crate::Pred) -> String {
+    match p {
+        crate::Pred::Var(n) => n.clone(),
+        crate::Pred::Num(l) => l.clone(),
+        crate::Pred::Bin(op, a, b) => {
+            format!("({op:?} {} {})", canonical_pred(a), canonical_pred(b))
+        }
+        crate::Pred::Un(op, a) => format!("({op:?} {})", canonical_pred(a)),
+        crate::Pred::App(f, args) => {
+            let args: Vec<String> = args.iter().map(canonical_pred).collect();
+            format!("({f} {})", args.join(" "))
+        }
+    }
 }
 
 fn canon_id(map: &mut BTreeMap<u32, usize>, v: u32) -> usize {

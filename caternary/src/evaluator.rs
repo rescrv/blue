@@ -434,6 +434,14 @@ impl<T> Evaluator<T> {
         self.refinements.get(name)
     }
 
+    /// Every attached refinement signature (§10.1), in table order
+    /// (unordered). The enumeration path for the attestation hash (M14): a
+    /// refinement axiom is Tier-1 attested content, so it must be part of the
+    /// content-addressed contract set.
+    pub fn refinements(&self) -> impl Iterator<Item = &crate::RefinementSig> {
+        self.refinements.values()
+    }
+
     /// Run **first-order Tier-1 verification** (M9, §10.5) over `tokens`,
     /// deriving every call site's demands and guarantees from the **attached
     /// refinement signatures** in this evaluator's refinement table
