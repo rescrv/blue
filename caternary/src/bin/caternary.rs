@@ -45,7 +45,13 @@ impl Error for CliError {}
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
     Word(String),
-    Number(f64),
+    /// An exactly-represented integer lexeme (the deliberate numeric
+    /// semantics: the solver models `Num` as exact `Real`, so integers stay
+    /// exact end-to-end; see `builtins::Num`).
+    Int(i128),
+    /// The documented `f64` escape hatch for fractional lexemes. Non-finite
+    /// lexemes (`inf`/`NaN`) are not numbers and stay `Word`s.
+    Float(f64),
     Bool(bool),
     Quotation(Vec<QuoteItem<Value>>),
 }
@@ -61,8 +67,12 @@ impl From<Token> for Value {
     fn from(token: Token) -> Self {
         match token {
             Token::Word(w) => {
-                if let Ok(n) = w.parse::<f64>() {
-                    Value::Number(n)
+                if let Ok(n) = w.parse::<i128>() {
+                    Value::Int(n)
+                } else if let Ok(f) = w.parse::<f64>()
+                    && f.is_finite()
+                {
+                    Value::Float(f)
                 } else if w == "true" {
                     Value::Bool(true)
                 } else if w == "false" {
@@ -91,7 +101,8 @@ impl Quotable for Value {
     fn to_tokens(&self) -> Vec<Token> {
         match self {
             Value::Word(w) => vec![Token::Word(w.clone())],
-            Value::Number(n) => vec![Token::Word(n.to_string())],
+            Value::Int(n) => vec![Token::Word(n.to_string())],
+            Value::Float(f) => vec![Token::Word(f.to_string())],
             Value::Bool(b) => vec![Token::Word(b.to_string())],
             Value::Quotation(tokens) => vec![Token::Bracket(quote_items_to_tokens(tokens))],
         }
@@ -100,7 +111,8 @@ impl Quotable for Value {
     fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(b) => *b,
-            Value::Number(n) => *n != 0.0,
+            Value::Int(n) => *n != 0,
+            Value::Float(f) => *f != 0.0,
             _ => true,
         }
     }
@@ -612,7 +624,8 @@ fn format_stack(stack: &[Value]) -> String {
 fn format_value(value: &Value) -> String {
     match value {
         Value::Word(w) => format_word(w),
-        Value::Number(n) => n.to_string(),
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Quotation(tokens) => format!("[{}]", format_tokens(&quote_items_to_tokens(tokens))),
     }

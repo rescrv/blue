@@ -135,11 +135,92 @@ fn scalar_word<T: Quotable>(value: &T) -> Result<String, EvalError> {
     }
 }
 
-fn pop_num<T: Quotable>(stack: &mut Vec<T>) -> Result<f64, EvalError> {
+/// The runtime `Num` scalar — the **deliberate numeric semantics** (recorded
+/// here; `docs/typing.md` is read-only).
+///
+/// The solver models `Num` as exact `Real` (QF_LRA), so the runtime computes
+/// **exactly wherever it can**: an integer-lexeme operand is an `i128` and
+/// integer arithmetic is checked (overflow is a runtime error, never a silent
+/// wrap or rounding — `9007199254740993 1 +` is `9007199254740994`, not
+/// `…992`). Fractional lexemes fall back to `f64` as the **documented escape
+/// hatch**: `f64` arithmetic rounds, so a proven refinement over fractional
+/// values holds only up to `f64` rounding. Non-finite lexemes (`inf`, `NaN`)
+/// have no `Real` semantics and are **not** numbers — the Tier-0 literal
+/// grammar ([`crate::types::is_numeric_literal`]) rejects them and so does
+/// this parser.
+#[derive(Clone, Copy, Debug)]
+enum Num {
+    /// An exactly-represented integer.
+    Int(i128),
+    /// The documented escape hatch: a finite `f64` for fractional lexemes.
+    Float(f64),
+}
+
+impl Num {
+    /// Parse a numeric lexeme: `i128` first (exact), then finite `f64`.
+    /// Non-finite lexemes are not numbers.
+    fn parse(word: &str) -> Option<Num> {
+        if let Ok(n) = word.parse::<i128>() {
+            return Some(Num::Int(n));
+        }
+        match word.parse::<f64>() {
+            Ok(f) if f.is_finite() => Some(Num::Float(f)),
+            _ => None,
+        }
+    }
+
+    fn as_f64(self) -> f64 {
+        match self {
+            Num::Int(n) => n as f64,
+            Num::Float(f) => f,
+        }
+    }
+
+    fn render(self) -> String {
+        match self {
+            Num::Int(n) => n.to_string(),
+            Num::Float(f) => f.to_string(),
+        }
+    }
+
+    fn is_zero(self) -> bool {
+        match self {
+            Num::Int(n) => n == 0,
+            Num::Float(f) => f == 0.0,
+        }
+    }
+
+    /// Exact equality where both operands are exact; the `f64` escape hatch
+    /// compares as `f64` when either side is fractional.
+    fn num_eq(self, other: Num) -> bool {
+        match (self, other) {
+            (Num::Int(a), Num::Int(b)) => a == b,
+            (a, b) => a.as_f64() == b.as_f64(),
+        }
+    }
+
+    /// Exact ordering where both operands are exact (see [`Num::num_eq`]).
+    fn num_cmp(self, other: Num) -> std::cmp::Ordering {
+        match (self, other) {
+            (Num::Int(a), Num::Int(b)) => a.cmp(&b),
+            (a, b) => a
+                .as_f64()
+                .partial_cmp(&b.as_f64())
+                .expect("finite floats always compare"),
+        }
+    }
+}
+
+fn overflow(op: &str) -> EvalError {
+    operator_error(format!(
+        "numeric overflow: `{op}` exceeds the exact integer range (i128)"
+    ))
+}
+
+fn pop_num<T: Quotable>(stack: &mut Vec<T>) -> Result<Num, EvalError> {
     let value = stack.pop().ok_or_else(|| stack_underflow(1, stack.len()))?;
     let word = scalar_word(&value)?;
-    word.parse::<f64>()
-        .map_err(|_| operator_error(format!("expected numeric value, found `{word}`")))
+    Num::parse(&word).ok_or_else(|| operator_error(format!("expected numeric value, found `{word}`")))
 }
 
 fn pop_int<T: Quotable>(stack: &mut Vec<T>) -> Result<i128, EvalError> {
@@ -153,8 +234,8 @@ fn push_word<T: From<Token>>(stack: &mut Vec<T>, word: impl Into<String>) {
     stack.push(T::from(Token::Word(word.into())));
 }
 
-fn push_num<T: From<Token>>(stack: &mut Vec<T>, n: f64) {
-    push_word(stack, n.to_string());
+fn push_num<T: From<Token>>(stack: &mut Vec<T>, n: Num) {
+    push_word(stack, n.render());
 }
 
 fn push_int<T: From<Token>>(stack: &mut Vec<T>, n: i128) {
@@ -164,7 +245,7 @@ fn push_int<T: From<Token>>(stack: &mut Vec<T>, n: i128) {
 fn numeric_bin<T, F>(stack: &mut Vec<T>, f: F) -> Result<(), EvalError>
 where
     T: Quotable,
-    F: FnOnce(f64, f64) -> Result<f64, EvalError>,
+    F: FnOnce(Num, Num) -> Result<Num, EvalError>,
 {
     require_len(stack, 2)?;
     let b = pop_num(stack)?;
@@ -200,33 +281,48 @@ where
 }
 
 fn plus<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_bin(stack, |a, b| Ok(a + b))
+    numeric_bin(stack, |a, b| match (a, b) {
+        (Num::Int(a), Num::Int(b)) => a.checked_add(b).map(Num::Int).ok_or_else(|| overflow("+")),
+        (a, b) => Ok(Num::Float(a.as_f64() + b.as_f64())),
+    })
 }
 
 fn minus<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_bin(stack, |a, b| Ok(a - b))
+    numeric_bin(stack, |a, b| match (a, b) {
+        (Num::Int(a), Num::Int(b)) => a.checked_sub(b).map(Num::Int).ok_or_else(|| overflow("-")),
+        (a, b) => Ok(Num::Float(a.as_f64() - b.as_f64())),
+    })
 }
 
 fn multiply<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_bin(stack, |a, b| Ok(a * b))
+    numeric_bin(stack, |a, b| match (a, b) {
+        (Num::Int(a), Num::Int(b)) => a.checked_mul(b).map(Num::Int).ok_or_else(|| overflow("*")),
+        (a, b) => Ok(Num::Float(a.as_f64() * b.as_f64())),
+    })
 }
 
 fn divide<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     numeric_bin(stack, |a, b| {
-        if b == 0.0 {
-            Err(operator_error("division by zero"))
-        } else {
-            Ok(a / b)
+        if b.is_zero() {
+            return Err(operator_error("division by zero"));
+        }
+        match (a, b) {
+            // Exact when the quotient is an integer; otherwise the f64 escape
+            // hatch (the model's division is exact rational — documented gap).
+            (Num::Int(a), Num::Int(b)) if a % b == 0 => Ok(Num::Int(a / b)),
+            (a, b) => Ok(Num::Float(a.as_f64() / b.as_f64())),
         }
     })
 }
 
 fn modulo<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     numeric_bin(stack, |a, b| {
-        if b == 0.0 {
-            Err(operator_error("modulo by zero"))
-        } else {
-            Ok(a % b)
+        if b.is_zero() {
+            return Err(operator_error("modulo by zero"));
+        }
+        match (a, b) {
+            (Num::Int(a), Num::Int(b)) => Ok(Num::Int(a % b)),
+            (a, b) => Ok(Num::Float(a.as_f64() % b.as_f64())),
         }
     })
 }
@@ -283,11 +379,27 @@ fn bool_not<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(),
     Ok(())
 }
 
+/// `=`/`==`/`!=` are **numeric** on numeric operands (the shadow models `=` as
+/// real equality, so `1 1.0 =` is `true` under every embedder `Value` — never
+/// rendering-dependent); non-numeric operands fall back to token equality
+/// (their Tier-0 contract is same-type polymorphic equality, and quotations /
+/// free words have no numeric reading).
+fn values_equal<T: Quotable>(a: &T, b: &T) -> bool {
+    let a_tokens = a.to_tokens();
+    let b_tokens = b.to_tokens();
+    if let ([Token::Word(aw)], [Token::Word(bw)]) = (a_tokens.as_slice(), b_tokens.as_slice())
+        && let (Some(an), Some(bn)) = (Num::parse(aw), Num::parse(bw))
+    {
+        return an.num_eq(bn);
+    }
+    a_tokens == b_tokens
+}
+
 fn eq<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
-    push_word(stack, (a.to_tokens() == b.to_tokens()).to_string());
+    push_word(stack, values_equal(&a, &b).to_string());
     Ok(())
 }
 
@@ -295,36 +407,36 @@ fn ne<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalE
     require_len(stack, 2)?;
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
-    push_word(stack, (a.to_tokens() != b.to_tokens()).to_string());
+    push_word(stack, (!values_equal(&a, &b)).to_string());
     Ok(())
 }
 
 fn numeric_cmp<T, F>(stack: &mut Vec<T>, f: F) -> Result<(), EvalError>
 where
     T: Quotable,
-    F: FnOnce(f64, f64) -> bool,
+    F: FnOnce(std::cmp::Ordering) -> bool,
 {
     require_len(stack, 2)?;
     let b = pop_num(stack)?;
     let a = pop_num(stack)?;
-    push_word(stack, f(a, b).to_string());
+    push_word(stack, f(a.num_cmp(b)).to_string());
     Ok(())
 }
 
 fn lt<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_cmp(stack, |a, b| a < b)
+    numeric_cmp(stack, std::cmp::Ordering::is_lt)
 }
 
 fn le<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_cmp(stack, |a, b| a <= b)
+    numeric_cmp(stack, std::cmp::Ordering::is_le)
 }
 
 fn gt<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_cmp(stack, |a, b| a > b)
+    numeric_cmp(stack, std::cmp::Ordering::is_gt)
 }
 
 fn ge<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
-    numeric_cmp(stack, |a, b| a >= b)
+    numeric_cmp(stack, std::cmp::Ordering::is_ge)
 }
 
 fn span() -> Span {
@@ -540,7 +652,10 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     enum Value {
         Word(String),
-        Number(f64),
+        /// Exact integers, mirroring the REPL's recommended embedder shape.
+        Int(i128),
+        /// The documented f64 escape hatch for fractional lexemes.
+        Float(f64),
         Bool(bool),
         Quotation(Vec<QuoteItem<Value>>),
     }
@@ -549,8 +664,12 @@ mod tests {
         fn from(token: Token) -> Self {
             match token {
                 Token::Word(w) => {
-                    if let Ok(n) = w.parse::<f64>() {
-                        Value::Number(n)
+                    if let Ok(n) = w.parse::<i128>() {
+                        Value::Int(n)
+                    } else if let Ok(f) = w.parse::<f64>()
+                        && f.is_finite()
+                    {
+                        Value::Float(f)
                     } else if w == "true" {
                         Value::Bool(true)
                     } else if w == "false" {
@@ -579,7 +698,8 @@ mod tests {
         fn to_tokens(&self) -> Vec<Token> {
             match self {
                 Value::Word(w) => vec![Token::Word(w.clone())],
-                Value::Number(n) => vec![Token::Word(n.to_string())],
+                Value::Int(n) => vec![Token::Word(n.to_string())],
+                Value::Float(f) => vec![Token::Word(f.to_string())],
                 Value::Bool(b) => vec![Token::Word(b.to_string())],
                 Value::Quotation(tokens) => vec![Token::Bracket(quote_items_to_tokens(tokens))],
             }
@@ -588,7 +708,8 @@ mod tests {
         fn is_truthy(&self) -> bool {
             match self {
                 Value::Bool(b) => *b,
-                Value::Number(n) => *n != 0.0,
+                Value::Int(n) => *n != 0,
+                Value::Float(f) => *f != 0.0,
                 _ => true,
             }
         }
@@ -614,6 +735,83 @@ mod tests {
         let stack = eval.eval(&tokens).unwrap();
 
         assert_eq!(stack, vec![Number(1), Number(2), Number(2), Number(2)]);
+    }
+
+    // =======================================================================
+    // Regression: the deliberate runtime numeric semantics (the solver models
+    // `Num` as exact Real; the runtime computes exactly wherever it can)
+    // =======================================================================
+
+    /// Integer arithmetic is exact `i128`, not `f64`: `9007199254740993 1 +`
+    /// is `…994`, not the f64-rounded `…992`.
+    #[test]
+    fn integer_arithmetic_is_exact_beyond_f64_precision() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        let tokens = parse("9007199254740993 1 +").unwrap();
+        let stack = eval.eval(&tokens).unwrap();
+        assert_eq!(stack, vec![Value::Int(9007199254740994)]);
+    }
+
+    /// Exact-integer overflow is a runtime error — never a silent wrap or a
+    /// silent fall to rounded floats.
+    #[test]
+    fn integer_overflow_is_a_runtime_error() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        let tokens = parse("170141183460469231731687303715884105727 1 +").unwrap();
+        assert!(eval.eval(&tokens).is_err());
+    }
+
+    /// `=` is numeric on numeric operands — `1 1.0 =` is `true` regardless of
+    /// how the embedder's `Value` renders numbers (it used to compare token
+    /// renderings, making the result rendering-dependent).
+    #[test]
+    fn equality_is_numeric_not_rendering_dependent() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        let stack = eval.eval(&parse("1 1.0 =").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Bool(true)]);
+        let stack = eval.eval(&parse("1 2 =").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Bool(false)]);
+        // Non-numeric operands keep token equality.
+        let stack = eval.eval(&parse("[ 1 ] [ 1 ] =").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Bool(true)]);
+        let stack = eval.eval(&parse("[ 1 ] [ 2 ] !=").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Bool(true)]);
+    }
+
+    /// Ordering comparisons are exact for integers beyond f64 precision.
+    #[test]
+    fn comparison_is_exact_beyond_f64_precision() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        let stack = eval
+            .eval(&parse("9007199254740993 9007199254740992 >").unwrap())
+            .unwrap();
+        assert_eq!(stack, vec![Value::Bool(true)]);
+    }
+
+    /// `inf`/`NaN` are not numbers: the literal grammar rejects them and the
+    /// runtime refuses to compute with them.
+    #[test]
+    fn non_finite_lexemes_are_not_numbers() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        assert!(eval.eval(&parse("inf 1 +").unwrap()).is_err());
+        assert!(eval.eval(&parse("NaN 1 +").unwrap()).is_err());
+    }
+
+    /// Fractional values take the documented `f64` escape hatch; an integer
+    /// quotient stays exact.
+    #[test]
+    fn division_is_exact_when_integral_and_f64_otherwise() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        let stack = eval.eval(&parse("6 3 /").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Int(2)]);
+        let stack = eval.eval(&parse("1 2 /").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Float(0.5)]);
     }
 
     #[test]
@@ -668,13 +866,13 @@ mod tests {
             vec![
                 Value::Bool(true),
                 Value::Bool(false),
-                Value::Number(2.0),
-                Value::Number(1.0),
-                Value::Number(2.0),
-                Value::Number(5.0),
-                Value::Number(6.0),
-                Value::Number(-1.0),
-                Value::Number(0.5),
+                Value::Int(2),
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(5),
+                Value::Int(6),
+                Value::Int(-1),
+                Value::Float(0.5),
             ]
         );
     }
