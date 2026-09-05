@@ -54,3 +54,8 @@ required-features = ["binaries"]
 name = "m14_attestation"
 path = "examples/m14_attestation.rs"
 required-features = ["binaries"]
+
+[[example]]
+name = "probe"
+path = "examples/probe.rs"
+required-features = ["binaries"]

@@ -164,6 +164,18 @@ pub enum TypeError {
         /// The span of the annotation.
         span: Span,
     },
+    /// A `>name` binder rebinds a name already bound in the **innermost**
+    /// lexical scope. The runtime forbids this (`single-assignment violation`,
+    /// `evaluator.rs`); the checker must reject it too so the gate does not
+    /// admit unrunnable code. Nested quotation-scope shadowing is unaffected: a
+    /// quotation opens a fresh scope, so an inner `>name` shadowing an outer
+    /// binding is a different scope and stays legal.
+    DuplicateBind {
+        /// The name being re-bound in the same scope.
+        name: String,
+        /// The span of the offending `>name` binder.
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for TypeError {
@@ -220,6 +232,13 @@ impl std::fmt::Display for TypeError {
                 write!(
                     f,
                     "malformed stack-effect annotation for `{name}` (byte {}): {detail}",
+                    span.start
+                )
+            }
+            TypeError::DuplicateBind { name, span } => {
+                write!(
+                    f,
+                    "single-assignment violation: `{name}` is already bound in this scope (byte {})",
                     span.start
                 )
             }
@@ -847,11 +866,19 @@ where
     let row = ctx.fresh_row();
     let mut acc = WordTy::new(StackTy::empty(row, span), StackTy::empty(row, span));
 
+    // The innermost lexical scope begins at the current `locals` length: it is
+    // 0 for a fresh body (the entry definition / `main`) and the enclosing
+    // clone size for a quotation (which captures outer locals by value for
+    // *resolution* but opens a fresh single-assignment scope, mirroring the
+    // runtime's per-execution `env`). Binds pushed during this sequence sit at
+    // indices `>= scope_base`; only those count for a same-scope rebind check.
+    let scope_base = locals.len();
+
     for token in tokens {
         // The per-token effect, and (for words) the name to blame on underflow.
         let (word_arrow, blame): (WordTy, Option<&str>) = match &token.kind {
             SpannedTokenKind::Word(w) => (
-                word_effect(evaluator, w, token.span, ctx, locals, def_env, poly)?,
+                word_effect(evaluator, w, token.span, ctx, locals, def_env, poly, scope_base)?,
                 Some(w),
             ),
             SpannedTokenKind::Bracket(inner) => {
@@ -957,6 +984,7 @@ where
 /// of a bound local, a numeric or boolean literal, a registered operator, a
 /// language-core primitive, or a definition (resolved through its generalized
 /// `Scheme`, or its monomorphic in-SCC assumption for a recursive call, §6).
+#[allow(clippy::too_many_arguments)]
 fn word_effect<T>(
     evaluator: &Evaluator<T>,
     w: &str,
@@ -965,6 +993,7 @@ fn word_effect<T>(
     locals: &mut Vec<Local>,
     def_env: &DefEnv,
     poly: &HashMap<String, Scheme>,
+    scope_base: usize,
 ) -> Result<WordTy, TypeError>
 where
     T: Quotable,
@@ -972,6 +1001,20 @@ where
     // `>name` : ( 'a t -- 'a ), introducing `name : t` (fresh `t`) for the rest
     // of the scope; the local is monomorphic (§5).
     if let Some(name) = bind_target(w) {
+        // The runtime forbids rebinding a name already bound in the *same*
+        // scope (`single-assignment violation`, `evaluator.rs`). A quotation
+        // opens a fresh scope, so only binds pushed at or after `scope_base`
+        // (this scope's own binds) count; an outer captured binding at a lower
+        // index is a different scope and may be shadowed.
+        if locals[scope_base..]
+            .iter()
+            .any(|l| l.name() == name)
+        {
+            return Err(TypeError::DuplicateBind {
+                name: name.to_string(),
+                span,
+            });
+        }
         let r = ctx.fresh_row();
         let t = Ty::var(ctx.fresh_ty(), span);
         let input = StackTy::new(vec![t.clone()], r, span);
@@ -2204,6 +2247,89 @@ mod tests {
             check_whole_program(&eval, crate::SmtLibSolver::new).is_err(),
             "gate must not verify a program whose `/` demand is undecidable"
         );
+    }
+
+
+    // =======================================================================
+    // Regression: `%` modulo must carry the same divisor demand as `/`
+    // (BUGS.md B1 — `%` did the same runtime division as `/` but had no
+    // `b * b > 0` refinement, so the gate admitted `[ 5 0 % DROP ]` and the
+    // runtime errored `modulo by zero`.)
+    // =======================================================================
+
+    /// `[ 5 0 % DROP ] :main` must be rejected by the whole-program gate: `%`
+    /// performs the same runtime division as `/`, so its refinement carries
+    /// the same `b * b > 0` divisor demand, which the literal `0` refutes.
+    #[test]
+    fn gate_rejects_modulo_by_zero() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens = parse_with_spans("[ 5 0 % DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_err(),
+            "the gate must reject a `%` whose divisor is the literal 0"
+        );
+    }
+
+    /// The control: a nonzero divisor satisfies the `%` demand, so
+    /// `[ 5 3 % DROP ] :main` still type-checks.
+    #[test]
+    fn gate_accepts_modulo_with_nonzero_divisor() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens = parse_with_spans("[ 5 3 % DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
+            "a `%` with a nonzero divisor must still pass the gate"
+        );
+    }
+
+
+    // =======================================================================
+    // Regression: same-scope `>name` rebind must be rejected (BUGS.md B4)
+    // The checker used to treat a second `>x` as shadowing (just pushing
+    // another Local) but the runtime forbids rebinding a name already bound
+    // in the same scope, so the gate admitted unrunnable code.
+    // =======================================================================
+
+    /// `[ 1 >x 2 >x x DROP ] :main` binds `x` twice in the same (top-level)
+    /// scope. The runtime rejects the second bind with `single-assignment
+    /// violation`; the gate must reject it too, naming `x`.
+    #[test]
+    fn gate_rejects_same_scope_local_rebind() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens = parse_with_spans("[ 1 >x 2 >x x DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
+            .unwrap_err();
+        assert!(
+            matches!(err, GateError::Tier0(TypeError::DuplicateBind { ref name, .. }) if name == "x"),
+            "a same-scope `>x` rebind must be rejected as DuplicateBind, got {err:?}"
+        );
+    }
+
+    /// The fix must not break nested quotation-scope shadowing: a quotation
+    /// opens a fresh single-assignment scope, so an inner `>x` shadowing an
+    /// outer `x` is legal and type-checks (and runs).
+    #[test]
+    fn gate_accepts_nested_quotation_scope_shadowing() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens =
+            parse_with_spans("[ 1 >x [ 2 >x x DROP ] CALL x DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
+            "nested quotation-scope shadowing must still type-check"
+        );
+        // And it must genuinely run (the runtime allows the inner fresh-scope bind).
+        let body = eval.definition_body("main").unwrap().to_vec();
+        let mut stack = Vec::new();
+        eval.eval_with_stack(&body, &mut stack).unwrap();
+        assert!(stack.is_empty(), "the nested-shadow program runs to an empty stack");
     }
 
     #[test]
@@ -4599,5 +4725,262 @@ mod tests {
         let ledger = check_whole_program(&mk("1"), crate::SmtLibSolver::new)
             .expect("a guarantee the body establishes discharges");
         assert!(ledger.is_clean());
+    }
+
+    // =======================================================================
+    // Regression (BUGS §A1): WHEN/UNLESS/MAP/FILTER/FOLD/EACH quotation
+    // bodies are verified — not skipped opaquely — and the tail they share
+    // with the continuation cannot smuggle stale knowledge past the gate.
+    // =======================================================================
+
+    fn gate(src: &str) -> Result<crate::Ledger, GateError> {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens = parse_with_spans(src).unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        check_whole_program(&eval, crate::SmtLibSolver::new)
+    }
+
+    /// §A1(a): a refinement obligation inside the body is generated and
+    /// refuted under every one of the six combinators (the same division the
+    /// gate catches inline), including nested inside an `IF` arm, and a user
+    /// contract violated through `WHEN`.
+    #[test]
+    fn combinator_bodies_generate_their_obligations() {
+        for src in [
+            "[ true [ 1 0 / DROP ] WHEN ] :main",
+            "[ false [ 1 0 / DROP ] UNLESS ] :main",
+            "[ [ 1 ] [ 1 0 / DROP ] MAP DROP ] :main",
+            "[ [ 1 ] 0 [ SWAP / ] FOLD DROP ] :main",
+            "[ [ 1 ] [ DROP 1 0 / DROP true ] FILTER DROP ] :main",
+            "[ [ 1 ] [ DROP 1 0 / DROP ] EACH ] :main",
+            "[ true [ true [ 1 0 / DROP ] [ ] IF ] WHEN ] :main",
+            "[ 1 - ] :dec
+             \"dec : ( n: Num where n > 0 -- r: Num )\"
+             [ true [ 0 dec DROP ] WHEN ] :main",
+        ] {
+            assert!(
+                gate(src).is_err(),
+                "a runtime-crashing (or contract-violating) body must fail the gate: {src}"
+            );
+        }
+    }
+
+    /// §A1(b): a shape-preserving scrambler body may permute the tail it runs
+    /// on (`WHEN`'s `('S -- 'S)`, `MAP`'s shared row absorbing tail slots), so
+    /// the shadow must not let pre-combinator knowledge about that tail
+    /// discharge downstream demands.
+    #[test]
+    fn combinator_bodies_invalidate_the_permutable_tail() {
+        for src in [
+            "[ 0 5 true [ SWAP ] WHEN 1 SWAP / DROP ] :main",
+            "[ 5 [ 0 ] [ SWAP ] MAP DROP 1 SWAP / DROP ] :main",
+        ] {
+            assert!(
+                gate(src).is_err(),
+                "tail knowledge must not survive a permuting body: {src}"
+            );
+        }
+    }
+
+    // =======================================================================
+    // Recorded (BUGS §B1): applying a quotation PARAMETER (or a quotation
+    // returned by a definition) fails the gate — the fail-closed floor of the
+    // unbuilt definition-side of §10.6 (see TODO.md "Higher-order definitions
+    // fail closed"). Do not "fix" this by letting the definition-side CALL
+    // move data opaquely: nothing verifies a literal quotation argument's
+    // body at the call site, so that would open an A1-class hole gate-wide.
+    // =======================================================================
+
+    #[test]
+    fn quotation_parameter_application_fails_closed() {
+        for src in [
+            // A quotation parameter, applied point-free or through a local.
+            "[ CALL ] :apply [ 5 [ 1 + ] apply ] :main",
+            "[ >q q CALL ] :apply [ 5 [ 1 + ] apply ] :main",
+            // The @name-annotated rank-2 pattern.
+            "[ [ a -- ] -- ] @r2 [ >f 1 f CALL true f CALL ] :r2 [ 5 [ DROP 0 ] r2 ] :main",
+            // A quotation-returning definition's output is opaque downstream.
+            "[ [ 1 2 + ] ] :mk [ 3 mk CALL ] :main",
+        ] {
+            assert!(
+                gate(src).is_err(),
+                "quotation-parameter application must fail closed: {src}"
+            );
+            // Each is runnable: the rejection is over-rejection, not a crash.
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            crate::register_all_builtins(&mut eval);
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            let body = eval.definition_body("main").unwrap().to_vec();
+            eval.eval(&body)
+                .unwrap_or_else(|e| panic!("the runtime accepts {src}: {e}"));
+        }
+        // The carve-out the §B2 locals fix bought: a quotation bound from a
+        // LITERAL in the same body is fully verifiable.
+        assert!(
+            gate("[ 5 [ 1 + ] >f f CALL DROP ] :main").is_ok(),
+            "a same-body literal quotation local stays CALLable"
+        );
+    }
+
+    // =======================================================================
+    // Regression (BUGS §B3): an IF whose branches both leave a quotation in a
+    // slot joins to the conditional pair `[ P [then] [else] IF ]` instead of
+    // an opaque term, so a later CALL re-splits on the path condition.
+    // =======================================================================
+
+    #[test]
+    fn branch_disagreed_quotation_slots_stay_callable() {
+        // The B3 repro: gate used to fail structurally ("expected a
+        // quotation, found a value term"); the runtime yields [1].
+        assert!(
+            gate("[ true [ [ 1 ] ] [ [ 2 ] ] IF CALL DROP ] :main").is_ok(),
+            "a quotation-on-both-paths slot must stay CALLable"
+        );
+        // Precision is not soundness-bought: a demand inside either possible
+        // body is discharged under that branch's path condition only, so a
+        // division hiding in one branch's quotation is still refuted...
+        assert!(
+            gate("[ true [ [ 1 0 / DROP ] ] [ [ 1 1 / DROP ] ] IF CALL ] :main").is_err(),
+            "the then-quotation's zero divisor must still fail the gate"
+        );
+        // ...and two safe bodies both discharge.
+        assert!(
+            gate("[ true [ [ 1 1 / DROP ] ] [ [ 2 1 / DROP ] ] IF CALL ] :main").is_ok(),
+            "two safe conditional bodies must both verify"
+        );
+    }
+
+    // =======================================================================
+    // Recorded (BUGS §A3/§B6): BI@/TRI@'s rank-1 schemes share one row across
+    // both applications of the quotation, which HM rows cannot make rigid.
+    // Both directions of the resulting imprecision are documented in TODO.md
+    // and pinned here so a drift in either direction surfaces.
+    // =======================================================================
+
+    /// §A3: the shared row absorbs a tail element, so `[ SWAP ]` unifies with
+    /// BI@'s `( 'r a -- 'r b )` slot while the runtime's second application
+    /// underflows — Tier-0-only surfaces (`type_check`, `infer_quote_type`,
+    /// REPL `:type`) assert a type for crashing code. The FULL gate is saved
+    /// by the Tier-1 shadow, which re-executes the real shuffle. §B6 is the
+    /// flip side: the same single row forces exactly `( a -- b )` per
+    /// application, so runnable `[ DROP ]`/`[ DUP ]` bodies occurs-check out.
+    #[test]
+    fn bi_at_rank1_scheme_limits_are_recorded() {
+        // A3: Tier 0 alone admits the crashing body; the gate rejects it.
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        crate::register_all_builtins(&mut eval);
+        let tokens = parse_with_spans("[ 1 2 [ SWAP ] BI@ DROP DROP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            type_check(&eval).is_ok(),
+            "Tier 0 admits the crashing BI@ body (the documented A3 limit)"
+        );
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_err(),
+            "the full gate rejects: the Tier-1 shadow runs the real shuffle"
+        );
+        let body = eval.definition_body("main").unwrap().to_vec();
+        assert!(eval.eval(&body).is_err(), "the runtime underflows");
+
+        // B6: runnable non-( a -- b ) bodies are over-rejected (cyclic type).
+        for src in ["[ 1 2 [ DROP ] BI@ ] :main", "[ 1 2 [ DUP ] BI@ ] :main"] {
+            assert!(
+                gate(src).is_err(),
+                "the rank-1 scheme cyclic-rejects this runnable body: {src}"
+            );
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            crate::register_all_builtins(&mut eval);
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            let body = eval.definition_body("main").unwrap().to_vec();
+            eval.eval(&body)
+                .unwrap_or_else(|e| panic!("the runtime accepts {src}: {e}"));
+        }
+    }
+
+    // =======================================================================
+    // Ratified (BUGS §B4): truthiness is a runtime escape hatch, not a typed
+    // promise — IF/WHEN/UNLESS demand Bool conditions and the connectives
+    // demand Bool operands, the same intentional gate tightening as the
+    // `=`/`==`/`!=` same-type contract (documented in the README).
+    // =======================================================================
+
+    #[test]
+    fn truthiness_tightening_is_ratified() {
+        for src in [
+            "[ 1 [ 2 ] [ 3 ] IF ] :main",
+            "[ 1 2 && DROP ] :main",
+            "[ 5 ! DROP ] :main",
+            "[ 1 [ ] WHEN ] :main",
+        ] {
+            // The gate rejects the non-Bool condition/operand...
+            assert!(gate(src).is_err(), "gate must reject Num-vs-Bool: {src}");
+            // ...while the truthy-generic runtime runs the program fine.
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            crate::register_all_builtins(&mut eval);
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            let body = eval.definition_body("main").unwrap().to_vec();
+            eval.eval(&body)
+                .unwrap_or_else(|e| panic!("runtime must accept truthiness: {src}: {e}"));
+        }
+    }
+
+    // =======================================================================
+    // Regression (BUGS §B2): `>name` locals are visible to Tier 1 — a binder
+    // pops the top slot into the scope, a use pushes the bound slot back, and
+    // a bracket captures live locals by value (mirroring the runtime).
+    // =======================================================================
+
+    #[test]
+    fn locals_carry_their_knowledge_through_tier1() {
+        // A demand through a local discharges from the bound term's knowledge
+        // (this failed closed as `Unknown` before the binder case existed)...
+        assert!(
+            gate("[ 4 >x x x / DROP ] :main").is_ok(),
+            "`x` must carry the bound 4 into the `/` demand"
+        );
+        // ...including through a by-value capture into a quotation body...
+        assert!(
+            gate("[ 4 >x [ x x / DROP ] CALL ] :main").is_ok(),
+            "a bracket captures `x` by value, like the runtime"
+        );
+        // ...and a quotation-valued local stays CALLable.
+        assert!(
+            gate("[ 5 [ 1 + ] >f f CALL DROP ] :main").is_ok(),
+            "a local bound to a quotation is CALLable"
+        );
+        // The direction stays sound: a violated demand through a local is
+        // still refuted, not merely unknown.
+        assert!(
+            gate("[ 0 >x 1 x / DROP ] :main").is_err(),
+            "a zero divisor through a local must fail the gate"
+        );
+    }
+
+    /// Completeness floor: safe bodies still pass, an identity `WHEN` body
+    /// preserves the tail (join keeps agreed slots), and a quotation sitting
+    /// below an untouched-tail `MAP` remains callable.
+    #[test]
+    fn safe_combinator_bodies_still_pass_the_gate() {
+        for src in [
+            "[ true [ 1 1 / DROP ] WHEN ] :main",
+            "[ [ 1 2 3 ] [ 1 + ] MAP DROP ] :main",
+            "[ [ 1 2 3 ] 0 [ + ] FOLD DROP ] :main",
+            "[ [ 1 2 3 ] [ DROP ] EACH ] :main",
+            "[ [ 1 2 3 ] [ 2 > ] FILTER DROP ] :main",
+            // The identity body provably preserves the 7 on both paths.
+            "[ 7 true [ ] WHEN 1 SWAP / DROP ] :main",
+            // The MAP body never reaches the tail: the quotation below
+            // survives the fixpoint and stays CALLable.
+            "[ [ 1 DROP ] [ 2 3 ] [ 1 + ] MAP DROP CALL ] :main",
+        ] {
+            assert!(
+                gate(src).is_ok(),
+                "a safe body must not be over-rejected: {src}"
+            );
+        }
     }
 }

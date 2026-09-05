@@ -142,12 +142,16 @@ fn scalar_word<T: Quotable>(value: &T) -> Result<String, EvalError> {
 /// **exactly wherever it can**: an integer-lexeme operand is an `i128` and
 /// integer arithmetic is checked (overflow is a runtime error, never a silent
 /// wrap or rounding — `9007199254740993 1 +` is `9007199254740994`, not
-/// `…992`). Fractional lexemes fall back to `f64` as the **documented escape
-/// hatch**: `f64` arithmetic rounds, so a proven refinement over fractional
-/// values holds only up to `f64` rounding. Non-finite lexemes (`inf`, `NaN`)
-/// have no `Real` semantics and are **not** numbers — the Tier-0 literal
-/// grammar ([`crate::types::is_numeric_literal`]) rejects them and so does
-/// this parser.
+/// `…992`). An integer lexeme **beyond** the `i128` range is likewise a loud
+/// runtime error ([`literal_overflow`]), never a rounded `f64`: the reasoner
+/// models the lexeme exactly, so rounding it at runtime would let two distinct
+/// integers compare equal (BUGS §A4). Fractional lexemes fall back to `f64` as
+/// the **documented escape hatch**: `f64` arithmetic rounds, so a proven
+/// refinement over fractional values holds only up to `f64` rounding.
+/// Non-finite lexemes (`inf`, `NaN`) have no `Real` semantics and are **not**
+/// numbers — the Tier-0 literal grammar
+/// ([`crate::types::is_numeric_literal`]) rejects them and so does this
+/// parser.
 #[derive(Clone, Copy, Debug)]
 enum Num {
     /// An exactly-represented integer.
@@ -157,11 +161,21 @@ enum Num {
 }
 
 impl Num {
-    /// Parse a numeric lexeme: `i128` first (exact), then finite `f64`.
+    /// Parse a numeric lexeme: `i128` first (exact), then finite `f64` — but
+    /// **only for fractional lexemes**. An integer lexeme beyond the `i128`
+    /// range must never fall through to a rounded `f64` (the reasoner models
+    /// the lexeme exactly, and "an integer-lexeme operand is an `i128`" is the
+    /// documented contract): it parses as no number at all, and the operator
+    /// that popped it raises the loud overflow error ([`literal_overflow`]).
     /// Non-finite lexemes are not numbers.
     fn parse(word: &str) -> Option<Num> {
         if let Ok(n) = word.parse::<i128>() {
             return Some(Num::Int(n));
+        }
+        if is_integer_lexeme(word) {
+            // Out-of-range integer: exactness is unrepresentable — not a
+            // rounded float, not a number.
+            return None;
         }
         match word.parse::<f64>() {
             Ok(f) if f.is_finite() => Some(Num::Float(f)),
@@ -217,10 +231,29 @@ fn overflow(op: &str) -> EvalError {
     ))
 }
 
+// An integer-form lexeme is exact by contract (`Num` docs above): one that
+// overflows `i128` must fail loudly, never round through `f64`.
+use crate::types::is_integer_literal as is_integer_lexeme;
+
+/// The loud error for an integer lexeme beyond the exact `i128` range —
+/// the literal-operand sibling of [`overflow`] ("overflow is a runtime error,
+/// never a silent wrap or rounding").
+fn literal_overflow(word: &str) -> EvalError {
+    operator_error(format!(
+        "numeric overflow: integer literal `{word}` exceeds the exact integer range (i128)"
+    ))
+}
+
 fn pop_num<T: Quotable>(stack: &mut Vec<T>) -> Result<Num, EvalError> {
     let value = stack.pop().ok_or_else(|| stack_underflow(1, stack.len()))?;
     let word = scalar_word(&value)?;
-    Num::parse(&word).ok_or_else(|| operator_error(format!("expected numeric value, found `{word}`")))
+    Num::parse(&word).ok_or_else(|| {
+        if is_integer_lexeme(&word) {
+            literal_overflow(&word)
+        } else {
+            operator_error(format!("expected numeric value, found `{word}`"))
+        }
+    })
 }
 
 fn pop_int<T: Quotable>(stack: &mut Vec<T>) -> Result<i128, EvalError> {
@@ -309,7 +342,17 @@ fn divide<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), E
         match (a, b) {
             // Exact when the quotient is an integer; otherwise the f64 escape
             // hatch (the model's division is exact rational — documented gap).
-            (Num::Int(a), Num::Int(b)) if a % b == 0 => Ok(Num::Int(a / b)),
+            // `a % b` and `a / b` both overflow for `i128::MIN / -1`; checked
+            // arithmetic raises a runtime error instead of panicking (debug)
+            // or silently wrapping to `i128::MIN` (release).
+            (Num::Int(a), Num::Int(b)) => {
+                let exact = a.checked_rem(b).map(|r| r == 0).ok_or_else(|| overflow("/"))?;
+                if exact {
+                    Ok(Num::Int(a.checked_div(b).ok_or_else(|| overflow("/"))?))
+                } else {
+                    Ok(Num::Float((a as f64) / (b as f64)))
+                }
+            }
             (a, b) => Ok(Num::Float(a.as_f64() / b.as_f64())),
         }
     })
@@ -321,7 +364,11 @@ fn modulo<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), E
             return Err(operator_error("modulo by zero"));
         }
         match (a, b) {
-            (Num::Int(a), Num::Int(b)) => Ok(Num::Int(a % b)),
+            (Num::Int(a), Num::Int(b)) => {
+                // `a % b` overflows for `i128::MIN % -1`; checked arithmetic
+                // raises a runtime error instead of panicking or wrapping.
+                Ok(Num::Int(a.checked_rem(b).ok_or_else(|| overflow("%"))?))
+            }
             (a, b) => Ok(Num::Float(a.as_f64() % b.as_f64())),
         }
     })
@@ -383,23 +430,31 @@ fn bool_not<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(),
 /// real equality, so `1 1.0 =` is `true` under every embedder `Value` — never
 /// rendering-dependent); non-numeric operands fall back to token equality
 /// (their Tier-0 contract is same-type polymorphic equality, and quotations /
-/// free words have no numeric reading).
-fn values_equal<T: Quotable>(a: &T, b: &T) -> bool {
+/// free words have no numeric reading). An **overflowing integer lexeme** is
+/// numeric but unrepresentable: comparing it is the loud
+/// [`literal_overflow`] error, never a token comparison of digit strings (nor,
+/// pre-fix, a rounded-`f64` equality that called two distinct integers equal).
+fn values_equal<T: Quotable>(a: &T, b: &T) -> Result<bool, EvalError> {
     let a_tokens = a.to_tokens();
     let b_tokens = b.to_tokens();
-    if let ([Token::Word(aw)], [Token::Word(bw)]) = (a_tokens.as_slice(), b_tokens.as_slice())
-        && let (Some(an), Some(bn)) = (Num::parse(aw), Num::parse(bw))
-    {
-        return an.num_eq(bn);
+    if let ([Token::Word(aw)], [Token::Word(bw)]) = (a_tokens.as_slice(), b_tokens.as_slice()) {
+        for w in [aw, bw] {
+            if is_integer_lexeme(w) && w.parse::<i128>().is_err() {
+                return Err(literal_overflow(w));
+            }
+        }
+        if let (Some(an), Some(bn)) = (Num::parse(aw), Num::parse(bw)) {
+            return Ok(an.num_eq(bn));
+        }
     }
-    a_tokens == b_tokens
+    Ok(a_tokens == b_tokens)
 }
 
 fn eq<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalError> {
     require_len(stack, 2)?;
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
-    push_word(stack, values_equal(&a, &b).to_string());
+    push_word(stack, values_equal(&a, &b)?.to_string());
     Ok(())
 }
 
@@ -407,7 +462,7 @@ fn ne<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), EvalE
     require_len(stack, 2)?;
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
-    push_word(stack, (!values_equal(&a, &b)).to_string());
+    push_word(stack, (!values_equal(&a, &b)?).to_string());
     Ok(())
 }
 
@@ -503,7 +558,7 @@ fn same_same_bool_scheme() -> Scheme {
     )
 }
 
-fn num_num_num_refinements() -> [(&'static str, &'static str); 4] {
+fn num_num_num_refinements() -> [(&'static str, &'static str); 7] {
     [
         ("+", "+ : ( a: Num b: Num -- c: Num where c = a + b )"),
         ("-", "- : ( a: Num b: Num -- c: Num where c = a - b )"),
@@ -511,6 +566,32 @@ fn num_num_num_refinements() -> [(&'static str, &'static str); 4] {
         (
             "/",
             "/ : ( a: Num b: Num where b * b > 0 -- c: Num where c = a / b )",
+        ),
+        // `%` mirrors `/`'s divisor demand (`b * b > 0`) so the gate rejects
+        // `[ 5 0 % DROP ]` just as it rejects `[ 5 0 / DROP ]`. No output
+        // guarantee: the modulo remainder is not expressible in the Real
+        // predicate language (the same value-domain gap as the bitwise case),
+        // and the demand alone closes the soundness hole.
+        (
+            "%",
+            "% : ( a: Num b: Num where b * b > 0 -- c: Num )",
+        ),
+        // The shifts demand the runtime's accepted amount range (`checked_shl`
+        // / `checked_shr` on i128: 0..=127) so the gate rejects `[ 1 -1 << ]`
+        // and `[ 1 200 << ]` instead of admitting a runtime "invalid shift
+        // amount" (BUGS §A5). `b * (127 - b) >= 0` is `0 <= b <= 127` as one
+        // atom: a conjunction's negated goal is a disjunction the linear
+        // reasoner treats as opaque (never discharges) — the same reason `/`
+        // demands `b * b > 0` rather than `b != 0`. No output guarantee, and
+        // the *integrality* of the amount stays unmodeled — that is the
+        // documented bitwise gap.
+        (
+            "<<",
+            "<< : ( a: Num b: Num where b * ( 127 - b ) >= 0 -- c: Num )",
+        ),
+        (
+            ">>",
+            ">> : ( a: Num b: Num where b * ( 127 - b ) >= 0 -- c: Num )",
         ),
     ]
 }
@@ -553,6 +634,19 @@ where
 /// value-domain rejections by these operators. Embedders who need the gate to
 /// carry that guarantee should register bitwise operators under their own
 /// attested, integrality-aware contracts instead of these.
+///
+/// # Recorded limitation: arithmetic overflow is unmodeled (gate-green ≠ crash-free)
+///
+/// The same shape of gap affects `+`/`-`/`*`. The solver models `Num` as
+/// unbounded `Real`, so these operators' guarantees (`c = a + b`, `c = a - b`,
+/// `c = a * b`) can never overflow in the model; the runtime uses checked
+/// `i128` and errors on overflow, so
+/// `[ 170141183460469231731687303715884105727 1 + ] :main` (`i128::MAX + 1`)
+/// passes `caternary check` and then fails at runtime with
+/// ``numeric overflow: `+` exceeds the exact integer range (i128) ``. Closing
+/// it needs a bounded-integer refinement (a range/integrality obligation) the
+/// predicate language currently lacks, so — like the bitwise case above — this
+/// is an explicitly documented soundness gap, not a silent one.
 pub fn register_scalar_builtins<T>(evaluator: &mut Evaluator<T>)
 where
     T: Quotable,
@@ -680,6 +774,10 @@ mod tests {
                 Token::Word(w) => {
                     if let Ok(n) = w.parse::<i128>() {
                         Value::Int(n)
+                    } else if crate::types::is_integer_literal(&w) {
+                        // Out-of-range integer: keep the exact lexeme (the
+                        // operators reject it loudly) — never a rounded f64.
+                        Value::Word(w)
                     } else if let Ok(f) = w.parse::<f64>()
                         && f.is_finite()
                     {
@@ -828,6 +926,46 @@ mod tests {
         assert_eq!(stack, vec![Value::Float(0.5)]);
     }
 
+    /// `i128::MIN / -1` and `i128::MIN % -1` overflow `i128` (the quotient
+    /// `2^127` is out of range). The unchecked `%`/`/` used to panic in debug
+    /// and silently wrap in release; both must be a runtime error instead.
+    #[test]
+    fn min_div_minus_one_is_a_runtime_error_not_a_crash() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        // `-170141183460469231731687303715884105728` is `i128::MIN`.
+        let err = eval
+            .eval(&parse("-170141183460469231731687303715884105728 -1 /").unwrap())
+            .unwrap_err();
+        assert!(err.to_string().contains("overflow"), "got: {err}");
+        let err = eval
+            .eval(&parse("-170141183460469231731687303715884105728 -1 %").unwrap())
+            .unwrap_err();
+        assert!(err.to_string().contains("overflow"), "got: {err}");
+    }
+
+    /// BUGS §A4: an integer lexeme beyond `i128` used to fall through to a
+    /// rounded `f64`, so two *distinct* integers compared equal (the reasoner
+    /// models the lexemes exactly). The runtime must fail loudly instead —
+    /// for `=`/`!=` and for the numeric operators alike — never round.
+    #[test]
+    fn out_of_range_integer_literals_error_instead_of_rounding() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        register_scalar_builtins(&mut eval);
+        // 2^127 and 2^127 + 1: distinct integers, identical as f64.
+        let src = "170141183460469231731687303715884105728 \
+                   170141183460469231731687303715884105729 =";
+        let err = eval.eval(&parse(src).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("overflow"), "got: {err}");
+        let err = eval
+            .eval(&parse("170141183460469231731687303715884105728 1 +").unwrap())
+            .unwrap_err();
+        assert!(err.to_string().contains("overflow"), "got: {err}");
+        // In-range integers and fractional lexemes are untouched.
+        let stack = eval.eval(&parse("1 1.0 =").unwrap()).unwrap();
+        assert_eq!(stack, vec![Value::Bool(true)]);
+    }
+
     #[test]
     fn forth_rotations_run() {
         let mut eval: Evaluator<Number> = Evaluator::new();
@@ -922,5 +1060,35 @@ mod tests {
         eval.load_with_spans(&tokens).unwrap();
 
         check_whole_program(&eval, crate::SmtLibSolver::new).unwrap();
+    }
+
+    /// BUGS §A5: the shift amount's runtime range (0..=127 — `checked_shl` /
+    /// `checked_shr` on i128) is modeled as a demand, so an out-of-range
+    /// amount fails the gate instead of surfacing only as a runtime "invalid
+    /// shift amount"; in-range amounts still discharge.
+    #[test]
+    fn shift_amount_range_is_gated() {
+        let gate = |src: &str| {
+            let mut eval: Evaluator<Value> = Evaluator::new();
+            register_scalar_builtins(&mut eval);
+            let tokens = parse_with_spans(src).unwrap();
+            eval.load_with_spans(&tokens).unwrap();
+            check_whole_program(&eval, crate::SmtLibSolver::new)
+        };
+        for src in [
+            "[ 1 -1 << DROP ] :main",
+            "[ 1 200 << DROP ] :main",
+            "[ 1 128 >> DROP ] :main",
+        ] {
+            assert!(gate(src).is_err(), "out-of-range shift must fail: {src}");
+        }
+        for src in [
+            "[ 1 0 << DROP ] :main",
+            "[ 1 3 << DROP ] :main",
+            "[ 1 127 << DROP ] :main",
+            "[ 8 2 >> DROP ] :main",
+        ] {
+            assert!(gate(src).is_ok(), "in-range shift must pass: {src}");
+        }
     }
 }

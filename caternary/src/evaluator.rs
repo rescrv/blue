@@ -533,6 +533,18 @@ impl<T> Evaluator<T> {
                         "malformed definition binder `{w}`: expected `:name`"
                     ))
                 })?;
+                // A definition named `true`/`false` desyncs the tiers: the
+                // runtime resolves definitions BEFORE literals while the
+                // checker types literals BEFORE definitions, so `[ 42 ] :true`
+                // runs as 42 but types as Bool (BUGS §B5). Numeric names are
+                // already excluded by the identifier rule; exclude the boolean
+                // literals the same way.
+                if crate::types::is_bool_literal(name) {
+                    return Err(definition_error(format!(
+                        "definition `:{name}` shadows the boolean literal `{name}` \
+                         (literals cannot be redefined)"
+                    )));
+                }
                 if i == 0 {
                     return Err(definition_error(format!(
                         "definition `:{name}` has no preceding quotation to bind"
@@ -1546,6 +1558,24 @@ mod tests {
         assert_load_error(":x", "definition `:x` has no preceding quotation to bind");
     }
 
+    /// BUGS §B5: a definition named `true`/`false` desyncs the tiers — the
+    /// runtime resolves definitions before literals, the checker types
+    /// literals before definitions — so `[ 42 ] :true [ true 1 + ] :main`
+    /// runs as 43 while the gate rejects Bool vs Num, and `[ ] :true` makes
+    /// the gate prove an effect the runtime never produces. Rejected at
+    /// `load`, mirroring the identifier rule that already excludes numerals.
+    #[test]
+    fn load_rejects_boolean_literal_definition_names() {
+        assert_load_error(
+            "[42] :true",
+            "definition `:true` shadows the boolean literal `true`",
+        );
+        assert_load_error(
+            "[] :false",
+            "definition `:false` shadows the boolean literal `false`",
+        );
+    }
+
     #[test]
     fn load_rejects_definition_after_word() {
         assert_load_error(
@@ -1781,8 +1811,7 @@ mod tests {
         let tokens = crate::parse_with_spans(src).unwrap();
         let err = eval.load_with_spans(&tokens).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("malformed refinement signature"),
+            err.to_string().contains("malformed refinement signature"),
             "got: {err}"
         );
     }

@@ -7,9 +7,65 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ## High
 
-(none open)
+### Higher-order definitions fail closed: applying a quotation parameter cannot pass the gate (BUGS §B1)
+
+Tier 1 seeds a definition's inputs as opaque *terms* (`seed_opaque_inputs`),
+so a body that `CALL`s/`DIP`s a quotation **parameter** is a hard shadow error
+("expected a quotation, found a value term") — `[ CALL ] :apply`,
+`[ >q q CALL ] :apply`, the `@name`-annotated rank-2 pattern, and callers of
+quotation-*returning* definitions are all rejected while the runtime runs
+them. (A quotation bound from a **literal in the same body** works:
+`[ 5 [ 1 + ] >f f CALL DROP ] :main` verifies — the §B2 locals fix.)
+
+The direction is safe (pure over-rejection), and — important — it currently
+**masks a soundness hole**: nothing verifies a literal quotation argument's
+body at a call site (`[ 1 0 / DROP ]` passed to `apply` is consumed opaquely;
+its division is only checked because `apply` itself CALLs it — which is
+exactly the part that fails closed today). A fix that merely lets the
+definition-side CALL move data opaquely would open that hole gate-wide.
+
+The sound fix is the **definition side of §10.6** (higher-order contracts at
+both ends of the boundary):
+
+1. A definition whose signature declares a quotation binder
+   `q: ( pre -- post )` seeds that input as a **contract-carrying symbolic
+   quotation**: running it inside the body discharges `pre` as an obligation
+   (bound at the invocation point), moves data per the contract's binder
+   counts, and asserts `post` on the fresh outputs.
+2. At each call site, the provided quotation must satisfy the expected
+   contract. Relay handles `[ w ]` (already implemented,
+   `relay_provided_contract`); a **literal body** must be *verified against
+   the expected contract* right there (seed `pre`, verify the body, prove
+   `post`) — and its possible reach past the contract's declared slots (the
+   §A1b row-absorption problem) must be excluded or havocked.
+3. Unrefined quotation parameters (including the `@name`-annotation-only
+   rank-2 pattern) stay fail-closed: with no contract there is nothing sound
+   to assume at the definition and nothing to check at the boundary.
+
+Pinned (fail-closed today, and the same-body-local carve-out) by
+`check::tests::quotation_parameter_application_fails_closed`.
 
 ## Medium
+
+### BI@/TRI@ rank-1 schemes: one shared row, two applications (BUGS §A3/§B6)
+
+`BI@ : ( 'S a a ('r a -- 'r b) -- 'S b b )` (and TRI@'s triple) reuse a single
+row/element pair for every application of the quotation, but the two runtime
+applications occur at *different* stack depths (the second sees the first's
+result) — which no rank-1 arrow can state. Two directions of imprecision:
+
+- **§A3 (unsound at Tier 0 only):** the shared row can absorb a tail element,
+  so `1 2 [ SWAP ] BI@` types `( 'S -- 'S Num Num )` on the Tier-0-only
+  surfaces (`check()`, `infer_quote_type`, REPL `:type`) while the runtime
+  underflows. The **full gate is unaffected** — the Tier-1 shadow re-executes
+  the real shuffle and rejects.
+- **§B6 (over-rejection everywhere):** the same single row forces exactly
+  `( a -- b )` per application, so runnable `[ DROP ]` / `[ DUP ]` bodies
+  occurs-check out ("cyclic type").
+
+Fixing either direction needs per-application instantiation of the quotation's
+arrow (rank-2 style generalization of a *value*), which the rank-1 substitution
+cannot express. Pinned by `check::tests::bi_at_rank1_scheme_limits_are_recorded`.
 
 ### API sharp edges
 
