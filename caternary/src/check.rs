@@ -1942,7 +1942,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn a_word_with_no_definition_or_contract_is_unresolved() {
         let mut eval: Evaluator<Value> = Evaluator::new();
