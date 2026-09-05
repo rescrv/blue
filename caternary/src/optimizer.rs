@@ -8,9 +8,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 
 use crate::ParseError;
 use crate::Token;
@@ -396,6 +393,8 @@ impl BacktrackBudget {
 pub struct Optimizer {
     rules: Vec<Rule>,
     max_backtracks: usize,
+    max_iterations: usize,
+    max_program_size: usize,
 }
 
 impl Optimizer {
@@ -404,6 +403,8 @@ impl Optimizer {
         Self {
             rules: Vec::new(),
             max_backtracks: 100_000,
+            max_iterations: 10_000,
+            max_program_size: 65_536,
         }
     }
 
@@ -423,12 +424,44 @@ impl Optimizer {
         self.max_backtracks
     }
 
-    /// Applies rules until no more changes occur.
+    /// Set the per-optimize rewrite-iteration budget. Optimization is
+    /// best-effort: when the budget runs out the current program is returned.
+    pub fn set_max_iterations(&mut self, max_iterations: usize) {
+        self.max_iterations = max_iterations;
+    }
+
+    /// Returns the current per-optimize rewrite-iteration budget.
+    pub fn max_iterations(&self) -> usize {
+        self.max_iterations
+    }
+
+    /// Set the maximum program size (total token count, brackets included)
+    /// rewriting may grow a program to. A size-increasing rule (`A -> A A`)
+    /// otherwise doubles the token stream forever; the cap stops runaway
+    /// growth and returns the current program.
+    pub fn set_max_program_size(&mut self, max_program_size: usize) {
+        self.max_program_size = max_program_size;
+    }
+
+    /// Returns the current maximum program size.
+    pub fn max_program_size(&self) -> usize {
+        self.max_program_size
+    }
+
+    /// Applies rules until no more changes occur, a previously-seen program
+    /// recurs (a rewrite cycle — detected by **exact equality**, never by hash
+    /// alone, so a 64-bit collision cannot silently terminate a live rewrite),
+    /// or a budget runs out ([`Optimizer::max_iterations`] /
+    /// [`Optimizer::max_program_size`] — size-increasing rules terminate
+    /// instead of growing without bound).
     pub fn optimize(&self, tokens: Vec<Token>) -> Vec<Token> {
         let mut current = tokens;
-        let mut seen = HashSet::new();
-        seen.insert(program_hash(&current));
-        loop {
+        // Exact-equality cycle detection: the set stores the programs
+        // themselves (hashing internally), so a hash collision degrades to a
+        // probe, never to a false "already seen".
+        let mut seen: HashSet<Vec<Token>> = HashSet::new();
+        seen.insert(current.clone());
+        for _ in 0..self.max_iterations {
             let mut changed = false;
             for rule in &self.rules {
                 if let Some(rewritten) = rule.apply_with_limit(&current, self.max_backtracks) {
@@ -440,7 +473,10 @@ impl Optimizer {
             if !changed {
                 break;
             }
-            if !seen.insert(program_hash(&current)) {
+            if program_size(&current) > self.max_program_size {
+                break;
+            }
+            if !seen.insert(current.clone()) {
                 break;
             }
         }
@@ -454,15 +490,66 @@ impl Default for Optimizer {
     }
 }
 
-fn program_hash(tokens: &[Token]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    tokens.hash(&mut hasher);
-    hasher.finish()
+/// Total token count of a program, brackets included (recursive).
+fn program_size(tokens: &[Token]) -> usize {
+    tokens
+        .iter()
+        .map(|t| match t {
+            Token::Word(_) => 1,
+            Token::Bracket(inner) => 1 + program_size(inner),
+        })
+        .sum()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =======================================================================
+    // Regression: termination bounds for size-increasing rules
+    // =======================================================================
+
+    /// `A -> A A` doubles the token stream on every pass; before the caps this
+    /// looped until OOM. The size budget stops it and returns the current
+    /// (best-effort) program.
+    #[test]
+    fn size_increasing_rule_terminates_at_the_size_cap() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("A", "A A").unwrap();
+        opt.set_max_program_size(1_000);
+        let result = opt.optimize(parse("A").unwrap());
+        assert!(result.len() > 1, "the rule did apply");
+        assert!(
+            result.len() <= 2_000,
+            "growth stops within one doubling of the cap"
+        );
+    }
+
+    /// The iteration budget bounds non-growing but non-converging rewrites.
+    #[test]
+    fn iteration_budget_bounds_the_rewrite_loop() {
+        let mut opt = Optimizer::new();
+        // A 1-token treadmill: A -> B, B -> A. Cycle detection catches it via
+        // exact equality; with a tiny budget the loop also provably stops.
+        opt.add_rule("A", "B").unwrap();
+        opt.add_rule("B", "A").unwrap();
+        opt.set_max_iterations(5);
+        let result = opt.optimize(parse("A").unwrap());
+        assert_eq!(result.len(), 1);
+    }
+
+    /// A rewrite cycle is detected by exact program equality (stored programs,
+    /// not bare 64-bit hashes), so a hash collision can never silently
+    /// terminate a live rewrite early.
+    #[test]
+    fn rewrite_cycle_stops_via_exact_equality() {
+        let mut opt = Optimizer::new();
+        opt.add_rule("A B", "B A").unwrap();
+        let result = opt.optimize(parse("A B").unwrap());
+        // One application flips to `B A`; the next flips back to the seen
+        // `A B` and the loop stops.
+        assert_eq!(result.len(), 2);
+    }
 
     #[test]
     fn build_probe_rewrite() {
