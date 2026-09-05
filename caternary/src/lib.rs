@@ -89,6 +89,7 @@ pub use solver::Model;
 pub use solver::Obligation;
 pub use solver::SUBSUMPTION_FAIL_CLOSED_MSG;
 pub use solver::SUBSUMPTION_NO_CONTRACT_MSG;
+pub use solver::SigResolver;
 pub use solver::SmtLibSolver;
 pub use solver::Solver;
 pub use solver::SubsumptionDirection;
