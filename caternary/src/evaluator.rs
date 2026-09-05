@@ -564,8 +564,44 @@ impl<T> Evaluator<T> {
     pub fn load_with_spans(&mut self, tokens: &[crate::SpannedToken]) -> Result<(), EvalError> {
         use crate::SpannedTokenKind;
 
-        // Validate and populate the runtime table through the existing path.
+        // Validate the stream's stack-effect annotations `[ effect ] @name`
+        // BEFORE any mutation (keeping `load_with_spans` atomic on error):
+        //  * a **ghost** annotation — one whose `name` is defined neither in
+        //    this stream nor already loaded — is rejected, so a typo'd `@name`
+        //    cannot silently unconstrain the definition it meant to annotate;
+        //  * a **duplicate** annotation is rejected, matching the hard error a
+        //    `:name` redefinition raises (never first-wins silently).
         let spanless: Vec<Token> = tokens.iter().map(crate::SpannedToken::to_token).collect();
+        let stream_defs: std::collections::HashSet<&str> = spanless
+            .iter()
+            .filter_map(|t| match t {
+                Token::Word(w) if has_def_prefix(w) => def_target(w),
+                _ => None,
+            })
+            .collect();
+        let mut stream_annotations: std::collections::HashSet<&str> =
+            std::collections::HashSet::new();
+        for (i, tok) in tokens.iter().enumerate() {
+            if let SpannedTokenKind::Word(w) = &tok.kind
+                && let Some(name) = w.strip_prefix('@')
+                && is_local_name(name)
+                && let Some(prev) = i.checked_sub(1)
+                && matches!(tokens[prev].kind, SpannedTokenKind::Bracket(_))
+            {
+                if self.annotations.contains_key(name) || !stream_annotations.insert(name) {
+                    return Err(definition_error(format!(
+                        "duplicate annotation: `@{name}` is already annotated"
+                    )));
+                }
+                if !stream_defs.contains(name) && !self.definitions.contains_key(name) {
+                    return Err(definition_error(format!(
+                        "annotation `@{name}` has no definition to annotate"
+                    )));
+                }
+            }
+        }
+
+        // Validate and populate the runtime table through the existing path.
         self.load(&spanless)?;
 
         // Re-walk the spanned top level to capture each definition's spanned
@@ -1636,6 +1672,37 @@ mod tests {
         assert_eq!(eval.eval(&tokens).unwrap(), vec![word("x")]);
     }
 
+    /// A **ghost** annotation — `@name` with no `:name` definition anywhere —
+    /// is rejected at load: a typo'd `@name` used to be silently ignored,
+    /// leaving the definition it meant to annotate unconstrained.
+    #[test]
+    fn ghost_annotation_is_rejected_at_load() {
+        let mut eval = locals_eval();
+        let tokens = crate::parse_with_spans("[ -- Num ] @ghost [ 0 ] :main").unwrap();
+        let err = eval.load_with_spans(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("annotation `@ghost` has no definition to annotate")
+        );
+        // Atomicity: the failed load defined nothing.
+        assert!(!eval.has_definition("main"));
+    }
+
+    /// A duplicate `@name` annotation is a hard error, matching `:name`
+    /// redefinition (it used to be silent first-wins).
+    #[test]
+    fn duplicate_annotation_is_rejected_at_load() {
+        let mut eval = locals_eval();
+        let tokens =
+            crate::parse_with_spans("[ -- Num ] @foo [ -- Bool ] @foo [ 0 ] :foo").unwrap();
+        let err = eval.load_with_spans(&tokens).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate annotation: `@foo` is already annotated")
+        );
+        assert!(!eval.has_definition("foo"));
+    }
+
     #[test]
     fn annotation_pairs_are_inert_at_runtime() {
         // §10.10 / invariant 20: a Tier-0 `[ effect ] @name` annotation is a
@@ -1644,12 +1711,12 @@ mod tests {
         // so it is never evaluated, and the runtime carries no verification
         // residue.
         let mut eval = locals_eval();
-        let tokens = crate::parse_with_spans("[ a -- a a ] @dupw [ 1 ADD ] :inc").unwrap();
+        let tokens = crate::parse_with_spans("[ a -- a ] @inc [ 1 ADD ] :inc").unwrap();
         eval.load_with_spans(&tokens).unwrap();
 
         // The annotation was recorded for the checker, but the definition body
         // is exactly `[ 1 ADD ]` — the `@dupw` directive is NOT spliced in.
-        assert!(eval.annotation_tokens("dupw").is_some());
+        assert!(eval.annotation_tokens("inc").is_some());
         let body = eval.definition_body("inc").expect("inc is defined");
         let has_at = body
             .iter()
