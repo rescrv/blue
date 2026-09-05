@@ -3371,8 +3371,8 @@ impl BigInt {
         debug_assert!(BigInt::cmp_mag(a, b) != std::cmp::Ordering::Less);
         let mut out = Vec::with_capacity(a.len());
         let mut borrow = 0i64;
-        for i in 0..a.len() {
-            let x = a[i] as i64;
+        for (i, &ai) in a.iter().enumerate() {
+            let x = ai as i64;
             let y = b.get(i).copied().unwrap_or(0) as i64;
             let mut v = x - y - borrow;
             if v < 0 {
