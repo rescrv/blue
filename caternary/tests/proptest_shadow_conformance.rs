@@ -334,9 +334,7 @@ impl Move {
                 n >= 3 && matches!(top(0), K::FnFold(_)) && top(1) == K::Num && top(2).list_like()
             }
             Move::Each => n >= 2 && matches!(top(0), K::FnEach(_)) && top(1).list_like(),
-            Move::Filter => {
-                n >= 2 && matches!(top(0), K::FnFilter(_)) && top(1).list_like()
-            }
+            Move::Filter => n >= 2 && matches!(top(0), K::FnFilter(_)) && top(1).list_like(),
             // Both IF families emit their arms inline (freshly typed, so no
             // occurs concern); the condition must sit on top.
             Move::IfConst(_) => n >= 1 && top(0) == K::Bool,
