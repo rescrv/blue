@@ -654,6 +654,13 @@ where
         } else if let Some(value) = env.get(w) {
             // reference: resolved scope-first, ahead of definitions and operators
             stack.push(value.clone());
+        } else if crate::parse_assume(w).is_some() {
+            // `assume( PRED )` (§10.7) is a Tier-1 path-condition marker, not a
+            // value: Tier 0 gives it the identity stack effect and Tier 1
+            // intercepts it before word resolution, so the runtime must move no
+            // data either — a gate-passing program's runtime stack matches its
+            // proven effect. (Pushing the literal word here would leave one more
+            // value on the stack than the proof says exists.)
         } else if let Some(body) = self.definitions.get(w) {
             // function call: re-enter in a fresh scope.
             let body = body.clone();
@@ -819,6 +826,18 @@ mod tests {
             ]
         );
         println!("Stack: {result:?}");
+    }
+
+    /// `assume( PRED )` is a Tier-1 marker with the identity Tier-0 effect; the
+    /// runtime must move no data either (§10.7). Before the fix the evaluator
+    /// fell through to the literal-word push and the runtime stack carried one
+    /// more value than the proven effect.
+    #[test]
+    fn assume_word_is_a_runtime_no_op() {
+        let eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse(r#"A "assume(x > 0)""#).unwrap();
+        let result = eval.eval(&tokens).unwrap();
+        assert_eq!(result, vec![Value::Word("A".to_string())]);
     }
 
     #[test]

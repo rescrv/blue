@@ -24,17 +24,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   grammar that rejects `inf`/`NaN`; make `=` numeric (or add `eqv?`-style
   token equality under a separate name and keep `=` out of the solver's Eq).
 
-### `assume(...)` is a no-op to the checker but a value at runtime
-
-- Tier 0 gives it the identity effect (`src/check.rs:1033`); Tier 1
-  intercepts it; but no operator is registered, so the runtime **pushes the
-  literal word**. `[ 5 ] :five` + `[ five "assume(x > 0)" ] :main` passes
-  the full gate (exit 0) while the runtime stack ends as
-  `[5 "assume(x > 0)"]` — one more value than the proof says exists.
-- Fix direction: treat `assume(...)` as a runtime no-op in the evaluator
-  (or strip the words before evaluation in a checked-program runner), and
-  test that a gate-passing program's runtime stack matches its proven effect.
-
 ### Parser: no literal brackets in words; deep nesting aborts the process
 
 - Shell quotes/escapes are resolved before bracket processing, so a word can
@@ -124,3 +113,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   `shadow_conforms_under_combinator_pressure` flake): pinned by
   `check::tests::dup_dip_rot_drop_call_does_not_spuriously_cycle`.
   When fixed, also re-run the shadow-conformance proptest repeatedly.
+- `assume(...)` runtime no-op: pinned by
+  `evaluator::tests::assume_word_is_a_runtime_no_op` and
+  `check::tests::gate_passing_assume_program_runtime_matches_proven_effect`.
