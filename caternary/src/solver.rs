@@ -825,6 +825,12 @@ pub struct SigResolver<'a, L> {
     /// shadow data flow silently diverges from the runtime's — the §10.3
     /// mis-shuffle failure class (wrong slots zipped at the next §10.2 binding).
     arrows: Option<ArrowLookup<'a>>,
+    /// The loaded definition names. The runtime's resolution order is
+    /// locals → definitions → operators, so a definition may **shadow** a
+    /// language-core word (`DUP`, `DIP`, …) or an interpreted operator; the
+    /// shadow evaluator must then move data per the definition's Tier 0 arrow,
+    /// not per the core word's baked-in semantics.
+    definitions: Option<&'a BTreeSet<String>>,
 }
 
 impl<'a, L> SigResolver<'a, L>
@@ -838,6 +844,7 @@ where
         SigResolver {
             lookup,
             arrows: None,
+            definitions: None,
         }
     }
 
@@ -848,6 +855,23 @@ where
         SigResolver {
             lookup,
             arrows: Some(arrows),
+            definitions: None,
+        }
+    }
+
+    /// Like [`SigResolver::with_arrows`], additionally carrying the loaded
+    /// **definition names** so a definition that shadows a language-core word
+    /// resolves to its own Tier 0 arrow (the runtime's resolution order is
+    /// locals → definitions → operators).
+    pub fn with_arrows_and_definitions(
+        lookup: &'a L,
+        arrows: ArrowLookup<'a>,
+        definitions: &'a BTreeSet<String>,
+    ) -> Self {
+        SigResolver {
+            lookup,
+            arrows: Some(arrows),
+            definitions: Some(definitions),
         }
     }
 
@@ -870,7 +894,18 @@ where
     L: Fn(&str) -> Option<RefinementSig>,
 {
     fn resolve(&self, word: &str) -> VerifyWord {
-        let resolved = refinement_verify_word(word, (self.lookup)(word).as_ref());
+        let sig = (self.lookup)(word);
+        // A loaded definition shadows a core word / interpreted operator (the
+        // runtime resolves definitions BEFORE operators). An unrefined
+        // definition must move data per its own inferred Tier 0 arrow — never
+        // per the shadowed core word's semantics.
+        if sig.is_none()
+            && self.definitions.is_some_and(|defs| defs.contains(word))
+            && let Some(arrow) = self.tier0_arrow(word)
+        {
+            return VerifyWord::Core(ShadowWord::Opaque(arrow));
+        }
+        let resolved = refinement_verify_word(word, sig.as_ref());
         // The Var fallback is only honest for a word with NO known Tier 0
         // arrow (a free symbolic variable). A word that Tier 0 typed — an
         // unrefined registered operator (MAP/FILTER/FOLD/EACH, embedder ops)
@@ -2162,13 +2197,14 @@ fn check_definition_ctx<L, S>(
     def: &Definition,
     lookup: &L,
     arrows: ArrowLookup<'_>,
+    definitions: &BTreeSet<String>,
     solver: &mut S,
 ) -> Result<VerifyCtx, ShadowError>
 where
     L: Fn(&str) -> Option<RefinementSig>,
     S: Solver + CounterModel + FactSnapshot,
 {
-    let resolve = SigResolver::with_arrows(lookup, arrows);
+    let resolve = SigResolver::with_arrows_and_definitions(lookup, arrows, definitions);
     let mut stack = ShadowStack::new();
     let mut ctx = VerifyCtx::with_site(&def.name);
 
@@ -2244,11 +2280,12 @@ where
 {
     let mut ledger = Ledger::new();
     let mut own: BTreeMap<String, Vec<Pred>> = BTreeMap::new();
+    let definition_names: BTreeSet<String> = defs.iter().map(|d| d.name.clone()).collect();
 
     // Pass 1: verify each body; collect its own accepted/rejected assumes.
     for def in defs {
         let mut solver = mk_solver();
-        let ctx = check_definition_ctx(def, lookup, arrows, &mut solver)?;
+        let ctx = check_definition_ctx(def, lookup, arrows, &definition_names, &mut solver)?;
         // Fail closed on any UNDISCHARGED obligation (§10.5/§10.7 Situation B):
         // `verify` records a `Sat` (refuted demand/guarantee, with a
         // counterexample model) or `Unknown` (undecided — fails closed for

@@ -1038,22 +1038,11 @@ where
         ));
     }
 
-    // A registered operator (embedder attestation): instantiate its scheme with
-    // fresh vars and re-anchor the spans at this call site (§5 `lookup`).
-    if let Some(scheme) = evaluator.contract(w) {
-        let scheme = scheme.clone();
-        let inst = ctx.instantiate(&scheme);
-        return Ok(respan_word(&inst, span));
-    }
-
-    // A language-core primitive (DUP/DROP/SWAP/OVER/CALL/IF), looked up under
-    // its runtime UPPER_SNAKE_CASE spelling. The spec uses runtime spelling
-    // directly; there is no lowercase translation layer.
-    if let Some(scheme) = core_scheme(w) {
-        let inst = ctx.instantiate(&scheme);
-        return Ok(respan_word(&inst, span));
-    }
-
+    // Definitions resolve BEFORE operators and core primitives — the runtime's
+    // resolution order is locals → definitions → operators (README), so a
+    // definition may shadow a registered operator or a language-core word and
+    // the checker must type the call against what the runtime will run.
+    //
     // A definition under inference in the *current* SCC: use its monomorphic
     // arrow assumption directly (recursive calls share the un-generalized type,
     // the no-polymorphic-recursion rule, §6). Re-anchor the spans at this call
@@ -1067,6 +1056,22 @@ where
     // re-anchor at this call site (§6, §5 `lookup`).
     if let Some(scheme) = def_env.schemes.get(w) {
         let inst = ctx.instantiate(scheme);
+        return Ok(respan_word(&inst, span));
+    }
+
+    // A registered operator (embedder attestation): instantiate its scheme with
+    // fresh vars and re-anchor the spans at this call site (§5 `lookup`).
+    if let Some(scheme) = evaluator.contract(w) {
+        let scheme = scheme.clone();
+        let inst = ctx.instantiate(&scheme);
+        return Ok(respan_word(&inst, span));
+    }
+
+    // A language-core primitive (DUP/DROP/SWAP/OVER/CALL/IF), looked up under
+    // its runtime UPPER_SNAKE_CASE spelling. The spec uses runtime spelling
+    // directly; there is no lowercase translation layer.
+    if let Some(scheme) = core_scheme(w) {
+        let inst = ctx.instantiate(&scheme);
         return Ok(respan_word(&inst, span));
     }
 
@@ -1910,6 +1915,56 @@ mod tests {
         assert_eq!(
             inst.output.elems[0].kind,
             crate::types::TyKind::Con(NUM.to_string())
+        );
+    }
+
+    // =======================================================================
+    // Regression: definitions must shadow language-core words
+    // (README: "a definition may shadow a builtin operator"; runtime
+    // resolution is locals → definitions → operators, but the checker
+    // resolved contracts/`core_scheme` BEFORE definitions)
+    // =======================================================================
+
+    /// The user's `DUP` takes no inputs; typed as the definition, `main`
+    /// closes against the empty stack. Mis-resolved as core `DUP`
+    /// ( 'S a -- 'S a a ), `main` underflows the empty stack.
+    #[test]
+    fn definition_shadowing_core_word_types_main_against_the_definition() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ 0 ] :DUP [ DUP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            type_check(&eval).is_ok(),
+            "definition `DUP` must shadow the core word (README resolution order)"
+        );
+    }
+
+    /// The other direction of the same desync: borrowing core `DUP`'s arity for
+    /// a user `DUP` that *consumes* two values makes `5 DUP` type-check against
+    /// the empty stack while the runtime underflows. The checker must reject.
+    #[test]
+    fn definition_shadowing_core_word_cannot_borrow_core_arity() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ DROP DROP 0 ] :DUP [ 5 DUP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            type_check(&eval).is_err(),
+            "checker must not type `DUP` via the core scheme when a definition shadows it"
+        );
+    }
+
+    /// Gate-level pin covering BOTH tiers: Tier 0 must type `DUP` from the
+    /// definition, and the Tier-1 shadow must move data per the definition's
+    /// arrow rather than `core_shadow_word("DUP")` (which would underflow the
+    /// shadow stack here and spuriously reject a runtime-fine program).
+    #[test]
+    fn gate_accepts_definition_shadowing_core_word() {
+        let mut eval: Evaluator<Value> = Evaluator::new();
+        let tokens = parse_with_spans("[ 0 ] :DUP [ DUP ] :main").unwrap();
+        eval.load_with_spans(&tokens).unwrap();
+        assert!(
+            check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
+            "gate must verify the definition the runtime will actually call"
         );
     }
 
