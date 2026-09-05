@@ -523,7 +523,7 @@ where
     // Tier 0 first — the immutability barrier and the arity floor Tier 1 rides on
     // (invariant 19). On rejection we return *without* constructing a shadow stack
     // or a solver: Tier 1 must never run on a program Tier 0 has not accepted.
-    check(evaluator).map_err(GateError::Tier0)?;
+    let (_, schemes) = type_check_entry_with_schemes(evaluator, MAIN).map_err(GateError::Tier0)?;
 
     // Tier 0 is green: bridge the evaluator into the Tier 1 shape. Each loaded
     // definition contributes its name, its (spanless) body, and its attached
@@ -548,9 +548,7 @@ where
     // comes from the Tier 0 arrow — the shadow evaluator owns no independent
     // notion of it). Definitions contribute their inferred, generalized schemes;
     // the embedder its registered contracts; the language core its baked-in
-    // schemes. Tier 0 is green here, so the schemes exist; the recomputation is
-    // read-only against the frozen result (invariant 18).
-    let schemes = definition_schemes(evaluator).map_err(GateError::Tier0)?;
+    // schemes. Reuse the schemes from the successful Tier 0 pass.
     let arrows = |w: &str| -> Option<WordTy> {
         if let Some(scheme) = schemes.get(w) {
             return Some(scheme.ty.clone());
@@ -609,6 +607,16 @@ pub fn type_check_entry<T>(evaluator: &Evaluator<T>, entry: &str) -> Result<Word
 where
     T: Quotable,
 {
+    type_check_entry_with_schemes(evaluator, entry).map(|(effect, _)| effect)
+}
+
+fn type_check_entry_with_schemes<T>(
+    evaluator: &Evaluator<T>,
+    entry: &str,
+) -> Result<(WordTy, HashMap<String, Scheme>), TypeError>
+where
+    T: Quotable,
+{
     // The checker reads the SPANNED body so every diagnostic anchors at a real
     // source byte offset (§13 invariant 6: origin spans exist from the first
     // inference commit and are not reconstructable later). A program to be
@@ -650,7 +658,7 @@ where
         true,
     )?;
 
-    Ok(ctx.resolve_word_deep(&effect))
+    Ok((ctx.resolve_word_deep(&effect), def_env.schemes))
 }
 
 /// Infer the stack-effect type of a quotation body against an evaluator's

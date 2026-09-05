@@ -9,7 +9,7 @@ Caternary is a small concatenative language with first-class quotations and a pa
 - `[ ... ]` creates a quotation token.
 - Shell quotes and escapes are resolved before FORTH parsing, so `"hello world"` is one word and `hello\ world` is also one word.
 - Case is preserved and significant (`Scan`, `SCAN`, and `scan` are different words).
-- Brackets nest arbitrarily.
+- Brackets nest up to `MAX_BRACKET_DEPTH`; deeper input is a parse error.
 
 Concrete examples (top of stack is on the right):
 
@@ -366,6 +366,12 @@ having been loaded, so a stray `:name` can never be mistaken for a literal.
 
 The optimizer rewrites token streams with pattern rules until fixpoint, with cycle detection.
 
+Rules are supplied by the embedder and match syntax only. The optimizer does
+not prove that a rewrite preserves behavior: that depends on the embedding's
+operators, their effects, and any definitions shadowing them. Type-checking
+both versions does not prove equivalence. Apply rules only where their semantic
+assumptions hold, and check the resulting program before running it.
+
 ```rust
 use caternary::{Optimizer, parse};
 
@@ -395,7 +401,7 @@ Examples:
 
 - Rules are tried in insertion order.
 - One successful rewrite is applied per iteration, then matching restarts.
-- Optimization stops at fixpoint or when a cycle is detected.
+- Optimization stops at fixpoint, a detected cycle, or an iteration/program-size limit.
 - `$*` matching uses a configurable backtracking budget:
 
 ```rust
