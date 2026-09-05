@@ -1006,7 +1006,7 @@ mod tests {
         let mut base = ShadowStack::new();
         base.push_term(var("x"));
         let mut then_state = base.clone();
-        let mut else_state = base.clone();
+        let else_state = base.clone();
         // The then branch mints $t0 in its slot; the else keeps `x`.
         then_state
             .apply_opaque(&WordTy::new(
