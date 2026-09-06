@@ -7,22 +7,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ## High
 
-### Runtime `Num` is f64, but the solver models it as exact `Real`
-
-- `src/solver.rs:342,488` declares every variable `Real` (QF_LRA);
-  `src/builtins.rs:138` (`pop_num`) computes in f64.
-- Proven refinements need not hold at runtime: `9007199254740993 1 +`
-  evaluates to `9007199254740992`; `is_numeric_literal` (`src/types.rs:59`)
-  accepts `inf`/`NaN` as literals, which have no Real semantics. Division in
-  the model is exact rational division; the runtime rounds.
-- `=`/`==`/`!=` compare **token renderings** (`to_tokens`,
-  `src/builtins.rs:286-302`) while the shadow models `=` as real equality
-  (`src/shadow.rs` `interpreted_op`). Rendering-dependent: in the README's
-  i64-based `Value`, `1 1.0 =` is false; in the REPL's f64 `Value`, true.
-- Fix direction: decide the semantics deliberately — e.g. runtime integers
-  via i128 with f64 only as a documented escape hatch, plus a `Num` literal
-  grammar that rejects `inf`/`NaN`; make `=` numeric (or add `eqv?`-style
-  token equality under a separate name and keep `=` out of the solver's Eq).
+(none open)
 
 ## Medium
 
@@ -102,6 +87,14 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 - `assume(...)` runtime no-op: pinned by
   `evaluator::tests::assume_word_is_a_runtime_no_op` and
   `check::tests::gate_passing_assume_program_runtime_matches_proven_effect`.
+- Runtime `Num` semantics decided and recorded (`builtins::Num`): exact
+  `i128` integers with checked overflow; finite `f64` as the documented
+  escape hatch for fractional lexemes; `inf`/`NaN` rejected by the literal
+  grammar and the runtime; `=`/`==`/`!=` numeric on numeric operands.
+  Pinned by `builtins::tests::integer_arithmetic_is_exact_beyond_f64_precision`,
+  `…::equality_is_numeric_not_rendering_dependent`, and neighbors. Remaining
+  documented gap: fractional arithmetic rounds (f64) while the model's
+  division is exact rational.
 - Parser literal brackets + nesting cap: pinned by
   `parser::tests::{double,single}_quoted_brackets_stay_literal`,
   `parser::tests::backslash_escaped_brackets_stay_literal`, and

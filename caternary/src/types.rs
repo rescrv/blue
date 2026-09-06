@@ -54,10 +54,16 @@ pub const MAIN: &str = "main";
 
 /// The Tier-0 decision for what counts as a numeric literal at the `Token`
 /// level. The parser has no numeric token; a numeric literal is a word whose
-/// text parses as an `f64` (integers included). Such a word has Tier-0 type
-/// `( 'a -- 'a Num )` (§5).
+/// text parses as a **finite** `f64` (integers included). Such a word has
+/// Tier-0 type `( 'a -- 'a Num )` (§5).
+///
+/// Non-finite lexemes (`inf`, `-inf`, `NaN`, and their case variants, plus
+/// overflowing forms like `1e999`) are **rejected**: the solver models `Num`
+/// as exact `Real` (QF_LRA), and infinities / NaN have no `Real` semantics —
+/// admitting them as literals would let a proven refinement be vacuous at
+/// runtime.
 pub fn is_numeric_literal(word: &str) -> bool {
-    !word.is_empty() && word.parse::<f64>().is_ok()
+    !word.is_empty() && word.parse::<f64>().map(f64::is_finite).unwrap_or(false)
 }
 
 /// The Tier-0 decision for what counts as a boolean literal.
@@ -1897,5 +1903,14 @@ mod tests {
         // There is no core `+`: it is not a numeric literal and must arrive via
         // registration.
         assert!(!is_numeric_literal("+"));
+        // Non-finite lexemes have no `Real` semantics and are not literals.
+        assert!(!is_numeric_literal("inf"));
+        assert!(!is_numeric_literal("-inf"));
+        assert!(!is_numeric_literal("infinity"));
+        assert!(!is_numeric_literal("NaN"));
+        assert!(!is_numeric_literal("nan"));
+        assert!(!is_numeric_literal("1e999"));
+        // Finite scientific notation stays a literal.
+        assert!(is_numeric_literal("1e3"));
     }
 }
