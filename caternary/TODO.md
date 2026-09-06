@@ -11,17 +11,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ## Medium
 
-### Attestation hash omits Tier-1 content
-
-- `ContractSet::attestation_hash` (`src/attestation.rs:222`) covers only
-  Tier-0 schemes + the operator table — not refinement signatures
-  (`Evaluator::attach_refinement`). Two builds differing only in refinement
-  axioms hash identically, contrary to the architecture section's
-  "all definition signatures + the operator table" (core entries are documented
-  to carry "Tier-0 scheme (and Tier-1 axiom)").
-- Fix direction: fold each name's `RefinementSig` (and the operator axioms)
-  into the canonical rendering before hashing.
-
 ### Optimizer: no termination bound for size-increasing rules
 
 - `Optimizer::optimize` (`src/optimizer.rs:427`) stops only at fixpoint or a
@@ -95,6 +84,8 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   `…::equality_is_numeric_not_rendering_dependent`, and neighbors. Remaining
   documented gap: fractional arithmetic rounds (f64) while the model's
   division is exact rational.
+- Attestation hash covers Tier-1 refinement signatures: pinned by
+  `attestation::tests::attestation_hash_covers_refinement_signatures`.
 - Parser literal brackets + nesting cap: pinned by
   `parser::tests::{double,single}_quoted_brackets_stay_literal`,
   `parser::tests::backslash_escaped_brackets_stay_literal`, and
