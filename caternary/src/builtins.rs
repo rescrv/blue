@@ -220,7 +220,8 @@ fn overflow(op: &str) -> EvalError {
 fn pop_num<T: Quotable>(stack: &mut Vec<T>) -> Result<Num, EvalError> {
     let value = stack.pop().ok_or_else(|| stack_underflow(1, stack.len()))?;
     let word = scalar_word(&value)?;
-    Num::parse(&word).ok_or_else(|| operator_error(format!("expected numeric value, found `{word}`")))
+    Num::parse(&word)
+        .ok_or_else(|| operator_error(format!("expected numeric value, found `{word}`")))
 }
 
 fn pop_int<T: Quotable>(stack: &mut Vec<T>) -> Result<i128, EvalError> {
