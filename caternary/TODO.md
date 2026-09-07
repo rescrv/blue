@@ -11,15 +11,6 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
 
 ## Medium
 
-### Optimizer: no termination bound for size-increasing rules
-
-- `Optimizer::optimize` (`src/optimizer.rs:427`) stops only at fixpoint or a
-  revisited 64-bit `DefaultHasher` program hash. `A -> A A` doubles the token
-  stream forever (OOM); a hash collision silently terminates early
-  ("false cycle").
-- Fix direction: add a max-iteration / max-program-size cap, and confirm
-  hash hits with a real equality check (or store the programs).
-
 ### API sharp edges
 
 - `Evaluator::load` is **non-atomic**: `[ 1 ] :a :2x` errors but `:a` stays
@@ -84,6 +75,10 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   `…::equality_is_numeric_not_rendering_dependent`, and neighbors. Remaining
   documented gap: fractional arithmetic rounds (f64) while the model's
   division is exact rational.
+- Optimizer termination: iteration + program-size budgets, cycle detection
+  by exact program equality. Pinned by
+  `optimizer::tests::size_increasing_rule_terminates_at_the_size_cap` and
+  neighbors.
 - Attestation hash covers Tier-1 refinement signatures: pinned by
   `attestation::tests::attestation_hash_covers_refinement_signatures`.
 - Parser literal brackets + nesting cap: pinned by
