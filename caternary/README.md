@@ -132,6 +132,13 @@ definitions, and runs the whole-program checker. A checked program must define
 printf '[ 1 2 + ] :main\n' | caternary check
 ```
 
+A green gate proves stack shapes and refinement obligations — it is not a
+proof that every builtin accepts every value in its `Num` domain. The bitwise
+builtins (`|`/`&`/`^`/`<<`/`>>`/`~`) are typed `( Num Num -- Num )` under the
+single-`Num` decision but demand integer-valued operands at runtime, so
+`[ 1 0.5 | ] :main` passes `check` and fails when run (documented on
+`register_scalar_builtins`).
+
 `caternary repl` starts the development REPL. Normal input is parsed, loaded,
 and evaluated against a persistent definition table and stack. Definition pairs
 such as `[ 1 + ] :inc` are loaded but not pushed onto the runtime stack.
