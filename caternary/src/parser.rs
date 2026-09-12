@@ -261,11 +261,7 @@ impl Parser {
         // Report the OUTERMOST unmatched `[`: with `[ [ [` open, the bracket
         // the user must close (or that was opened by mistake) is the first
         // one, and everything after it is properly nested inside.
-        if let Some(open_start) = self
-            .frames
-            .iter()
-            .find_map(|frame| frame.open_bracket)
-        {
+        if let Some(open_start) = self.frames.iter().find_map(|frame| frame.open_bracket) {
             return Err(ParseError::UnmatchedOpenBracket {
                 span: Span::point(open_start),
             });
