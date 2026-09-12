@@ -444,9 +444,11 @@ fn lex(src: &str) -> Result<Vec<Spanned>, RefineParseError> {
                     j += 1;
                 }
                 let lexeme = src[i..j].to_string();
-                // Reject a malformed numeric literal (e.g. `1.2.3`) so it is a
-                // located error rather than surviving as a bad atom.
-                if lexeme.matches('.').count() > 1 {
+                // Reject a malformed numeric literal (e.g. `1.2.3`, or the
+                // trailing-dot form `1.` — which `render_smtlib` would emit
+                // verbatim as invalid SMT-LIB) so it is a located error rather
+                // than surviving as a bad atom.
+                if lexeme.matches('.').count() > 1 || lexeme.ends_with('.') {
                     return Err(RefineParseError::new(
                         format!("malformed numeric literal `{lexeme}`"),
                         RefineSpan::new(i, j),
@@ -1212,6 +1214,16 @@ mod tests {
             "error should be inside the quotation contract, got {:?}",
             err.span
         );
+    }
+
+    /// A trailing-dot literal (`1.`) is a located lex error: `render_smtlib`
+    /// used to emit it verbatim — invalid SMT-LIB for the z3 backend.
+    #[test]
+    fn trailing_dot_numeric_literal_is_rejected() {
+        let err = parse_predicate("x > 1.").expect_err("trailing-dot literal must error");
+        assert!(err.to_string().contains("malformed numeric literal `1.`"));
+        // Proper decimals still lex.
+        assert!(parse_predicate("x > 1.5").is_ok());
     }
 
     #[test]
