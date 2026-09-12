@@ -124,6 +124,7 @@ use crate::refinement::RefinementSide;
 use crate::refinement::RefinementSig;
 use crate::refinement::UnOp;
 use crate::refinement::parse_assume;
+use crate::evaluator::bind_target;
 use crate::shadow::NamedBinding;
 use crate::shadow::ShadowError;
 use crate::shadow::ShadowQuoteItem;
@@ -1347,7 +1348,133 @@ fn apply_core<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
             stack.push_quote(combined);
             Ok(())
         }
+        // WHEN runs its body on the truthy path only; UNLESS on the falsy path.
+        ShadowWord::When => verify_one_armed_if(stack, false, resolve, solver, ctx),
+        ShadowWord::Unless => verify_one_armed_if(stack, true, resolve, solver, ctx),
+        // MAP/FILTER: the body runs once per element on the tail it shares with
+        // the continuation; verify it at the havoc fixpoint, then push the
+        // (opaque) result sequence. The per-element output (MAP's b / FILTER's
+        // Bool) is popped by each iteration.
+        ShadowWord::Map | ShadowWord::Filter => {
+            stack.require(2)?;
+            let body = stack.pop_quote()?;
+            let _seq = stack.pop()?;
+            verify_loop_body(stack, &body, true, resolve, solver, ctx)?;
+            let out = stack.fresh_literal();
+            stack.push_term(out);
+            Ok(())
+        }
+        // EACH: as MAP, but the body consumes the element and nothing is pushed.
+        ShadowWord::Each => {
+            stack.require(2)?;
+            let body = stack.pop_quote()?;
+            let _seq = stack.pop()?;
+            verify_loop_body(stack, &body, false, resolve, solver, ctx)
+        }
+        // FOLD: the threaded accumulator is part of the loop state — push the
+        // init back and fix over (tail + acc). The step body consumes acc+elem
+        // and leaves the new acc, so it pops no extra output; the fixpoint's
+        // top slot is the final accumulator (opaque unless the step provably
+        // preserves it).
+        ShadowWord::Fold => {
+            stack.require(3)?;
+            let body = stack.pop_quote()?;
+            let init = stack.pop()?;
+            let _seq = stack.pop()?;
+            stack.push_slot(init);
+            verify_loop_body(stack, &body, false, resolve, solver, ctx)
+        }
     }
+}
+
+/// The path-condition treatment of `WHEN`/`UNLESS` (§10.4 applied to the
+/// one-armed conditional): `cond [ body ] WHEN` is `cond [ body ] [ ] IF`, so
+/// verify the body on a branch copy under the appropriate path condition
+/// (`P` for `WHEN`, `¬P` for `UNLESS`) and **join** with the skipped path —
+/// the unchanged incoming stack. The body's Tier 0 effect is `('S -- 'S)`,
+/// which admits shape-preserving scramblers, so only slot-wise agreed
+/// knowledge may survive into the unconditional continuation
+/// ([`ShadowStack::join_branch_states`]).
+fn verify_one_armed_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    stack: &mut ShadowStack,
+    negate_cond: bool,
+    resolve: &R,
+    solver: &mut S,
+    ctx: &mut VerifyCtx,
+) -> Result<(), ShadowError> {
+    stack.require(2)?;
+    let body = stack.pop_quote()?;
+    let cond = stack.pop_term()?;
+    let path = if negate_cond { negate(&cond) } else { cond };
+
+    let ran = {
+        let mut branch = stack.clone();
+        solver.push_scope();
+        solver.assert(&path);
+        verify_quote_ctx(&body, &mut branch, solver, resolve, ctx)?;
+        solver.pop_scope();
+        branch
+    };
+
+    // Join with the skipped path: the incoming stack, unchanged. A slot that
+    // is a quotation on both paths joins to the conditional pair keyed on the
+    // ran-branch's path condition (`join_branch_states_ite`, BUGS §B3).
+    let joined = ShadowStack::join_branch_states_ite(ran, stack, Some(&path))?;
+    *stack = joined;
+    Ok(())
+}
+
+/// Verify a sequence-combinator body (`MAP`/`FILTER`/`FOLD`/`EACH`) that runs
+/// an unknown number of times on the stack it shares with the continuation.
+///
+/// Two phases over [`ShadowStack::havoc_fixpoint`]:
+///
+///   1. **Fixpoint rounds** replay one iteration at a time — a fresh opaque
+///      element pushed, the body run, the per-element output popped when the
+///      combinator's contract has one (`pops_output`) — inside a pushed solver
+///      scope with a **scratch** [`VerifyCtx`], so probe facts and probe
+///      obligations are discarded: only the final, inductive replay is
+///      ledgered.
+///   2. **The verified replay** at the fixpoint state discharges the body's
+///      obligations into the real `ctx`, against the inductive invariant (any
+///      iteration's entry state) — never against first-iteration-only
+///      knowledge. Its facts stay scoped: they speak about that replay's fresh
+///      element, which does not exist downstream.
+///
+/// On return `stack` is the fixpoint state — the sound post-state of the loop
+/// for zero or any number of iterations.
+fn verify_loop_body<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    stack: &mut ShadowStack,
+    body: &[ShadowQuoteItem],
+    pops_output: bool,
+    resolve: &R,
+    solver: &mut S,
+    ctx: &mut VerifyCtx,
+) -> Result<(), ShadowError> {
+    stack.havoc_fixpoint(|st| {
+        let elem = st.fresh_literal();
+        st.push_term(elem);
+        let mut probe_ctx = VerifyCtx::new();
+        solver.push_scope();
+        let ran = verify_quote_ctx(body, st, solver, resolve, &mut probe_ctx);
+        solver.pop_scope();
+        ran?;
+        if pops_output {
+            st.pop()?;
+        }
+        Ok(())
+    })?;
+
+    // The verified replay at the inductive state.
+    let mut replay = stack.clone();
+    let elem = replay.fresh_literal();
+    replay.push_term(elem);
+    solver.push_scope();
+    let ran = verify_quote_ctx(body, &mut replay, solver, resolve, ctx);
+    solver.pop_scope();
+    ran?;
+    stack.absorb_fresh(&replay);
+    Ok(())
 }
 
 /// Verify a token sequence with **path conditions** (§10.4): execute the shadow
@@ -1389,23 +1516,18 @@ pub fn verify_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     resolve: &R,
     ctx: &mut VerifyCtx,
 ) -> Result<(), ShadowError> {
+    // A fresh locals scope per walk, mirroring `Evaluator::eval_with_stack`
+    // (each definition body / top level opens its own `>name` scope — §B2).
+    let mut env = ShadowLocals::new();
     for token in tokens {
         match token {
-            Token::Bracket(body) => stack.push_quote(shadow_quote_from_tokens(body)),
-            Token::Word(w) if is_if(w) => {
-                verify_if(stack, solver, resolve, ctx)?;
+            Token::Bracket(body) => {
+                // A quotation value captures the locals in scope by value —
+                // the shadow image of `evaluator.rs::capture_tokens`.
+                let items = shadow_quote_from_tokens(body);
+                stack.push_quote(capture_locals(&items, &env));
             }
-            Token::Word(w) if parse_assume(w).is_some() => {
-                // Safe: `is_some()` above. A malformed `assume(` body surfaces as
-                // a located ShadowError rather than being mistaken for a word.
-                let pred = parse_assume(w).unwrap().map_err(|e| ShadowError {
-                    message: format!("malformed `assume` clause: {e}"),
-                })?;
-                apply_assume(stack, w, pred, solver, ctx)?;
-            }
-            Token::Word(w) => {
-                apply_effect(stack, w, resolve, solver, ctx)?;
-            }
+            Token::Word(w) => verify_word(w, stack, solver, resolve, ctx, &mut env)?,
         }
     }
     Ok(())
@@ -1418,25 +1540,116 @@ fn verify_quote_ctx<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     resolve: &R,
     ctx: &mut VerifyCtx,
 ) -> Result<(), ShadowError> {
+    // A fresh locals scope per quotation body, mirroring
+    // `Evaluator::eval_quote_with_stack` (enclosing locals reach a body only
+    // through by-value capture at the bracket, never dynamically).
+    let mut env = ShadowLocals::new();
     for item in items {
         match item {
-            ShadowQuoteItem::Word(w) if is_if(w) => {
-                verify_if(stack, solver, resolve, ctx)?;
-            }
-            ShadowQuoteItem::Word(w) if parse_assume(w).is_some() => {
-                let pred = parse_assume(w).unwrap().map_err(|e| ShadowError {
-                    message: format!("malformed `assume` clause: {e}"),
-                })?;
-                apply_assume(stack, w, pred, solver, ctx)?;
-            }
-            ShadowQuoteItem::Word(w) => {
-                apply_effect(stack, w, resolve, solver, ctx)?;
-            }
-            ShadowQuoteItem::Bracket(body) => stack.push_quote(body.clone()),
+            ShadowQuoteItem::Word(w) => verify_word(w, stack, solver, resolve, ctx, &mut env)?,
+            ShadowQuoteItem::Bracket(body) => stack.push_quote(capture_locals(body, &env)),
             ShadowQuoteItem::Push(slot) => stack.push_slot(slot.clone()),
         }
     }
     Ok(())
+}
+
+/// The `>name` locals live during one verify walk (BUGS §B2): each maps a
+/// bound local to the shadow **slot** it captured — a value term keeps its
+/// knowledge (so `4 >x x x /` discharges `x * x > 0`), a quotation slot stays
+/// CALLable. One scope per walk, exactly like the runtime's per-scope `env`.
+type ShadowLocals = std::collections::HashMap<String, Slot>;
+
+/// Verify a single word, mirroring `evaluator.rs::eval_word`'s resolution
+/// order: `>name` binder first, then a bound local, then the verifier's
+/// interceptions (`IF`, `assume(...)`), then ordinary word resolution. The
+/// binder **pops the top slot into the scope** and a use **pushes the bound
+/// slot back** — the runtime's data flow, byte for byte; before this case
+/// existed, `>x` pushed a phantom `Var(">x")` and a use pushed a free
+/// `Var("x")`, so every demand through a local failed closed (§B2).
+fn verify_word<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
+    w: &str,
+    stack: &mut ShadowStack,
+    solver: &mut S,
+    resolve: &R,
+    ctx: &mut VerifyCtx,
+    env: &mut ShadowLocals,
+) -> Result<(), ShadowError> {
+    if let Some(name) = bind_target(w) {
+        // Mirror the runtime's single-assignment rule (Tier 0 also rejects a
+        // same-scope rebind; this guard keeps the walk total on its own).
+        if env.contains_key(name) {
+            return Err(ShadowError {
+                message: format!(
+                    "single-assignment violation: `{name}` is already bound in this scope"
+                ),
+            });
+        }
+        let slot = stack.pop()?;
+        env.insert(name.to_string(), slot);
+        return Ok(());
+    }
+    if let Some(slot) = env.get(w) {
+        // Locals resolve scope-first, ahead of definitions and operators.
+        stack.push_slot(slot.clone());
+        return Ok(());
+    }
+    if is_if(w) {
+        return verify_if(stack, solver, resolve, ctx);
+    }
+    if let Some(pred) = parse_assume(w) {
+        // A malformed `assume(` body surfaces as a located ShadowError rather
+        // than being mistaken for a word.
+        let pred = pred.map_err(|e| ShadowError {
+            message: format!("malformed `assume` clause: {e}"),
+        })?;
+        return apply_assume(stack, w, pred, solver, ctx);
+    }
+    apply_effect(stack, w, resolve, solver, ctx)
+}
+
+/// Bake the walk's live locals into a quotation body **by value** — the shadow
+/// image of `evaluator.rs::capture_tokens`: a use of a captured local becomes a
+/// `Push` of its slot, a `>name` bound *inside* the body shadows the capture
+/// for the rest of that body, and nested brackets recurse under the shadowed
+/// environment.
+fn capture_locals(items: &[ShadowQuoteItem], env: &ShadowLocals) -> Vec<ShadowQuoteItem> {
+    if env.is_empty() {
+        return items.to_vec();
+    }
+    let mut local: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            ShadowQuoteItem::Word(w) => {
+                if let Some(name) = bind_target(w) {
+                    local.insert(name);
+                    out.push(item.clone());
+                } else if !local.contains(w.as_str())
+                    && let Some(slot) = env.get(w)
+                {
+                    out.push(ShadowQuoteItem::Push(slot.clone()));
+                } else {
+                    out.push(item.clone());
+                }
+            }
+            ShadowQuoteItem::Bracket(inner) => {
+                let captured = if local.is_empty() {
+                    capture_locals(inner, env)
+                } else {
+                    let shadowed: ShadowLocals = env
+                        .iter()
+                        .filter(|(k, _)| !local.contains(k.as_str()))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    capture_locals(inner, &shadowed)
+                };
+                out.push(ShadowQuoteItem::Bracket(captured));
+            }
+            ShadowQuoteItem::Push(_) => out.push(item.clone()),
+        }
+    }
+    out
 }
 
 /// The path-condition core (§10.4) for `cond [ then ] [ else ] IF`.
@@ -1488,8 +1701,10 @@ fn verify_if<R: VerifyResolve, S: Solver + CounterModel + FactSnapshot>(
     };
 
     // Advance the real stack by the join: only branch-agreed knowledge
-    // survives into the unconditional continuation.
-    *stack = ShadowStack::join_branch_states(then_stack, &else_stack)?;
+    // survives into the unconditional continuation — except a slot that is a
+    // quotation on both paths, which joins to the conditional pair
+    // (`join_branch_states_ite`, BUGS §B3) so a later CALL re-splits on `P`.
+    *stack = ShadowStack::join_branch_states_ite(then_stack, &else_stack, Some(&cond))?;
     Ok(())
 }
 
@@ -5882,18 +6097,25 @@ mod tests {
 
     #[test]
     fn resolver_falls_back_to_the_core_tier0_arrow_before_var() {
-        // `MAP` has a core Tier-0 scheme ( 'S (List a) ('r a -- 'r b) -- 'S
-        // (List b) ) but no shadow word and no sig: it must resolve Opaque with
-        // that arrow's arity (pop 2, push 1) — never Var (pop 0, push 1).
+        // `IF` has a core Tier-0 scheme ( 'S Bool ('S -- 'T) ('S -- 'T) -- 'T )
+        // but no shadow word (the verifier intercepts it before resolution) and
+        // no sig: reaching the resolver it must be Opaque with that arrow's
+        // arity (pop 3) — never Var (pop 0). (`MAP` pinned this fallback before
+        // the sequence combinators became real shadow words — BUGS §A1; it now
+        // resolves to `ShadowWord::Map`, asserted below.)
         let lookup = |_: &str| None;
         let resolve = SigResolver::new(&lookup);
-        match resolve.resolve("MAP") {
+        match resolve.resolve("IF") {
             VerifyWord::Core(ShadowWord::Opaque(arrow)) => {
-                assert_eq!(arrow.input.elems.len(), 2, "MAP pops the list and the fn");
-                assert_eq!(arrow.output.elems.len(), 1, "MAP pushes the mapped list");
+                assert_eq!(arrow.input.elems.len(), 3, "IF pops cond and both arms");
+                assert_eq!(arrow.output.elems.len(), 0, "IF's result rides the row");
             }
-            other => panic!("MAP must be Opaque per its core Tier 0 arrow, got {other:?}"),
+            other => panic!("IF must be Opaque per its core Tier 0 arrow, got {other:?}"),
         }
+        assert!(
+            matches!(resolve.resolve("MAP"), VerifyWord::Core(ShadowWord::Map)),
+            "MAP is a real shadow word — its body is verified, not skipped"
+        );
     }
 
     #[test]

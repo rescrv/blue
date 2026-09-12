@@ -137,6 +137,7 @@ pub use types::WordTy;
 pub use types::core_scheme;
 pub use types::format_word_type;
 pub use types::is_bool_literal;
+pub use types::is_integer_literal;
 pub use types::is_numeric_literal;
 pub use types::respan_word;
 

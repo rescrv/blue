@@ -226,6 +226,29 @@ pub enum ShadowWord {
     TwoCurry,
     /// `3CURRY` — prepend three captured slots to a quotation.
     ThreeCurry,
+    /// `WHEN` — pop a quotation and a condition; the quotation (effect
+    /// `('S -- 'S)`) runs on the stack below the condition only on the truthy
+    /// path. The body is executed on a branch copy (under the condition as a
+    /// path condition, where a solver is present) and the result **joined**
+    /// with the skipped path, exactly as `IF` joins its arms.
+    When,
+    /// `UNLESS` — as `WHEN`, but the quotation runs on the falsy path (under
+    /// the negated condition).
+    Unless,
+    /// `MAP` — pop a quotation and a sequence; havoc-to-fixpoint over the
+    /// shared tail ([`ShadowStack::havoc_fixpoint`]), verify the body at the
+    /// fixpoint, and push the (opaque) result sequence.
+    Map,
+    /// `FILTER` — pop a quotation (predicate) and a sequence; as `MAP` (the
+    /// per-element output is the predicate's Bool; the result list is opaque).
+    Filter,
+    /// `FOLD` — pop a quotation, an accumulator, and a sequence; the threaded
+    /// accumulator joins the loop state, so the fixpoint's top slot is the
+    /// final accumulator (opaque unless the step provably preserves it).
+    Fold,
+    /// `EACH` — pop a quotation and a sequence; havoc-to-fixpoint over the
+    /// shared tail and verify the consumer body at the fixpoint.
+    Each,
     /// An interpreted binary operator (arithmetic/comparison/connective): pops
     /// two terms `a b` and pushes the proposition/term `Bin(op, a, b)`.
     Bin(BinOp),
@@ -281,6 +304,12 @@ pub fn core_shadow_word(name: &str) -> Option<ShadowWord> {
         "CURRY" => ShadowWord::Curry,
         "2CURRY" => ShadowWord::TwoCurry,
         "3CURRY" => ShadowWord::ThreeCurry,
+        "WHEN" => ShadowWord::When,
+        "UNLESS" => ShadowWord::Unless,
+        "MAP" => ShadowWord::Map,
+        "FILTER" => ShadowWord::Filter,
+        "FOLD" => ShadowWord::Fold,
+        "EACH" => ShadowWord::Each,
         _ => return None,
     };
     Some(word)
@@ -403,10 +432,17 @@ impl ShadowStack {
 
     /// Mint a fresh literal term for an opaque producer (§10.3). Each call is a
     /// distinct SMT variable; soundness holds, precision degrades gracefully.
-    fn fresh_literal(&mut self) -> Pred {
+    pub(crate) fn fresh_literal(&mut self) -> Pred {
         let p = Pred::Var(format!("$t{}", self.fresh));
         self.fresh += 1;
         p
+    }
+
+    /// Advance this stack's fresh-literal counter past everything `other`
+    /// minted — called after running a probe body on a clone, so terms minted
+    /// here afterwards never alias the probe's.
+    pub(crate) fn absorb_fresh(&mut self, other: &ShadowStack) {
+        self.fresh = self.fresh.max(other.fresh);
     }
 
     /// Join two branch post-states into an `IF`'s post-state (§10.4).
@@ -420,14 +456,32 @@ impl ShadowStack {
     /// would otherwise discharge against a term the runtime's else branch never
     /// produces.)
     ///
-    /// A *disagreed quotation* slot also joins to an opaque term: a later
-    /// combinator that needs to run it fails the shadow structurally, which is
-    /// the fail-closed reading — the checker cannot know which body it would be
-    /// verifying. An ite-aware join could recover precision here later; opacity
-    /// is the conservative floor.
+    /// Without a condition in hand (this wrapper), a *disagreed quotation*
+    /// slot also joins to an opaque term: a later combinator that needs to run
+    /// it fails the shadow structurally — the fail-closed floor. The verifier,
+    /// which does hold the condition, uses [`Self::join_branch_states_ite`] to
+    /// recover precision for quotation-on-both-paths slots (BUGS §B3).
     pub fn join_branch_states(
         then_state: ShadowStack,
         else_state: &ShadowStack,
+    ) -> Result<ShadowStack, ShadowError> {
+        Self::join_branch_states_ite(then_state, else_state, None)
+    }
+
+    /// [`ShadowStack::join_branch_states`] with an **ite-aware quotation
+    /// join** (BUGS §B3): when the branch condition `cond` is supplied and the
+    /// branches disagree on a slot that is a **quotation in both**, the join
+    /// keeps a synthetic conditional quotation `[ cond [then] [else] IF ]`
+    /// instead of an opaque term. A later combinator that runs the slot
+    /// re-enters the verifier's `IF` treatment: each body is verified under
+    /// its own path condition and the results re-join — so the checker knows
+    /// the slot is a quotation without pretending to know which body, and a
+    /// demand inside either body is still discharged only under that branch's
+    /// condition. Every other disagreement stays the opaque fail-closed floor.
+    pub(crate) fn join_branch_states_ite(
+        then_state: ShadowStack,
+        else_state: &ShadowStack,
+        cond: Option<&Pred>,
     ) -> Result<ShadowStack, ShadowError> {
         if then_state.slots.len() != else_state.slots.len() {
             // Tier 0 guarantees shape agreement; this guard keeps the zip total.
@@ -439,6 +493,21 @@ impl ShadowStack {
         joined.fresh = joined.fresh.max(else_state.fresh);
         for i in 0..joined.slots.len() {
             if joined.slots[i] != else_state.slots[i] {
+                if let (Some(cond), Slot::Quote(t), Slot::Quote(e)) =
+                    (cond, &joined.slots[i], &else_state.slots[i])
+                {
+                    // Both control paths leave a quotation here: keep the
+                    // conditional pair. (The `IF` word is safe from local
+                    // shadowing: this body never passes through source-level
+                    // capture, and a quotation body opens a fresh scope.)
+                    joined.slots[i] = Slot::Quote(vec![
+                        ShadowQuoteItem::Push(Slot::Term(cond.clone())),
+                        ShadowQuoteItem::Bracket(t.clone()),
+                        ShadowQuoteItem::Bracket(e.clone()),
+                        ShadowQuoteItem::Word("IF".to_string()),
+                    ]);
+                    continue;
+                }
                 let opaque = joined.fresh_literal();
                 joined.slots[i] = Slot::Term(opaque);
             }
@@ -628,6 +697,72 @@ impl ShadowStack {
             self.push_term(fresh);
         }
         Ok(())
+    }
+
+    /// Havoc-to-fixpoint over the whole current stack — the sound post-state
+    /// for a loop body (`MAP`/`FILTER`/`FOLD`/`EACH`) that runs an **unknown
+    /// number of times** on the stack it shares with the continuation.
+    ///
+    /// `run_body` models exactly one iteration and must be depth-neutral over
+    /// the current stack (push the representative element, run the quotation,
+    /// pop the per-element output — the runtime enforces the same shape per
+    /// iteration). Starting from the current slots as the abstraction, each
+    /// round replays one iteration and **havocs** (replaces with a fresh opaque
+    /// literal) every not-yet-havocked slot the iteration changed — a changed
+    /// quotation slot havocs to an opaque *term*, the fail-closed floor, since
+    /// the checker no longer knows which body that slot holds. The loop stops
+    /// when an iteration changes nothing that isn't already opaque: the
+    /// surviving slots are an **inductive invariant** of the body (preserved
+    /// syntactically even with every havocked slot arbitrary), so they hold
+    /// after zero or any number of iterations. Termination: each round havocs
+    /// at least one new slot or exits, so it runs at most `depth + 1` rounds.
+    ///
+    /// On return the stack *is* the fixpoint state. The caller should verify
+    /// the body one final time **at this state** so its obligations are
+    /// discharged against the inductive invariant (any iteration's entry
+    /// state), never against first-iteration-only knowledge.
+    pub(crate) fn havoc_fixpoint<F>(&mut self, mut run_body: F) -> Result<(), ShadowError>
+    where
+        F: FnMut(&mut ShadowStack) -> Result<(), ShadowError>,
+    {
+        let depth = self.slots.len();
+        let mut havocked = vec![false; depth];
+        loop {
+            // Candidate state: the original slots, havocked ones fresh-opaque.
+            let mut probe = self.clone();
+            for (i, h) in havocked.iter().enumerate() {
+                if *h {
+                    let fresh = probe.fresh_literal();
+                    probe.slots[i] = Slot::Term(fresh);
+                }
+            }
+            let entry = probe.slots.clone();
+            run_body(&mut probe)?;
+            if probe.slots.len() != depth {
+                return Err(ShadowError::new(
+                    "sequence-combinator body changed the shared stack depth \
+                     (Tier 0 should have rejected this program)",
+                ));
+            }
+            self.fresh = self.fresh.max(probe.fresh);
+            let mut widened = false;
+            for i in 0..depth {
+                if !havocked[i] && probe.slots[i] != entry[i] {
+                    havocked[i] = true;
+                    widened = true;
+                }
+            }
+            if !widened {
+                // Fixpoint: install the inductive state.
+                for (i, h) in havocked.iter().enumerate() {
+                    if *h {
+                        let fresh = self.fresh_literal();
+                        self.slots[i] = Slot::Term(fresh);
+                    }
+                }
+                return Ok(());
+            }
+        }
     }
 
     // --- token-driven execution (mirrors evaluator.rs::eval_scope) ---
@@ -830,6 +965,68 @@ impl ShadowStack {
                         ];
                         combined.extend(body);
                         self.push_quote(combined);
+                    }
+                    // WHEN/UNLESS: the quotation (effect 'S -- 'S) runs on the
+                    // stack below the condition, on one control path only.
+                    // Execute the body on a branch copy and JOIN with the
+                    // skipped path (the unchanged stack), exactly as IF joins
+                    // its two arms: only knowledge both control paths agree on
+                    // survives, so a body that permutes the tail can't leave
+                    // one path's values speaking for the other.
+                    ShadowWord::When | ShadowWord::Unless => {
+                        self.require(2)?;
+                        let body = self.pop_quote()?;
+                        let _cond = self.pop()?;
+                        let mut ran = self.clone();
+                        ran.exec_quote(&body, resolve)?;
+                        let joined = ShadowStack::join_branch_states(ran, self)?;
+                        *self = joined;
+                    }
+                    // MAP/FILTER/EACH: pop the quotation and the sequence, then
+                    // havoc-to-fixpoint over the shared tail — the body runs
+                    // once per element at runtime, so every tail slot an
+                    // iteration can change must go opaque, and the body is
+                    // replayed at the fixpoint so the abstraction is inductive.
+                    // MAP/FILTER additionally push the (opaque) result sequence.
+                    ShadowWord::Map | ShadowWord::Filter => {
+                        self.require(2)?;
+                        let body = self.pop_quote()?;
+                        let _seq = self.pop()?;
+                        self.havoc_fixpoint(|st| {
+                            let elem = st.fresh_literal();
+                            st.push_term(elem);
+                            st.exec_quote(&body, resolve)?;
+                            st.pop()?; // per-element output (MAP: b; FILTER: the Bool)
+                            Ok(())
+                        })?;
+                        let out = self.fresh_literal();
+                        self.push_term(out);
+                    }
+                    ShadowWord::Each => {
+                        self.require(2)?;
+                        let body = self.pop_quote()?;
+                        let _seq = self.pop()?;
+                        self.havoc_fixpoint(|st| {
+                            let elem = st.fresh_literal();
+                            st.push_term(elem);
+                            st.exec_quote(&body, resolve) // body consumes the element
+                        })?;
+                    }
+                    // FOLD: the threaded accumulator is part of the loop state —
+                    // push the init back and fix over (tail + acc); the fixpoint
+                    // top IS the final accumulator (opaque unless the step
+                    // provably preserves it).
+                    ShadowWord::Fold => {
+                        self.require(3)?;
+                        let body = self.pop_quote()?;
+                        let init = self.pop()?;
+                        let _seq = self.pop()?;
+                        self.push_slot(init);
+                        self.havoc_fixpoint(|st| {
+                            let elem = st.fresh_literal();
+                            st.push_term(elem);
+                            st.exec_quote(&body, resolve) // body leaves the new acc
+                        })?;
                     }
                     ShadowWord::Bin(op) => self.bin(op)?,
                     ShadowWord::Un(op) => self.un(op)?,
