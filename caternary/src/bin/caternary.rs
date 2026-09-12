@@ -580,11 +580,18 @@ fn expect_no_positionals(command: &str, free: &[String]) -> Result<()> {
 
 fn repl_runtime_tokens(tokens: &[SpannedToken]) -> Vec<Token> {
     let mut skip = vec![false; tokens.len()];
-    for i in 1..tokens.len() {
+    for i in 0..tokens.len() {
         let SpannedTokenKind::Word(word) = &tokens[i].kind else {
             continue;
         };
-        if (is_definition_binder(word) || is_annotation_binder(word))
+        // A refinement-signature word (`"name : ( … -- … )"`) is a load-only
+        // directive, like the definition/annotation pairs below.
+        if is_signature_word(word) {
+            skip[i] = true;
+            continue;
+        }
+        if i > 0
+            && (is_definition_binder(word) || is_annotation_binder(word))
             && matches!(tokens[i - 1].kind, SpannedTokenKind::Bracket(_))
         {
             skip[i - 1] = true;
@@ -605,6 +612,12 @@ fn is_definition_binder(word: &str) -> bool {
 
 fn is_annotation_binder(word: &str) -> bool {
     word.strip_prefix('@').is_some_and(is_name)
+}
+
+/// Mirrors the loader's refinement-signature marker (`evaluator.rs`): only a
+/// quoted word can contain ` : (`, so ordinary program words never match.
+fn is_signature_word(word: &str) -> bool {
+    word.contains(" : (")
 }
 
 fn is_name(name: &str) -> bool {
