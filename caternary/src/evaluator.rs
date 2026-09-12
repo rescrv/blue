@@ -1781,8 +1781,7 @@ mod tests {
         let tokens = crate::parse_with_spans(src).unwrap();
         let err = eval.load_with_spans(&tokens).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("malformed refinement signature"),
+            err.to_string().contains("malformed refinement signature"),
             "got: {err}"
         );
     }
