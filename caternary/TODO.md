@@ -36,9 +36,7 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   break despite the M13 "bit-for-bit aligned" claim.
 - Refinement binder type names are unvalidated (`n: Banana` parses and is
   treated as a `Real`); only `Quote` is load-bearing.
-- `SmtLibSolver::pop_scope` / `Z3Solver::pop_scope` guard base-scope
-  underflow only with `debug_assert` (release: silent base pop, later
-  `unwrap` panic).
+
 
 
 ## Fixed-or-pinned elsewhere
@@ -66,6 +64,8 @@ Holes 1, 2, and 4 are fixed and pinned by regression tests in
   division is exact rational.
 - `Evaluator::load` atomicity: pinned by
   `evaluator::tests::load_is_atomic_on_error`.
+- `pop_scope` base underflow is a hard assert in all build profiles: pinned
+  by `solver::tests::smtlib_pop_scope_underflow_panics_with_its_name`.
 - `Parser::finish` reports the outermost unmatched `[`: pinned by
   `parser::tests::unmatched_open_bracket_reports_the_outermost`.
 - Ghost / duplicate `@name` annotations rejected at load: pinned by
