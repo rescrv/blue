@@ -1,8 +1,10 @@
 //! Type-directed property tests, paired with runtime observations.
 //!
 //! P1/P3/P5 generate scalar programs over Num/Bool and compare the independently
-//! simulated output types with inference and execution. Composition and row
-//! neutrality also compare complete runtime values. P2 generates nested List and
+//! simulated output types with inference and execution. P1 also generates varied
+//! literals and checks exact results against an independent concrete oracle.
+//! Composition and row neutrality also compare complete runtime values.
+//! P2 generates nested List and
 //! quotation types as well as scalar/type/row variables. P4 exercises a capture
 //! shared with its monomorphic environment and a helper instantiated at distinct
 //! types. P6 permutes dependency chains and a terminating recursive SCC, checking
@@ -222,6 +224,103 @@ fn simulate(choices: &[u16], st: &mut Vec<Base>) -> Vec<String> {
     tokens
 }
 
+/// Concrete oracle values, independent of the runtime's token representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scalar {
+    Num(i128),
+    Bool(bool),
+}
+
+impl Scalar {
+    fn base(self) -> Base {
+        match self {
+            Self::Num(_) => Base::Num,
+            Self::Bool(_) => Base::Bool,
+        }
+    }
+
+    fn value(self) -> Value {
+        Value::Word(match self {
+            Self::Num(n) => n.to_string(),
+            Self::Bool(b) => b.to_string(),
+        })
+    }
+}
+
+/// Simulate a legal move with Rust operations, never using caternary to compute
+/// expected results. Overflow is a runtime domain error, so it excludes a move
+/// from this generator of successfully executable programs.
+fn scalar_step(m: Move, payload: i16, stack: &[Scalar]) -> Option<Vec<Scalar>> {
+    let mut out = stack.to_vec();
+    match m {
+        Move::PushNum => out.push(Scalar::Num(i128::from(payload))),
+        Move::PushBool => out.push(Scalar::Bool(payload & 1 != 0)),
+        Move::Dup => out.push(*out.last().unwrap()),
+        Move::Drop => {
+            out.pop();
+        }
+        Move::Swap => {
+            let n = out.len();
+            out.swap(n - 1, n - 2);
+        }
+        Move::Over => out.push(out[out.len() - 2]),
+        Move::NumNot => {
+            let Scalar::Num(n) = out.pop().unwrap() else {
+                unreachable!()
+            };
+            out.push(Scalar::Num(!n));
+        }
+        Move::BoolNot => {
+            let Scalar::Bool(b) = out.pop().unwrap() else {
+                unreachable!()
+            };
+            out.push(Scalar::Bool(!b));
+        }
+        Move::Arith(op) | Move::Cmp(op) | Move::Logic(op) | Move::Eq(op) => {
+            let b = out.pop().unwrap();
+            let a = out.pop().unwrap();
+            let result = match (op, a, b) {
+                ("+", Scalar::Num(a), Scalar::Num(b)) => Scalar::Num(a.checked_add(b)?),
+                ("-", Scalar::Num(a), Scalar::Num(b)) => Scalar::Num(a.checked_sub(b)?),
+                ("*", Scalar::Num(a), Scalar::Num(b)) => Scalar::Num(a.checked_mul(b)?),
+                ("<", Scalar::Num(a), Scalar::Num(b)) => Scalar::Bool(a < b),
+                (">", Scalar::Num(a), Scalar::Num(b)) => Scalar::Bool(a > b),
+                ("&&", Scalar::Bool(a), Scalar::Bool(b)) => Scalar::Bool(a && b),
+                ("||", Scalar::Bool(a), Scalar::Bool(b)) => Scalar::Bool(a || b),
+                ("==", a, b) => Scalar::Bool(a == b),
+                ("!=", a, b) => Scalar::Bool(a != b),
+                _ => unreachable!("move must satisfy its type preconditions"),
+            };
+            out.push(result);
+        }
+    }
+    Some(out)
+}
+
+/// Shrinking choices or literals rebuilds a valid program and its known output.
+fn known_output_program(choices: &[(u16, i16)]) -> (String, Vec<Scalar>) {
+    let mut types = Vec::new();
+    let mut expected = Vec::new();
+    let mut tokens = Vec::new();
+    for &(choice, payload) in choices {
+        let legal: Vec<_> = moves_for(&types)
+            .into_iter()
+            .filter_map(|m| scalar_step(m, payload, &expected).map(|next| (m, next)))
+            .collect();
+        let (m, next) = &legal[usize::from(choice) % legal.len()];
+        let emitted = run_move(*m, &mut types);
+        // The type-only generator uses fixed literals. Replace those with this
+        // move's random literal while retaining its existing instruction syntax.
+        match m {
+            Move::PushNum => tokens.push(payload.to_string()),
+            Move::PushBool => tokens.push((payload & 1 != 0).to_string()),
+            _ => tokens.extend(emitted),
+        }
+        expected = next.clone();
+    }
+    (format!("[ {} ] :main", tokens.join(" ")), expected)
+}
+
 /// Emit literals that reconstruct an exact base-type stack (bottom to top).
 fn emit_literals(st: &[Base]) -> Vec<String> {
     st.iter()
@@ -265,13 +364,19 @@ proptest! {
     /// A type-directed term has a known final stack; inference must reproduce it
     /// exactly. The top-level input is empty and its row threads to the output
     /// row (the identity tail), and the output's observed elements are precisely
-    /// the simulated base-type stack.
+    /// the simulated base-type stack. Execution must return the independently
+    /// computed values, and every returned value must inhabit its inferred type.
     #[test]
-    fn p1_inference_agrees_with_oracle(script in choice_script()) {
-        let mut st = Vec::new();
-        let tokens = simulate(&script, &mut st);
-        let src = format!("[ {} ] :main", tokens.join(" "));
-        let effect = checked_main(&src).expect("type-directed term must type-check");
+    fn p1_inference_agrees_with_oracle(
+        script in prop::collection::vec((any::<u16>(), any::<i16>()), 0..64)
+    ) {
+        let (src, expected) = known_output_program(&script);
+        let st: Vec<_> = expected.iter().map(|v| v.base()).collect();
+        let mut eval = new_eval();
+        eval.load_with_spans(&parse_with_spans(&src).unwrap()).unwrap();
+        let effect = type_check(&eval);
+        prop_assert!(effect.is_ok(), "generated program failed type checking: {src}: {effect:?}");
+        let effect = effect.unwrap();
         prop_assert!(effect.input.elems.is_empty(), "top-level input is empty");
         prop_assert_eq!(effect.input.row, effect.output.row, "identity tail threads");
         prop_assert!(
@@ -281,6 +386,20 @@ proptest! {
             st,
             src
         );
+        let runtime = eval.eval(&parse("main").unwrap());
+        prop_assert!(runtime.is_ok(), "generated program failed to run: {src}: {runtime:?}");
+        let runtime = runtime.unwrap();
+        let values: Vec<_> = expected.iter().map(|v| v.value()).collect();
+        prop_assert_eq!(&runtime, &values, "runtime differs from known output: {}", src);
+        prop_assert_eq!(runtime.len(), effect.output.elems.len(), "output depth: {}", src);
+        for (value, ty) in runtime.iter().zip(&effect.output.elems) {
+            let conforms = match (value, &ty.kind) {
+                (Value::Word(w), TyKind::Con(name)) if name == NUM => w.parse::<i128>().is_ok(),
+                (Value::Word(w), TyKind::Con(name)) if name == BOOL => w == "true" || w == "false",
+                _ => false,
+            };
+            prop_assert!(conforms, "output {value:?} does not conform to {ty:?}: {src}");
+        }
     }
 }
 
