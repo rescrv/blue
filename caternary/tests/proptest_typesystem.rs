@@ -1,35 +1,12 @@
-//! Harness 1 — Type-Directed Term Generator (proptest).
+//! Type-directed property tests, paired with runtime observations.
 //!
-//! There is no reference implementation, so the oracle is the type system's own
-//! claimed invariants. The generator manufactures that oracle — every term it
-//! produces has a *known* type — turning "inferred == expected" from a
-//! crash-check into a real assertion.
-//!
-//! ## The generator
-//!
-//! caternary's Tier-0 has a **single numeric type** (`Num`) plus `Bool`, and the
-//! only words the *type checker* resolves are: numeric/boolean literals, the
-//! registered scalar operators (`+ - * < > && || == != ~ not …`), and the
-//! language-core primitives in [`caternary::core_scheme`]
-//! (`DUP DROP SWAP OVER CALL IF DIP`). `ROT/NIP/TUCK/2DUP` are runtime-only and
-//! have no Tier-0 scheme, so the generator never emits them.
-//!
-//! That base-value simplicity (no `Int`/`Float`/`Bool` axis to sample) lets the
-//! generator be **concrete-stack** directed rather than effect-variable directed:
-//! it simulates an abstract stack of base types (`Num`/`Bool`) starting from the
-//! genuine top-level empty stack, only ever emitting a word whose precondition
-//! the simulated stack satisfies. The simulated final stack is the oracle.
-//! Because every position is a concrete `Con`, P1 needs no α-equivalence
-//! normalization — the inferred output stack must be *exactly* the simulated one.
-//!
-//! ## The properties
-//!
-//! P1 (inference == oracle), P2 (substitution/resolution idempotence),
-//! P3 (composition coherence, as a metamorphic "interface-only" relation),
-//! P4 (generalization respects the environment), P5 (row neutrality),
-//! P6 (definition-order independence). Where a property has no directly exposed
-//! seam in caternary's public API (e.g. a standalone `generalize(τ, Γ)`), how it
-//! is exercised instead is noted at the property.
+//! P1/P3/P5 generate scalar programs over Num/Bool and compare the independently
+//! simulated output types with inference and execution. Composition and row
+//! neutrality also compare complete runtime values. P2 generates nested List and
+//! quotation types as well as scalar/type/row variables. P4 exercises a capture
+//! shared with its monomorphic environment and a helper instantiated at distinct
+//! types. P6 permutes dependency chains and a terminating recursive SCC, checking
+//! both definition schemes and runtime results.
 
 use caternary::*;
 use proptest::prelude::*;
@@ -70,6 +47,9 @@ impl Quotable for Value {
             Value::Bracket(b) => vec![Token::Bracket(quote_items_to_tokens(b))],
         }
     }
+    fn is_truthy(&self) -> bool {
+        !matches!(self, Value::Word(w) if w == "false")
+    }
     fn as_sequence(&self) -> Option<Vec<Self>> {
         match self {
             Value::Bracket(b) => Some(quote_items_to_values(b)),
@@ -92,7 +72,29 @@ fn checked_main(src: &str) -> Result<WordTy, TypeError> {
     let mut eval = new_eval();
     let toks = parse_with_spans(src).expect("generated source parses");
     eval.load_with_spans(&toks).expect("generated source loads");
-    type_check(&eval)
+    let effect = type_check(&eval)?;
+    let runtime = eval
+        .eval(eval.definition_body("main").unwrap())
+        .unwrap_or_else(|e| panic!("typed program failed at runtime: {src}: {e}"));
+    let observed: Vec<TyKind> = runtime
+        .iter()
+        .map(|v| match v {
+            Value::Word(w) if w == "true" || w == "false" => TyKind::Con(BOOL.into()),
+            Value::Word(w) if w.parse::<i128>().is_ok() => TyKind::Con(NUM.into()),
+            other => panic!("scalar generator produced unexpected value {other:?}: {src}"),
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        effect
+            .output
+            .elems
+            .iter()
+            .map(|t| t.kind.clone())
+            .collect::<Vec<_>>(),
+        "runtime types disagree: {src}"
+    );
+    Ok(effect)
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +295,24 @@ fn p2_ty() -> impl Strategy<Value = Ty> {
         Just(Ty::bool(s)),
         (0u32..6).prop_map(move |v| Ty::var(v, s)),
     ]
+    .prop_recursive(2, 16, 3, move |inner| {
+        prop_oneof![
+            inner.clone().prop_map(move |t| Ty {
+                kind: TyKind::App("List".into(), vec![t]),
+                span: s
+            }),
+            (
+                prop::collection::vec(inner.clone(), 0..3),
+                0u32..6,
+                prop::collection::vec(inner, 0..3),
+                0u32..6
+            )
+                .prop_map(move |(a, ra, b, rb)| Ty::quote(
+                    WordTy::new(StackTy::new(a, ra, s), StackTy::new(b, rb, s)),
+                    s
+                )),
+        ]
+    })
 }
 
 fn p2_stack() -> impl Strategy<Value = StackTy> {
@@ -369,6 +389,12 @@ proptest! {
         let lit_a = emit_literals(a_stack);
         let prog_litag = format!("[ {} ] :main", concat_tokens(&lit_a, g_tokens));
 
+        let eval = new_eval();
+        let mut composed = eval.eval(&parse(&f_tokens.join(" ")).unwrap()).unwrap();
+        eval.eval_with_stack(&parse(&g_tokens.join(" ")).unwrap(), &mut composed).unwrap();
+        let whole = eval.eval(&parse(&tokens.join(" ")).unwrap()).unwrap();
+        prop_assert_eq!(composed, whole, "runtime composition changed values");
+
         let eff_fg = checked_main(&prog_fg).expect("f g type-checks");
         let eff_litag = checked_main(&prog_litag).expect("litA g type-checks");
 
@@ -400,94 +426,50 @@ fn concat_tokens(a: &[String], b: &[String]) -> String {
 // P4 — Generalization respects the environment.
 // ---------------------------------------------------------------------------
 
-/// Does any element type anywhere in a scheme's arrow mention a concrete base
-/// type (`Con`)? A purely polymorphic shuffle never forces one; an operator does.
-fn scheme_has_con(scheme: &Scheme) -> bool {
-    word_has_con(&scheme.ty)
-}
-fn word_has_con(w: &WordTy) -> bool {
-    stack_has_con(&w.input) || stack_has_con(&w.output)
-}
-fn stack_has_con(s: &StackTy) -> bool {
-    s.elems.iter().any(ty_has_con)
-}
-fn ty_has_con(t: &Ty) -> bool {
-    match &t.kind {
-        TyKind::Con(_) => true,
-        TyKind::Var(_) => false,
-        TyKind::App(_, args) => args.iter().any(ty_has_con),
-        TyKind::Quote(w) => word_has_con(w),
-    }
-}
-
-/// A generic-shuffle body uses only `DUP/DROP/SWAP/OVER` — words that never pin a
-/// base type. At definition level the stack tail is a polymorphic row, so any
-/// sequence type-checks (operands come from the row).
-fn shuffle_word() -> impl Strategy<Value = &'static str> {
-    prop_oneof![Just("DUP"), Just("DROP"), Just("SWAP"), Just("OVER")]
-}
-
 proptest! {
-    /// The let-polymorphism surface. A definition is generalized (M3 SCC pass) into
-    /// a [`Scheme`]; generalizing a position the environment monomorphically
-    /// constrains is the bug. We exercise both branches:
-    ///
-    /// * **Free ⇒ generalizes.** A pure shuffle forces no base type, so its scheme
-    ///   must be `Con`-free — every value position is a quantified variable — and
-    ///   it must quantify at least the row (the body is non-trivially polymorphic).
-    /// * **Constrained ⇒ must NOT generalize.** Appending `+` pins the top two to
-    ///   `Num`; that position must appear as `Con(Num)` in the scheme, i.e. it is
-    ///   *not* generalized away.
-    ///
-    /// (caternary exposes generalization only at the definition boundary via
-    /// [`definition_schemes`]; there is no standalone `generalize(τ, Γ)` seam, so
-    /// the environment Γ is supplied as the operator constraint inside the body.)
+    /// The captured x is shared with the enclosing monomorphic environment.
+    /// Constraining the result of [x] CALL must constrain both the input x and
+    /// the later x. An unconstrained helper must still instantiate independently.
     #[test]
-    fn p4_generalization_respects_environment(
-        body in prop::collection::vec(shuffle_word(), 0..8),
-        constrain in any::<bool>(),
-    ) {
-        let mut words: Vec<&str> = body.clone();
-        if constrain {
-            // Force two Nums on top, then constrain them with `+`.
-            words.push("0");
-            words.push("0");
-            words.push("+");
-        }
-        let src = format!("[ {} ] :w", words.join(" "));
-        let mut eval = new_eval();
-        let toks = parse_with_spans(&src).expect("parses");
-        eval.load_with_spans(&toks).expect("loads");
-        let schemes = definition_schemes(&eval).expect("generic body generalizes");
-        let scheme = schemes.get("w").expect("w has a scheme");
-
-        if constrain {
-            prop_assert!(
-                scheme_has_con(scheme),
-                "a `+`-constrained position must NOT be generalized: {:?}",
-                scheme
-            );
+    fn p4_generalization_respects_environment(n in -20i32..20, b in any::<bool>(), numeric in any::<bool>()) {
+        let (op, con, good, bad) = if numeric {
+            ("1 +", NUM, n.to_string(), b.to_string())
         } else {
-            prop_assert!(
-                !scheme_has_con(scheme),
-                "a pure shuffle must be fully polymorphic (Con-free): {:?}",
-                scheme
-            );
-            prop_assert!(
-                !scheme.rowvars.is_empty() || !scheme.tyvars.is_empty(),
-                "a definition over a polymorphic stack must quantify something"
-            );
-            // Free vars round-trip to *fresh* ones: two instantiations don't alias.
-            let mut ctx = InferCtx::new();
-            let a = ctx.instantiate(scheme);
-            let b = ctx.instantiate(scheme);
-            if !scheme.rowvars.is_empty() {
-                prop_assert_ne!(
-                    a.input.row, b.input.row,
-                    "distinct instantiations must not share a row var"
-                );
-            }
-        }
+            ("not", BOOL, b.to_string(), n.to_string())
+        };
+        let definition = format!("[ >x [ x ] CALL {op} x ] :w");
+        let mut eval = new_eval();
+        eval.load_with_spans(&parse_with_spans(&definition).unwrap()).unwrap();
+        let scheme = definition_schemes(&eval).unwrap().remove("w").unwrap();
+        let row = scheme.ty.input.row;
+        let span = ZERO_SPAN;
+        let t = Ty { kind: TyKind::Con(con.into()), span };
+        let expected = Scheme::new(vec![], vec![row], WordTy::new(
+            StackTy::new(vec![t.clone()], row, span),
+            StackTy::new(vec![t.clone(), t], row, span)));
+        prop_assert_eq!(norm_scheme(&scheme), expected, "captured input lost its constraint");
+        checked_main(&format!("{definition} [ {good} w ] :main")).unwrap();
+        prop_assert!(checked_main(&format!("{definition} [ {bad} w ] :main")).is_err(), "captured input accepted the wrong type");
+
+        // Both uses of a duplicated capture retain x's environment constraint.
+        let mut conflicting = new_eval();
+        conflicting.load_with_spans(&parse_with_spans(
+            "[ >x [ x ] DUP CALL 1 + DROP CALL not ] :w").unwrap()).unwrap();
+        prop_assert!(definition_schemes(&conflicting).is_err());
+
+        let src = format!("[ >x [ x ] CALL x ] :copy [ {n} copy {b} copy ] :main");
+        checked_main(&src).unwrap();
+        let mut free = new_eval();
+        free.load_with_spans(&parse_with_spans(&src).unwrap()).unwrap();
+        let runtime = free.eval(free.definition_body("main").unwrap()).unwrap();
+        prop_assert_eq!(runtime, vec![Value::Word(n.to_string()), Value::Word(n.to_string()),
+            Value::Word(b.to_string()), Value::Word(b.to_string())]);
+        let schemes = definition_schemes(&free).unwrap();
+        let mut ctx = InferCtx::new();
+        let a = ctx.instantiate(&schemes["copy"]);
+        let c = ctx.instantiate(&schemes["copy"]);
+        prop_assert_ne!(a.input.row, c.input.row);
+        prop_assert_ne!(&a.input.elems[0].kind, &c.input.elems[0].kind);
     }
 }
 
@@ -517,6 +499,12 @@ proptest! {
             "[ {} ] :main",
             concat_tokens(&junk_tokens, &body)
         );
+
+        let eval = new_eval();
+        let mut expected_values = eval.eval(&parse(&junk_tokens.join(" ")).unwrap()).unwrap();
+        expected_values.extend(eval.eval(&parse(&body.join(" ")).unwrap()).unwrap());
+        let actual_values = eval.eval(&parse(&concat_tokens(&junk_tokens, &body)).unwrap()).unwrap();
+        prop_assert_eq!(actual_values, expected_values, "runtime changed the untouched row");
 
         let base = checked_main(&base_src).expect("body type-checks");
         let with = checked_main(&with_src).expect("junk-prefixed body type-checks");
@@ -580,35 +568,38 @@ fn norm_schemes(
 }
 
 proptest! {
-    /// The flat whole-program pre-pass makes source order irrelevant for
-    /// independent definitions. We generate several independent definitions
-    /// (each a closed term referencing only builtins/literals — never another
-    /// definition), load them in a generated order and in a permuted order, and
-    /// assert [`definition_schemes`] returns the identical name → scheme map. A
-    /// failure means the pre-pass leaks order-dependent state.
+    /// Permute a dependency chain and mutually recursive even/odd definitions.
+    /// Both the inferred schemes and concrete execution must be order-independent.
     #[test]
     fn p6_definition_order_independence(
         bodies in prop::collection::vec(choice_script(), 1..5),
-        perm_seed in prop::collection::vec(any::<u32>(), 1..5),
+        perm_seed in prop::collection::vec(any::<u32>(), 8),
     ) {
         // Build (name, source-fragment) pairs; name is fixed to the body's index
         // so the shuffle moves *fragments*, never relabels a body.
-        let frags: Vec<(String, String)> = bodies
+        let mut frags: Vec<(String, String)> = bodies
             .iter()
             .enumerate()
             .map(|(i, script)| {
                 let mut st = Vec::new();
                 let tokens = simulate(script, &mut st);
                 let name = format!("w{i}");
-                let frag = format!("[ {} ] :{}", tokens.join(" "), name);
+                let dependency = if i == 0 { String::new() } else { format!("w{}", i - 1) };
+                let frag = format!("[ {dependency} {} ] :{}", tokens.join(" "), name);
                 (name, frag)
             })
             .collect();
 
+        frags.extend([
+            ("even".into(), "[ DUP 0 > [ 1 - odd ] [ DROP true ] IF ] :even".into()),
+            ("odd".into(), "[ DUP 0 > [ 1 - even ] [ DROP false ] IF ] :odd".into()),
+            ("main".into(), format!("[ {} even w{} ] :main", bodies.len(), bodies.len() - 1)),
+        ]);
+
         // Original order, then a permutation by a stable sort on a seed.
         let mut shuffled: Vec<usize> = (0..frags.len()).collect();
         let seed: Vec<u32> = (0..frags.len())
-            .map(|i| *perm_seed.get(i).unwrap_or(&(i as u32)))
+            .map(|i| perm_seed[i])
             .collect();
         shuffled.sort_by_key(|&i| (seed[i], i));
 
@@ -635,6 +626,17 @@ proptest! {
             e.load_with_spans(&t).expect("perm loads");
             definition_schemes(&e).expect("perm checks")
         };
+
+        checked_main(&src_orig).unwrap();
+        checked_main(&src_perm).unwrap();
+        let run = |src: &str| {
+            let mut eval = new_eval();
+            eval.load_with_spans(&parse_with_spans(src).unwrap()).unwrap();
+            eval.eval(eval.definition_body("main").unwrap()).unwrap()
+        };
+        let original_values = run(&src_orig);
+        prop_assert_eq!(&original_values[0], &Value::Word((bodies.len() % 2 == 0).to_string()));
+        prop_assert_eq!(original_values, run(&src_perm), "definition order changed runtime values");
 
         prop_assert_eq!(
             norm_schemes(&schemes_orig),
