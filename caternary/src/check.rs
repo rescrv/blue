@@ -878,7 +878,9 @@ where
         // The per-token effect, and (for words) the name to blame on underflow.
         let (word_arrow, blame): (WordTy, Option<&str>) = match &token.kind {
             SpannedTokenKind::Word(w) => (
-                word_effect(evaluator, w, token.span, ctx, locals, def_env, poly, scope_base)?,
+                word_effect(
+                    evaluator, w, token.span, ctx, locals, def_env, poly, scope_base,
+                )?,
                 Some(w),
             ),
             SpannedTokenKind::Bracket(inner) => {
@@ -1006,10 +1008,7 @@ where
         // opens a fresh scope, so only binds pushed at or after `scope_base`
         // (this scope's own binds) count; an outer captured binding at a lower
         // index is a different scope and may be shadowed.
-        if locals[scope_base..]
-            .iter()
-            .any(|l| l.name() == name)
-        {
+        if locals[scope_base..].iter().any(|l| l.name() == name) {
             return Err(TypeError::DuplicateBind {
                 name: name.to_string(),
                 span,
@@ -2249,7 +2248,6 @@ mod tests {
         );
     }
 
-
     // =======================================================================
     // Regression: `%` modulo must carry the same divisor demand as `/`
     // (BUGS.md B1 — `%` did the same runtime division as `/` but had no
@@ -2286,7 +2284,6 @@ mod tests {
         );
     }
 
-
     // =======================================================================
     // Regression: same-scope `>name` rebind must be rejected (BUGS.md B4)
     // The checker used to treat a second `>x` as shadowing (just pushing
@@ -2303,8 +2300,7 @@ mod tests {
         crate::register_all_builtins(&mut eval);
         let tokens = parse_with_spans("[ 1 >x 2 >x x DROP ] :main").unwrap();
         eval.load_with_spans(&tokens).unwrap();
-        let err = check_whole_program(&eval, crate::SmtLibSolver::new)
-            .unwrap_err();
+        let err = check_whole_program(&eval, crate::SmtLibSolver::new).unwrap_err();
         assert!(
             matches!(err, GateError::Tier0(TypeError::DuplicateBind { ref name, .. }) if name == "x"),
             "a same-scope `>x` rebind must be rejected as DuplicateBind, got {err:?}"
@@ -2318,8 +2314,7 @@ mod tests {
     fn gate_accepts_nested_quotation_scope_shadowing() {
         let mut eval: Evaluator<Value> = Evaluator::new();
         crate::register_all_builtins(&mut eval);
-        let tokens =
-            parse_with_spans("[ 1 >x [ 2 >x x DROP ] CALL x DROP ] :main").unwrap();
+        let tokens = parse_with_spans("[ 1 >x [ 2 >x x DROP ] CALL x DROP ] :main").unwrap();
         eval.load_with_spans(&tokens).unwrap();
         assert!(
             check_whole_program(&eval, crate::SmtLibSolver::new).is_ok(),
@@ -2329,7 +2324,10 @@ mod tests {
         let body = eval.definition_body("main").unwrap().to_vec();
         let mut stack = Vec::new();
         eval.eval_with_stack(&body, &mut stack).unwrap();
-        assert!(stack.is_empty(), "the nested-shadow program runs to an empty stack");
+        assert!(
+            stack.is_empty(),
+            "the nested-shadow program runs to an empty stack"
+        );
     }
 
     #[test]

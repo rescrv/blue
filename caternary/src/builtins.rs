@@ -346,7 +346,10 @@ fn divide<T: Quotable>(stack: &mut Vec<T>, _eval: &Evaluator<T>) -> Result<(), E
             // arithmetic raises a runtime error instead of panicking (debug)
             // or silently wrapping to `i128::MIN` (release).
             (Num::Int(a), Num::Int(b)) => {
-                let exact = a.checked_rem(b).map(|r| r == 0).ok_or_else(|| overflow("/"))?;
+                let exact = a
+                    .checked_rem(b)
+                    .map(|r| r == 0)
+                    .ok_or_else(|| overflow("/"))?;
                 if exact {
                     Ok(Num::Int(a.checked_div(b).ok_or_else(|| overflow("/"))?))
                 } else {
@@ -572,10 +575,7 @@ fn num_num_num_refinements() -> [(&'static str, &'static str); 7] {
         // guarantee: the modulo remainder is not expressible in the Real
         // predicate language (the same value-domain gap as the bitwise case),
         // and the demand alone closes the soundness hole.
-        (
-            "%",
-            "% : ( a: Num b: Num where b * b > 0 -- c: Num )",
-        ),
+        ("%", "% : ( a: Num b: Num where b * b > 0 -- c: Num )"),
         // The shifts demand the runtime's accepted amount range (`checked_shl`
         // / `checked_shr` on i128: 0..=127) so the gate rejects `[ 1 -1 << ]`
         // and `[ 1 200 << ]` instead of admitting a runtime "invalid shift
