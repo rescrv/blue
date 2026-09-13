@@ -1832,6 +1832,8 @@ impl Default for SstOptions {
 pub struct SstBuilder<W: Write = File> {
     // Options for every "normal" table entry.
     options: SstOptions,
+    // The first key written, retained so metadata can be produced without reopening the output.
+    first_key: Option<Vec<u8>>,
     // The most recent that was successfully written.  Update only after writing to the block to
     // which a key is written.
     last_key: Vec<u8>,
@@ -1884,6 +1886,7 @@ impl<W: Write> SstBuilder<W> {
         let write_buffer_size = options.write_buffer_size;
         SstBuilder {
             options,
+            first_key: None,
             last_key: Vec::new(),
             last_timestamp: u64::MAX,
             block_builder: None,
@@ -1918,6 +1921,9 @@ impl<W: Write> SstBuilder<W> {
 
     fn assign_last_key(&mut self, key: &[u8], timestamp: u64) {
         BUILDER_ASSIGN_LAST_KEY.click();
+        if self.first_key.is_none() {
+            self.first_key = Some(key.to_vec());
+        }
         self.last_key.clear();
         self.last_key.extend_from_slice(key);
         self.last_timestamp = timestamp;
@@ -2087,6 +2093,29 @@ impl<W: Write> SstBuilder<W> {
         io_result_with_context(self.output.flush(), "sst builder flush")?;
         Ok(())
     }
+
+    // Seal the blocks and return the underlying writer together with the metadata the builder
+    // computed while writing -- no reopen required.  Used by the multi-builder's sink flow.
+    fn into_writer_and_metadata(mut self) -> Result<(W, SstMetadata), SError> {
+        self.seal_blocks()?;
+        let metadata = SstMetadata {
+            setsum: self.setsum.digest(),
+            first_key: self.first_key.clone().unwrap_or_default(),
+            last_key: if self.first_key.is_some() {
+                self.last_key.clone()
+            } else {
+                MAX_KEY.to_vec()
+            },
+            smallest_timestamp: self.smallest_timestamp,
+            biggest_timestamp: self.biggest_timestamp,
+            file_size: self.bytes_written as u64,
+        };
+        let writer = self
+            .output
+            .into_inner()
+            .map_err(|_| logic_error_buf_writer_into_inner_failed())?;
+        Ok((writer, metadata))
+    }
 }
 
 impl Builder for SstBuilder<File> {
@@ -2170,29 +2199,114 @@ pub struct SealedSst<N> {
     pub metadata: SstMetadata,
 }
 
-/// Create an SstBuilder that will create numbered files of similar prefix and suffix.
-pub struct SstMultiBuilder {
+/// Where [`SstMultiBuilder`] sends its outputs.
+///
+/// The sink cannot name an output at create time, because content-addressed sinks (e.g. an object
+/// store keyed on the setsum digest) do not know the name until the bytes -- and thus the metadata
+/// -- are in hand.  So naming happens in [`finish`](SstSink::finish), once the builder has sealed.
+pub trait SstSink {
+    /// The name the sink assigns to a stored output.
+    type Name;
+    /// The writer the builder streams an SST into.
+    type Sink: Write;
+    /// Start a new output.  No name yet.
+    fn create(&mut self) -> Result<Self::Sink, SError>;
+    /// The builder has sealed this output.  The sink names it and durably stores it.
+    fn finish(&mut self, sink: Self::Sink, metadata: &SstMetadata)
+        -> Result<Self::Name, SError>;
+}
+
+/// An [`SstSink`] that reproduces the historical `prefix`/`suffix`/`counter` file naming.
+pub struct PathSink {
     prefix: PathBuf,
     suffix: String,
     counter: u64,
-    options: SstOptions,
-    builder: Option<SstBuilder>,
-    // The path of the currently-open builder, if any.
+    // The path of the output most recently handed out by `create`.
     current_path: Option<PathBuf>,
-    // The outputs sealed so far, each with its metadata.
-    sealed: Vec<SealedSst<PathBuf>>,
 }
 
-impl SstMultiBuilder {
-    /// Create Ssts with prefix, suffix, and options.
-    pub fn new(prefix: PathBuf, suffix: String, options: SstOptions) -> Self {
+impl PathSink {
+    /// Create a sink that names files `{counter}{suffix}` under `prefix`.
+    pub fn new(prefix: PathBuf, suffix: String) -> Self {
         Self {
             prefix,
             suffix,
             counter: 0,
-            options,
-            builder: None,
             current_path: None,
+        }
+    }
+}
+
+impl SstSink for PathSink {
+    type Name = PathBuf;
+    type Sink = File;
+
+    fn create(&mut self) -> Result<File, SError> {
+        let path = self
+            .prefix
+            .join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
+        self.counter += 1;
+        let file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| {
+                system_error_with_path_and_context(
+                    e,
+                    path.to_string_lossy(),
+                    "opening file for sst builder",
+                )
+            })?;
+        self.current_path = Some(path);
+        Ok(file)
+    }
+
+    fn finish(&mut self, sink: File, _metadata: &SstMetadata) -> Result<PathBuf, SError> {
+        io_result_with_context(sink.sync_all(), "sst builder sync_all")?;
+        self.current_path.take().ok_or_else(|| {
+            LOGIC_ERROR.click();
+            logic_error_sst_builder_no_path()
+        })
+    }
+}
+
+/// Create an SstBuilder that will create numbered files of similar prefix and suffix.
+pub struct SstMultiBuilder<S: SstSink = PathSink> {
+    options: SstOptions,
+    sink: S,
+    builder: Option<SstBuilder<S::Sink>>,
+    // The outputs sealed so far, each with its metadata.
+    sealed: Vec<SealedSst<S::Name>>,
+}
+
+impl SstMultiBuilder<PathSink> {
+    /// Create Ssts with prefix, suffix, and options.
+    pub fn new(prefix: PathBuf, suffix: String, options: SstOptions) -> Self {
+        Self::with_sink(PathSink::new(prefix, suffix), options)
+    }
+}
+
+impl<S: SstSink<Name = PathBuf>> SstMultiBuilder<S> {
+    /// Seal the multi-builder and return the paths of the outputs, discarding metadata.
+    ///
+    /// Provided so callers that only want names migrate mechanically from the old
+    /// `seal() -> Vec<PathBuf>` behavior; prefer [`Builder::seal`] when the metadata is needed.
+    pub fn paths(self) -> Result<Vec<PathBuf>, SError> {
+        Ok(self
+            .seal_all()?
+            .into_iter()
+            .map(|sealed| sealed.name)
+            .collect())
+    }
+}
+
+impl<S: SstSink> SstMultiBuilder<S> {
+    /// Create Ssts backed by an arbitrary sink.
+    pub fn with_sink(sink: S, options: SstOptions) -> Self {
+        Self {
+            options,
+            sink,
+            builder: None,
             sealed: Vec::new(),
         }
     }
@@ -2227,21 +2341,17 @@ impl SstMultiBuilder {
         Ok(())
     }
 
-    // Seal the currently-open builder (if any), recording its name and metadata.
+    // Seal the currently-open builder (if any), naming it via the sink and recording its metadata.
     fn finish_builder(&mut self) -> Result<(), SError> {
         if let Some(builder) = self.builder.take() {
-            let name = self.current_path.take().ok_or_else(|| {
-                LOGIC_ERROR.click();
-                logic_error_sst_builder_no_path()
-            })?;
-            let sst = builder.seal()?;
-            let metadata = sst.metadata()?;
+            let (writer, metadata) = builder.into_writer_and_metadata()?;
+            let name = self.sink.finish(writer, &metadata)?;
             self.sealed.push(SealedSst { name, metadata });
         }
         Ok(())
     }
 
-    fn get_builder(&mut self) -> Result<&mut SstBuilder, SError> {
+    fn get_builder(&mut self) -> Result<&mut SstBuilder<S::Sink>, SError> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.target_file_size {
@@ -2250,36 +2360,20 @@ impl SstMultiBuilder {
             }
             return Ok(self.builder.as_mut().unwrap());
         }
-        let path = self
-            .prefix
-            .join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
-        self.current_path = Some(path.clone());
-        self.counter += 1;
-        self.builder = Some(SstBuilder::new(self.options.clone(), path)?);
+        let sink = self.sink.create()?;
+        self.builder = Some(SstBuilder::from_write(self.options.clone(), sink));
         Ok(self.builder.as_mut().unwrap())
     }
 
     // Seal any open builder and return every output paired with its metadata.
-    fn seal_all(mut self) -> Result<Vec<SealedSst<PathBuf>>, SError> {
+    fn seal_all(mut self) -> Result<Vec<SealedSst<S::Name>>, SError> {
         self.finish_builder()?;
         Ok(self.sealed)
     }
-
-    /// Seal the multi-builder and return the paths of the outputs, discarding metadata.
-    ///
-    /// Provided so callers that only want names migrate mechanically from the old
-    /// `seal() -> Vec<PathBuf>` behavior; prefer [`Builder::seal`] when the metadata is needed.
-    pub fn paths(self) -> Result<Vec<PathBuf>, SError> {
-        Ok(self
-            .seal_all()?
-            .into_iter()
-            .map(|sealed| sealed.name)
-            .collect())
-    }
 }
 
-impl Builder for SstMultiBuilder {
-    type Sealed = Vec<SealedSst<PathBuf>>;
+impl<S: SstSink> Builder for SstMultiBuilder<S> {
+    type Sealed = Vec<SealedSst<S::Name>>;
 
     fn approximate_size(&self) -> usize {
         match &self.builder {
@@ -2296,7 +2390,7 @@ impl Builder for SstMultiBuilder {
         self.get_builder()?.del(key, timestamp)
     }
 
-    fn seal(self) -> Result<Vec<SealedSst<PathBuf>>, SError> {
+    fn seal(self) -> Result<Vec<SealedSst<S::Name>>, SError> {
         self.seal_all()
     }
 }
@@ -2784,6 +2878,63 @@ mod tests {
             assert_eq!(2, paths.len());
             assert!(paths.iter().all(|p| p.exists()));
             let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    mod sink {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        use super::*;
+
+        // An in-memory, content-addressed sink modeling the object-store case: each output is
+        // buffered into a Vec<u8> and named by the setsum hex digest at finish.  Objects are held
+        // behind a shared handle so the test can inspect them after the builder is consumed.
+        #[derive(Clone, Default)]
+        struct MemSink {
+            objects: Rc<RefCell<HashMap<String, Vec<u8>>>>,
+        }
+
+        impl SstSink for MemSink {
+            type Name = String;
+            type Sink = Vec<u8>;
+
+            fn create(&mut self) -> Result<Vec<u8>, SError> {
+                Ok(Vec::new())
+            }
+
+            fn finish(&mut self, sink: Vec<u8>, metadata: &SstMetadata) -> Result<String, SError> {
+                let name = Setsum::from_digest(metadata.setsum).hexdigest();
+                self.objects.borrow_mut().insert(name.clone(), sink);
+                Ok(name)
+            }
+        }
+
+        #[test]
+        fn mem_sink_names_by_setsum_and_stores_bytes() {
+            let sink = MemSink::default();
+            let objects = Rc::clone(&sink.objects);
+            let mut mb = SstMultiBuilder::with_sink(sink, SstOptions::default());
+            mb.put(b"a", 1, b"1").unwrap();
+            mb.split_hint_with(SplitPolicy::Force).unwrap();
+            mb.put(b"b", 1, b"2").unwrap();
+            let sealed = mb.seal().unwrap();
+            assert_eq!(2, sealed.len());
+            for s in &sealed {
+                // The name is the setsum hex digest of the metadata.
+                assert_eq!(Setsum::from_digest(s.metadata.setsum).hexdigest(), s.name);
+            }
+            // The bytes buffered by the sink reparse to the metadata the builder reported.
+            let objects = objects.borrow();
+            assert_eq!(2, objects.len());
+            let bytes = objects.get(&sealed[0].name).unwrap().clone();
+            let sst = Sst::from_bytes(bytes).unwrap();
+            let reparsed = sst.metadata().unwrap();
+            assert_eq!(sealed[0].metadata.first_key, reparsed.first_key);
+            assert_eq!(sealed[0].metadata.last_key, reparsed.last_key);
+            assert_eq!(sealed[0].metadata.setsum, reparsed.setsum);
+            assert_eq!(sealed[0].metadata.file_size, reparsed.file_size);
         }
     }
 
