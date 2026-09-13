@@ -16,31 +16,19 @@ use crate::parse;
 /// A rewrite rule: pattern => replacement.
 #[derive(Debug, Clone)]
 pub struct Rule {
-    pattern: Vec<PatternElement>,
-    replacement: Vec<ReplacementElement>,
+    pattern: Vec<RuleElement>,
+    replacement: Vec<RuleElement>,
 }
 
 #[derive(Debug, Clone)]
-enum PatternElement {
-    /// Matches a literal word.
-    Word(String),
-    /// Matches a literal bracket with a nested pattern.
-    Bracket(Vec<PatternElement>),
-    /// Matches exactly one token and binds it to a name.
-    Var(String),
-    /// Matches zero or more tokens and binds them to a name.
-    VarMany(String),
-}
-
-#[derive(Debug, Clone)]
-enum ReplacementElement {
+enum RuleElement {
     /// A literal word.
     Word(String),
-    /// A literal bracket with nested replacements.
-    Bracket(Vec<ReplacementElement>),
-    /// Interpolate a bound variable (single token).
+    /// A literal bracket with nested rule elements.
+    Bracket(Vec<RuleElement>),
+    /// A variable capturing or interpolating exactly one token.
     Var(String),
-    /// Interpolate a bound variable (multiple tokens).
+    /// A variable capturing or interpolating zero or more tokens.
     VarMany(String),
 }
 
@@ -84,14 +72,14 @@ impl Rule {
         let pattern_tokens = parse(pattern).map_err(RuleError::PatternParse)?;
         let replacement_tokens = parse(replacement).map_err(RuleError::ReplacementParse)?;
 
-        let pattern = Self::parse_pattern(&pattern_tokens)?;
-        let replacement = Self::parse_replacement(&replacement_tokens)?;
+        let pattern = Self::parse_elements(&pattern_tokens)?;
+        let replacement = Self::parse_elements(&replacement_tokens)?;
 
         // Validate that all replacement variables are bound in pattern and have matching arity.
         let mut bound: HashMap<String, bool> = HashMap::new();
-        Self::collect_pattern_vars(&pattern, &mut bound)?;
+        Self::collect_vars(&pattern, &mut bound)?;
         let mut replacement_vars: HashMap<String, bool> = HashMap::new();
-        Self::collect_replacement_vars(&replacement, &mut replacement_vars)?;
+        Self::collect_vars(&replacement, &mut replacement_vars)?;
         for (name, replacement_is_many) in replacement_vars {
             let Some(pattern_is_many) = bound.get(&name).copied() else {
                 return Err(RuleError::UnboundVariable(name));
@@ -107,71 +95,36 @@ impl Rule {
         })
     }
 
-    fn parse_pattern(tokens: &[Token]) -> Result<Vec<PatternElement>, RuleError> {
+    fn parse_elements(tokens: &[Token]) -> Result<Vec<RuleElement>, RuleError> {
         tokens
             .iter()
             .map(|t| match t {
-                Token::Word(w) if w.starts_with("$*") => Ok(PatternElement::VarMany(
+                Token::Word(w) if w.starts_with("$*") => Ok(RuleElement::VarMany(
                     Self::parse_variable_name(&w[2..])?.to_string(),
                 )),
-                Token::Word(w) if w.starts_with('$') => Ok(PatternElement::Var(
+                Token::Word(w) if w.starts_with('$') => Ok(RuleElement::Var(
                     Self::parse_variable_name(&w[1..])?.to_string(),
                 )),
-                Token::Word(w) => Ok(PatternElement::Word(w.clone())),
-                Token::Bracket(inner) => Ok(PatternElement::Bracket(Self::parse_pattern(inner)?)),
+                Token::Word(w) => Ok(RuleElement::Word(w.clone())),
+                Token::Bracket(inner) => Ok(RuleElement::Bracket(Self::parse_elements(inner)?)),
             })
             .collect::<Result<Vec<_>, RuleError>>()
     }
 
-    fn parse_replacement(tokens: &[Token]) -> Result<Vec<ReplacementElement>, RuleError> {
-        tokens
-            .iter()
-            .map(|t| match t {
-                Token::Word(w) if w.starts_with("$*") => Ok(ReplacementElement::VarMany(
-                    Self::parse_variable_name(&w[2..])?.to_string(),
-                )),
-                Token::Word(w) if w.starts_with('$') => Ok(ReplacementElement::Var(
-                    Self::parse_variable_name(&w[1..])?.to_string(),
-                )),
-                Token::Word(w) => Ok(ReplacementElement::Word(w.clone())),
-                Token::Bracket(inner) => {
-                    Ok(ReplacementElement::Bracket(Self::parse_replacement(inner)?))
-                }
-            })
-            .collect::<Result<Vec<_>, RuleError>>()
-    }
-
-    fn collect_pattern_vars(
-        pattern: &[PatternElement],
+    fn collect_vars(
+        elements: &[RuleElement],
         vars: &mut HashMap<String, bool>,
     ) -> Result<(), RuleError> {
-        for elem in pattern {
+        for elem in elements {
             match elem {
-                PatternElement::Var(name) => {
+                RuleElement::Var(name) => {
                     Self::insert_var_arity(vars, name, false)?;
                 }
-                PatternElement::VarMany(name) => {
+                RuleElement::VarMany(name) => {
                     Self::insert_var_arity(vars, name, true)?;
                 }
-                PatternElement::Bracket(inner) => Self::collect_pattern_vars(inner, vars)?,
-                PatternElement::Word(_) => {}
-            }
-        }
-        Ok(())
-    }
-
-    fn collect_replacement_vars(
-        replacement: &[ReplacementElement],
-        vars: &mut HashMap<String, bool>,
-    ) -> Result<(), RuleError> {
-        for elem in replacement {
-            match elem {
-                ReplacementElement::Var(name) => {
-                    Self::insert_var_arity(vars, name, false)?;
-                }
-                ReplacementElement::VarMany(name) => Self::insert_var_arity(vars, name, true)?,
-                ReplacementElement::Bracket(inner) => Self::collect_replacement_vars(inner, vars)?,
-                ReplacementElement::Word(_) => {}
+                RuleElement::Bracket(inner) => Self::collect_vars(inner, vars)?,
+                RuleElement::Word(_) => {}
             }
         }
         Ok(())
@@ -244,7 +197,7 @@ impl Rule {
     }
 
     fn match_pattern(
-        pattern: &[PatternElement],
+        pattern: &[RuleElement],
         tokens: &[Token],
         pos: usize,
         bindings: &mut Bindings,
@@ -255,7 +208,7 @@ impl Rule {
 
         while pat_idx < pattern.len() {
             match &pattern[pat_idx] {
-                PatternElement::Word(w) => {
+                RuleElement::Word(w) => {
                     if tok_idx >= tokens.len() {
                         return None;
                     }
@@ -269,7 +222,7 @@ impl Rule {
                     tok_idx += 1;
                     pat_idx += 1;
                 }
-                PatternElement::Bracket(inner_pattern) => {
+                RuleElement::Bracket(inner_pattern) => {
                     if tok_idx >= tokens.len() {
                         return None;
                     }
@@ -285,7 +238,7 @@ impl Rule {
                     tok_idx += 1;
                     pat_idx += 1;
                 }
-                PatternElement::Var(name) => {
+                RuleElement::Var(name) => {
                     if tok_idx >= tokens.len() {
                         return None;
                     }
@@ -295,7 +248,7 @@ impl Rule {
                     tok_idx += 1;
                     pat_idx += 1;
                 }
-                PatternElement::VarMany(name) => {
+                RuleElement::VarMany(name) => {
                     // Greedy: try matching as many as possible first, then fewer
                     let remaining_pattern = &pattern[pat_idx + 1..];
                     let available = tokens.len().saturating_sub(tok_idx);
@@ -340,20 +293,15 @@ impl Rule {
         Self::substitute_elements(&self.replacement, bindings)
     }
 
-    fn substitute_elements(elements: &[ReplacementElement], bindings: &Bindings) -> Vec<Token> {
+    fn substitute_elements(elements: &[RuleElement], bindings: &Bindings) -> Vec<Token> {
         let mut result = Vec::new();
         for elem in elements {
             match elem {
-                ReplacementElement::Word(w) => result.push(Token::Word(w.clone())),
-                ReplacementElement::Bracket(inner) => {
+                RuleElement::Word(w) => result.push(Token::Word(w.clone())),
+                RuleElement::Bracket(inner) => {
                     result.push(Token::Bracket(Self::substitute_elements(inner, bindings)));
                 }
-                ReplacementElement::Var(name) => {
-                    if let Some(tokens) = bindings.get(name) {
-                        result.extend(tokens.clone());
-                    }
-                }
-                ReplacementElement::VarMany(name) => {
+                RuleElement::Var(name) | RuleElement::VarMany(name) => {
                     if let Some(tokens) = bindings.get(name) {
                         result.extend(tokens.clone());
                     }
