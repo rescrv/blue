@@ -66,6 +66,18 @@ pub fn is_numeric_literal(word: &str) -> bool {
     !word.is_empty() && word.parse::<f64>().map(f64::is_finite).unwrap_or(false)
 }
 
+/// Is this word an **integer-form** lexeme — an optional sign followed by
+/// digits only? A subset of [`is_numeric_literal`]. The distinction matters
+/// because an integer lexeme is **exact by contract** (the `Num` semantics in
+/// `builtins.rs`, mirrored by the reasoner's exact model): one that exceeds
+/// the `i128` range must fail loudly at runtime — never round through `f64` —
+/// and an embedder's `Value::from` should preserve its lexeme (fall through to
+/// a `Word`) rather than construct a rounded float.
+pub fn is_integer_literal(word: &str) -> bool {
+    let digits = word.strip_prefix(['+', '-']).unwrap_or(word);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// The Tier-0 decision for what counts as a boolean literal.
 ///
 /// `docs/typing.md` §5 spells out the numeric-literal rule but the `IF`
