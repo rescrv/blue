@@ -2157,6 +2157,19 @@ pub enum SplitPolicy {
     Force,
 }
 
+/// A sealed output of [`SstMultiBuilder`], pairing the sink-assigned name with the metadata the
+/// builder already had in hand at seal time.
+///
+/// Returning this from [`Builder::seal`] spares the caller from reopening every output and calling
+/// [`Sst::metadata`] just to build the manifest edit -- an extra GET per file on object storage.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SealedSst<N> {
+    /// Whatever the sink names the object.  `PathBuf` for the file sink.
+    pub name: N,
+    /// The metadata for this output: exactly the manifest row.
+    pub metadata: SstMetadata,
+}
+
 /// Create an SstBuilder that will create numbered files of similar prefix and suffix.
 pub struct SstMultiBuilder {
     prefix: PathBuf,
@@ -2164,7 +2177,10 @@ pub struct SstMultiBuilder {
     counter: u64,
     options: SstOptions,
     builder: Option<SstBuilder>,
-    paths: Vec<PathBuf>,
+    // The path of the currently-open builder, if any.
+    current_path: Option<PathBuf>,
+    // The outputs sealed so far, each with its metadata.
+    sealed: Vec<SealedSst<PathBuf>>,
 }
 
 impl SstMultiBuilder {
@@ -2176,7 +2192,8 @@ impl SstMultiBuilder {
             counter: 0,
             options,
             builder: None,
-            paths: Vec::new(),
+            current_path: None,
+            sealed: Vec::new(),
         }
     }
 
@@ -2204,9 +2221,22 @@ impl SstMultiBuilder {
                 SplitPolicy::Force => true,
             };
             if should_split {
-                let builder = self.builder.take().unwrap();
-                builder.seal()?;
+                self.finish_builder()?;
             }
+        }
+        Ok(())
+    }
+
+    // Seal the currently-open builder (if any), recording its name and metadata.
+    fn finish_builder(&mut self) -> Result<(), SError> {
+        if let Some(builder) = self.builder.take() {
+            let name = self.current_path.take().ok_or_else(|| {
+                LOGIC_ERROR.click();
+                logic_error_sst_builder_no_path()
+            })?;
+            let sst = builder.seal()?;
+            let metadata = sst.metadata()?;
+            self.sealed.push(SealedSst { name, metadata });
         }
         Ok(())
     }
@@ -2215,8 +2245,7 @@ impl SstMultiBuilder {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
             if size >= TABLE_FULL_SIZE || size >= self.options.target_file_size {
-                let builder = self.builder.take().unwrap();
-                builder.seal()?;
+                self.finish_builder()?;
                 return self.get_builder();
             }
             return Ok(self.builder.as_mut().unwrap());
@@ -2224,15 +2253,33 @@ impl SstMultiBuilder {
         let path = self
             .prefix
             .join(PathBuf::from(format!("{}{}", self.counter, self.suffix)));
-        self.paths.push(path.clone());
+        self.current_path = Some(path.clone());
         self.counter += 1;
         self.builder = Some(SstBuilder::new(self.options.clone(), path)?);
         Ok(self.builder.as_mut().unwrap())
     }
+
+    // Seal any open builder and return every output paired with its metadata.
+    fn seal_all(mut self) -> Result<Vec<SealedSst<PathBuf>>, SError> {
+        self.finish_builder()?;
+        Ok(self.sealed)
+    }
+
+    /// Seal the multi-builder and return the paths of the outputs, discarding metadata.
+    ///
+    /// Provided so callers that only want names migrate mechanically from the old
+    /// `seal() -> Vec<PathBuf>` behavior; prefer [`Builder::seal`] when the metadata is needed.
+    pub fn paths(self) -> Result<Vec<PathBuf>, SError> {
+        Ok(self
+            .seal_all()?
+            .into_iter()
+            .map(|sealed| sealed.name)
+            .collect())
+    }
 }
 
 impl Builder for SstMultiBuilder {
-    type Sealed = Vec<PathBuf>;
+    type Sealed = Vec<SealedSst<PathBuf>>;
 
     fn approximate_size(&self) -> usize {
         match &self.builder {
@@ -2249,15 +2296,8 @@ impl Builder for SstMultiBuilder {
         self.get_builder()?.del(key, timestamp)
     }
 
-    fn seal(mut self) -> Result<Vec<PathBuf>, SError> {
-        let builder = match self.builder.take() {
-            Some(b) => b,
-            None => {
-                return Ok(self.paths);
-            }
-        };
-        builder.seal()?;
-        Ok(self.paths)
+    fn seal(self) -> Result<Vec<SealedSst<PathBuf>>, SError> {
+        self.seal_all()
     }
 }
 
@@ -2692,6 +2732,57 @@ mod tests {
             mb.put(b"b", 1, b"2").unwrap();
             let paths = mb.seal().unwrap();
             assert_eq!(2, paths.len(), "force should have cut despite the floor");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    mod sealed_metadata {
+        use super::*;
+
+        fn scratch_dir(name: &str) -> PathBuf {
+            let dir = std::env::temp_dir().join(format!(
+                "sst-sealed-metadata-{name}-{}-{:p}",
+                std::process::id(),
+                &name as *const _
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn seal_returns_metadata_per_output() {
+            let dir = scratch_dir("meta");
+            let mut mb =
+                SstMultiBuilder::new(dir.clone(), ".sst".to_string(), SstOptions::default());
+            mb.put(b"a", 5, b"1").unwrap();
+            mb.put(b"b", 7, b"2").unwrap();
+            mb.split_hint_with(SplitPolicy::Force).unwrap();
+            mb.put(b"c", 9, b"3").unwrap();
+            let sealed = mb.seal().unwrap();
+            assert_eq!(2, sealed.len());
+            // First output covers a..b, second covers c, and the names are the file paths.
+            assert_eq!(b"a".to_vec(), sealed[0].metadata.first_key);
+            assert_eq!(b"b".to_vec(), sealed[0].metadata.last_key);
+            assert_eq!(b"c".to_vec(), sealed[1].metadata.first_key);
+            assert_eq!(b"c".to_vec(), sealed[1].metadata.last_key);
+            assert!(sealed[0].name.exists());
+            assert!(sealed[1].name.exists());
+            assert!(sealed[0].metadata.file_size > 0);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn paths_accessor_returns_names_only() {
+            let dir = scratch_dir("paths");
+            let mut mb =
+                SstMultiBuilder::new(dir.clone(), ".sst".to_string(), SstOptions::default());
+            mb.put(b"a", 1, b"1").unwrap();
+            mb.split_hint_with(SplitPolicy::Force).unwrap();
+            mb.put(b"b", 1, b"2").unwrap();
+            let paths = mb.paths().unwrap();
+            assert_eq!(2, paths.len());
+            assert!(paths.iter().all(|p| p.exists()));
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
