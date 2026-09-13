@@ -2452,6 +2452,62 @@ impl OverlapCutter {
     }
 }
 
+/////////////////////////////////////////////// SstRead ////////////////////////////////////////////
+
+/// A positioned, range-oriented reader for an SST.
+///
+/// `Sst`, `SstCursor`, and `load` are all generic over a write-capable file handle today, which
+/// forces an object-store reader to fetch the whole object (`Sst::from_bytes`).  At the default
+/// target file size that is one large GET per lookup.  `SstRead` is the smaller surface a reader
+/// actually needs -- size and ranged reads -- so an implementation over a ranged GET plus a block
+/// cache can back an SST without downloading it whole.
+///
+/// Reworking `Sst`/`SstCursor`/`load` to consume `SstRead` is the largest change in the sstree
+/// plan and is scoped separately; this defines the abstraction and the file-backed implementations
+/// it will build on.  Bytes are returned as `Vec<u8>` to keep `sst` free of a `bytes` dependency
+/// until that rework lands.
+pub trait SstRead {
+    /// The total size of the SST in bytes.
+    fn size(&self) -> Result<u64, SError>;
+    /// Read exactly `len` bytes starting at `offset`.
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError>;
+}
+
+impl SstRead for FileHandle {
+    fn size(&self) -> Result<u64, SError> {
+        FileHandle::size(self)
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError> {
+        let mut buf = vec![0u8; len];
+        self.read_exact_at(&mut buf, offset)?;
+        Ok(buf)
+    }
+}
+
+impl SstRead for InMemoryFile {
+    fn size(&self) -> Result<u64, SError> {
+        Ok(InMemoryFile::size(self))
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError> {
+        let contents = self.contents();
+        let start = offset as usize;
+        let end = start.checked_add(len).filter(|end| *end <= contents.len());
+        let Some(end) = end else {
+            CORRUPTION.click();
+            return Err(error_with_message(
+                CODE_CORRUPTION_FILE_TOO_SMALL,
+                format!(
+                    "read_at past end of in-memory file: offset={offset} len={len} size={}",
+                    contents.len()
+                ),
+            ));
+        };
+        Ok(contents[start..end].to_vec())
+    }
+}
+
 ///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
 /// A cursor over an Sst.
@@ -3049,6 +3105,28 @@ mod tests {
             let mut cutter = OverlapCutter::new(parents, 15);
             assert!(!cutter.should_stop_before(b"c")); // passed a..b: 10
             assert!(cutter.should_stop_before(b"g")); // passed c..d and e..f: 30 > 15
+        }
+    }
+
+    mod sst_read {
+        use super::*;
+        use file_manager::InMemoryFile;
+
+        #[test]
+        fn in_memory_file_ranged_reads() {
+            let file = InMemoryFile::new(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            assert_eq!(10, SstRead::size(&file).unwrap());
+            assert_eq!(vec![2, 3, 4], SstRead::read_at(&file, 2, 3).unwrap());
+            assert_eq!(vec![9], SstRead::read_at(&file, 9, 1).unwrap());
+            // Zero-length read is allowed.
+            assert_eq!(Vec::<u8>::new(), SstRead::read_at(&file, 10, 0).unwrap());
+        }
+
+        #[test]
+        fn in_memory_file_out_of_bounds_errors() {
+            let file = InMemoryFile::new(vec![0, 1, 2, 3]);
+            assert!(SstRead::read_at(&file, 2, 4).is_err());
+            assert!(SstRead::read_at(&file, 5, 1).is_err());
         }
     }
 
