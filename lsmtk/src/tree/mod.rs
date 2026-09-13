@@ -1315,7 +1315,7 @@ impl LsmTree {
         }
         drop(cursor);
         // Seal the multi-builder.
-        let paths = sstmb.seal()?;
+        let paths = sstmb.paths()?;
         // Finish the compaction
         self.compaction_finish(
             compaction,
@@ -1385,7 +1385,7 @@ impl LsmTree {
         }
         drop(cursor);
         // Seal the multi-builder.
-        let paths = sstmb.seal()?;
+        let paths = sstmb.paths()?;
         // Finish the compaction
         self.compaction_finish(
             compaction,
