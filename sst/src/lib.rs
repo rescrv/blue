@@ -2395,6 +2395,64 @@ impl<S: SstSink> Builder for SstMultiBuilder<S> {
     }
 }
 
+///////////////////////////////////////////// OverlapCutter /////////////////////////////////////////
+
+/// Decides where to cut an output run so the next compaction's merge stays bounded.
+///
+/// As the output cursor advances, an output overlaps every parent-level file whose key range it
+/// spans; draining that output later re-reads all of them.  [`OverlapCutter`] accumulates the sizes
+/// of the parent files the current output has passed and reports when that accumulation exceeds
+/// `limit`, so the caller can cut before the overlap gets too expensive.
+///
+/// The caller supplies the parent level, which differs by compaction type: `L_{i+2}` for an
+/// ordinary leveled move out of `L_i`, but `L_{i+1}` for a staged run that will drain into
+/// `L_{i+1}`.
+pub struct OverlapCutter {
+    /// Parent files overlapping the compaction's key range, as `(first_key, last_key, file_size)`
+    /// sorted by first key.
+    boundaries: Vec<(Vec<u8>, Vec<u8>, u64)>,
+    limit: u64,
+    idx: usize,
+    accumulated: u64,
+}
+
+impl OverlapCutter {
+    /// Build a cutter over the parent files, cutting once accumulated overlap exceeds `limit`.
+    pub fn new(parents: impl IntoIterator<Item = SstMetadata>, limit: u64) -> Self {
+        let mut boundaries: Vec<(Vec<u8>, Vec<u8>, u64)> = parents
+            .into_iter()
+            .map(|m| (m.first_key, m.last_key, m.file_size))
+            .collect();
+        boundaries.sort_by(|a, b| a.0.cmp(&b.0));
+        Self {
+            boundaries,
+            limit,
+            idx: 0,
+            accumulated: 0,
+        }
+    }
+
+    /// Advance to `key`, accumulating the bytes of every parent file the output has now passed.
+    /// Returns true when the accumulation exceeds `limit`.
+    ///
+    /// The accumulation is a running sum, not a per-file maximum: a limit expressed as a multiple
+    /// of the target file size is only ever reached by summing, and taking the maximum silently
+    /// never cuts.
+    pub fn should_stop_before(&mut self, key: &[u8]) -> bool {
+        while self.idx < self.boundaries.len() && key > self.boundaries[self.idx].1.as_slice() {
+            self.accumulated += self.boundaries[self.idx].2;
+            self.idx += 1;
+        }
+        self.accumulated > self.limit
+    }
+
+    /// Reset the accumulator after acting on a `true` from [`should_stop_before`].  The cursor into
+    /// the parent files is preserved; only the per-output accumulation is cleared.
+    pub fn reset(&mut self) {
+        self.accumulated = 0;
+    }
+}
+
 ///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
 /// A cursor over an Sst.
@@ -2935,6 +2993,63 @@ mod tests {
             assert_eq!(sealed[0].metadata.last_key, reparsed.last_key);
             assert_eq!(sealed[0].metadata.setsum, reparsed.setsum);
             assert_eq!(sealed[0].metadata.file_size, reparsed.file_size);
+        }
+    }
+
+    mod overlap_cutter {
+        use super::*;
+
+        fn parent(first: &[u8], last: &[u8], size: u64) -> SstMetadata {
+            SstMetadata {
+                setsum: [0u8; 32],
+                first_key: first.to_vec(),
+                last_key: last.to_vec(),
+                smallest_timestamp: 0,
+                biggest_timestamp: 0,
+                file_size: size,
+            }
+        }
+
+        #[test]
+        fn accumulates_across_parents() {
+            // Three parents of 10 bytes each; limit 25.  No single file reaches the limit, so a
+            // max-based rule would never cut.  Summing crosses 25 after the third.
+            let parents = vec![
+                parent(b"a", b"b", 10),
+                parent(b"c", b"d", 10),
+                parent(b"e", b"f", 10),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 25);
+            assert!(!cutter.should_stop_before(b"c")); // passed 1: 10
+            assert!(!cutter.should_stop_before(b"e")); // passed 2: 20
+            assert!(cutter.should_stop_before(b"g")); // passed 3: 30 > 25
+        }
+
+        #[test]
+        fn reset_clears_accumulation_but_not_cursor() {
+            let parents = vec![
+                parent(b"a", b"b", 20),
+                parent(b"c", b"d", 20),
+                parent(b"e", b"f", 20),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 25);
+            assert!(!cutter.should_stop_before(b"c")); // passed p0: 20
+            assert!(cutter.should_stop_before(b"e")); // passed p1: 40 > 25
+            cutter.reset();
+            // Accumulation restarts from 0; p0 and p1 are not recounted (cursor preserved).
+            assert!(!cutter.should_stop_before(b"g")); // passed p2 only: 20, not > 25
+        }
+
+        #[test]
+        fn unsorted_input_is_sorted_by_first_key() {
+            let parents = vec![
+                parent(b"e", b"f", 10),
+                parent(b"a", b"b", 10),
+                parent(b"c", b"d", 10),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 15);
+            assert!(!cutter.should_stop_before(b"c")); // passed a..b: 10
+            assert!(cutter.should_stop_before(b"g")); // passed c..d and e..f: 30 > 15
         }
     }
 
