@@ -39,6 +39,7 @@ members = [
     "rpc_pb",
     "rustrc",
     "saros",
+    "schtum",
     "scrunch",
     "setsum",
     "shvar",

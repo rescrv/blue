@@ -1,0 +1,32 @@
+[package]
+name = "schtum"
+version = "0.1.0"
+authors = ["Robert Escriva <robert@rescrv.net>"]
+edition = { workspace = true }
+description = "schtum keeps secrets: versioned rings of key material with clock-scheduled rotation."
+license = "Apache-2.0"
+repository = "https://github.com/rescrv/blue"
+
+[features]
+default = ["binaries"]
+
+binaries = ["command_line"]
+command_line = ["dep:arrrg", "dep:arrrg_derive", "dep:base64", "dep:getopts", "dep:serde_json"]
+
+[dependencies]
+biometrics = { workspace = true }
+buffertk = { workspace = true }
+prototk = { workspace = true }
+prototk_derive = { workspace = true }
+utf8path = { workspace = true }
+
+arrrg = { workspace = true, optional = true }
+arrrg_derive = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+getopts = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[[bin]]
+name = "schtum"
+path = "src/bin/schtum.rs"
+required-features = ["binaries"]
