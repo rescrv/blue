@@ -2147,6 +2147,16 @@ impl Builder for SstBuilder<Vec<u8>> {
 
 ////////////////////////////////////////// SstMultiBuilder /////////////////////////////////////////
 
+/// How aggressively [`SstMultiBuilder::split_hint_with`] should honor a split request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SplitPolicy {
+    /// Current behavior: split only if the open builder is at least `minimum_file_size`.
+    AtLeastMinimum,
+    /// Split here regardless of size.  For cuts driven by parent overlap, where a too-large key
+    /// span is more expensive than a too-small object.
+    Force,
+}
+
 /// Create an SstBuilder that will create numbered files of similar prefix and suffix.
 pub struct SstMultiBuilder {
     prefix: PathBuf,
@@ -2171,10 +2181,29 @@ impl SstMultiBuilder {
     }
 
     /// Provide a hint that this would be a good spot to split to create a new sst.
+    ///
+    /// Equivalent to [`split_hint_with`](Self::split_hint_with) with
+    /// [`SplitPolicy::AtLeastMinimum`].
     pub fn split_hint(&mut self) -> Result<(), SError> {
+        self.split_hint_with(SplitPolicy::AtLeastMinimum)
+    }
+
+    /// Provide a hint that this would be a good spot to split, subject to `policy`.
+    ///
+    /// [`SplitPolicy::AtLeastMinimum`] respects `minimum_file_size`, so tiny objects are not cut.
+    /// [`SplitPolicy::Force`] overrides that floor: it seals the open builder regardless of size.
+    /// Use `Force` for cuts driven by parent overlap, where a too-large key span forces a more
+    /// expensive next compaction than a too-small object costs in requests.
+    pub fn split_hint_with(&mut self, policy: SplitPolicy) -> Result<(), SError> {
         if self.builder.is_some() {
             let size = self.builder.as_mut().unwrap().approximate_size();
-            if size >= TABLE_FULL_SIZE || size >= self.options.minimum_file_size {
+            let should_split = match policy {
+                SplitPolicy::AtLeastMinimum => {
+                    size >= TABLE_FULL_SIZE || size >= self.options.minimum_file_size
+                }
+                SplitPolicy::Force => true,
+            };
+            if should_split {
                 let builder = self.builder.take().unwrap();
                 builder.seal()?;
             }
@@ -2621,6 +2650,49 @@ mod tests {
             let exp: &[u8] = &[0xff, 0xff, 0xff];
             assert_eq!(exp, &key);
             assert_eq!(6, timestamp);
+        }
+    }
+
+    mod split_policy {
+        use super::*;
+
+        fn scratch_dir(name: &str) -> PathBuf {
+            let dir = std::env::temp_dir().join(format!(
+                "sst-split-policy-{name}-{}-{:p}",
+                std::process::id(),
+                &name as *const _
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn at_least_minimum_does_not_split_below_floor() {
+            let dir = scratch_dir("floor");
+            let mut mb =
+                SstMultiBuilder::new(dir.clone(), ".sst".to_string(), SstOptions::default());
+            mb.put(b"a", 1, b"1").unwrap();
+            // A single tiny key is well below minimum_file_size, so this must not cut.
+            mb.split_hint().unwrap();
+            mb.put(b"b", 1, b"2").unwrap();
+            let paths = mb.seal().unwrap();
+            assert_eq!(1, paths.len(), "floor should have vetoed the split");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn force_overrides_floor() {
+            let dir = scratch_dir("force");
+            let mut mb =
+                SstMultiBuilder::new(dir.clone(), ".sst".to_string(), SstOptions::default());
+            mb.put(b"a", 1, b"1").unwrap();
+            // Force ignores minimum_file_size and cuts here regardless of size.
+            mb.split_hint_with(SplitPolicy::Force).unwrap();
+            mb.put(b"b", 1, b"2").unwrap();
+            let paths = mb.seal().unwrap();
+            assert_eq!(2, paths.len(), "force should have cut despite the floor");
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 
