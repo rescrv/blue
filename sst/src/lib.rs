@@ -2212,8 +2212,7 @@ pub trait SstSink {
     /// Start a new output.  No name yet.
     fn create(&mut self) -> Result<Self::Sink, SError>;
     /// The builder has sealed this output.  The sink names it and durably stores it.
-    fn finish(&mut self, sink: Self::Sink, metadata: &SstMetadata)
-        -> Result<Self::Name, SError>;
+    fn finish(&mut self, sink: Self::Sink, metadata: &SstMetadata) -> Result<Self::Name, SError>;
 }
 
 /// An [`SstSink`] that reproduces the historical `prefix`/`suffix`/`counter` file naming.
