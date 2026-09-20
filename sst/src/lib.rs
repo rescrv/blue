@@ -11,9 +11,8 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Write};
 use std::ops::Bound;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1394,9 +1393,9 @@ impl From<SstMetadata> for indicio::Value {
 
 /// An Sst represents an immutable sorted string table.
 #[derive(Clone, Debug)]
-pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
+pub struct Sst<R: SstRead + Clone = FileHandle> {
     // The file backing the table.
-    handle: W,
+    handle: R,
     // The final block of the table.
     final_block: FinalBlock,
     // Sst metadata.
@@ -1409,7 +1408,7 @@ pub struct Sst<W: Clone + Seek + Write + FileExt = FileHandle> {
     file_size: u64,
 }
 
-impl<W: Clone + Seek + Write + FileExt> Sst<W> {
+impl<R: SstRead + Clone> Sst<R> {
     /// Open the provided path using options.
     pub fn new<P: AsRef<Path>>(_options: SstOptions, path: P) -> Result<Sst<FileHandle>, SError> {
         // TODO(rescrv): Use utf8path to avoid lossy path conversions.
@@ -1420,17 +1419,16 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 
     /// Create an Sst from a file handle.
-    pub fn from_file_handle(mut handle: W) -> Result<Self, SError> {
+    pub fn from_file_handle(handle: R) -> Result<Self, SError> {
         SST_OPEN.click();
         // Read and parse the final block's offset
-        let file_size = io_result(handle.seek(SeekFrom::End(0)))?;
+        let file_size = handle.size()?;
         if file_size < 8 {
             CORRUPTION.click();
             return Err(corruption_file_too_small(file_size, 8));
         }
         let position = file_size - 8;
-        let mut buf: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0];
-        io_result(handle.read_exact_at(&mut buf, position))?;
+        let buf = handle.read_at(position, 8)?;
         let mut up = Unpacker::new(&buf);
         let final_block_offset: u64 = up
             .unpack()
@@ -1444,8 +1442,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
             ));
         }
         let size_of_final_block = position + 8 - (final_block_offset);
-        buf.resize(size_of_final_block as usize, 0);
-        io_result(handle.read_exact_at(&mut buf, final_block_offset))?;
+        let buf = handle.read_at(final_block_offset, size_of_final_block as usize)?;
         let mut up = Unpacker::new(&buf);
         let final_block: FinalBlock = up.unpack().map_err(unpack_final_block)?;
         final_block.index_block.sanity_check()?;
@@ -1466,9 +1463,9 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
                 final_block_offset,
             ));
         }
-        let index_block = Sst::load_block(&handle, &final_block.index_block)?;
-        let index_entries = Arc::new(Sst::<W>::load_index_entries(&index_block)?);
-        let filter = Sst::load_filter_block(&handle, &final_block.filter_block)?;
+        let index_block = Sst::<R>::load_block(&handle, &final_block.index_block)?;
+        let index_entries = Arc::new(Sst::<R>::load_index_entries(&index_block)?);
+        let filter = Sst::<R>::load_filter_block(&handle, &final_block.filter_block)?;
         Ok(Self {
             handle,
             final_block,
@@ -1492,9 +1489,9 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
     }
 
     /// Get a new cursor for the Sst.
-    pub fn cursor(&self) -> SstCursor<W> {
+    pub fn cursor(&self) -> SstCursor<R> {
         SST_CURSOR_NEW.click();
-        SstCursor::<W>::new(self.clone())
+        SstCursor::<R>::new(self.clone())
     }
 
     /// Get the Sst's metadata.  This will involve reading the first and last keys from disk.
@@ -1539,7 +1536,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         meta_cursor.seek_to_first()?;
         meta_cursor.next()?;
         while let Some(kvr) = meta_cursor.key_value() {
-            let metadata = SstCursor::<W>::metadata_from_kvr(&kvr)
+            let metadata = SstCursor::<R>::metadata_from_kvr(&kvr)
                 .expect("metadata should parse")
                 .unwrap();
             println!("{metadata:?}");
@@ -1561,12 +1558,11 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         Ok(())
     }
 
-    fn load_block(file: &W, block_metadata: &BlockMetadata) -> Result<Block, SError> {
+    fn load_block(file: &R, block_metadata: &BlockMetadata) -> Result<Block, SError> {
         SST_LOAD_BLOCK.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
-        let mut buf: Vec<u8> = vec![0u8; amt];
-        io_result(file.read_exact_at(&mut buf, block_metadata.start))?;
+        let buf = file.read_at(block_metadata.start, amt)?;
         let mut up = Unpacker::new(&buf);
         let table_entry: SstEntry = up.unpack().map_err(unpack_table_entry)?;
         if table_entry.crc32c() != block_metadata.crc32c {
@@ -1596,7 +1592,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         cursor.seek_to_first()?;
         cursor.next()?;
         while let Some(kvr) = cursor.key_value() {
-            let Some(metadata) = SstCursor::<W>::metadata_from_kvr(&kvr)? else {
+            let Some(metadata) = SstCursor::<R>::metadata_from_kvr(&kvr)? else {
                 break;
             };
             entries.push(SstIndexEntry {
@@ -1608,12 +1604,11 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         Ok(entries)
     }
 
-    fn load_filter_block(file: &W, block_metadata: &BlockMetadata) -> Result<Filter, SError> {
+    fn load_filter_block(file: &R, block_metadata: &BlockMetadata) -> Result<Filter, SError> {
         SST_LOAD_FILTER.click();
         block_metadata.sanity_check()?;
         let amt = (block_metadata.limit - block_metadata.start) as usize;
-        let mut buf: Vec<u8> = vec![0u8; amt];
-        io_result(file.read_exact_at(&mut buf, block_metadata.start))?;
+        let buf = file.read_at(block_metadata.start, amt)?;
         let mut up = Unpacker::new(&buf);
         let table_entry: SstEntry = up.unpack().map_err(unpack_table_entry)?;
         if table_entry.crc32c() != block_metadata.crc32c {
@@ -1679,7 +1674,7 @@ impl<W: Clone + Seek + Write + FileExt> Sst<W> {
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
         timestamp: u64,
-    ) -> Result<BoundsCursor<PruningCursor<SstCursor<W>>>, SError> {
+    ) -> Result<BoundsCursor<PruningCursor<SstCursor<R>>>, SError> {
         let pruning = PruningCursor::new(self.cursor(), timestamp)?;
         BoundsCursor::new(pruning, start_bound, end_bound)
     }
@@ -2456,16 +2451,14 @@ impl OverlapCutter {
 
 /// A positioned, range-oriented reader for an SST.
 ///
-/// `Sst`, `SstCursor`, and `load` are all generic over a write-capable file handle today, which
-/// forces an object-store reader to fetch the whole object (`Sst::from_bytes`).  At the default
-/// target file size that is one large GET per lookup.  `SstRead` is the smaller surface a reader
-/// actually needs -- size and ranged reads -- so an implementation over a ranged GET plus a block
-/// cache can back an SST without downloading it whole.
+/// `Sst`, `SstCursor`, and `load` are generic over `R: SstRead + Clone`, so an object-store reader
+/// no longer has to fetch the whole object (`Sst::from_bytes`) -- at the default target file size
+/// that was one large GET per lookup.  `SstRead` is the smaller surface a reader actually needs --
+/// size and ranged reads -- so an implementation over a ranged GET plus a block cache can back an
+/// SST without downloading it whole.
 ///
-/// Reworking `Sst`/`SstCursor`/`load` to consume `SstRead` is the largest change in the sstree
-/// plan and is scoped separately; this defines the abstraction and the file-backed implementations
-/// it will build on.  Bytes are returned as `Vec<u8>` to keep `sst` free of a `bytes` dependency
-/// until that rework lands.
+/// `FileHandle` and `InMemoryFile` implement it, which is how the local-disk and in-memory paths
+/// continue to work.  Bytes are returned as `Vec<u8>` to keep `sst` free of a `bytes` dependency.
 pub trait SstRead {
     /// The total size of the SST in bytes.
     fn size(&self) -> Result<u64, SError>;
@@ -2512,16 +2505,16 @@ impl SstRead for InMemoryFile {
 
 /// A cursor over an Sst.
 #[derive(Clone, Debug)]
-pub struct SstCursor<W: Clone + Seek + Write + FileExt = FileHandle> {
-    table: Sst<W>,
+pub struct SstCursor<R: SstRead + Clone = FileHandle> {
+    table: Sst<R>,
     // The current index entry.  When block_cursor is None, meta_idx is the next block for forward
     // traversal and one past the next block for reverse traversal.
     meta_idx: usize,
     block_cursor: Option<BlockCursor>,
 }
 
-impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
-    fn new(table: Sst<W>) -> Self {
+impl<R: SstRead + Clone> SstCursor<R> {
+    fn new(table: Sst<R>) -> Self {
         Self {
             table,
             meta_idx: 0,
@@ -2537,7 +2530,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
 
     fn load_block_cursor(&self, idx: usize) -> Result<BlockCursor, SError> {
         let block =
-            Sst::<W>::load_block(&self.table.handle, &self.table.index_entries[idx].metadata)?;
+            Sst::<R>::load_block(&self.table.handle, &self.table.index_entries[idx].metadata)?;
         Ok(block.cursor())
     }
 
@@ -2555,7 +2548,7 @@ impl<W: Clone + Seek + Write + FileExt> SstCursor<W> {
     }
 }
 
-impl<W: Clone + Seek + Write + FileExt> Cursor for SstCursor<W> {
+impl<R: SstRead + Clone> Cursor for SstCursor<R> {
     fn seek_to_first(&mut self) -> Result<(), SError> {
         SST_CURSOR_SEEK_TO_FIRST.click();
         self.meta_idx = 0;
