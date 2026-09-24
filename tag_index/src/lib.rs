@@ -93,7 +93,10 @@ impl Tags<'_> {
     }
 
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> + '_ {
-        // NOTE(rescrv):  We never construct a Tags that won't parse.
+        // NOTE(rescrv):  We never construct a Tags that won't parse.  Every constructor --
+        // `new` and `try_from` -- runs `parse` on the assembled string and refuses to build a
+        // `Tags` when it fails, so this unwrap is a real invariant and not an assertion of
+        // intent.  Do not add an infallible constructor without re-reading this comment.
         Self::parse(&self.tags).unwrap().into_iter()
     }
 
@@ -126,19 +129,36 @@ impl Tags<'_> {
     }
 }
 
-impl<'a> From<Vec<Tag<'a>>> for Tags<'static> {
-    fn from(tags: Vec<Tag<'a>>) -> Self {
+/// Returned when a `Vec<Tag>` does not assemble into a `Tags` that round-trips through
+/// [`Tags::parse`].
+///
+/// The delimiter-joined encoding is not escaped, so a `:` in a key or value, or a repeated key,
+/// produces a string that cannot be parsed back into the tags it was built from.  Those inputs
+/// are rejected here rather than stored and discovered later.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct InvalidTags;
+
+impl Display for InvalidTags {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "tags do not round-trip through the canonical encoding")
+    }
+}
+
+impl std::error::Error for InvalidTags {}
+
+impl<'a> TryFrom<Vec<Tag<'a>>> for Tags<'static> {
+    type Error = InvalidTags;
+
+    fn try_from(tags: Vec<Tag<'a>>) -> Result<Self, Self::Error> {
         let mut s = String::new();
-        for tag in tags {
+        for tag in tags.iter() {
             s.push(':');
             s.push_str(tag.key());
             s.push('=');
             s.push_str(tag.value());
         }
         s.push(':');
-        Tags {
-            tags: Cow::Owned(s),
-        }
+        Tags::new(s).ok_or(InvalidTags)
     }
 }
 
@@ -349,7 +369,7 @@ impl TagIndex for InvertedTagIndex {
 mod tests {
     use std::borrow::Cow;
 
-    use super::{CompressedTagIndex, Tag, TagIndex, Tags};
+    use super::{CompressedTagIndex, InvalidTags, Tag, TagIndex, Tags};
 
     #[test]
     fn tag_into_owned() {
@@ -372,6 +392,60 @@ mod tests {
         assert!(Tags::new(":foo=bar:=baz:").is_none());
         assert!(Tags::new("foo=bar:").is_none());
         assert!(Tags::new(":foo=bar").is_none());
+    }
+
+    // `Tag::new` admits `:`, `Tags::parse` treats `:` as an unescaped record delimiter,
+    // and the old `From<Vec<Tag>>` skipped validation -- so `tags()` unwrapped a `None`.  These
+    // cases are the ones that used to panic downstream; they must now be rejected at
+    // construction.
+    #[test]
+    fn try_from_rejects_colons() {
+        // Prometheus recording-rule naming convention.
+        let tags = vec![Tag::new("__name__", "node:cpu:rate5m").unwrap().into_owned()];
+        assert_eq!(Err(InvalidTags), Tags::try_from(tags));
+        // A colon hiding in a value.
+        let tags = vec![
+            Tag::new("__name__", "http_requests_total")
+                .unwrap()
+                .into_owned(),
+            Tag::new("path", "a:b").unwrap().into_owned(),
+        ];
+        assert_eq!(Err(InvalidTags), Tags::try_from(tags));
+    }
+
+    #[test]
+    fn try_from_rejects_duplicate_keys() {
+        let tags = vec![
+            Tag::new("__name__", "http_x").unwrap().into_owned(),
+            Tag::new("__name__", "http_y").unwrap().into_owned(),
+        ];
+        assert_eq!(Err(InvalidTags), Tags::try_from(tags));
+    }
+
+    #[test]
+    fn try_from_rejects_empty() {
+        assert_eq!(Err(InvalidTags), Tags::try_from(Vec::<Tag<'static>>::new()));
+    }
+
+    #[test]
+    fn try_from_round_trips() {
+        let tags = vec![
+            Tag::new("tag1", "foo").unwrap().into_owned(),
+            Tag::new("tag2", "bar").unwrap().into_owned(),
+        ];
+        let tags = Tags::try_from(tags).unwrap();
+        assert_eq!(Tags::new(":tag1=foo:tag2=bar:").unwrap(), tags);
+        let round_tripped: Vec<_> = tags
+            .tags()
+            .map(|t| (t.key().to_string(), t.value().to_string()))
+            .collect();
+        assert_eq!(
+            vec![
+                ("tag1".to_string(), "foo".to_string()),
+                ("tag2".to_string(), "bar".to_string())
+            ],
+            round_tripped
+        );
     }
 
     #[test]
