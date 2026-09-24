@@ -2394,6 +2394,120 @@ impl<S: SstSink> Builder for SstMultiBuilder<S> {
     }
 }
 
+///////////////////////////////////////////// OverlapCutter /////////////////////////////////////////
+
+/// Decides where to cut an output run so the next compaction's merge stays bounded.
+///
+/// As the output cursor advances, an output overlaps every parent-level file whose key range it
+/// spans; draining that output later re-reads all of them.  [`OverlapCutter`] accumulates the sizes
+/// of the parent files the current output has passed and reports when that accumulation exceeds
+/// `limit`, so the caller can cut before the overlap gets too expensive.
+///
+/// The caller supplies the parent level, which differs by compaction type: `L_{i+2}` for an
+/// ordinary leveled move out of `L_i`, but `L_{i+1}` for a staged run that will drain into
+/// `L_{i+1}`.
+pub struct OverlapCutter {
+    /// Parent files overlapping the compaction's key range, as `(first_key, last_key, file_size)`
+    /// sorted by first key.
+    boundaries: Vec<(Vec<u8>, Vec<u8>, u64)>,
+    limit: u64,
+    idx: usize,
+    accumulated: u64,
+}
+
+impl OverlapCutter {
+    /// Build a cutter over the parent files, cutting once accumulated overlap exceeds `limit`.
+    pub fn new(parents: impl IntoIterator<Item = SstMetadata>, limit: u64) -> Self {
+        let mut boundaries: Vec<(Vec<u8>, Vec<u8>, u64)> = parents
+            .into_iter()
+            .map(|m| (m.first_key, m.last_key, m.file_size))
+            .collect();
+        boundaries.sort_by(|a, b| a.0.cmp(&b.0));
+        Self {
+            boundaries,
+            limit,
+            idx: 0,
+            accumulated: 0,
+        }
+    }
+
+    /// Advance to `key`, accumulating the bytes of every parent file the output has now passed.
+    /// Returns true when the accumulation exceeds `limit`.
+    ///
+    /// The accumulation is a running sum, not a per-file maximum: a limit expressed as a multiple
+    /// of the target file size is only ever reached by summing, and taking the maximum silently
+    /// never cuts.
+    pub fn should_stop_before(&mut self, key: &[u8]) -> bool {
+        while self.idx < self.boundaries.len() && key > self.boundaries[self.idx].1.as_slice() {
+            self.accumulated += self.boundaries[self.idx].2;
+            self.idx += 1;
+        }
+        self.accumulated > self.limit
+    }
+
+    /// Reset the accumulator after acting on a `true` from [`should_stop_before`].  The cursor into
+    /// the parent files is preserved; only the per-output accumulation is cleared.
+    pub fn reset(&mut self) {
+        self.accumulated = 0;
+    }
+}
+
+/////////////////////////////////////////////// SstRead ////////////////////////////////////////////
+
+/// A positioned, range-oriented reader for an SST.
+///
+/// `Sst`, `SstCursor`, and `load` are all generic over a write-capable file handle today, which
+/// forces an object-store reader to fetch the whole object (`Sst::from_bytes`).  At the default
+/// target file size that is one large GET per lookup.  `SstRead` is the smaller surface a reader
+/// actually needs -- size and ranged reads -- so an implementation over a ranged GET plus a block
+/// cache can back an SST without downloading it whole.
+///
+/// Reworking `Sst`/`SstCursor`/`load` to consume `SstRead` is the largest change in the sstree
+/// plan and is scoped separately; this defines the abstraction and the file-backed implementations
+/// it will build on.  Bytes are returned as `Vec<u8>` to keep `sst` free of a `bytes` dependency
+/// until that rework lands.
+pub trait SstRead {
+    /// The total size of the SST in bytes.
+    fn size(&self) -> Result<u64, SError>;
+    /// Read exactly `len` bytes starting at `offset`.
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError>;
+}
+
+impl SstRead for FileHandle {
+    fn size(&self) -> Result<u64, SError> {
+        FileHandle::size(self)
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError> {
+        let mut buf = vec![0u8; len];
+        self.read_exact_at(&mut buf, offset)?;
+        Ok(buf)
+    }
+}
+
+impl SstRead for InMemoryFile {
+    fn size(&self) -> Result<u64, SError> {
+        Ok(InMemoryFile::size(self))
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, SError> {
+        let contents = self.contents();
+        let start = offset as usize;
+        let end = start.checked_add(len).filter(|end| *end <= contents.len());
+        let Some(end) = end else {
+            CORRUPTION.click();
+            return Err(error_with_message(
+                CODE_CORRUPTION_FILE_TOO_SMALL,
+                format!(
+                    "read_at past end of in-memory file: offset={offset} len={len} size={}",
+                    contents.len()
+                ),
+            ));
+        };
+        Ok(contents[start..end].to_vec())
+    }
+}
+
 ///////////////////////////////////////////// SstCursor ////////////////////////////////////////////
 
 /// A cursor over an Sst.
@@ -2934,6 +3048,85 @@ mod tests {
             assert_eq!(sealed[0].metadata.last_key, reparsed.last_key);
             assert_eq!(sealed[0].metadata.setsum, reparsed.setsum);
             assert_eq!(sealed[0].metadata.file_size, reparsed.file_size);
+        }
+    }
+
+    mod overlap_cutter {
+        use super::*;
+
+        fn parent(first: &[u8], last: &[u8], size: u64) -> SstMetadata {
+            SstMetadata {
+                setsum: [0u8; 32],
+                first_key: first.to_vec(),
+                last_key: last.to_vec(),
+                smallest_timestamp: 0,
+                biggest_timestamp: 0,
+                file_size: size,
+            }
+        }
+
+        #[test]
+        fn accumulates_across_parents() {
+            // Three parents of 10 bytes each; limit 25.  No single file reaches the limit, so a
+            // max-based rule would never cut.  Summing crosses 25 after the third.
+            let parents = vec![
+                parent(b"a", b"b", 10),
+                parent(b"c", b"d", 10),
+                parent(b"e", b"f", 10),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 25);
+            assert!(!cutter.should_stop_before(b"c")); // passed 1: 10
+            assert!(!cutter.should_stop_before(b"e")); // passed 2: 20
+            assert!(cutter.should_stop_before(b"g")); // passed 3: 30 > 25
+        }
+
+        #[test]
+        fn reset_clears_accumulation_but_not_cursor() {
+            let parents = vec![
+                parent(b"a", b"b", 20),
+                parent(b"c", b"d", 20),
+                parent(b"e", b"f", 20),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 25);
+            assert!(!cutter.should_stop_before(b"c")); // passed p0: 20
+            assert!(cutter.should_stop_before(b"e")); // passed p1: 40 > 25
+            cutter.reset();
+            // Accumulation restarts from 0; p0 and p1 are not recounted (cursor preserved).
+            assert!(!cutter.should_stop_before(b"g")); // passed p2 only: 20, not > 25
+        }
+
+        #[test]
+        fn unsorted_input_is_sorted_by_first_key() {
+            let parents = vec![
+                parent(b"e", b"f", 10),
+                parent(b"a", b"b", 10),
+                parent(b"c", b"d", 10),
+            ];
+            let mut cutter = OverlapCutter::new(parents, 15);
+            assert!(!cutter.should_stop_before(b"c")); // passed a..b: 10
+            assert!(cutter.should_stop_before(b"g")); // passed c..d and e..f: 30 > 15
+        }
+    }
+
+    mod sst_read {
+        use super::*;
+        use file_manager::InMemoryFile;
+
+        #[test]
+        fn in_memory_file_ranged_reads() {
+            let file = InMemoryFile::new(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            assert_eq!(10, SstRead::size(&file).unwrap());
+            assert_eq!(vec![2, 3, 4], SstRead::read_at(&file, 2, 3).unwrap());
+            assert_eq!(vec![9], SstRead::read_at(&file, 9, 1).unwrap());
+            // Zero-length read is allowed.
+            assert_eq!(Vec::<u8>::new(), SstRead::read_at(&file, 10, 0).unwrap());
+        }
+
+        #[test]
+        fn in_memory_file_out_of_bounds_errors() {
+            let file = InMemoryFile::new(vec![0, 1, 2, 3]);
+            assert!(SstRead::read_at(&file, 2, 4).is_err());
+            assert!(SstRead::read_at(&file, 5, 1).is_err());
         }
     }
 
