@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use arrrg::CommandLine;
 use utf8path::Path;
 
-use rustrc::{Pid1, Pid1Options, Target};
+use rustrc::{Pid1, Pid1Options, ServiceStatus, Target};
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Options {
@@ -74,6 +74,11 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 opts.optflag("l", "list", "List all possible services.");
                 opts.optflag("e", "enabled", "List enabled services.");
                 opts.optflag("r", "reload", "Reload the rc_conf and rc_d directories.");
+                opts.optflag(
+                    "n",
+                    "dry-run",
+                    "With --reload, report what reloading would do without applying it.",
+                );
                 opts.optflag("s", "start", "Start one or more services.");
                 opts.optflag("S", "stop", "Stop one or more services.");
                 opts.optflag("R", "restart", "Restart one or more services.");
@@ -113,10 +118,18 @@ impl unix_sock::Invokable for UnixSockAdapter {
                     }
                 }
 
-                if matches.opt_present("r")
-                    && let Err(err) = self.pid1.reload()
-                {
-                    response += &format!("error: {err:?}");
+                if matches.opt_present("r") {
+                    let plan = if matches.opt_present("n") {
+                        self.pid1.plan_reload()
+                    } else {
+                        self.pid1.reload_with_plan()
+                    };
+                    match plan {
+                        Ok(plan) => response += &plan.to_string(),
+                        Err(err) => response += &format!("error: {err:?}\n"),
+                    }
+                } else if matches.opt_present("n") {
+                    return "error: --dry-run only applies to --reload".to_string();
                 }
 
                 // NOTE(rescrv):  I've gone back and forth on these five lines.
@@ -162,12 +175,131 @@ impl unix_sock::Invokable for UnixSockAdapter {
                     }
                 }
             }
+            "status" => {
+                let mut targets: Vec<_> = argv[1..].iter().map(Target::from).collect();
+                let statuses = self
+                    .pid1
+                    .status()
+                    .into_iter()
+                    .filter(|s| {
+                        targets.is_empty() || targets.iter_mut().any(|t| t.matches_name(&s.service))
+                    })
+                    .collect::<Vec<_>>();
+                response += &render_status(&statuses);
+            }
+            "kill" => {
+                let mut opts = getopts::Options::new();
+                opts.parsing_style(getopts::ParsingStyle::StopAtFirstFree);
+                opts.optopt("s", "signal", "Signal to send (name or number).", "SIGNAL");
+                let matches = match opts.parse(&argv[1..]) {
+                    Ok(matches) => matches,
+                    Err(err) => {
+                        return format!("error: {err:?}");
+                    }
+                };
+                let name = matches.opt_str("s").unwrap_or_else(|| "TERM".to_string());
+                let Some(signal) = rustrc::parse_signal(&name) else {
+                    return format!("error: unknown signal {name:?}");
+                };
+                if matches.free.is_empty() {
+                    return "error: name one or more services or pids".to_string();
+                }
+                for target in matches.free.iter() {
+                    // NOTE:  Refuse "*"; signaling every service is not a one-token operation.
+                    let parsed = if target == "*" {
+                        response += "*: error: refusing to signal every service; name them\n";
+                        continue;
+                    } else if let Ok(pid) = target.parse::<i32>() {
+                        Target::Pid(pid)
+                    } else {
+                        Target::One(target.clone())
+                    };
+                    match self.pid1.signal(parsed, signal) {
+                        Ok(0) => response += &format!("{target}: error: no running process\n"),
+                        Ok(n) => {
+                            response += &format!("{target}: sent {signal} to {n} process(es)\n")
+                        }
+                        Err(err) => response += &format!("{target}: error: {err:?}\n"),
+                    }
+                }
+            }
             _ => {
                 return format!("error: unknown command {:?}", argv[0]);
             }
         }
         response
     }
+}
+
+fn human(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 86400 {
+        format!("{}d{}h", secs / 86400, (secs % 86400) / 3600)
+    } else if secs >= 3600 {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
+}
+
+fn render_status(statuses: &[ServiceStatus]) -> String {
+    let mut rows = vec![[
+        "SERVICE".to_string(),
+        "STATE".to_string(),
+        "PID".to_string(),
+        "UPTIME".to_string(),
+        "STARTS".to_string(),
+        "LAST EXIT".to_string(),
+        "BACKOFF".to_string(),
+        "LOG".to_string(),
+    ]];
+    for s in statuses {
+        let (pid, uptime) = match s.running.first() {
+            Some((_, up)) => {
+                let pids = s
+                    .running
+                    .iter()
+                    .map(|(p, _)| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                (pids, human(*up))
+            }
+            None => ("-".to_string(), "-".to_string()),
+        };
+        rows.push([
+            s.service.clone(),
+            s.state().to_string(),
+            pid,
+            uptime,
+            s.starts.to_string(),
+            s.last_exit
+                .as_ref()
+                .map(|(what, ago)| format!("{what} ({} ago)", human(*ago)))
+                .unwrap_or_else(|| "-".to_string()),
+            s.backoff.map(human).unwrap_or_else(|| "-".to_string()),
+            s.log.clone().unwrap_or_else(|| "-".to_string()),
+        ]);
+    }
+    let mut widths = [0usize; 8];
+    for row in rows.iter() {
+        for (w, cell) in widths.iter_mut().zip(row.iter()) {
+            *w = (*w).max(cell.len());
+        }
+    }
+    let mut out = String::new();
+    for row in rows.iter() {
+        let line = row
+            .iter()
+            .zip(widths.iter())
+            .map(|(cell, w)| format!("{cell:w$}"))
+            .collect::<Vec<_>>()
+            .join("  ");
+        out += line.trim_end();
+        out.push('\n');
+    }
+    out
 }
 
 fn main() {

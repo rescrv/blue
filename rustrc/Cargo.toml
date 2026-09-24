@@ -33,6 +33,11 @@ path = "src/bin/rustrc.rs"
 required-features=["binaries"]
 
 [[bin]]
+name = "rustrcctl"
+path = "src/bin/rustrcctl.rs"
+required-features=["binaries"]
+
+[[bin]]
 name = "rustrc-smoke-test"
 path = "src/bin/rustrc-smoke-test.rs"
 required-features=["binaries"]

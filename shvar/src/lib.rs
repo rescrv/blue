@@ -692,7 +692,7 @@ fn parse_statement(
     while let Some(c) = tokens.peek() {
         match c {
             '\'' => {
-                parse_single_quotes(ctx.vars, witness, tokens, output)?;
+                parse_single_quotes(ctx, witness, tokens, output)?;
             }
             '"' => {
                 parse_double_quotes(ctx, witness, tokens, output)?;
@@ -713,7 +713,7 @@ fn parse_statement(
 }
 
 fn parse_single_quotes(
-    _: &dyn VariableProvider,
+    ctx: &ParseContext<'_>,
     _: &mut dyn VariableWitness,
     tokens: &mut Tokenize,
     output: &mut Builder,
@@ -734,6 +734,11 @@ fn parse_single_quotes(
             } else if c == '\n' {
                 output.push('\\');
                 output.push('n');
+            } else if c == '$' && ctx.escape_dollar_literal {
+                // The literal lands inside double quotes, where a later pass of expand_recursive
+                // would treat it as a variable.  Emit the literal-dollar escape instead;
+                // post-processing turns it back into '$'.
+                output.push_str("$$");
             } else {
                 output.push(c);
             }
@@ -2286,5 +2291,67 @@ mod tests {
         let (word3, rest3) = split_once(rest2).unwrap().unwrap();
         assert_eq!("three", word3);
         assert_eq!(None, split_once(rest3).unwrap());
+    }
+
+    fn expand_split(vars: &[(&str, &str)], input: &str) -> Result<Vec<String>, Error> {
+        let vars = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<HashMap<_, _>>();
+        crate::split(&crate::expand_recursive(&vars, input)?)
+    }
+
+    #[test]
+    fn expand_recursive_keeps_single_quoted_variables_literal() {
+        let vars = [("G", "hi")];
+        assert_eq!(
+            vec!["sh", "-c", "echo ${G}"],
+            expand_split(&vars, "sh -c 'echo ${G}'").unwrap()
+        );
+        assert_eq!(
+            vec!["echo", "${G}", "hi"],
+            expand_split(&vars, "echo '${G}' ${G}").unwrap()
+        );
+        assert_eq!(
+            vec!["echo", "${UNSET}"],
+            expand_split(&vars, "echo '${UNSET}'").unwrap()
+        );
+        assert_eq!(
+            vec!["echo", "$(G)"],
+            expand_split(&vars, "echo '$(G)'").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_recursive_keeps_single_quoted_dollars_literal() {
+        assert_eq!(vec!["echo", "$"], expand_split(&[], "echo '$'").unwrap());
+        assert_eq!(vec!["echo", "$$"], expand_split(&[], "echo '$$'").unwrap());
+        assert_eq!(vec!["a$b"], expand_split(&[], "'a$b'").unwrap());
+    }
+
+    #[test]
+    fn expand_recursive_expands_inside_single_quotes_within_double_quotes() {
+        // Inside double quotes a single quote is an ordinary character, as in the shell.
+        assert_eq!(
+            vec!["sh", "-c", "trap 'echo hi' TERM"],
+            expand_split(&[("G", "hi")], "sh -c \"trap 'echo ${G}' TERM\"").unwrap()
+        );
+    }
+
+    #[test]
+    fn expand_recursive_value_with_single_quoted_literal_terminates() {
+        assert_eq!(
+            vec!["echo", "${G}"],
+            expand_split(&[("G", "hi"), ("X", "'${G}'")], "echo ${X}").unwrap()
+        );
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn expand_recursive_single_quoted_text_is_verbatim(s in "[a-zA-Z0-9_ ${}()]*") {
+            let vars = [("a", "X"), ("b", "Y")];
+            let got = expand_split(&vars, &format!("'{s}'")).unwrap();
+            proptest::prop_assert_eq!(vec![s.clone()], got);
+        }
     }
 }

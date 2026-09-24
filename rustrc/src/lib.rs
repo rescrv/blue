@@ -518,6 +518,14 @@ struct Pid1State {
     processes: Vec<Arc<Execution>>,
     inhibited: HashSet<String>,
     backedoff: HashMap<String, Instant>,
+    history: HashMap<String, ServiceHistory>,
+}
+
+/// Per-service counters kept across executions.
+#[derive(Clone, Debug, Default)]
+struct ServiceHistory {
+    starts: u64,
+    last_exit: Option<(libc::c_int, Instant)>,
 }
 
 impl Pid1State {
@@ -527,6 +535,7 @@ impl Pid1State {
         let processes = vec![];
         let inhibited = HashSet::new();
         let backedoff = HashMap::new();
+        let history = HashMap::new();
         STATE_NEW.click();
         Self {
             shutdown,
@@ -535,6 +544,7 @@ impl Pid1State {
             processes,
             inhibited,
             backedoff,
+            history,
         }
     }
 
@@ -635,6 +645,10 @@ impl Pid1State {
             .spawn(move || Self::wait(exec, reclaim))?;
         execution.set_thread(thread);
         execution.exec()?;
+        self.history
+            .entry(execution.service.clone())
+            .or_default()
+            .starts += 1;
         self.processes.push(execution);
         Ok(execution_id)
     }
@@ -648,6 +662,8 @@ impl Pid1State {
                 if libc::waitpid(pid, &mut status, 0) < 0 {
                     // TODO(rescrv): log that this failed.
                     // TODO(rescrv): backoff and retry in a loop.
+                } else {
+                    *exec.exit_status.lock().unwrap() = Some(status);
                 }
             }
             clue!(COLLECTOR, INFO, {
@@ -763,6 +779,10 @@ impl Pid1 {
             {
                 let mut state = state.lock().unwrap();
                 state.processes.retain(|p| !Arc::ptr_eq(p, &exec));
+                if let Some(status) = *exec.exit_status.lock().unwrap() {
+                    state.history.entry(service.clone()).or_default().last_exit =
+                        Some((status, Instant::now()));
+                }
                 state.set_backoff(service, Instant::now() + backoff);
                 coord.converge.notify_all();
                 state.converge = state.converge.wrapping_add(1);
@@ -920,19 +940,10 @@ impl Pid1 {
                         pid: pid,
                     },
                 });
-                for iter in 1..=3 {
-                    for _ in 0..(1 << iter) * 10 {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        if !has_process(state, &exec) {
-                            break;
-                        }
-                    }
-                    let _ = exec.kill(minimal_signals::SIGTERM);
-                }
-                while has_process(state, &exec) {
-                    let _ = exec.kill(minimal_signals::SIGKILL);
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
+                let _ = terminate(&exec, || has_process(state, &exec));
+                // A restart we caused is not a crash; don't make the new execution wait out a
+                // backoff penalty for it.
+                state.lock().unwrap().clear_backoff(&exec.service);
             }
         }
         let now = Instant::now();
@@ -1003,15 +1014,15 @@ impl Pid1 {
             let mut state = self.state.lock().unwrap();
             state.shutdown = true;
         }
-        'outer: for iter in 1..=3 {
-            for _ in 0..(1 << iter) * 10 {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if !self.has_processes() {
-                    break 'outer;
-                }
+        let processes = { self.state.lock().unwrap().processes.clone() };
+        std::thread::scope(|scope| {
+            for proc in processes.iter() {
+                scope.spawn(|| {
+                    let _ = terminate(proc, || self.has_process(proc));
+                });
             }
-            let _ = self.kill(Target::All, minimal_signals::SIGTERM);
-        }
+        });
+        // Anything spawned after the snapshot gets no grace period.
         while self.has_processes() {
             let _ = self.kill(Target::All, minimal_signals::SIGKILL);
             std::thread::sleep(std::time::Duration::from_secs(1));
@@ -1065,17 +1076,169 @@ impl Pid1 {
         });
         let options = { self.options.lock().unwrap().clone() };
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
+        self.install(config);
+        Ok(())
+    }
+
+    /// Reload, returning what converging onto the new configuration will do.
+    pub fn reload_with_plan(&self) -> Result<ReloadPlan, Error> {
+        RELOAD.click();
+        clue!(COLLECTOR, INFO, {
+            reload: true,
+        });
+        let options = { self.options.lock().unwrap().clone() };
+        let config = Arc::new(Pid1Configuration::from_options(&options)?);
+        let plan = self.plan_for(&config);
+        self.install(config);
+        Ok(plan)
+    }
+
+    /// Compute what a reload would do without applying it.
+    pub fn plan_reload(&self) -> Result<ReloadPlan, Error> {
+        let options = { self.options.lock().unwrap().clone() };
+        let config = Pid1Configuration::from_options(&options)?;
+        Ok(self.plan_for(&config))
+    }
+
+    fn install(&self, config: Arc<Pid1Configuration>) {
         {
             let mut state = self.state.lock().unwrap();
             state.config = config;
             state.converge = state.converge.wrapping_add(1);
         }
         self.coord.converge.notify_all();
-        Ok(())
+    }
+
+    fn plan_for(&self, config: &Pid1Configuration) -> ReloadPlan {
+        let now = Instant::now();
+        let (processes, inhibited, backedoff) = {
+            let state = self.state.lock().unwrap();
+            (
+                state.processes.clone(),
+                state.inhibited.clone(),
+                state.backedoff.clone(),
+            )
+        };
+        let mut plan = ReloadPlan::default();
+        let mut running = HashSet::new();
+        for exec in processes.iter() {
+            if !running.insert(exec.service.clone()) {
+                continue;
+            }
+            if config.get_service_path(&exec.service).is_none()
+                || config.rc_conf.service_switch(&exec.service) == SwitchPosition::No
+            {
+                plan.keep_running.push(exec.service.clone());
+                continue;
+            }
+            match ExecutionContext::new(config, &exec.service, &[]) {
+                Ok(context) => {
+                    if context != exec.context {
+                        plan.restart.push((
+                            exec.service.clone(),
+                            context_changes(&exec.context, &context),
+                        ));
+                    }
+                }
+                Err(err) => plan.errors.push((exec.service.clone(), format!("{err:?}"))),
+            }
+        }
+        for service in config.services() {
+            if !running.contains(&service)
+                && !inhibited.contains(&service)
+                && config.rc_conf.service_switch(&service) == SwitchPosition::Yes
+            {
+                if let Err(err) = ExecutionContext::new(config, &service, &[]) {
+                    plan.errors.push((service.clone(), format!("{err:?}")));
+                }
+                let backoff = backedoff
+                    .get(&service)
+                    .filter(|b| **b > now)
+                    .map(|b| *b - now);
+                plan.start.push((service, backoff));
+            }
+        }
+        if let Ok(enabled) = config.rc_conf.list_services() {
+            for service in enabled {
+                if config.get_service_path(&service).is_none() {
+                    plan.errors
+                        .push((service, "enabled but there is no rc.d stub".to_string()));
+                }
+            }
+        }
+        plan.start.sort();
+        plan.start.dedup();
+        plan.restart.sort();
+        plan.keep_running.sort();
+        plan.errors.sort();
+        plan
+    }
+
+    /// A point-in-time status of every known service, sorted by name.
+    pub fn status(&self) -> Vec<ServiceStatus> {
+        let state = self.state.lock().unwrap();
+        let now = Instant::now();
+        let mut names = state.config.services().into_iter().collect::<HashSet<_>>();
+        names.extend(state.processes.iter().map(|p| p.service.clone()));
+        names.extend(state.history.keys().cloned());
+        let mut names = names.into_iter().collect::<Vec<_>>();
+        names.sort();
+        names
+            .into_iter()
+            .map(|service| {
+                let known = state.config.get_service_path(&service).is_some();
+                let running = state
+                    .processes
+                    .iter()
+                    .filter(|p| p.service == service)
+                    .filter_map(|p| p.pid().map(|pid| (pid, p.context.started.elapsed())))
+                    .collect();
+                let history = state.history.get(&service).cloned().unwrap_or_default();
+                let log = state
+                    .processes
+                    .iter()
+                    .find(|p| p.service == service)
+                    .and_then(|p| p.context.log.as_ref())
+                    .map(|l| l.to_string_lossy().into_owned())
+                    .or_else(|| {
+                        state
+                            .config
+                            .rc_conf
+                            .argv(&service, "LOG", &())
+                            .ok()
+                            .and_then(|v| v.into_iter().next())
+                    });
+                ServiceStatus {
+                    switch: known.then(|| state.config.rc_conf.service_switch(&service)),
+                    inhibited: state.is_inhibited(&service),
+                    running,
+                    backoff: state
+                        .get_backoff(&service)
+                        .filter(|b| *b > now)
+                        .map(|b| b - now),
+                    starts: history.starts,
+                    last_exit: history
+                        .last_exit
+                        .map(|(st, when)| (describe_wait_status(st), when.elapsed())),
+                    log,
+                    service,
+                }
+            })
+            .collect()
     }
 
     /// Send the specified signal to all processes that match the target.
-    pub fn kill(&self, mut target: Target, signal: minimal_signals::Signal) -> Result<(), Error> {
+    pub fn kill(&self, target: Target, signal: minimal_signals::Signal) -> Result<(), Error> {
+        self.signal(target, signal).map(|_| ())
+    }
+
+    /// Send the specified signal to all processes that match the target, returning how many
+    /// processes matched.
+    pub fn signal(
+        &self,
+        mut target: Target,
+        signal: minimal_signals::Signal,
+    ) -> Result<usize, Error> {
         KILL.click();
         clue!(COLLECTOR, INFO, {
             kill: {
@@ -1084,9 +1247,11 @@ impl Pid1 {
             },
         });
         let mut err = Ok(());
+        let mut matched = 0;
         let state = self.state.lock().unwrap();
         for process in state.processes.iter() {
             if target.matches(process) {
+                matched += 1;
                 let pid: libc::pid_t = *process.pid.lock().unwrap();
                 if pid > 0 {
                     unsafe {
@@ -1110,7 +1275,7 @@ impl Pid1 {
                 }
             }
         }
-        err
+        err.map(|()| matched)
     }
 
     /// List the available services.
@@ -1174,6 +1339,7 @@ impl Pid1 {
         self.stop(service)?;
         let mut state = self.state.lock().unwrap();
         state.clear_inhibit(service);
+        state.clear_backoff(service);
         if state.service_switch(service) == SwitchPosition::Manual {
             state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
         }
@@ -1208,19 +1374,7 @@ impl Pid1 {
             if proc.pid().is_none() {
                 continue;
             }
-            for iter in 1..=3 {
-                for _ in 0..(1 << iter) * 10 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    if !self.has_process(&proc) {
-                        break;
-                    }
-                }
-                proc.kill(minimal_signals::SIGTERM)?;
-            }
-            while self.has_process(&proc) {
-                proc.kill(minimal_signals::SIGKILL)?;
-                std::thread::sleep(std::time::Duration::from_secs(1));
-            }
+            terminate(&proc, || self.has_process(&proc))?;
         }
         Ok(())
     }
@@ -1256,6 +1410,13 @@ pub struct ExecutionContext {
     pub argv: Vec<CString>,
     /// The environment to set.
     pub env: Vec<CString>,
+    /// Where to send stdout and stderr (opened O_APPEND), from the service's LOG variable.  When
+    /// unset, the service inherits rustrc's stdout and stderr.
+    pub log: Option<CString>,
+    /// How long to wait after SIGTERM before SIGKILL, from the service's STOP_TIMEOUT variable
+    /// (seconds; fractions allowed).  When unset, rustrc uses its legacy escalation schedule.  Not
+    /// used for equality or hashing:  changing it applies to the next stop without a restart.
+    pub stop_timeout: Option<Duration>,
     /// The instant that it started (not used for equality or hashing).
     pub started: Instant,
 }
@@ -1266,6 +1427,7 @@ impl PartialEq for ExecutionContext {
             && self.wrapper == other.wrapper
             && self.argv == other.argv
             && self.env == other.env
+            && self.log == other.log
     }
 }
 
@@ -1275,6 +1437,7 @@ impl Hash for ExecutionContext {
         self.wrapper.hash(h);
         self.argv.hash(h);
         self.env.hash(h);
+        self.log.hash(h);
     }
 }
 
@@ -1321,12 +1484,48 @@ impl ExecutionContext {
             }
         }
         env.sort();
+        // setup log
+        let log = config.rc_conf.argv(service, "LOG", &())?;
+        let log = match log.len() {
+            0 => None,
+            1 => Some(CString::new(log[0].as_bytes())?),
+            _ => {
+                return Err(Error::ServiceError(format!(
+                    "LOG must expand to exactly one path; got {log:?}"
+                )));
+            }
+        };
+        // setup stop timeout
+        let stop_timeout = match config.rc_conf.lookup_suffix(service, "STOP_TIMEOUT") {
+            None => None,
+            Some(raw) => {
+                let raw =
+                    shvar::expand_recursive(&config.rc_conf.variable_provider_for(service)?, &raw)?;
+                let raw = raw.trim();
+                if raw.is_empty() {
+                    None
+                } else {
+                    match raw.parse::<f64>() {
+                        Ok(secs) if secs.is_finite() && secs >= 0.0 => {
+                            Some(Duration::from_secs_f64(secs))
+                        }
+                        _ => {
+                            return Err(Error::ServiceError(format!(
+                                "STOP_TIMEOUT must be a non-negative number of seconds; got {raw:?}"
+                            )));
+                        }
+                    }
+                }
+            }
+        };
         let started = Instant::now();
         Ok(Self {
             path,
             wrapper,
             argv,
             env,
+            log,
+            stop_timeout,
             started,
         })
     }
@@ -1348,8 +1547,217 @@ impl From<&ExecutionContext> for indicio::Value {
             wrapper: to_value(&exec.wrapper),
             argv: to_value(&exec.argv),
             env: to_value(&exec.env),
+            log: exec.log.as_ref().map(c_string_to_string).unwrap_or_default(),
         })
     }
+}
+
+///////////////////////////////////////////// terminate ////////////////////////////////////////////
+
+/// Stop `exec`, returning once `alive` reports it gone.
+///
+/// With a STOP_TIMEOUT, send SIGTERM immediately and escalate to SIGKILL after the timeout.
+/// Without one, keep rustrc's legacy schedule:  SIGTERM after 2s, 6s, and 14s, then SIGKILL every
+/// second until it's gone.
+fn terminate(exec: &Execution, alive: impl Fn() -> bool) -> Result<(), Error> {
+    if let Some(grace) = exec.context.stop_timeout {
+        exec.kill(minimal_signals::SIGTERM)?;
+        let deadline = Instant::now() + grace;
+        while alive() {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            std::thread::sleep(std::cmp::min(Duration::from_millis(100), deadline - now));
+        }
+    } else {
+        for iter in 1..=3 {
+            for _ in 0..(1 << iter) * 10 {
+                std::thread::sleep(Duration::from_millis(100));
+                if !alive() {
+                    break;
+                }
+            }
+            exec.kill(minimal_signals::SIGTERM)?;
+        }
+    }
+    while alive() {
+        exec.kill(minimal_signals::SIGKILL)?;
+        // Poll rather than sleeping the full second; reclaim is usually immediate.
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(100));
+            if !alive() {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse a signal given as a number, a name (`SIGHUP`), or a bare name (`HUP`), case-insensitively.
+pub fn parse_signal(s: &str) -> Option<minimal_signals::Signal> {
+    if let Ok(n) = s.parse::<i32>() {
+        return minimal_signals::Signal::from_i32(n);
+    }
+    let upper = s.to_ascii_uppercase();
+    let want = if upper.starts_with("SIG") {
+        upper
+    } else {
+        format!("SIG{upper}")
+    };
+    minimal_signals::Signal::known().find(|sig| sig.name() == want)
+}
+
+/////////////////////////////////////////// ServiceStatus //////////////////////////////////////////
+
+/// How a process ended, decoded from a waitpid status.
+pub fn describe_wait_status(status: libc::c_int) -> String {
+    if libc::WIFEXITED(status) {
+        format!("exit {}", libc::WEXITSTATUS(status))
+    } else if libc::WIFSIGNALED(status) {
+        let sig = libc::WTERMSIG(status);
+        match minimal_signals::Signal::from_i32(sig) {
+            Some(signal) => format!("killed by {signal}"),
+            None => format!("killed by signal {sig}"),
+        }
+    } else {
+        format!("status {status:#x}")
+    }
+}
+
+/// A point-in-time view of one service.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServiceStatus {
+    /// The service name.
+    pub service: String,
+    /// The switch from rc.conf, ignoring any stop-inhibit.
+    pub switch: Option<SwitchPosition>,
+    /// True if the service was stopped by request and will not be restarted until started.
+    pub inhibited: bool,
+    /// Running executions as (pid, uptime).
+    pub running: Vec<(i32, Duration)>,
+    /// Time remaining before the supervisor will try to start it again, if backing off.
+    pub backoff: Option<Duration>,
+    /// Successful spawns since rustrc started.
+    pub starts: u64,
+    /// The most recent exit, decoded, and how long ago it was.
+    pub last_exit: Option<(String, Duration)>,
+    /// Where the service's output goes, if LOG is set.
+    pub log: Option<String>,
+}
+
+impl ServiceStatus {
+    /// A one-word summary of the state.
+    pub fn state(&self) -> &'static str {
+        if !self.running.is_empty() {
+            "running"
+        } else if self.inhibited {
+            "stopped"
+        } else if self.backoff.is_some() {
+            "backoff"
+        } else {
+            match self.switch {
+                Some(SwitchPosition::Yes) => "down",
+                Some(SwitchPosition::Manual) => "manual",
+                Some(SwitchPosition::No) => "disabled",
+                None => "unknown",
+            }
+        }
+    }
+}
+
+//////////////////////////////////////////// ReloadPlan ////////////////////////////////////////////
+
+/// What converging onto a new configuration will do.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReloadPlan {
+    /// Enabled services that are not running and will be started, with the remaining backoff if
+    /// the start will be delayed.
+    pub start: Vec<(String, Option<Duration>)>,
+    /// Running services whose execution context changed, with what changed.  They will be
+    /// stopped and started.
+    pub restart: Vec<(String, Vec<String>)>,
+    /// Running services that the new configuration disables or no longer knows.  rustrc does not
+    /// stop these on reload; stop them explicitly.
+    pub keep_running: Vec<String>,
+    /// Services whose execution context could not be computed under the new configuration.
+    pub errors: Vec<(String, String)>,
+}
+
+impl ReloadPlan {
+    /// True if converging will do nothing.
+    pub fn is_empty(&self) -> bool {
+        self.start.is_empty()
+            && self.restart.is_empty()
+            && self.keep_running.is_empty()
+            && self.errors.is_empty()
+    }
+}
+
+impl std::fmt::Display for ReloadPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_empty() {
+            return writeln!(f, "no changes");
+        }
+        for (s, backoff) in self.start.iter() {
+            match backoff {
+                Some(d) => writeln!(f, "start {s} (after {:.1}s backoff)", d.as_secs_f64())?,
+                None => writeln!(f, "start {s}")?,
+            }
+        }
+        for (s, why) in self.restart.iter() {
+            writeln!(f, "restart {s}: {}", why.join(", "))?;
+        }
+        for s in self.keep_running.iter() {
+            writeln!(
+                f,
+                "keep-running {s}: disabled or removed; stop it explicitly"
+            )?;
+        }
+        for (s, e) in self.errors.iter() {
+            writeln!(f, "{s}: error: {e}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Describe how two execution contexts differ, naming env keys but never values.
+fn context_changes(old: &ExecutionContext, new: &ExecutionContext) -> Vec<String> {
+    fn env_map(env: &[CString]) -> HashMap<String, String> {
+        env.iter()
+            .map(|e| {
+                let e = e.to_string_lossy();
+                match e.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => (e.to_string(), String::new()),
+                }
+            })
+            .collect()
+    }
+    let mut changes = vec![];
+    if old.path != new.path {
+        changes.push("stub".to_string());
+    }
+    if old.wrapper != new.wrapper {
+        changes.push("WRAPPER".to_string());
+    }
+    if old.argv != new.argv {
+        changes.push("argv".to_string());
+    }
+    if old.log != new.log {
+        changes.push("LOG".to_string());
+    }
+    let (a, b) = (env_map(&old.env), env_map(&new.env));
+    let mut keys = a
+        .keys()
+        .chain(b.keys())
+        .filter(|k| a.get(*k) != b.get(*k))
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    changes.extend(keys);
+    changes
 }
 
 ///////////////////////////////////////////// Execution ////////////////////////////////////////////
@@ -1361,6 +1769,7 @@ struct Execution {
     pid: Mutex<libc::pid_t>,
     pid_set: Condvar,
     thread: Mutex<Option<JoinHandle<()>>>,
+    exit_status: Mutex<Option<libc::c_int>>,
 }
 
 impl Execution {
@@ -1373,12 +1782,14 @@ impl Execution {
         let pid = Mutex::new(-1);
         let pid_set = Condvar::new();
         let thread = Mutex::new(None);
+        let exit_status = Mutex::new(None);
         Self {
             service,
             context,
             pid,
             pid_set,
             thread,
+            exit_status,
         }
     }
 
@@ -1458,17 +1869,78 @@ impl Execution {
         let envp: *const *mut libc::c_char = envp.as_mut_ptr() as _;
         // spawn
         let mut pid: libc::pid_t = -1;
+        // SAFETY(rescrv): file_actions is initialized before use and destroyed on every path after
+        // initialization succeeds.  posix_spawn* return an errno value rather than setting errno.
         unsafe {
-            if libc::posix_spawnp(
-                &mut pid,
-                exe.as_ptr() as _,
-                std::ptr::null(),
-                std::ptr::null(),
-                argv,
-                envp,
-            ) != 0
-            {
-                return Err(std::io::Error::last_os_error().into());
+            let mut file_actions = MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+            let actions: *const libc::posix_spawn_file_actions_t =
+                if let Some(log) = self.context.log.as_ref() {
+                    let rc = libc::posix_spawn_file_actions_init(file_actions.as_mut_ptr());
+                    if rc != 0 {
+                        return Err(std::io::Error::from_raw_os_error(rc).into());
+                    }
+                    let mut rc = libc::posix_spawn_file_actions_addopen(
+                        file_actions.as_mut_ptr(),
+                        libc::STDOUT_FILENO,
+                        log.as_ptr(),
+                        libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+                        0o644,
+                    );
+                    if rc == 0 {
+                        rc = libc::posix_spawn_file_actions_adddup2(
+                            file_actions.as_mut_ptr(),
+                            libc::STDOUT_FILENO,
+                            libc::STDERR_FILENO,
+                        );
+                    }
+                    if rc != 0 {
+                        libc::posix_spawn_file_actions_destroy(file_actions.as_mut_ptr());
+                        return Err(std::io::Error::from_raw_os_error(rc).into());
+                    }
+                    file_actions.as_ptr()
+                } else {
+                    std::ptr::null()
+                };
+            // rustrc blocks every signal so a dedicated thread can sigwait for them.  Children
+            // inherit the mask (and inherited SIG_IGN dispositions) across posix_spawn, which
+            // would leave SIGTERM undeliverable to services, so reset both.
+            let mut attr = MaybeUninit::<libc::posix_spawnattr_t>::uninit();
+            let mut rc = libc::posix_spawnattr_init(attr.as_mut_ptr());
+            if rc == 0 {
+                let mut empty = MaybeUninit::<libc::sigset_t>::uninit();
+                let mut all = MaybeUninit::<libc::sigset_t>::uninit();
+                libc::sigemptyset(empty.as_mut_ptr());
+                libc::sigfillset(all.as_mut_ptr());
+                // SIGKILL and SIGSTOP cannot have their disposition changed.
+                libc::sigdelset(all.as_mut_ptr(), libc::SIGKILL);
+                libc::sigdelset(all.as_mut_ptr(), libc::SIGSTOP);
+                rc = libc::posix_spawnattr_setsigmask(attr.as_mut_ptr(), empty.as_ptr());
+                if rc == 0 {
+                    rc = libc::posix_spawnattr_setsigdefault(attr.as_mut_ptr(), all.as_ptr());
+                }
+                if rc == 0 {
+                    rc = libc::posix_spawnattr_setflags(
+                        attr.as_mut_ptr(),
+                        (libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF) as _,
+                    );
+                }
+                if rc == 0 {
+                    rc = libc::posix_spawnp(
+                        &mut pid,
+                        exe.as_ptr() as _,
+                        actions,
+                        attr.as_ptr(),
+                        argv,
+                        envp,
+                    );
+                }
+                libc::posix_spawnattr_destroy(attr.as_mut_ptr());
+            }
+            if !actions.is_null() {
+                libc::posix_spawn_file_actions_destroy(file_actions.as_mut_ptr());
+            }
+            if rc != 0 {
+                return Err(std::io::Error::from_raw_os_error(rc).into());
             }
         }
         Ok(pid)

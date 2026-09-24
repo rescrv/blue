@@ -1,5 +1,5 @@
 //! ```
-//! USAGE: rcinvoke [OPTIONS] <service> [ARGS]
+//! USAGE: rcinvoke [OPTIONS] [--dry-run] <service> [ARGS]
 //! ```
 
 use arrrg::CommandLine;
@@ -16,6 +16,11 @@ struct Options {
         "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
     )]
     rc_d_path: String,
+    #[arrrg(
+        flag,
+        "Print the command rcinvoke would exec (as an env(1) invocation) instead of running it."
+    )]
+    dry_run: bool,
 }
 
 impl Default for Options {
@@ -23,6 +28,7 @@ impl Default for Options {
         Self {
             rc_conf_path: "rc.conf".to_string(),
             rc_d_path: "rc.d".to_string(),
+            dry_run: false,
         }
     }
 }
@@ -34,6 +40,20 @@ fn main() {
     if argv.is_empty() {
         eprintln!("expected service name to be provided");
         std::process::exit(129);
+    }
+    if options.dry_run {
+        let mut cmd = vec!["run"];
+        cmd.extend(argv[1..].iter());
+        match rc_conf::plan_invoke(&options.rc_conf_path, &options.rc_d_path, argv[0], &cmd) {
+            Ok(invocation) => {
+                println!("{}", invocation.to_shell());
+                return;
+            }
+            Err((code, msg)) => {
+                eprintln!("{msg}");
+                std::process::exit(code);
+            }
+        }
     }
     rc_conf::invoke(
         &options.rc_conf_path,
