@@ -20,9 +20,9 @@ use tuple_key2::TupleKey;
 
 use crate::prometheus::{PrometheusLine, SensorType};
 use crate::{
-    BiometricsStore, FetchCountersRequest, FetchCountersResponse, FetchedSeries, MetricType, Point,
-    SError as SarosError, SeriesChunk, Time, Window, arithmetic_error, coding_error,
-    internal_error, system_error, text_error, time_error,
+    BiometricsStore, ChunkEncoder, FetchCountersRequest, FetchCountersResponse, FetchedSeries,
+    MetricType, Point, SError as SarosError, SeriesChunk, Time, Window, arithmetic_error,
+    coding_error, internal_error, system_error, text_error, time_error,
 };
 
 /// Number of microseconds covered by one physical storage segment.
@@ -50,6 +50,19 @@ const FAMILY_TAG_INDEX: u8 = 1;
 const FAMILY_CHECKPOINT: u8 = 2;
 const TAG_FINGERPRINT_ITEM: u8 = 1;
 
+/// Bitmask of the [`MetricType`]s this build actually stores.
+///
+/// A checkpoint asserts idempotence for the types it covers, not for the whole file.
+/// When gauge support lands, add its bit here and every file checkpointed under a
+/// counters-only build becomes eligible for re-ingest instead of being permanently lost.
+pub const SUPPORTED_METRIC_TYPES: u64 = 1 << 0;
+
+/// The coverage attributed to a checkpoint written before `supported_types` existed.
+///
+/// Those builds stored counters and silently discarded everything else, so that is exactly what
+/// their checkpoints cover.
+const LEGACY_METRIC_TYPES: u64 = 1 << 0;
+
 /// Records that a Prometheus scrape file has been ingested.
 #[derive(Clone, Debug, Default, PartialEq, prototk_derive::Message)]
 pub struct FileCheckpoint {
@@ -59,6 +72,45 @@ pub struct FileCheckpoint {
     /// Wall-clock ingest time for the checkpoint row.
     #[prototk(2, message)]
     pub ingested_at: Time,
+    /// Bitmask of [`MetricType`]s that were storable when this checkpoint was written.
+    ///
+    /// Zero means the checkpoint predates this field; see [`LEGACY_METRIC_TYPES`].
+    #[prototk(3, uint64)]
+    pub supported_types: u64,
+}
+
+/// Tunables for [`SarosStore`].
+#[derive(Clone, Debug)]
+pub struct SarosStoreOptions {
+    /// Process-wide budget for encoded, unflushed chunk bytes across all series.
+    ///
+    /// The writer used to hold raw samples per series with no global bound, so resident
+    /// memory was a function of live series count times samples per chunk.  Crossing this
+    /// watermark flushes the largest pending chunks first, memtable-style.  Lowering it bounds
+    /// RSS harder at the cost of smaller chunks and more read amplification; that trade is the
+    /// reason this is a knob and not a constant.
+    pub max_pending_bytes: usize,
+    /// How many segments backwards a frontier or predecessor search may walk before giving up.
+    ///
+    /// The search walks one segment at a time and, unbounded, runs from now to the UNIX
+    /// epoch -- roughly 250,000 range scans -- for any series with no earlier data, which is
+    /// the common case under series churn.  The bound makes that cost proportional to the
+    /// lookback instead of to the age of the epoch.
+    ///
+    /// The trade is real and one-directional:  a series silent for longer than this is treated
+    /// as new, so a sample older than its true frontier will be accepted rather than rejected.
+    /// `saros.store.lookback_exhausted` counts every time that risk is taken.  A frontier key
+    /// family would remove the walk, and with it this trade.
+    pub max_lookback_segments: u64,
+}
+
+impl Default for SarosStoreOptions {
+    fn default() -> Self {
+        Self {
+            max_pending_bytes: 64 * 1024 * 1024,
+            max_lookback_segments: 168,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -68,14 +120,25 @@ struct Row {
     value: Vec<u8>,
 }
 
+/// In-memory writer state for one series.
+///
+/// This used to hold every pending sample as a raw `(Time, Point)` and re-encode the whole
+/// chunk on every push, purely to learn a byte count -- Θ(n²) encoder work per chunk and
+/// O(samples) resident memory per live series.  It now holds a live [`ChunkEncoder`] plus a
+/// one-sample `tail`.
+///
+/// The `tail` is what makes the duplicate-timestamp overwrite free.  A repeated timestamp
+/// always refers to the most recent sample, and the most recent sample has not been handed to
+/// the encoder yet, so the overwrite is a field assignment rather than a re-encode.  Nothing
+/// else needs the raw samples, so nothing else keeps them.
 #[derive(Clone, Debug)]
 struct SeriesState {
     metric_type: MetricType,
     fingerprint: [u8; 16],
     tags: Tags<'static>,
     metadata_emitted: bool,
-    pending: Vec<(Time, Point)>,
-    pending_over_target: bool,
+    encoder: ChunkEncoder,
+    tail: Option<(Time, Point)>,
     last_ts: Option<Time>,
 }
 
@@ -91,10 +154,33 @@ impl SeriesState {
             fingerprint,
             tags,
             metadata_emitted: false,
-            pending: Vec::new(),
-            pending_over_target: false,
+            encoder: ChunkEncoder::new(metric_type),
+            tail: None,
             last_ts,
         }
+    }
+
+    /// True when this series holds samples that have not been written to a chunk row.
+    fn has_pending(&self) -> bool {
+        self.tail.is_some() || !self.encoder.is_empty()
+    }
+
+    /// Encoded bytes currently held for this series, for the process-wide budget.
+    ///
+    /// Charges the upper bound:  a budget that under-counts does not bound anything.
+    fn pending_bytes(&self) -> usize {
+        self.encoder.encoded_len_upper_bound()
+    }
+
+    /// Whether the chunk under construction has reached its target size.
+    ///
+    /// Compares against the compressed streams alone, which is a lower bound on the encoded
+    /// chunk, since message framing and the header are strictly additive.  So a chunk flushed on
+    /// this condition is at least `CHUNK_TARGET_BYTES`, which is the invariant
+    /// `series_state_flushes_around_target_size_and_below_hard_max` checks.  Deciding on the
+    /// upper bound instead would flush marginally *under* target and break it.
+    fn pending_over_target(&self) -> bool {
+        self.encoder.stream_bytes() >= CHUNK_TARGET_BYTES
     }
 
     fn push(&mut self, time: Time, point: Point, rows: &mut Vec<Row>) -> Result<(), SError> {
@@ -106,37 +192,36 @@ impl SeriesState {
                     time.to_rfc3339()
                 )));
             }
-            if self.pending.is_empty() && time == last_ts {
+            if !self.has_pending() && time == last_ts {
                 return Err(time_error(
                     "duplicate timestamp arrived after its chunk was flushed",
                 ));
             }
         }
-        if self
-            .pending
-            .last()
-            .is_some_and(|(pending_time, _)| *pending_time == time)
-        {
-            let last = self.pending.last_mut().expect("checked pending last");
-            last.1 = point;
-            self.refresh_pending_size()?;
+        if self.tail.is_some_and(|(tail_time, _)| tail_time == time) {
+            self.tail = Some((time, point));
             self.last_ts = Some(time);
             return Ok(());
         }
-        if !self.pending.is_empty() {
-            let pending_segment = segment_start(self.pending[0].0);
-            let next_segment = segment_start(time);
-            if pending_segment != next_segment || self.pending_over_target {
-                self.flush_pending(rows)?;
-            }
+        // Order matters.  The previous tail can no longer be overwritten -- a repeated timestamp
+        // would have been caught above -- so fold it in *before* deciding whether to close the
+        // chunk.  Deciding first would leave it out of the size and segment tests and shift every
+        // chunk boundary by one sample relative to the pending-vector version.
+        if let Some((tail_time, tail_point)) = self.tail.take() {
+            self.encoder.push(tail_time, tail_point)?;
         }
-        self.pending.push((time, point));
+        if let Some(first) = self.encoder.first_sample_ts()
+            && (segment_start(first) != segment_start(time) || self.pending_over_target())
+        {
+            self.flush_pending(rows)?;
+        }
+        self.tail = Some((time, point));
         self.last_ts = Some(time);
-        self.refresh_pending_size()
+        self.check_pending_size()
     }
 
     fn flush_pending(&mut self, rows: &mut Vec<Row>) -> Result<(), SError> {
-        if self.pending.is_empty() {
+        if !self.has_pending() {
             return Ok(());
         }
         let timestamp = ingest_timestamp()?;
@@ -155,9 +240,16 @@ impl SeriesState {
             }
             self.metadata_emitted = true;
         }
-        let chunk = SeriesChunk::from_samples(self.metric_type, &self.pending)?;
+        if let Some((tail_time, tail_point)) = self.tail.take() {
+            self.encoder.push(tail_time, tail_point)?;
+        }
+        let encoder = std::mem::replace(&mut self.encoder, ChunkEncoder::new(self.metric_type));
+        let chunk = encoder.seal()?;
         let value = chunk.encode();
         if value.len() > CHUNK_MAX_BYTES {
+            // Unreachable while `check_pending_size` runs on every push, because
+            // `ChunkEncoder::encoded_len` is an upper bound on this length.  Kept as the
+            // authoritative check so the invariant does not depend on that reasoning.
             return Err(coding_error(format!(
                 "series chunk exceeded max bytes: {} > {}",
                 value.len(),
@@ -174,20 +266,16 @@ impl SeriesState {
             timestamp,
             value,
         });
-        self.pending.clear();
-        self.pending_over_target = false;
         Ok(())
     }
 
-    fn refresh_pending_size(&mut self) -> Result<(), SError> {
-        let chunk = SeriesChunk::from_samples(self.metric_type, &self.pending)?;
-        let size = chunk.encode().len();
+    fn check_pending_size(&self) -> Result<(), SError> {
+        let size = self.encoder.encoded_len_upper_bound();
         if size > CHUNK_MAX_BYTES {
             return Err(coding_error(format!(
                 "series chunk exceeded max bytes: {size} > {CHUNK_MAX_BYTES}"
             )));
         }
-        self.pending_over_target = size >= CHUNK_TARGET_BYTES;
         Ok(())
     }
 }
@@ -258,9 +346,11 @@ struct SeriesFrontier {
 pub struct SarosStore {
     root: PathBuf,
     tree: LsmTree,
+    options: SarosStoreOptions,
     rows: Vec<Row>,
     pending_checkpoints: BTreeSet<[u8; 32]>,
     series: BTreeMap<(MetricType, [u8; 16]), SeriesState>,
+    pending_bytes: usize,
     flush_counter: u64,
 }
 
@@ -271,17 +361,36 @@ impl SarosStore {
     ///
     /// Returns an error if the underlying LSM tree cannot be opened.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SError> {
+        Self::open_with_options(path, SarosStoreOptions::default())
+    }
+
+    /// Open an existing store or create a new one at `path` with explicit tunables.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying LSM tree cannot be opened.
+    pub fn open_with_options(
+        path: impl AsRef<Path>,
+        options: SarosStoreOptions,
+    ) -> Result<Self, SError> {
         let root = path.as_ref().to_path_buf();
-        let options = LsmtkOptions::default().with_path(root.to_string_lossy().to_string());
-        let tree = LsmTree::open(options)?;
+        let lsmtk_options = LsmtkOptions::default().with_path(root.to_string_lossy().to_string());
+        let tree = LsmTree::open(lsmtk_options)?;
         Ok(Self {
             root,
             tree,
+            options,
             rows: Vec::new(),
             pending_checkpoints: BTreeSet::new(),
             series: BTreeMap::new(),
+            pending_bytes: 0,
             flush_counter: 0,
         })
+    }
+
+    /// The tunables this store was opened with.
+    pub fn options(&self) -> &SarosStoreOptions {
+        &self.options
     }
 
     /// Ingest a Prometheus scrape file opened through [`biometrics_prometheus`].
@@ -347,7 +456,7 @@ impl SarosStore {
     ) -> Result<bool, SError> {
         let content_hash = content_hash(contents);
         if self.pending_checkpoints.contains(&content_hash)
-            || self.checkpoint_exists(content_hash)?
+            || self.checkpoint_covers_supported(content_hash)?
         {
             return Ok(false);
         }
@@ -371,14 +480,33 @@ impl SarosStore {
         for state in self.series.values_mut() {
             state.flush_pending(&mut self.rows)?;
         }
+        self.pending_bytes = 0;
         if self.rows.is_empty() {
             return Ok(());
         }
-        let mut rows = self.rows.clone();
+        // This used to clone every row before sorting, doubling peak RSS at exactly the
+        // moment it was already highest, and the clone was never read after the subsequent
+        // `clear()`.  Take instead.  A failed build puts the rows back, so a caller that retries
+        // `flush` does not silently lose the batch -- the old code's `clear()` ran only on
+        // success, and that behaviour is preserved deliberately rather than by accident.
+        let mut rows = std::mem::take(&mut self.rows);
         rows.sort_by(|lhs, rhs| {
             KeyRef::new(&lhs.key, lhs.timestamp).cmp(&KeyRef::new(&rhs.key, rhs.timestamp))
         });
         rows.dedup_by(|lhs, rhs| lhs.key == rhs.key && lhs.timestamp == rhs.timestamp);
+        match self.build_and_ingest(&rows) {
+            Ok(()) => {
+                self.pending_checkpoints.clear();
+                Ok(())
+            }
+            Err(err) => {
+                self.rows = rows;
+                Err(err)
+            }
+        }
+    }
+
+    fn build_and_ingest(&mut self, rows: &[Row]) -> Result<(), SError> {
         let path = self.next_flush_path();
         if path.exists() {
             std::fs::remove_file(&path).map_err(|err| system_error(err.to_string()))?;
@@ -390,8 +518,6 @@ impl SarosStore {
         builder.seal()?;
         self.tree.ingest(&path)?;
         std::fs::remove_file(&path).map_err(|err| system_error(err.to_string()))?;
-        self.rows.clear();
-        self.pending_checkpoints.clear();
         Ok(())
     }
 
@@ -416,9 +542,45 @@ impl SarosStore {
             if state.tags != batch_series.tags {
                 return Err(internal_error("series fingerprint collision"));
             }
+            let before = state.pending_bytes();
             for (time, point) in batch_series.samples {
                 state.push(time, point, &mut self.rows)?;
             }
+            let after = state.pending_bytes();
+            // Intermediate flushes inside `push` already emitted their rows, so the difference
+            // between the two snapshots is the net change to what is still resident.
+            self.pending_bytes = self.pending_bytes.saturating_add(after).saturating_sub(before);
+        }
+        self.enforce_pending_budget()
+    }
+
+    /// Flush the largest pending chunks until the process-wide budget is satisfied.
+    ///
+    /// The writer had no global bound at all, so resident memory was live-series count
+    /// times samples-per-chunk.  Largest-first is memtable discipline:  it buys the most
+    /// headroom per chunk written and leaves small, slow series accumulating toward their
+    /// target instead of being flushed into tiny chunks.
+    fn enforce_pending_budget(&mut self) -> Result<(), SError> {
+        if self.pending_bytes <= self.options.max_pending_bytes {
+            return Ok(());
+        }
+        let target = self.options.max_pending_bytes / 2;
+        let mut order: Vec<((MetricType, [u8; 16]), usize)> = self
+            .series
+            .iter()
+            .filter(|(_, state)| state.has_pending())
+            .map(|(key, state)| (*key, state.pending_bytes()))
+            .collect();
+        order.sort_by(|lhs, rhs| rhs.1.cmp(&lhs.1));
+        for (key, bytes) in order {
+            if self.pending_bytes <= target {
+                break;
+            }
+            if let Some(state) = self.series.get_mut(&key) {
+                state.flush_pending(&mut self.rows)?;
+                crate::PENDING_BUDGET_FLUSH.click();
+            }
+            self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
         }
         Ok(())
     }
@@ -448,6 +610,11 @@ impl SarosStore {
                     continue;
                 };
                 if sensor_type != SensorType::Counter {
+                    // These readings are parsed and then discarded.  The checkpoint
+                    // records that fact via `supported_types`, so the file becomes eligible for
+                    // re-ingest once the type is supported, and this counter makes the discard
+                    // visible in the meantime.
+                    crate::SKIPPED_UNSUPPORTED.click();
                     continue;
                 }
                 let tags = canonical_tags(&reading.metric_name, &reading.labels, source_id)?;
@@ -465,7 +632,7 @@ impl SarosStore {
                             if state.tags != tags {
                                 return Err(internal_error("series fingerprint collision"));
                             }
-                            (state.last_ts, !state.pending.is_empty())
+                            (state.last_ts, state.has_pending())
                         } else {
                             let frontier = self.load_series_frontier(metric_type, fingerprint)?;
                             if let Some(stored_tags) = frontier.tags
@@ -501,35 +668,58 @@ impl SarosStore {
         Ok(SeriesFrontier { tags, last_ts })
     }
 
+    /// The last stored sample timestamp for a series, or `None` within the configured lookback.
+    ///
+    /// This used to range over the whole chunk family for the metric type, `seek_to_last`
+    /// and then `prev()` until the fingerprint matched -- O(total chunks) per cold series, so
+    /// O(C·N) to warm N of them.  Chunk keys sort `(segment, fingerprint, last_ts)`, which means
+    /// a series' chunks are contiguous *within* a segment; `predecessor_chunk` already exploits
+    /// that and this now defers to it.
+    ///
+    /// The search starts one segment into the future so a chunk written with clock skew, or a
+    /// backfill dated slightly ahead, is still seen.  A chunk dated further ahead than that is
+    /// not, which is the same class of residual risk as the lookback bound:  both are removed by
+    /// a frontier key family, and neither is silent -- see `saros.store.lookback_exhausted`.
     fn latest_series_timestamp(
         &self,
         metric_type: MetricType,
         fingerprint: [u8; 16],
     ) -> Result<Option<Time>, SError> {
-        let start = series_chunk_metric_prefix(metric_type);
-        let end = series_chunk_metric_prefix_u8(metric_type.to_u8() + 1);
-        let start_bound = Bound::Included(start);
-        let end_bound = Bound::Excluded(end);
-        let mut cursor = self.tree.range_scan(&start_bound, &end_bound)?;
-        cursor.seek_to_last()?;
-        cursor.prev()?;
-        while let Some(kvr) = cursor.key_value() {
-            let (_, _, key_fingerprint, last_ts) = parse_series_chunk_key(kvr.key)?;
-            if key_fingerprint == fingerprint && kvr.value.is_some() {
-                return Ok(Some(last_ts));
-            }
-            cursor.prev()?;
-        }
-        Ok(None)
+        let now = Time::now().ok_or_else(|| time_error("could not get current time"))?;
+        let from = now + SEGMENT_DURATION;
+        Ok(self
+            .predecessor_chunk(metric_type, fingerprint, from)?
+            .map(|(_, last_ts, _)| last_ts))
     }
 
-    fn checkpoint_exists(&self, content_hash: [u8; 32]) -> Result<bool, SError> {
+    /// Whether a checkpoint already covers every metric type this build can store.
+    ///
+    /// The old predicate was "a checkpoint row exists", which made a file that was
+    /// ingested under a counters-only build permanently un-reingestable -- its gauges were
+    /// dropped and its content hash was checkpointed anyway.  Coverage is now recorded, so
+    /// adding a bit to [`SUPPORTED_METRIC_TYPES`] re-opens exactly the files that need it while
+    /// leaving content-hash idempotence intact per (hash, type set).
+    fn checkpoint_covers_supported(&self, content_hash: [u8; 32]) -> Result<bool, SError> {
         let mut is_tombstone = false;
-        Ok(self
+        let Some(value) = self
             .tree
             .load(&checkpoint_key(content_hash), &mut is_tombstone)?
-            .is_some()
-            && !is_tombstone)
+        else {
+            return Ok(false);
+        };
+        if is_tombstone {
+            return Ok(false);
+        }
+        let mut unpacker = Unpacker::new(&value);
+        let checkpoint: FileCheckpoint = unpacker
+            .unpack()
+            .map_err(|err: prototk::SError| coding_error(err.to_string()))?;
+        let covered = if checkpoint.supported_types == 0 {
+            LEGACY_METRIC_TYPES
+        } else {
+            checkpoint.supported_types
+        };
+        Ok(covered & SUPPORTED_METRIC_TYPES == SUPPORTED_METRIC_TYPES)
     }
 
     fn emit_checkpoint(&mut self, content_hash: [u8; 32], basename: &str) -> Result<(), SError> {
@@ -537,6 +727,7 @@ impl SarosStore {
         let checkpoint = FileCheckpoint {
             basename: basename.to_string(),
             ingested_at,
+            supported_types: SUPPORTED_METRIC_TYPES,
         };
         self.rows.push(Row {
             key: checkpoint_key(content_hash),
@@ -555,48 +746,99 @@ impl SarosStore {
             .join(format!("saros-flush-{pid}-{counter}.sst.tmp"))
     }
 
+    /// Fingerprints matching every tag, in ascending order.
+    ///
+    /// This used to materialize each posting list into a `Vec<[u8; 16]>` -- it had to,
+    /// because it sorted the lists by `Vec::len` to pick a join order -- and then build a
+    /// `BTreeSet` per additional matcher.  For `__name__=x` over 10⁶ series that is ~16 MB of
+    /// fingerprints plus ~10⁶ tree nodes allocated before a single sample is read, with no early
+    /// exit.
+    ///
+    /// The key layout `(1, metric_type, tag_key, tag_value, fingerprint)` already makes each
+    /// matcher a sorted run in the tree, so a leapfrog join works directly:  one cursor per
+    /// matcher, repeatedly seek every cursor to the current maximum fingerprint, emit on
+    /// unanimous agreement.  Resident state is O(matchers); cost is bounded by the smallest list
+    /// with skip-out on the rest.  The sort and dedup in `posting_list` are gone with it --
+    /// `range_scan` already yields merged keys in sorted order.
+    ///
+    /// Cursor order is still arbitrary, so the skip-out is not as sharp as it could be.  Ordering
+    /// by estimated cardinality without materializing is future work; until then an arbitrary
+    /// order is correct, just slower.
     fn matching_fingerprints(
         &self,
         metric_type: MetricType,
         tags: &Tags<'_>,
     ) -> Result<Vec<[u8; 16]>, SError> {
-        let mut sets = Vec::new();
-        for tag in tags.tags() {
-            sets.push(self.posting_list(metric_type, tag.key(), tag.value())?);
+        let matchers: Vec<(String, String)> = tags
+            .tags()
+            .map(|tag| (tag.key().to_string(), tag.value().to_string()))
+            .collect();
+        if matchers.is_empty() {
+            // This used to return an empty result, reporting "no data" for a query that
+            // actually asked for everything.  `Tags::parse` rejects the empty set, so this is
+            // reachable only through a direct construction, but defence in depth costs one line
+            // and at 10⁶ series a whole-store scan is not something to serve by accident.
+            return Err(text_error("query must constrain at least one tag"));
         }
-        if sets.is_empty() {
-            return Ok(Vec::new());
+        let mut cursors = Vec::with_capacity(matchers.len());
+        for (key, value) in matchers.iter() {
+            let start = tag_index_key(metric_type, key, value, [0u8; 16]);
+            let end = tag_index_key(metric_type, key, value, [0xffu8; 16]);
+            let start_bound = Bound::Included(start);
+            let end_bound = Bound::Included(end);
+            let mut cursor = self.tree.range_scan(&start_bound, &end_bound)?;
+            cursor.next()?;
+            cursors.push(cursor);
         }
-        sets.sort_by_key(Vec::len);
-        let mut intersection = sets.remove(0);
-        for set in sets {
-            let set: BTreeSet<_> = set.into_iter().collect();
-            intersection.retain(|fingerprint| set.contains(fingerprint));
+        let arity = cursors.len();
+        let mut matches = Vec::new();
+        let Some(mut candidate) = Self::cursor_fingerprint(&cursors[0])? else {
+            return Ok(matches);
+        };
+        // `agreed` counts how many cursors are known to sit on `candidate`, starting with the
+        // one it was read from.  `idx` is the cursor advanced most recently.
+        let mut agreed = 1usize;
+        let mut idx = 0usize;
+        loop {
+            if agreed == arity {
+                matches.push(candidate);
+                idx = (idx + 1) % arity;
+                cursors[idx].next()?;
+                let Some(next) = Self::cursor_fingerprint(&cursors[idx])? else {
+                    break;
+                };
+                candidate = next;
+                agreed = 1;
+                continue;
+            }
+            idx = (idx + 1) % arity;
+            let (key, value) = &matchers[idx];
+            let target = tag_index_key(metric_type, key, value, candidate);
+            cursors[idx].seek(&target)?;
+            let Some(found) = Self::cursor_fingerprint(&cursors[idx])? else {
+                break;
+            };
+            if found == candidate {
+                agreed += 1;
+            } else {
+                // `seek` lands at or after the target, so this strictly advances the candidate,
+                // which is what makes the loop terminate.
+                candidate = found;
+                agreed = 1;
+            }
         }
-        Ok(intersection)
+        // A key present at more than one timestamp can surface twice; the old `posting_list`
+        // deduped for the same reason.  `matches` is ascending, so this is linear.
+        matches.dedup();
+        Ok(matches)
     }
 
-    fn posting_list(
-        &self,
-        metric_type: MetricType,
-        tag_key: &str,
-        tag_value: &str,
-    ) -> Result<Vec<[u8; 16]>, SError> {
-        let start = tag_index_key(metric_type, tag_key, tag_value, [0u8; 16]);
-        let end = tag_index_key(metric_type, tag_key, tag_value, [0xffu8; 16]);
-        let start_bound = Bound::Included(start);
-        let end_bound = Bound::Included(end);
-        let mut cursor = self.tree.range_scan(&start_bound, &end_bound)?;
-        let mut fingerprints = Vec::new();
-        cursor.next()?;
-        while let Some(kvr) = cursor.key_value() {
-            let (_, _, _, fingerprint) = parse_tag_index_key(kvr.key)?;
-            fingerprints.push(fingerprint);
-            cursor.next()?;
-        }
-        fingerprints.sort();
-        fingerprints.dedup();
-        Ok(fingerprints)
+    fn cursor_fingerprint(cursor: &impl Cursor) -> Result<Option<[u8; 16]>, SError> {
+        let Some(kvr) = cursor.key_value() else {
+            return Ok(None);
+        };
+        let (_, _, _, fingerprint) = parse_tag_index_key(kvr.key)?;
+        Ok(Some(fingerprint))
     }
 
     fn load_tags(
@@ -621,6 +863,53 @@ impl SarosStore {
             .map(Tags::into_owned)
             .ok_or_else(|| coding_error("stored tags did not parse"))
             .map(Some)
+    }
+
+    /// Load canonical tags for an ascending set of fingerprints in one forward pass.
+    ///
+    /// `fetch_counters` did one `load_tags` point lookup per matched series.  The
+    /// fingerprints come out of the leapfrog join already ascending and the metadata family
+    /// sorts `(0, 1, metric_type, fingerprint)`, so a single cursor seeking forward through them
+    /// turns k random lookups into one near-sequential scan.
+    ///
+    /// The chunk family is the other half of the same problem and is *not* done here.  Inverting
+    /// `load_chunks` into a per-segment merge join is the larger win on paper, but its payoff
+    /// depends on the relative cost of `Cursor::seek` against opening a fresh `range_scan` in
+    /// lsmtk, which is a number to measure rather than assume.  Measure it before rewriting the
+    /// read path's inner loop.
+    fn load_tags_batch(
+        &self,
+        metric_type: MetricType,
+        fingerprints: &[[u8; 16]],
+    ) -> Result<BTreeMap<[u8; 16], Tags<'static>>, SError> {
+        let mut found = BTreeMap::new();
+        let Some(first) = fingerprints.first() else {
+            return Ok(found);
+        };
+        let last = fingerprints.last().expect("non-empty checked above");
+        let start_bound = Bound::Included(series_tags_key(metric_type, *first));
+        let end_bound = Bound::Included(series_tags_key(metric_type, *last));
+        let mut cursor = self.tree.range_scan(&start_bound, &end_bound)?;
+        for fingerprint in fingerprints.iter() {
+            cursor.seek(&series_tags_key(metric_type, *fingerprint))?;
+            let Some(kvr) = cursor.key_value() else {
+                break;
+            };
+            if kvr.key != series_tags_key(metric_type, *fingerprint).as_slice() {
+                continue;
+            }
+            let Some(value) = kvr.value else {
+                continue;
+            };
+            let tags = std::str::from_utf8(value)
+                .map_err(|_| coding_error("stored tags are not UTF-8"))?
+                .to_string();
+            let tags = Tags::new(tags)
+                .map(Tags::into_owned)
+                .ok_or_else(|| coding_error("stored tags did not parse"))?;
+            found.insert(*fingerprint, tags);
+        }
+        Ok(found)
     }
 
     fn load_chunks(
@@ -670,6 +959,17 @@ impl SarosStore {
         Ok(chunks.into_values().collect())
     }
 
+    /// The most recent chunk for a series at or before `time`, within the configured lookback.
+    ///
+    /// This walk is one range scan per segment and, unbounded, runs from `time` to the
+    /// UNIX epoch -- on the order of 250,000 scans in 2026 -- for any series with no earlier
+    /// data.  Under series churn that is the common case, not the rare one, which is why
+    /// `latest_series_timestamp` could not simply route the frontier probe through here until
+    /// this walk was bounded.
+    ///
+    /// `SarosStoreOptions::max_lookback_segments` bounds it.  Exhausting the bound is counted,
+    /// not swallowed:  on the query path it costs a rate extrapolation, and on the ingest path
+    /// it means monotonicity is no longer enforced against the true frontier for that series.
     fn predecessor_chunk(
         &self,
         metric_type: MetricType,
@@ -677,6 +977,7 @@ impl SarosStore {
         time: Time,
     ) -> Result<Option<(Time, Time, SeriesChunk)>, SError> {
         let mut segment = segment_start(time);
+        let mut walked = 0u64;
         loop {
             let start = series_chunk_key(metric_type, segment, fingerprint, segment);
             let end = if segment == segment_start(time) {
@@ -705,6 +1006,11 @@ impl SarosStore {
             if segment.0 <= 0 {
                 return Ok(None);
             }
+            walked += 1;
+            if walked >= self.options.max_lookback_segments {
+                crate::LOOKBACK_EXHAUSTED.click();
+                return Ok(None);
+            }
             segment = segment - SEGMENT_DURATION;
         }
     }
@@ -719,9 +1025,11 @@ impl BiometricsStore for SarosStore {
         let req_tags =
             Tags::new(req.tags).ok_or_else(|| text_error("counter request tags did not parse"))?;
         let window = req.params.window_including_lookback();
+        let fingerprints = self.matching_fingerprints(MetricType::Counter, &req_tags)?;
+        let tags_by_fingerprint = self.load_tags_batch(MetricType::Counter, &fingerprints)?;
         let mut serieses = Vec::new();
-        for fingerprint in self.matching_fingerprints(MetricType::Counter, &req_tags)? {
-            let Some(tags) = self.load_tags(MetricType::Counter, fingerprint)? else {
+        for fingerprint in fingerprints {
+            let Some(tags) = tags_by_fingerprint.get(&fingerprint) else {
                 continue;
             };
             let chunks = self.load_chunks(MetricType::Counter, fingerprint, window)?;
@@ -783,7 +1091,17 @@ pub fn canonical_tags(
                 .into_owned(),
         );
     }
-    Ok(Tags::from(tags))
+    // `Tags::from` was infallible and skipped validation, so a `:` in any key or value
+    // produced a `Tags` that would not parse -- and `series_fingerprint` calls `tags.tags()`,
+    // which unwraps that parse.  A Prometheus recording-rule name panicked the ingest process.
+    // `try_from` validates, converting the panic into the rejection path
+    // `ingest_prometheus_bytes` already documents.
+    //
+    // This is the safety fix and not the feature fix.  Rejecting every recording-rule metric is
+    // not acceptable behaviour; the repair is to stop using an unescaped delimiter-joined string
+    // as the canonical encoding.  `series_fingerprint` already builds a self-delimiting
+    // `tuple_key2` per tag, so the encoder exists.  That is a format change, not a localized fix.
+    Tags::try_from(tags).map_err(|_| text_error("canonical tags did not round-trip"))
 }
 
 /// Compute the folded setsum fingerprint for canonical tags.
@@ -809,18 +1127,10 @@ pub fn series_fingerprint(tags: &Tags<'_>) -> [u8; 16] {
     fingerprint
 }
 
-fn series_chunk_metric_prefix(metric_type: MetricType) -> Vec<u8> {
-    series_chunk_metric_prefix_u8(metric_type.to_u8())
-}
-
-fn series_chunk_metric_prefix_u8(metric_type: u8) -> Vec<u8> {
-    TupleKey::builder()
-        .u8(FAMILY_SERIES)
-        .u8(SERIES_CHUNK)
-        .u8(metric_type)
-        .build()
-        .into_bytes()
-}
+// NOTE:  `series_chunk_metric_prefix` and its `_u8` sibling existed only to bound the
+// whole-chunk-family backward scan in `latest_series_timestamp`.  Nothing scans the whole family
+// any more, so they are gone.  Reintroducing a key that spans every segment for a metric type
+// recreates the whole-family scan problem; do it deliberately if at all.
 
 /// Construct the key for an encoded series chunk.
 ///
@@ -989,8 +1299,19 @@ fn reading_sensor_type(
     )))
 }
 
+/// Whether an input label key is reserved.
+///
+/// This used to guard `__saros_*__` only, so `__name__` was accepted from callers.
+/// `canonical_tags` pushes its own `__name__` and then appends caller labels unfiltered, and
+/// `series_fingerprint` inserts tags into a setsum, which is order-independent -- so
+/// `http_x{__name__="http_y"}` and `http_y{__name__="http_x"}` canonicalize to the same multiset
+/// and the same fingerprint.  The collision guard compares tag strings, which are equal too, so
+/// it cannot fire.
+///
+/// The rule is now the one Prometheus itself uses:  the `__` prefix is reserved.  That covers
+/// `__name__`, `__saros_source__`, and whatever Prometheus reserves next.
 fn is_reserved_saros_tag(key: &str) -> bool {
-    key.starts_with("__saros_") && key.ends_with("__")
+    key.starts_with("__")
 }
 
 fn _decode_checkpoint(value: &[u8]) -> Result<FileCheckpoint, SError> {
@@ -1129,6 +1450,7 @@ mod tests {
             FileCheckpoint {
                 basename: "first.prom".to_string(),
                 ingested_at: checkpoint.ingested_at,
+                supported_types: SUPPORTED_METRIC_TYPES,
             },
             checkpoint
         );

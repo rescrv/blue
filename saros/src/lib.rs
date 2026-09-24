@@ -32,16 +32,45 @@ static DROPPED_METRICS_MONITOR: Stationary =
 static TIME_TRAVEL: Counter = Counter::new("saros.time_travel");
 static TIME_TRAVEL_MONITOR: Stationary = Stationary::new("saros.time_travel", &TIME_TRAVEL);
 
+/// Readings parsed from a scrape file and then not stored because their metric type is not yet
+/// supported.  This is the class of bug that is invisible without a counter, in a
+/// metrics database.
+pub(crate) static SKIPPED_UNSUPPORTED: Counter = Counter::new("saros.ingest.skipped_unsupported");
+static SKIPPED_UNSUPPORTED_MONITOR: Stationary =
+    Stationary::new("saros.ingest.skipped_unsupported", &SKIPPED_UNSUPPORTED);
+
+/// A backward walk for a series frontier or predecessor chunk hit
+/// `SarosStoreOptions::max_lookback_segments` without finding a chunk.  When this fires during
+/// ingest, per-series timestamp monotonicity is no longer being enforced against the true
+/// frontier for that series.
+pub(crate) static LOOKBACK_EXHAUSTED: Counter = Counter::new("saros.store.lookback_exhausted");
+static LOOKBACK_EXHAUSTED_MONITOR: Stationary =
+    Stationary::new("saros.store.lookback_exhausted", &LOOKBACK_EXHAUSTED);
+
+/// Series whose pending chunk was flushed early because the process-wide pending budget was
+/// exceeded rather than because the chunk reached its target size.  A nonzero rate here
+/// means read amplification is being traded for a bounded resident set.
+pub(crate) static PENDING_BUDGET_FLUSH: Counter =
+    Counter::new("saros.store.pending_budget_flush");
+static PENDING_BUDGET_FLUSH_MONITOR: Stationary =
+    Stationary::new("saros.store.pending_budget_flush", &PENDING_BUDGET_FLUSH);
+
 /// Register this crate's biometrics.
 pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&DROPPED_METRICS);
     collector.register_counter(&TIME_TRAVEL);
+    collector.register_counter(&SKIPPED_UNSUPPORTED);
+    collector.register_counter(&LOOKBACK_EXHAUSTED);
+    collector.register_counter(&PENDING_BUDGET_FLUSH);
 }
 
 /// Register this crate's monitors.
 pub fn register_monitors(hey_listen: &mut HeyListen) {
     hey_listen.register_stationary(&DROPPED_METRICS_MONITOR);
     hey_listen.register_stationary(&TIME_TRAVEL_MONITOR);
+    hey_listen.register_stationary(&SKIPPED_UNSUPPORTED_MONITOR);
+    hey_listen.register_stationary(&LOOKBACK_EXHAUSTED_MONITOR);
+    hey_listen.register_stationary(&PENDING_BUDGET_FLUSH_MONITOR);
 }
 
 /////////////////////////////////////////////// Errors /////////////////////////////////////////////
@@ -767,6 +796,172 @@ pub struct SeriesChunk {
     pub value_stream: Vec<u8>,
 }
 
+/////////////////////////////////////////// ChunkEncoder ///////////////////////////////////////////
+
+/// An upper bound on the packed size of every [`SeriesChunk`] field except the two byte streams.
+///
+/// Fields 1-6 pack to at most 54 bytes (two varint `uint32`, two nested `Time` messages, one
+/// varint `uint64`, one `fixed64`).  The slack is deliberate: this constant only ever makes
+/// [`ChunkEncoder::encoded_len`] over-estimate, which makes the writer flush marginally early.
+const CHUNK_HEADER_MAX_BYTES: usize = 64;
+
+/// An upper bound on the packed size of a `bytes` field carrying `len` bytes: one tag byte plus
+/// a length varint plus the payload.
+const fn bytes_field_upper_bound(len: usize) -> usize {
+    1 + 5 + len
+}
+
+/// Incremental encoder for one [`SeriesChunk`].
+///
+/// This is the *only* implementation of the chunk encoding; [`SeriesChunk::from_samples`] is a
+/// loop over [`ChunkEncoder::push`].  Keeping one implementation is the point: a writer that
+/// holds a live encoder and a batch encoder that re-encodes from a slice cannot drift apart if
+/// there is nothing to drift from.
+#[derive(Clone, Debug)]
+pub struct ChunkEncoder {
+    metric_type: MetricType,
+    state: Option<ChunkEncoderState>,
+}
+
+#[derive(Clone, Debug)]
+struct ChunkEncoderState {
+    first_sample_ts: Time,
+    first_value_bits: u64,
+    prev_prev_ts: Option<Time>,
+    prev_ts: Time,
+    sample_count: u64,
+    timestamps: delta_array::DeltaEncoder,
+    values: coding::GorillaEncoder,
+}
+
+impl ChunkEncoder {
+    /// A new, empty encoder for `metric_type`.
+    pub fn new(metric_type: MetricType) -> Self {
+        Self {
+            metric_type,
+            state: None,
+        }
+    }
+
+    /// True when no sample has been pushed.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_none()
+    }
+
+    /// The number of samples pushed so far.
+    pub fn sample_count(&self) -> u64 {
+        self.state.as_ref().map_or(0, |state| state.sample_count)
+    }
+
+    /// The timestamp of the first sample pushed, if any.
+    pub fn first_sample_ts(&self) -> Option<Time> {
+        self.state.as_ref().map(|state| state.first_sample_ts)
+    }
+
+    /// The timestamp of the most recent sample pushed, if any.
+    pub fn last_sample_ts(&self) -> Option<Time> {
+        self.state.as_ref().map(|state| state.prev_ts)
+    }
+
+    /// An upper bound on `self.clone().seal()?.encode().len()`, computed in constant time.
+    ///
+    /// Use this where over-estimating is the safe direction:  rejecting a chunk that would
+    /// exceed a hard maximum, or charging a memory budget.  Any check that must be exact --
+    /// notably the `CHUNK_MAX_BYTES` rejection at flush -- still runs against the sealed chunk.
+    pub fn encoded_len_upper_bound(&self) -> usize {
+        let Some(state) = self.state.as_ref() else {
+            return 0;
+        };
+        CHUNK_HEADER_MAX_BYTES
+            + bytes_field_upper_bound(state.timestamps.as_ref().len())
+            + bytes_field_upper_bound(state.values.bytes())
+    }
+
+    /// The two compressed streams, without message framing:  a lower bound on the encoded size.
+    ///
+    /// Use this where *under*-estimating is the safe direction, which is the "have we reached
+    /// the target chunk size?" decision.  A writer that flushes when this reaches its target
+    /// produces chunks that are at least that large, with no slack constant to get wrong, since
+    /// the framing and header the bound omits are strictly additive.
+    pub fn stream_bytes(&self) -> usize {
+        let Some(state) = self.state.as_ref() else {
+            return 0;
+        };
+        state.timestamps.as_ref().len() + state.values.bytes()
+    }
+
+    /// Append one sample.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for unsorted timestamps, arithmetic overflow, or timestamp deltas that
+    /// cannot be represented by the stream.
+    pub fn push(&mut self, ts: Time, point: Point) -> Result<(), SError> {
+        let bits = point.0.to_bits();
+        let Some(state) = self.state.as_mut() else {
+            self.state = Some(ChunkEncoderState {
+                first_sample_ts: ts,
+                first_value_bits: bits,
+                prev_prev_ts: None,
+                prev_ts: ts,
+                sample_count: 1,
+                timestamps: delta_array::DeltaEncoder::default(),
+                values: coding::GorillaEncoder::new(bits),
+            });
+            return Ok(());
+        };
+        let delta =
+            ts.0.checked_sub(state.prev_ts.0)
+                .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
+        if delta < 0 {
+            return Err(time_error("samples are not sorted by timestamp"));
+        }
+        match state.prev_prev_ts {
+            None => state.timestamps.push(delta as u64)?,
+            Some(prev_prev_ts) => {
+                let prev_delta = state
+                    .prev_ts
+                    .0
+                    .checked_sub(prev_prev_ts.0)
+                    .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
+                let dd = delta
+                    .checked_sub(prev_delta)
+                    .ok_or_else(|| arithmetic_error("timestamp delta-delta underflow"))?;
+                state.timestamps.push(prototk::zigzag(dd))?;
+            }
+        }
+        state.values.push(bits);
+        state.prev_prev_ts = Some(state.prev_ts);
+        state.prev_ts = ts;
+        state.sample_count = state
+            .sample_count
+            .checked_add(1)
+            .ok_or_else(|| coding_error("sample count exceeds u64"))?;
+        Ok(())
+    }
+
+    /// Finish the chunk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no sample was ever pushed.
+    pub fn seal(self) -> Result<SeriesChunk, SError> {
+        let Some(state) = self.state else {
+            return Err(coding_error("cannot encode empty chunk"));
+        };
+        Ok(SeriesChunk {
+            version: SERIES_CHUNK_VERSION,
+            metric_type: self.metric_type.to_u32(),
+            first_sample_ts: state.first_sample_ts,
+            last_sample_ts: state.prev_ts,
+            sample_count: state.sample_count,
+            first_value_bits: state.first_value_bits,
+            timestamp_stream: state.timestamps.as_ref().to_vec(),
+            value_stream: state.values.seal(),
+        })
+    }
+}
+
 impl SeriesChunk {
     /// Encode sorted samples into one chunk.
     ///
@@ -778,52 +973,11 @@ impl SeriesChunk {
         metric_type: MetricType,
         samples: &[(Time, Point)],
     ) -> Result<Self, SError> {
-        if samples.is_empty() {
-            return Err(coding_error("cannot encode empty chunk"));
+        let mut encoder = ChunkEncoder::new(metric_type);
+        for (ts, point) in samples.iter().copied() {
+            encoder.push(ts, point)?;
         }
-        let first_sample_ts = samples[0].0;
-        let last_sample_ts = samples[samples.len() - 1].0;
-        let sample_count =
-            u64::try_from(samples.len()).map_err(|_| coding_error("sample count exceeds u64"))?;
-        let first_value_bits = samples[0].1.0.to_bits();
-        let mut timestamp_encoder = delta_array::DeltaEncoder::default();
-        let mut value_encoder = coding::GorillaEncoder::new(first_value_bits);
-        let mut prev_prev_ts: Option<Time> = None;
-        let mut prev_ts = first_sample_ts;
-        for (idx, (ts, point)) in samples.iter().copied().enumerate().skip(1) {
-            let delta =
-                ts.0.checked_sub(prev_ts.0)
-                    .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
-            if delta < 0 {
-                return Err(time_error("samples are not sorted by timestamp"));
-            }
-            if idx == 1 {
-                timestamp_encoder.push(delta as u64)?;
-            } else {
-                let prev_prev_ts = prev_prev_ts.expect("idx >= 2 has prev_prev_ts");
-                let prev_delta = prev_ts
-                    .0
-                    .checked_sub(prev_prev_ts.0)
-                    .ok_or_else(|| arithmetic_error("timestamp delta underflow"))?;
-                let dd = delta
-                    .checked_sub(prev_delta)
-                    .ok_or_else(|| arithmetic_error("timestamp delta-delta underflow"))?;
-                timestamp_encoder.push(prototk::zigzag(dd))?;
-            }
-            value_encoder.push(point.0.to_bits());
-            prev_prev_ts = Some(prev_ts);
-            prev_ts = ts;
-        }
-        Ok(Self {
-            version: SERIES_CHUNK_VERSION,
-            metric_type: metric_type.to_u32(),
-            first_sample_ts,
-            last_sample_ts,
-            sample_count,
-            first_value_bits,
-            timestamp_stream: timestamp_encoder.as_ref().to_vec(),
-            value_stream: value_encoder.seal(),
-        })
+        encoder.seal()
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -1433,6 +1587,62 @@ mod tests {
             assert_eq!(exp_time, got_time);
             assert_eq!(exp_point.0.to_bits(), got_point.0.to_bits());
         }
+    }
+
+    // `encoded_len` replaces a full re-encode on every push, so it has to be (a) an upper
+    // bound on the real encoded size, never an under-estimate, and (b) computed from the same
+    // encoder that produces the bytes.
+    #[test]
+    fn chunk_encoder_len_bounds_the_encoding() {
+        for count in [1usize, 2, 3, 17, 256, 4096] {
+            let mut encoder = ChunkEncoder::new(MetricType::Counter);
+            let mut samples = vec![];
+            for idx in 0..count {
+                // Mix constant, linear, and irregular spacing so the delta-delta and Gorilla
+                // streams take all three of their branches.
+                let micros = 1_000_000 + (idx as i64) * 15_000_000 + ((idx as i64 % 7) * 137);
+                let ts = Time::from_micros(micros).unwrap();
+                let point = Point(if idx % 3 == 0 {
+                    1.0
+                } else {
+                    idx as f64 * 1.5
+                });
+                encoder.push(ts, point).unwrap();
+                samples.push((ts, point));
+            }
+            let upper = encoder.encoded_len_upper_bound();
+            let lower = encoder.stream_bytes();
+            assert_eq!(count as u64, encoder.sample_count());
+            let incremental = encoder.seal().unwrap().encode();
+            assert!(
+                incremental.len() <= upper,
+                "count={count} encoded={} upper={upper}",
+                incremental.len()
+            );
+            assert!(
+                incremental.len() >= lower,
+                "count={count} encoded={} lower={lower}",
+                incremental.len()
+            );
+            let batch = SeriesChunk::from_samples(MetricType::Counter, &samples)
+                .unwrap()
+                .encode();
+            assert_eq!(batch, incremental, "count={count}");
+        }
+    }
+
+    #[test]
+    fn chunk_encoder_rejects_empty_and_unsorted() {
+        assert!(ChunkEncoder::new(MetricType::Counter).seal().is_err());
+        let mut encoder = ChunkEncoder::new(MetricType::Counter);
+        encoder
+            .push(Time::from_secs(10).unwrap(), Point(1.0))
+            .unwrap();
+        assert!(
+            encoder
+                .push(Time::from_secs(9).unwrap(), Point(1.0))
+                .is_err()
+        );
     }
 
     #[test]
