@@ -96,30 +96,10 @@ impl BiometricsSys {
     }
 
     fn getrusage(&mut self) -> libc::rusage {
-        let mut rusage = libc::rusage {
-            ru_utime: libc::timeval {
-                tv_sec: 0,
-                tv_usec: 0,
-            },
-            ru_stime: libc::timeval {
-                tv_sec: 0,
-                tv_usec: 0,
-            },
-            ru_maxrss: 0,
-            ru_ixrss: 0,
-            ru_idrss: 0,
-            ru_isrss: 0,
-            ru_minflt: 0,
-            ru_majflt: 0,
-            ru_nswap: 0,
-            ru_inblock: 0,
-            ru_oublock: 0,
-            ru_msgsnd: 0,
-            ru_msgrcv: 0,
-            ru_nsignals: 0,
-            ru_nvcsw: 0,
-            ru_nivcsw: 0,
-        };
+        // musl's `struct rusage` ends in a private `__reserved` field, so it
+        // cannot be constructed with struct literal syntax; an all-zero
+        // `rusage` is the well-formed starting point the syscall fills in.
+        let mut rusage: libc::rusage = unsafe { std::mem::zeroed() };
         if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut rusage) } < 0 {
             self.errors += 1;
         }
@@ -193,30 +173,22 @@ mod tests {
     fn emit_with_child_rusage_counters() {
         let mut sys = BiometricsSys::new();
         let mut emitter = RecordingEmitter::default();
-        let usage = libc::rusage {
-            ru_utime: libc::timeval {
-                tv_sec: 1,
-                tv_usec: 500_000,
-            },
-            ru_stime: libc::timeval {
-                tv_sec: 2,
-                tv_usec: 250_000,
-            },
-            ru_maxrss: 0,
-            ru_ixrss: 0,
-            ru_idrss: 0,
-            ru_isrss: 0,
-            ru_minflt: 3,
-            ru_majflt: 5,
-            ru_nswap: 0,
-            ru_inblock: 7,
-            ru_oublock: 11,
-            ru_msgsnd: 0,
-            ru_msgrcv: 0,
-            ru_nsignals: 0,
-            ru_nvcsw: 13,
-            ru_nivcsw: 17,
+        // `__reserved` keeps musl from allowing struct literal syntax here too.
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        usage.ru_utime = libc::timeval {
+            tv_sec: 1,
+            tv_usec: 500_000,
         };
+        usage.ru_stime = libc::timeval {
+            tv_sec: 2,
+            tv_usec: 250_000,
+        };
+        usage.ru_minflt = 3;
+        usage.ru_majflt = 5;
+        usage.ru_inblock = 7;
+        usage.ru_oublock = 11;
+        usage.ru_nvcsw = 13;
+        usage.ru_nivcsw = 17;
         sys.emit_with_rusage(&mut emitter, 99, usage);
 
         assert_eq!(9, emitter.readings.len());
