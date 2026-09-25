@@ -66,6 +66,21 @@ name = "rcdebug"
 path = "src/bin/rcdebug.rs"
 required-features=["binaries"]
 
+[[bin]]
+name = "rcwhy"
+path = "src/bin/rcwhy.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rclint"
+path = "src/bin/rclint.rs"
+required-features=["binaries"]
+
+[[bin]]
+name = "rcdiff"
+path = "src/bin/rcdiff.rs"
+required-features=["binaries"]
+
 [[test]]
 name = "example1"
 path = "tests/example1.rs"
@@ -74,4 +89,9 @@ required-features=["binaries"]
 [[test]]
 name = "example2"
 path = "tests/example2.rs"
+required-features=["binaries"]
+
+[[test]]
+name = "tooling"
+path = "tests/tooling.rs"
 required-features=["binaries"]

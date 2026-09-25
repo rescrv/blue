@@ -12,6 +12,16 @@ use biometrics::Counter;
 use shvar::{PrefixingVariableProvider, VariableProvider};
 use utf8path::Path;
 
+mod effective;
+mod lint;
+mod why;
+
+pub use effective::{
+    Change, Effective, EffectiveError, Invocation, diff_effective, effective, plan_invoke,
+};
+pub use lint::{Finding, LintOptions, Severity, lint};
+pub use why::{Candidate, Layer, Origin, Provenance, SwitchWhy, Why};
+
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
 const RESTRICTED_VARIABLES: &[&str] = &["NAME"];
@@ -448,6 +458,8 @@ impl RcScript {
     /// Invoke the RcScript, providing args to the invocation.  If args is non-empty, it will be
     /// appened with an additional '--' to separate it from the args interpreted from the RcScript
     /// command field.
+    ///
+    /// `run` execs the command in place of the current process and returns only if exec fails.
     pub fn invoke(&self, args: &[impl AsRef<str>]) -> Result<(), Error> {
         if args.is_empty() {
             Err(Error::invalid_invocation("must provide arguments"))
@@ -502,20 +514,11 @@ impl RcScript {
         }
         cmd.extend(args.iter().map(|s| s.to_string()));
 
-        let status = Command::new(&cmd[0])
-            .args(&cmd[1..])
-            .status()
-            .map_err(|err| Error::exec_failed(&cmd[0], err))?;
-
-        if !status.success() {
-            return Err(Error::invalid_invocation(format!(
-                "command {} failed with exit code {:?}",
-                cmd[0],
-                status.code()
-            )));
-        }
-
-        Ok(())
+        // Replace this process rather than spawning a child.  A supervisor tracks and signals the
+        // pid it started; if rcscript stayed resident, signals would stop at rcscript and killing
+        // it would orphan the service.
+        let err = Command::new(&cmd[0]).args(&cmd[1..]).exec();
+        Err(Error::exec_failed(&cmd[0], err))
     }
 }
 
@@ -623,15 +626,10 @@ pub struct RcConf {
 impl RcConf {
     /// Parse `path` to get a new RcConf.
     pub fn parse(path: &str) -> Result<Self, Error> {
-        let mut seen = HashSet::default();
         let mut items = HashMap::default();
-        for piece in path.split(':') {
-            let piece = strip_self_dir_prefix(&Path::from(piece));
-            if !piece.exists()? {
-                continue;
-            }
-            Self::parse_recursive(&piece, &mut seen, &mut items)?;
-        }
+        walk_rc_conf_path(path, &mut |_, _, var, val| {
+            items.insert(var.to_string(), val);
+        })?;
         Self::validate_alias_control_variables(&Path::from(path), &items)?;
         let mut aliases = HashMap::default();
         let mut autogens = HashSet::default();
@@ -823,43 +821,6 @@ impl RcConf {
             values,
             filters,
         })
-    }
-
-    fn parse_recursive(
-        path: &Path,
-        seen: &mut HashSet<Path>,
-        items: &mut HashMap<String, String>,
-    ) -> Result<(), Error> {
-        if seen.contains(path) {
-            return Ok(());
-        }
-        seen.insert(path.clone().into_owned());
-        let contents = std::fs::read_to_string(path.as_str())?;
-        for (number, line, _) in linearize(path, &contents)? {
-            if line.trim().starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            if let Some(source) = line.trim().strip_prefix("source ") {
-                if is_safe_source_path(source) {
-                    let source = path.dirname().join(source);
-                    Self::parse_recursive(&source, seen, items)?;
-                } else {
-                    return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
-                }
-            } else if let Some((var, val)) = line.split_once('=') {
-                let split = shvar::split(val)?;
-                if split.is_empty() {
-                    items.insert(var.to_string(), String::new());
-                } else if split.len() == 1 {
-                    items.insert(var.to_string(), split[0].clone());
-                } else {
-                    return Err(Error::invalid_rc_conf(path, number, line));
-                }
-            } else {
-                return Err(Error::invalid_rc_conf(path, number, line));
-            }
-        }
-        Ok(())
     }
 
     fn validate_alias_control_variables(
@@ -1131,6 +1092,14 @@ impl RcConf {
         service: &str,
         path: &Path,
     ) -> Result<HashMap<String, String>, Error> {
+        let keys = self.stub_rcvars(service, path)?;
+        let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+        self.generate_rcvars(service, &keys)
+    }
+
+    /// Run the stub at `path` as `service` and return the fully-qualified rc variables it reads
+    /// (e.g. `memcached_two_PORT`), whether or not they are set.
+    pub fn stub_rcvars(&self, service: &str, path: &Path) -> Result<Vec<String>, Error> {
         let output = Command::new(path.clone().into_std())
             .arg("rcvar")
             .env_clear()
@@ -1141,13 +1110,18 @@ impl RcConf {
             )
             .output()?;
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
             return Err(Error::InvalidInvocation {
-                message: "rcvar command failed".to_string(),
+                message: if stderr.is_empty() {
+                    "rcvar command failed".to_string()
+                } else {
+                    format!("rcvar command failed: {stderr}")
+                },
             });
         }
         let keys = String::from_utf8(output.stdout)?;
-        let keys = keys.split_whitespace().collect::<Vec<_>>();
-        self.generate_rcvars(service, &keys)
+        Ok(keys.split_whitespace().map(String::from).collect())
     }
 
     /// Generate the set of rcvariables that are expected by the script at `path` when invoked as
@@ -1326,6 +1300,64 @@ impl shvar::VariableProvider for RcConf {
     }
 }
 
+///////////////////////////////////////////// walking //////////////////////////////////////////////
+
+/// Visit every assignment reachable from a colon-separated rc_conf path, in the order the parser
+/// applies them.  Later visits override earlier ones.  This is the single traversal shared by
+/// [RcConf::parse] and [Provenance::load], so the two cannot disagree about what was read.
+pub(crate) fn walk_rc_conf_path(
+    path: &str,
+    visit: &mut dyn FnMut(&Path, u32, &str, String),
+) -> Result<(), Error> {
+    let mut seen = HashSet::default();
+    for piece in path.split(':') {
+        let piece = strip_self_dir_prefix(&Path::from(piece));
+        if !piece.exists()? {
+            continue;
+        }
+        walk_rc_conf_file(&piece, &mut seen, visit)?;
+    }
+    Ok(())
+}
+
+fn walk_rc_conf_file(
+    path: &Path,
+    seen: &mut HashSet<Path>,
+    visit: &mut dyn FnMut(&Path, u32, &str, String),
+) -> Result<(), Error> {
+    if seen.contains(path) {
+        return Ok(());
+    }
+    seen.insert(path.clone().into_owned());
+    let contents = std::fs::read_to_string(path.as_str())?;
+    for (number, line, _) in linearize(path, &contents)? {
+        if line.trim().starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        if let Some(source) = line.trim().strip_prefix("source ") {
+            if is_safe_source_path(source) {
+                let source = path.dirname().join(source);
+                walk_rc_conf_file(&source, seen, visit)?;
+            } else {
+                return Err(Error::invalid_rc_conf(path, number, "unsafe source path"));
+            }
+        } else if let Some((var, val)) = line.split_once('=') {
+            let split = shvar::split(val)?;
+            if split.is_empty() {
+                visit(path, number, var, String::new());
+            } else if split.len() == 1 {
+                // SAFETY(rescrv): Length is one, so there is a first element.
+                visit(path, number, var, split.into_iter().next().unwrap());
+            } else {
+                return Err(Error::invalid_rc_conf(path, number, line));
+            }
+        } else {
+            return Err(Error::invalid_rc_conf(path, number, line));
+        }
+    }
+    Ok(())
+}
+
 /////////////////////////////////////////////// rc.d ///////////////////////////////////////////////
 
 /// Load the rc.d services from a given rc.d path.
@@ -1372,60 +1404,15 @@ pub fn exec_rc(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str])
 }
 
 fn exec_rc_with_override(rc_conf_path: &str, rc_d_path: &str, service: &str, cmd: &[&str]) -> ! {
-    let rc_conf = RcConf::parse(rc_conf_path).unwrap_or_else(|e| {
-        eprintln!("failed to parse rc_conf: {e}");
-        std::process::exit(133);
-    });
-    let rc_d = load_services(rc_d_path).unwrap_or_else(|e| {
-        eprintln!("failed to load services: {e}");
-        std::process::exit(134);
-    });
-    if !rc_conf.service_switch(service).can_be_started() {
-        eprintln!("service not enabled");
-        std::process::exit(132);
-    }
-    let mut env = HashMap::new();
-    let path = if let Some(alias) = rc_conf.aliases.get(&var_name_from_service(service)) {
-        let Some(path) = rc_d.get(rc_conf.resolve_alias(&alias.aliases)) else {
-            eprintln!("expected alias of service to be available via --rc-d-path");
-            std::process::exit(130);
-        };
-        env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
-        path
-    } else {
-        let Some(path) = rc_d.get(service) else {
-            eprintln!("expected service to be available via --rc-d-path");
-            std::process::exit(130);
-        };
-        env.insert("RCVAR_ARGV0".to_string(), var_name_from_service(service));
-        path
-    };
-    let path = match path {
-        Ok(path) => path,
-        Err(err) => {
-            eprintln!("service encountered an error: {err:?}");
-            std::process::exit(131);
-        }
-    };
-    let mut bound = rc_conf.bind_for_invoke(service, path).unwrap_or_else(|e| {
-        eprintln!("failed to bind variables for service: {e}");
-        std::process::exit(135);
-    });
-    bound.extend(env);
-    let argv = rc_conf.argv(service, "WRAPPER", &()).unwrap_or_else(|e| {
-        eprintln!("failed to generate argv: {e}");
-        std::process::exit(136);
-    });
-    let err = if !argv.is_empty() {
-        Command::new(&argv[0])
-            .args(&argv[1..])
-            .arg(path.as_str())
-            .args(cmd)
-            .envs(bound)
-            .exec()
-    } else {
-        Command::new(path.as_str()).args(cmd).envs(bound).exec()
-    };
+    let invocation =
+        plan_invoke(rc_conf_path, rc_d_path, service, cmd).unwrap_or_else(|(code, msg)| {
+            eprintln!("{msg}");
+            std::process::exit(code);
+        });
+    let err = Command::new(&invocation.program)
+        .args(&invocation.args)
+        .envs(&invocation.env)
+        .exec();
     eprintln!("command unexpectedly failed: {err}");
     std::process::exit(137);
 }
@@ -1666,7 +1653,8 @@ pub fn linearize(path: &Path, contents: &str) -> Result<Vec<(u32, String, Vec<St
             let line = std::mem::take(&mut acc);
             let raw = std::mem::take(&mut raw);
             lines.push((start, line, raw));
-            start = number as u32 + 1;
+            // The next logical line begins on the next physical line (1-based).
+            start = number as u32 + 2;
         } else {
             acc += line[..line.len() - 1].trim();
             raw.push(line.to_string());

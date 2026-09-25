@@ -89,6 +89,24 @@ Tools
   Usage:  `rcvar --rc-conf-path rc.conf:rc.conf.local --rc-d-path rc.d:/srv/rc.d memcached`
 - rcscript:  An interpreter for rc.d shell stubs.
   Usage:  as an interpreter
+- rcwhy:  Explain how a service resolves a variable:  every name consulted in lookup order (autogen
+  bindings, the service, each alias hop up to the first without `_INHERIT="YES"`, the global), the
+  file and line of each assignment and what it overrides, the winner, its expansion, and how each
+  variable it references resolves.  With no variables, explains `_ENABLED` and everything the stub
+  reads.
+  Usage:  `rcwhy --rc-conf-path rc.conf:rc.conf.local --rc-d-path rc.d memcached_two PORT`
+- rclint:  Lint an rc.conf against an rc.d.  Errors for invalid `_ENABLED` values (otherwise
+  silently treated as NO), enabled services without a stub, stubs whose `rcvar` fails, and values
+  that fail to expand; warnings for variables nothing reads and duplicate assignments within a file;
+  notes for stub variables with no value and stubs nothing enables.  `--allow IMAGE,CONTAINERFILE`
+  for variables other tools read; `--strict` fails on warnings.
+  Usage:  `rclint --rc-conf-path rc.conf --rc-d-path rc.d`
+- rcdiff:  Compare the effective configuration (switch, stub, bound environment, WRAPPER) of every
+  service between two rc_conf paths.  Exits like diff(1).  `--keys-only` hides values.
+  Usage:  `rcdiff --rc-d-path rc.d rc.conf rc.conf.new`
+
+`rcinvoke --dry-run` prints the exact exec as an `env K=V ... program args` command instead of
+running it.
 
 Warts
 -----
@@ -98,6 +116,13 @@ Warts
 
 Backwards-Incompatible Changes
 ------------------------------
+
+- `rcscript run` (and `RcScript::invoke(["run", ...])`) now execs the command in place of rcscript
+  instead of spawning it and waiting.  Supervisors signal the service itself, and killing it no
+  longer orphans the service.  The exit status is now the service's own rather than 130 on failure.
+
+- Line numbers in parse errors were one too low for every line after the first; they are now
+  correct.  Anything matching on the old numbers will need updating.
 
 - `RCCONF_OVERRIDE_SERVICE_SWITCH` was removed. Service enablement checks are now always
   enforced when invoking services via `rcinvoke`, `rcvar`, or `rccontainer`.
