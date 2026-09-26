@@ -9,7 +9,7 @@ use std::sync::{Arc, Condvar, Mutex, WaitTimeoutResult};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use indicio::{ERROR, INFO, clue, value};
+use indicio::{DEBUG, ERROR, INFO, clue, value};
 use one_two_eight::generate_id;
 use rc_conf::{RcConf, SwitchPosition, load_services};
 use utf8path::Path;
@@ -552,10 +552,6 @@ impl Pid1State {
         !self.processes.is_empty()
     }
 
-    fn has_process(&self, proc: &Arc<Execution>) -> bool {
-        self.processes.iter().any(|p| Arc::ptr_eq(p, proc))
-    }
-
     fn is_running(&self, service: &str) -> bool {
         self.processes.iter().any(|p| p.service == service)
     }
@@ -654,29 +650,17 @@ impl Pid1State {
     }
 
     fn wait(exec: Arc<Execution>, reclaim: SyncSender<Arc<Execution>>) {
-        let pid = exec.block_until_have_pid();
-        if pid > 0 {
-            let mut status = 0;
+        if let Some(pid) = exec.block_until_spawned() {
             WAITPID_ENTER.click();
-            unsafe {
-                if libc::waitpid(pid, &mut status, 0) < 0 {
-                    // TODO(rescrv): log that this failed.
-                    // TODO(rescrv): backoff and retry in a loop.
-                } else {
-                    *exec.exit_status.lock().unwrap() = Some(status);
-                }
-            }
-            clue!(COLLECTOR, INFO, {
-                waitpid: {
-                    pid: pid,
-                },
-                exec: indicio::Value::from(&exec.context),
-            });
+            exec.await_exit(pid);
+            exec.reap(pid);
             WAITPID_EXIT.click();
         } else {
             NON_POSITIVE_PID.click();
         }
-        reclaim.send(exec).unwrap();
+        // The reclaimer outlives every execution; shutdown drops the last sender only after the
+        // process table drains.
+        let _ = reclaim.send(exec);
     }
 }
 
@@ -787,6 +771,7 @@ impl Pid1 {
                 coord.converge.notify_all();
                 state.converge = state.converge.wrapping_add(1);
             }
+            exec.mark_done();
         }
     }
 
@@ -910,10 +895,6 @@ impl Pid1 {
             converge: true,
             services: indicio::Value::from(config.services()),
         });
-        fn has_process(state: &Mutex<Pid1State>, exec: &Arc<Execution>) -> bool {
-            let state = state.lock().unwrap();
-            state.has_process(exec)
-        }
         for exec in processes {
             let current_context = match ExecutionContext::new(&config, &exec.service, &[]) {
                 Ok(current_context) => current_context,
@@ -940,7 +921,7 @@ impl Pid1 {
                         pid: pid,
                     },
                 });
-                let _ = terminate(&exec, || has_process(state, &exec));
+                let _ = terminate(&exec);
                 // A restart we caused is not a crash; don't make the new execution wait out a
                 // backoff penalty for it.
                 state.lock().unwrap().clear_backoff(&exec.service);
@@ -1018,7 +999,7 @@ impl Pid1 {
         std::thread::scope(|scope| {
             for proc in processes.iter() {
                 scope.spawn(|| {
-                    let _ = terminate(proc, || self.has_process(proc));
+                    let _ = terminate(proc);
                 });
             }
         });
@@ -1250,27 +1231,14 @@ impl Pid1 {
         let mut matched = 0;
         let state = self.state.lock().unwrap();
         for process in state.processes.iter() {
-            if target.matches(process) {
+            if process.pid().is_some() && target.matches(process) {
                 matched += 1;
-                let pid: libc::pid_t = *process.pid.lock().unwrap();
-                if pid > 0 {
-                    unsafe {
-                        if libc::kill(pid, signal.into_i32()) < 0 {
-                            let local: Error = std::io::Error::last_os_error().into();
-                            clue!(COLLECTOR, ERROR, {
-                                error: indicio::Value::from(&local),
-                            });
-                            if err.is_ok() {
-                                err = Err(local);
-                            }
-                        } else {
-                            clue!(COLLECTOR, INFO, {
-                                kill: {
-                                    pid: pid,
-                                    signal: signal.to_string(),
-                                },
-                            });
-                        }
+                if let Err(local) = process.kill(signal) {
+                    clue!(COLLECTOR, ERROR, {
+                        error: indicio::Value::from(&local),
+                    });
+                    if err.is_ok() {
+                        err = Err(local);
                     }
                 }
             }
@@ -1374,7 +1342,7 @@ impl Pid1 {
             if proc.pid().is_none() {
                 continue;
             }
-            terminate(&proc, || self.has_process(&proc))?;
+            terminate(&proc)?;
         }
         Ok(())
     }
@@ -1390,10 +1358,6 @@ impl Pid1 {
 
     fn has_processes(&self) -> bool {
         self.state.lock().unwrap().has_processes()
-    }
-
-    fn has_process(&self, proc: &Arc<Execution>) -> bool {
-        self.state.lock().unwrap().has_process(proc)
     }
 }
 
@@ -1554,42 +1518,26 @@ impl From<&ExecutionContext> for indicio::Value {
 
 ///////////////////////////////////////////// terminate ////////////////////////////////////////////
 
-/// Stop `exec`, returning once `alive` reports it gone.
+/// Stop `exec`, returning once the reclaimer has retired it.
 ///
 /// With a STOP_TIMEOUT, send SIGTERM immediately and escalate to SIGKILL after the timeout.
 /// Without one, keep rustrc's legacy schedule:  SIGTERM after 2s, 6s, and 14s, then SIGKILL every
-/// second until it's gone.
-fn terminate(exec: &Execution, alive: impl Fn() -> bool) -> Result<(), Error> {
+/// second until it's gone.  Signals go to the service's whole process group.
+fn terminate(exec: &Execution) -> Result<(), Error> {
     if let Some(grace) = exec.context.stop_timeout {
-        exec.kill(minimal_signals::SIGTERM)?;
-        let deadline = Instant::now() + grace;
-        while alive() {
-            let now = Instant::now();
-            if now >= deadline {
-                break;
-            }
-            std::thread::sleep(std::cmp::min(Duration::from_millis(100), deadline - now));
-        }
+        exec.kill_group(minimal_signals::SIGTERM)?;
+        exec.wait_done(grace);
     } else {
         for iter in 1..=3 {
-            for _ in 0..(1 << iter) * 10 {
-                std::thread::sleep(Duration::from_millis(100));
-                if !alive() {
-                    break;
-                }
+            if exec.wait_done(Duration::from_millis((1 << iter) * 1000)) {
+                return Ok(());
             }
-            exec.kill(minimal_signals::SIGTERM)?;
+            exec.kill_group(minimal_signals::SIGTERM)?;
         }
     }
-    while alive() {
-        exec.kill(minimal_signals::SIGKILL)?;
-        // Poll rather than sleeping the full second; reclaim is usually immediate.
-        for _ in 0..10 {
-            std::thread::sleep(Duration::from_millis(100));
-            if !alive() {
-                break;
-            }
-        }
+    while !exec.wait_done(Duration::ZERO) {
+        exec.kill_group(minimal_signals::SIGKILL)?;
+        exec.wait_done(Duration::from_secs(1));
     }
     Ok(())
 }
@@ -1762,14 +1710,35 @@ fn context_changes(old: &ExecutionContext, new: &ExecutionContext) -> Vec<String
 
 ///////////////////////////////////////////// Execution ////////////////////////////////////////////
 
+/// Where an execution's process is in its lifecycle.
+///
+/// The pid is only meaningful while the process is `Running`:  the process either runs or is a
+/// zombie we have not reaped, so the kernel cannot hand its pid to anyone else.  The waiter moves
+/// the state to `Reaped` under the same mutex it reaps under, and every signal is sent under that
+/// mutex, so a signal can never land on a recycled pid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessState {
+    /// posix_spawn has not returned.
+    Pending,
+    /// posix_spawn failed; there is no process.
+    Failed,
+    /// The process exists and is ours to signal.  It leads a process group of the same id.
+    Running(libc::pid_t),
+    /// The process has been reaped.  The pid may already belong to an unrelated process.
+    Reaped(libc::pid_t),
+}
+
 #[derive(Debug)]
 struct Execution {
     service: String,
     context: ExecutionContext,
-    pid: Mutex<libc::pid_t>,
-    pid_set: Condvar,
+    process: Mutex<ProcessState>,
+    process_changed: Condvar,
     thread: Mutex<Option<JoinHandle<()>>>,
     exit_status: Mutex<Option<libc::c_int>>,
+    // Set once the reclaimer has removed this execution from the process table.
+    done: Mutex<bool>,
+    done_changed: Condvar,
 }
 
 impl Execution {
@@ -1779,63 +1748,93 @@ impl Execution {
         service: String,
         context: ExecutionContext,
     ) -> Self {
-        let pid = Mutex::new(-1);
-        let pid_set = Condvar::new();
-        let thread = Mutex::new(None);
-        let exit_status = Mutex::new(None);
         Self {
             service,
             context,
-            pid,
-            pid_set,
-            thread,
-            exit_status,
+            process: Mutex::new(ProcessState::Pending),
+            process_changed: Condvar::new(),
+            thread: Mutex::new(None),
+            exit_status: Mutex::new(None),
+            done: Mutex::new(false),
+            done_changed: Condvar::new(),
         }
     }
 
+    /// The pid, if the process exists and has not been reaped.
     fn pid(&self) -> Option<i32> {
-        let pid = self.pid.lock().unwrap();
-        if *pid > 0 { Some(*pid) } else { None }
+        match *self.process.lock().unwrap() {
+            ProcessState::Running(pid) => Some(pid),
+            _ => None,
+        }
     }
 
+    /// Signal the service's main process.  A no-op once the process has been reaped.
     fn kill(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
         EXECUTION_KILL.click();
-        clue!(COLLECTOR, INFO, {
-            kill: indicio::Value::from(&self.context),
+        let process = self.process.lock().unwrap();
+        let ProcessState::Running(pid) = *process else {
+            return Ok(());
+        };
+        clue!(COLLECTOR, DEBUG, {
+            kill: {
+                service: self.service.as_str(),
+                pid: pid,
+                signal: signal.to_string(),
+            },
         });
-        if let Some(pid) = self.pid() {
-            #[cfg(not(target_os = "macos"))]
-            fn errno() -> i32 {
-                unsafe { *libc::__errno_location() }
+        send_signal(pid, signal.into_i32())
+    }
+
+    /// Signal every process in the service's process group.  A no-op once the main process has
+    /// been reaped:  after that the group id may be recycled.
+    fn kill_group(&self, signal: minimal_signals::Signal) -> Result<(), Error> {
+        EXECUTION_KILL.click();
+        let process = self.process.lock().unwrap();
+        let ProcessState::Running(pid) = *process else {
+            return Ok(());
+        };
+        clue!(COLLECTOR, DEBUG, {
+            kill_group: {
+                service: self.service.as_str(),
+                pgid: pid,
+                signal: signal.to_string(),
+            },
+        });
+        // The service may have moved its main process out of the group it was born into; fall
+        // back to signaling the process itself when the group is gone or unsignalable.
+        match send_signal(-pid, signal.into_i32()) {
+            Err(Error::Io(err))
+                if matches!(err.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM)) =>
+            {
+                send_signal(pid, signal.into_i32())
             }
-            #[cfg(target_os = "macos")]
-            fn errno() -> i32 {
-                unsafe { *libc::__error() }
-            }
-            unsafe {
-                if libc::kill(pid, signal.into_i32()) < 0 && errno() != libc::ESRCH {
-                    return Err(std::io::Error::last_os_error().into());
-                }
-            }
+            result => result,
         }
-        Ok(())
     }
 
     fn exec(self: &Arc<Self>) -> Result<(), Error> {
         EXECUTION_EXEC.click();
-        clue!(COLLECTOR, INFO, {
-            exec: indicio::Value::from(&self.context),
-        });
         match self.exec_inner() {
             Ok(pid) => {
-                self.set_pid(pid);
+                clue!(COLLECTOR, INFO, {
+                    exec: {
+                        service: self.service.as_str(),
+                        pid: pid,
+                        context: indicio::Value::from(&self.context),
+                    },
+                });
+                self.set_process(ProcessState::Running(pid));
                 Ok(())
             }
             Err(err) => {
                 clue!(COLLECTOR, ERROR, {
-                    exec: indicio::Value::from(&self.context),
+                    exec: {
+                        service: self.service.as_str(),
+                        context: indicio::Value::from(&self.context),
+                    },
+                    error: indicio::Value::from(&err),
                 });
-                self.set_pid(0);
+                self.set_process(ProcessState::Failed);
                 Err(err)
             }
         }
@@ -1867,96 +1866,119 @@ impl Execution {
         }
         envp.push(std::ptr::null_mut());
         let envp: *const *mut libc::c_char = envp.as_mut_ptr() as _;
-        // spawn
+        let actions = FileActions::new(self.context.log.as_ref())?;
+        let attr = SpawnAttr::new()?;
         let mut pid: libc::pid_t = -1;
-        // SAFETY(rescrv): file_actions is initialized before use and destroyed on every path after
-        // initialization succeeds.  posix_spawn* return an errno value rather than setting errno.
-        unsafe {
-            let mut file_actions = MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
-            let actions: *const libc::posix_spawn_file_actions_t =
-                if let Some(log) = self.context.log.as_ref() {
-                    let rc = libc::posix_spawn_file_actions_init(file_actions.as_mut_ptr());
-                    if rc != 0 {
-                        return Err(std::io::Error::from_raw_os_error(rc).into());
-                    }
-                    let mut rc = libc::posix_spawn_file_actions_addopen(
-                        file_actions.as_mut_ptr(),
-                        libc::STDOUT_FILENO,
-                        log.as_ptr(),
-                        libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
-                        0o644,
-                    );
-                    if rc == 0 {
-                        rc = libc::posix_spawn_file_actions_adddup2(
-                            file_actions.as_mut_ptr(),
-                            libc::STDOUT_FILENO,
-                            libc::STDERR_FILENO,
-                        );
-                    }
-                    if rc != 0 {
-                        libc::posix_spawn_file_actions_destroy(file_actions.as_mut_ptr());
-                        return Err(std::io::Error::from_raw_os_error(rc).into());
-                    }
-                    file_actions.as_ptr()
-                } else {
-                    std::ptr::null()
-                };
-            // rustrc blocks every signal so a dedicated thread can sigwait for them.  Children
-            // inherit the mask (and inherited SIG_IGN dispositions) across posix_spawn, which
-            // would leave SIGTERM undeliverable to services, so reset both.
-            let mut attr = MaybeUninit::<libc::posix_spawnattr_t>::uninit();
-            let mut rc = libc::posix_spawnattr_init(attr.as_mut_ptr());
-            if rc == 0 {
-                let mut empty = MaybeUninit::<libc::sigset_t>::uninit();
-                let mut all = MaybeUninit::<libc::sigset_t>::uninit();
-                libc::sigemptyset(empty.as_mut_ptr());
-                libc::sigfillset(all.as_mut_ptr());
-                // SIGKILL and SIGSTOP cannot have their disposition changed.
-                libc::sigdelset(all.as_mut_ptr(), libc::SIGKILL);
-                libc::sigdelset(all.as_mut_ptr(), libc::SIGSTOP);
-                rc = libc::posix_spawnattr_setsigmask(attr.as_mut_ptr(), empty.as_ptr());
-                if rc == 0 {
-                    rc = libc::posix_spawnattr_setsigdefault(attr.as_mut_ptr(), all.as_ptr());
-                }
-                if rc == 0 {
-                    rc = libc::posix_spawnattr_setflags(
-                        attr.as_mut_ptr(),
-                        (libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF) as _,
-                    );
-                }
-                if rc == 0 {
-                    rc = libc::posix_spawnp(
-                        &mut pid,
-                        exe.as_ptr() as _,
-                        actions,
-                        attr.as_ptr(),
-                        argv,
-                        envp,
-                    );
-                }
-                libc::posix_spawnattr_destroy(attr.as_mut_ptr());
-            }
-            if !actions.is_null() {
-                libc::posix_spawn_file_actions_destroy(file_actions.as_mut_ptr());
-            }
-            if rc != 0 {
-                return Err(std::io::Error::from_raw_os_error(rc).into());
-            }
+        // SAFETY(rescrv): every pointer is valid for the duration of the call:  exe, argv, and
+        // envp borrow CStrings owned by self.context, and actions/attr are initialized guards.
+        // posix_spawn* return an errno value rather than setting errno.
+        let rc = unsafe {
+            libc::posix_spawnp(
+                &mut pid,
+                exe.as_ptr() as _,
+                actions.as_ptr(),
+                attr.as_ptr(),
+                argv,
+                envp,
+            )
+        };
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc).into());
         }
         Ok(pid)
     }
 
-    fn block_until_have_pid(&self) -> libc::pid_t {
-        let mut pid = self.pid.lock().unwrap();
-        while *pid < 0 {
-            pid = self.pid_set.wait(pid).unwrap();
+    /// Block until posix_spawn has returned.  None means there is no process to wait for.
+    fn block_until_spawned(&self) -> Option<libc::pid_t> {
+        let mut process = self.process.lock().unwrap();
+        loop {
+            match *process {
+                ProcessState::Pending => {
+                    process = self.process_changed.wait(process).unwrap();
+                }
+                ProcessState::Running(pid) => return Some(pid),
+                ProcessState::Failed | ProcessState::Reaped(_) => return None,
+            }
         }
-        *pid
     }
 
-    fn set_pid(&self, pid: libc::pid_t) {
-        *self.pid.lock().unwrap() = pid;
-        self.pid_set.notify_all();
+    /// Block until the process exits, without reaping it.
+    fn await_exit(&self, pid: libc::pid_t) {
+        loop {
+            let mut info = MaybeUninit::<libc::siginfo_t>::zeroed();
+            // SAFETY(rescrv): waitid writes only into info.  WNOWAIT leaves the zombie in place so
+            // the pid stays ours until reap() takes the process mutex.
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    info.as_mut_ptr(),
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            if rc == 0 {
+                return;
+            }
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            clue!(COLLECTOR, ERROR, {
+                waitid: {
+                    service: self.service.as_str(),
+                    pid: pid,
+                },
+                error: format!("{err:?}"),
+            });
+            return;
+        }
+    }
+
+    /// Reap the exited process and retire its pid.  Anything the service left in its process group
+    /// is killed first, while the group id is still guaranteed to be ours.
+    fn reap(&self, pid: libc::pid_t) {
+        let mut process = self.process.lock().unwrap();
+        // SAFETY(rescrv): kill observes only integer arguments.  The leader is a zombie we have
+        // not reaped, so the group id cannot have been recycled.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+        let mut status = 0;
+        let rc = loop {
+            // SAFETY(rescrv): waitpid observes only the supplied pid and status pointer.
+            let rc = unsafe { libc::waitpid(pid, &mut status, 0) };
+            if rc < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            break rc;
+        };
+        *process = ProcessState::Reaped(pid);
+        drop(process);
+        self.process_changed.notify_all();
+        if rc == pid {
+            *self.exit_status.lock().unwrap() = Some(status);
+            clue!(COLLECTOR, INFO, {
+                exited: {
+                    service: self.service.as_str(),
+                    pid: pid,
+                    status: describe_wait_status(status),
+                    uptime: format!("{:?}", self.context.started.elapsed()),
+                },
+            });
+        } else {
+            clue!(COLLECTOR, ERROR, {
+                waitpid: {
+                    service: self.service.as_str(),
+                    pid: pid,
+                },
+                error: format!("{:?}", std::io::Error::last_os_error()),
+            });
+        }
+    }
+
+    fn set_process(&self, state: ProcessState) {
+        *self.process.lock().unwrap() = state;
+        self.process_changed.notify_all();
     }
 
     fn set_thread(&self, join: JoinHandle<()>) {
@@ -1965,6 +1987,179 @@ impl Execution {
 
     fn take_thread(&self) -> Option<JoinHandle<()>> {
         std::mem::take(&mut *self.thread.lock().unwrap())
+    }
+
+    fn mark_done(&self) {
+        *self.done.lock().unwrap() = true;
+        self.done_changed.notify_all();
+    }
+
+    /// Wait up to `timeout` for the reclaimer to retire this execution.  True if it has.
+    fn wait_done(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut done = self.done.lock().unwrap();
+        while !*done {
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            done = self
+                .done_changed
+                .wait_timeout(done, deadline - now)
+                .unwrap()
+                .0;
+        }
+        true
+    }
+}
+
+/// Send `signal` to `pid` (a process group when negative), treating a vanished target as success.
+fn send_signal(pid: libc::pid_t, signal: libc::c_int) -> Result<(), Error> {
+    // SAFETY(rescrv): kill observes only integer arguments.
+    if unsafe { libc::kill(pid, signal) } < 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::ESRCH) || pid < 0 {
+            return Err(err.into());
+        }
+    }
+    Ok(())
+}
+
+fn spawn_check(rc: libc::c_int) -> Result<(), Error> {
+    if rc != 0 {
+        return Err(std::io::Error::from_raw_os_error(rc).into());
+    }
+    Ok(())
+}
+
+/// posix_spawn file actions for a service:  stdin from /dev/null, and stdout/stderr to LOG if set.
+struct FileActions(Box<MaybeUninit<libc::posix_spawn_file_actions_t>>);
+
+impl FileActions {
+    fn new(log: Option<&CString>) -> Result<Self, Error> {
+        let mut actions = Box::new(MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit());
+        // SAFETY(rescrv): init writes into the boxed, stable storage.
+        let rc = unsafe { libc::posix_spawn_file_actions_init(actions.as_mut_ptr()) };
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc).into());
+        }
+        let this = Self(actions);
+        // Services run in their own process group, so a service reading a terminal would be
+        // stopped by SIGTTIN.  Give them /dev/null instead of rustrc's stdin.
+        spawn_check(unsafe {
+            // SAFETY(rescrv): actions is initialized; the path is a static C string.
+            libc::posix_spawn_file_actions_addopen(
+                this.raw(),
+                libc::STDIN_FILENO,
+                c"/dev/null".as_ptr(),
+                libc::O_RDONLY,
+                0,
+            )
+        })?;
+        if let Some(log) = log {
+            spawn_check(unsafe {
+                // SAFETY(rescrv): actions is initialized; log outlives the posix_spawn call,
+                // which copies the path.
+                libc::posix_spawn_file_actions_addopen(
+                    this.raw(),
+                    libc::STDOUT_FILENO,
+                    log.as_ptr(),
+                    libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+                    0o644,
+                )
+            })?;
+            spawn_check(unsafe {
+                // SAFETY(rescrv): actions is initialized.
+                libc::posix_spawn_file_actions_adddup2(
+                    this.raw(),
+                    libc::STDOUT_FILENO,
+                    libc::STDERR_FILENO,
+                )
+            })?;
+        }
+        Ok(this)
+    }
+
+    fn raw(&self) -> *mut libc::posix_spawn_file_actions_t {
+        self.0.as_ptr() as *mut _
+    }
+
+    fn as_ptr(&self) -> *const libc::posix_spawn_file_actions_t {
+        self.0.as_ptr()
+    }
+}
+
+impl Drop for FileActions {
+    fn drop(&mut self) {
+        // SAFETY(rescrv): constructed only after a successful init.
+        unsafe {
+            libc::posix_spawn_file_actions_destroy(self.0.as_mut_ptr());
+        }
+    }
+}
+
+/// posix_spawn attributes for a service:  a fresh process group, an empty signal mask, and default
+/// dispositions.
+struct SpawnAttr(Box<MaybeUninit<libc::posix_spawnattr_t>>);
+
+impl SpawnAttr {
+    fn new() -> Result<Self, Error> {
+        let mut attr = Box::new(MaybeUninit::<libc::posix_spawnattr_t>::uninit());
+        // SAFETY(rescrv): init writes into the boxed, stable storage.
+        let rc = unsafe { libc::posix_spawnattr_init(attr.as_mut_ptr()) };
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc).into());
+        }
+        let mut this = Self(attr);
+        // rustrc blocks every signal so a dedicated thread can sigwait for them.  Children inherit
+        // the mask (and inherited SIG_IGN dispositions) across posix_spawn, which would leave
+        // SIGTERM undeliverable to services, so reset both.
+        let mut empty = MaybeUninit::<libc::sigset_t>::uninit();
+        let mut all = MaybeUninit::<libc::sigset_t>::uninit();
+        // SAFETY(rescrv): the sigset functions write into the provided storage; attr is
+        // initialized.
+        let rc = unsafe {
+            libc::sigemptyset(empty.as_mut_ptr());
+            libc::sigfillset(all.as_mut_ptr());
+            // SIGKILL and SIGSTOP cannot have their disposition changed.
+            libc::sigdelset(all.as_mut_ptr(), libc::SIGKILL);
+            libc::sigdelset(all.as_mut_ptr(), libc::SIGSTOP);
+            let mut rc = libc::posix_spawnattr_setsigmask(this.0.as_mut_ptr(), empty.as_ptr());
+            if rc == 0 {
+                rc = libc::posix_spawnattr_setsigdefault(this.0.as_mut_ptr(), all.as_ptr());
+            }
+            if rc == 0 {
+                // Each service leads its own process group so a stop reaches everything it
+                // started, and so terminal job control aimed at rustrc does not reach services.
+                rc = libc::posix_spawnattr_setpgroup(this.0.as_mut_ptr(), 0);
+            }
+            if rc == 0 {
+                rc = libc::posix_spawnattr_setflags(
+                    this.0.as_mut_ptr(),
+                    (libc::POSIX_SPAWN_SETSIGMASK
+                        | libc::POSIX_SPAWN_SETSIGDEF
+                        | libc::POSIX_SPAWN_SETPGROUP) as _,
+                );
+            }
+            rc
+        };
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc).into());
+        }
+        Ok(this)
+    }
+
+    fn as_ptr(&self) -> *const libc::posix_spawnattr_t {
+        self.0.as_ptr()
+    }
+}
+
+impl Drop for SpawnAttr {
+    fn drop(&mut self) {
+        // SAFETY(rescrv): constructed only after a successful init.
+        unsafe {
+            libc::posix_spawnattr_destroy(self.0.as_mut_ptr());
+        }
     }
 }
 
@@ -2036,6 +2231,199 @@ impl BackoffTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::path::PathBuf;
+
+    /// A throwaway rc.conf and rc.d.  Stubs are plain sh scripts, so tests need neither rcscript
+    /// nor any rustrc binary on PATH.
+    struct Fixture {
+        dir: PathBuf,
+    }
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir =
+                std::env::temp_dir().join(format!("rustrc-test-{name}-{}-{n}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("rc.d")).unwrap();
+            std::fs::write(dir.join("rc.conf"), "").unwrap();
+            Self { dir }
+        }
+
+        fn path(&self, name: &str) -> String {
+            self.dir.join(name).to_string_lossy().into_owned()
+        }
+
+        /// Write an rc.d stub.  `rcvar` and `run` are sh fragments for the two verbs rustrc uses;
+        /// `@` in either is replaced with the fixture directory.
+        fn stub(&self, name: &str, rcvar: &str, run: &str) {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = self.dir.to_string_lossy();
+            let body = format!(
+                "#!/bin/sh\ncase \"$1\" in\nrcvar)\n{}\n;;\nrun)\nshift\n{}\n;;\n*) exit 64 ;;\nesac\n",
+                rcvar.replace('@', &dir),
+                run.replace('@', &dir),
+            );
+            let path = self.dir.join("rc.d").join(name);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        fn rc_conf(&self, contents: &str) {
+            std::fs::write(self.dir.join("rc.conf"), contents).unwrap();
+        }
+
+        fn options(&self) -> Pid1Options {
+            Pid1Options {
+                rc_conf_path: self.path("rc.conf"),
+                rc_d_path: self.path("rc.d"),
+                ..Pid1Options::default()
+            }
+        }
+
+        /// Wait for a file the stub writes, returning its trimmed contents.
+        fn wait_for_file(&self, name: &str, timeout: Duration) -> String {
+            let deadline = Instant::now() + timeout;
+            loop {
+                if let Ok(contents) = std::fs::read_to_string(self.dir.join(name))
+                    && contents.ends_with('\n')
+                {
+                    return contents.trim().to_string();
+                }
+                assert!(Instant::now() < deadline, "{name} never appeared");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// True once `pid` no longer names a live process.  Zombies count as gone:  orphans are
+    /// reparented to whatever init the test runs under, which may be slow to reap them.
+    fn is_gone(pid: libc::pid_t) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .map(|(_, rest)| rest.trim_start().starts_with('Z'))
+                .unwrap_or(true),
+            // SAFETY(rescrv): kill with signal 0 only checks for existence.
+            Err(_) => (unsafe { libc::kill(pid, 0) }) != 0,
+        }
+    }
+
+    fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
+        let deadline = Instant::now() + timeout;
+        while !f() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn running_pid(pid1: &Pid1, service: &str) -> Option<libc::pid_t> {
+        pid1.status()
+            .into_iter()
+            .find(|s| s.service == service)
+            .and_then(|s| s.running.first().map(|(pid, _)| *pid))
+    }
+
+    #[test]
+    fn stop_signals_the_whole_process_group() {
+        minimal_signals::block();
+        let fx = Fixture::new("stop-group");
+        fx.stub(
+            "svc",
+            "",
+            "sleep 1000 &\necho $! > @/child.pid\nexec sleep 1000",
+        );
+        fx.rc_conf("svc_ENABLED=\"YES\"\nsvc_STOP_TIMEOUT=\"5\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        let child: libc::pid_t = fx
+            .wait_for_file("child.pid", Duration::from_secs(10))
+            .parse()
+            .unwrap();
+        wait_until("svc running", Duration::from_secs(5), || {
+            running_pid(&pid1, "svc").is_some()
+        });
+        pid1.stop("svc").unwrap();
+        wait_until("background child to die", Duration::from_secs(2), || {
+            is_gone(child)
+        });
+        pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn leader_exit_takes_the_group_with_it() {
+        minimal_signals::block();
+        let fx = Fixture::new("leader-exit");
+        fx.stub(
+            "svc",
+            "",
+            "sleep 1000 &\necho $! > @/child.pid\nsleep 0.2\nexit 0",
+        );
+        fx.rc_conf("svc_ENABLED=\"MANUAL\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        pid1.start("svc").unwrap();
+        let child: libc::pid_t = fx
+            .wait_for_file("child.pid", Duration::from_secs(10))
+            .parse()
+            .unwrap();
+        wait_until("straggler to die", Duration::from_secs(5), || {
+            is_gone(child)
+        });
+        pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn reaped_pids_are_not_signalable() {
+        minimal_signals::block();
+        let fx = Fixture::new("reaped");
+        fx.stub("svc", "", "sleep 0.3\nexit 0");
+        fx.rc_conf("svc_ENABLED=\"MANUAL\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        pid1.start("svc").unwrap();
+        let pid = running_pid(&pid1, "svc").expect("svc should be running");
+        wait_until("svc to exit", Duration::from_secs(5), || {
+            pid1.status()
+                .iter()
+                .any(|s| s.service == "svc" && s.last_exit.is_some())
+        });
+        assert_eq!(
+            0,
+            pid1.signal(Target::Pid(pid), minimal_signals::SIGTERM)
+                .unwrap()
+        );
+        assert_eq!(
+            0,
+            pid1.signal(Target::One("svc".to_string()), minimal_signals::SIGTERM)
+                .unwrap()
+        );
+        pid1.shutdown().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn services_read_dev_null() {
+        minimal_signals::block();
+        let fx = Fixture::new("stdin");
+        fx.stub(
+            "svc",
+            "",
+            "readlink /proc/self/fd/0 > @/stdin.tmp && mv @/stdin.tmp @/stdin\nexec sleep 1000",
+        );
+        fx.rc_conf("svc_ENABLED=\"YES\"\nsvc_STOP_TIMEOUT=\"5\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        assert_eq!(
+            "/dev/null",
+            fx.wait_for_file("stdin", Duration::from_secs(10))
+        );
+        pid1.shutdown().unwrap();
+    }
 
     #[test]
     fn smoke_test() {
