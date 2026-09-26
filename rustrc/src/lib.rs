@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::hash::{Hash, Hasher};
 use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, WaitTimeoutResult};
 use std::thread::JoinHandle;
@@ -75,6 +76,9 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&EXECUTION_EXEC);
     helper::register_biometrics(collector);
 }
+
+/// How long a stop waits after SIGTERM before SIGKILL when a service sets no STOP_TIMEOUT.
+pub const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 //////////////////////////////////////////// init support //////////////////////////////////////////
 
@@ -774,12 +778,14 @@ impl Pid1 {
                 JOINING_THREAD.click();
                 let _ = join.join();
             }
-            let backoff = {
+            // An exit rustrc asked for (stop, restart, reconfigure, shutdown) is not a crash and
+            // earns no penalty; anything else backs off.
+            let backoff = (!exec.stop_requested()).then(|| {
                 let mut backoff = coord.backoff.lock().unwrap();
                 backoff.track(exec.service.to_string(), exec.context.started.elapsed());
                 backoff.wipe_debts();
                 backoff.backoff(&exec.service)
-            };
+            });
             let service = exec.service.to_string();
             {
                 let mut state = state.lock().unwrap();
@@ -788,7 +794,10 @@ impl Pid1 {
                     state.history.entry(service.clone()).or_default().last_exit =
                         Some((status, Instant::now()));
                 }
-                state.set_backoff(service, Instant::now() + backoff);
+                match backoff {
+                    Some(backoff) => state.set_backoff(service, Instant::now() + backoff),
+                    None => state.clear_backoff(&service),
+                }
                 coord.converge.notify_all();
                 state.converge = state.converge.wrapping_add(1);
             }
@@ -919,35 +928,52 @@ impl Pid1 {
             services: indicio::Value::from(config.services()),
         });
         for exec in processes {
+            if exec.stop_requested() {
+                continue;
+            }
             let current_context = match ExecutionContext::new(&config, &exec.service, &[]) {
                 Ok(current_context) => current_context,
                 Err(err) => {
                     clue!(COLLECTOR, ERROR, {
+                        service: exec.service.as_str(),
                         error: indicio::Value::from(&err),
                     });
                     continue;
                 }
             };
-            if current_context != exec.context {
-                let Some(pid) = exec.pid() else {
-                    clue!(COLLECTOR, ERROR, {
-                        error: {
-                            human: format!("failed to converge {}; manually reload and restart", exec.service),
-                        }
-                    });
-                    continue;
-                };
-                clue!(COLLECTOR, INFO, {
-                    converge: {
-                        old: indicio::Value::from(&exec.context),
-                        new: indicio::Value::from(&current_context),
-                        pid: pid,
-                    },
+            if current_context == exec.context || exec.pid().is_none() {
+                continue;
+            }
+            if !exec.request_stop() {
+                continue;
+            }
+            clue!(COLLECTOR, INFO, {
+                reconfigure: {
+                    service: exec.service.as_str(),
+                    changed: indicio::Value::from(context_changes(&exec.context, &current_context)),
+                },
+            });
+            // Stopping can take the whole STOP_TIMEOUT.  Do it on its own thread so this pass keeps
+            // starting and respawning everything else; the reclaimer's notification brings the
+            // replacement up with the new context.
+            let stopping = Arc::clone(&exec);
+            let spawned = std::thread::Builder::new()
+                .name(format!("rustrc-restart-{}", exec.service))
+                .stack_size(65536)
+                .spawn(move || {
+                    if let Err(err) = terminate(&stopping) {
+                        clue!(COLLECTOR, ERROR, {
+                            service: stopping.service.as_str(),
+                            error: indicio::Value::from(&err),
+                        });
+                    }
+                });
+            if let Err(err) = spawned {
+                clue!(COLLECTOR, ERROR, {
+                    service: exec.service.as_str(),
+                    error: format!("could not start restart thread: {err:?}"),
                 });
                 let _ = terminate(&exec);
-                // A restart we caused is not a crash; don't make the new execution wait out a
-                // backoff penalty for it.
-                state.lock().unwrap().clear_backoff(&exec.service);
             }
         }
         // Decide what to start under the lock, compute contexts (which runs each stub's rcvar)
@@ -1432,8 +1458,8 @@ pub struct ExecutionContext {
     /// unset, the service inherits rustrc's stdout and stderr.
     pub log: Option<CString>,
     /// How long to wait after SIGTERM before SIGKILL, from the service's STOP_TIMEOUT variable
-    /// (seconds; fractions allowed).  When unset, rustrc uses its legacy escalation schedule.  Not
-    /// used for equality or hashing:  changing it applies to the next stop without a restart.
+    /// (seconds; fractions allowed).  When unset, rustrc waits [`DEFAULT_STOP_TIMEOUT`].  Not used
+    /// for equality or hashing:  changing it applies to the next stop without a restart.
     pub stop_timeout: Option<Duration>,
     /// The instant that it started (not used for equality or hashing).
     pub started: Instant,
@@ -1578,21 +1604,21 @@ impl From<&ExecutionContext> for indicio::Value {
 
 /// Stop `exec`, returning once the reclaimer has retired it.
 ///
-/// With a STOP_TIMEOUT, send SIGTERM immediately and escalate to SIGKILL after the timeout.
-/// Without one, keep rustrc's legacy schedule:  SIGTERM after 2s, 6s, and 14s, then SIGKILL every
-/// second until it's gone.  Signals go to the service's whole process group.
+/// SIGTERM goes to the service's process group immediately; SIGKILL follows after the service's
+/// STOP_TIMEOUT (default [`DEFAULT_STOP_TIMEOUT`]) and repeats every second until it is gone.
 fn terminate(exec: &Execution) -> Result<(), Error> {
-    if let Some(grace) = exec.context.stop_timeout {
-        exec.kill_group(minimal_signals::SIGTERM)?;
-        exec.wait_done(grace);
-    } else {
-        for iter in 1..=3 {
-            if exec.wait_done(Duration::from_millis((1 << iter) * 1000)) {
-                return Ok(());
-            }
-            exec.kill_group(minimal_signals::SIGTERM)?;
-        }
+    exec.request_stop();
+    let grace = exec.context.stop_timeout.unwrap_or(DEFAULT_STOP_TIMEOUT);
+    exec.kill_group(minimal_signals::SIGTERM)?;
+    if exec.wait_done(grace) {
+        return Ok(());
     }
+    clue!(COLLECTOR, INFO, {
+        stop_timeout: {
+            service: exec.service.as_str(),
+            after: format!("{grace:?}"),
+        },
+    });
     while !exec.wait_done(Duration::ZERO) {
         exec.kill_group(minimal_signals::SIGKILL)?;
         exec.wait_done(Duration::from_secs(1));
@@ -1794,6 +1820,8 @@ struct Execution {
     process_changed: Condvar,
     thread: Mutex<Option<JoinHandle<()>>>,
     exit_status: Mutex<Option<libc::c_int>>,
+    // Set once rustrc decides to stop this execution.  Its exit is then not a crash.
+    stop_requested: AtomicBool,
     // Set once the reclaimer has removed this execution from the process table.
     done: Mutex<bool>,
     done_changed: Condvar,
@@ -1813,6 +1841,7 @@ impl Execution {
             process_changed: Condvar::new(),
             thread: Mutex::new(None),
             exit_status: Mutex::new(None),
+            stop_requested: AtomicBool::new(false),
             done: Mutex::new(false),
             done_changed: Condvar::new(),
         }
@@ -2045,6 +2074,15 @@ impl Execution {
 
     fn take_thread(&self) -> Option<JoinHandle<()>> {
         std::mem::take(&mut *self.thread.lock().unwrap())
+    }
+
+    /// Mark this execution as being stopped on purpose.  True if it was not already.
+    fn request_stop(&self) -> bool {
+        !self.stop_requested.swap(true, Ordering::AcqRel)
+    }
+
+    fn stop_requested(&self) -> bool {
+        self.stop_requested.load(Ordering::Acquire)
     }
 
     fn mark_done(&self) {
@@ -2510,6 +2548,92 @@ mod tests {
         let start = Instant::now();
         pid1.shutdown().unwrap();
         assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn stop_sends_sigterm_immediately() {
+        minimal_signals::block();
+        let fx = Fixture::new("stop-prompt");
+        fx.stub("svc", "", "exec sleep 1000");
+        fx.rc_conf("svc_ENABLED=\"YES\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        wait_until("svc running", Duration::from_secs(5), || {
+            running_pid(&pid1, "svc").is_some()
+        });
+        let start = Instant::now();
+        pid1.stop("svc").unwrap();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "stop took {:?}",
+            start.elapsed()
+        );
+        pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn stop_escalates_to_sigkill_after_stop_timeout() {
+        minimal_signals::block();
+        let fx = Fixture::new("stop-escalate");
+        fx.stub(
+            "svc",
+            "",
+            "trap '' TERM\necho $$ > @/svc.pid\nwhile :; do sleep 0.05; done",
+        );
+        fx.rc_conf("svc_ENABLED=\"YES\"\nsvc_STOP_TIMEOUT=\"0.5\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        let pid: libc::pid_t = fx
+            .wait_for_file("svc.pid", Duration::from_secs(5))
+            .parse()
+            .unwrap();
+        let start = Instant::now();
+        pid1.stop("svc").unwrap();
+        let took = start.elapsed();
+        assert!(
+            took >= Duration::from_millis(450) && took < Duration::from_secs(2),
+            "stop took {took:?}"
+        );
+        assert!(is_gone(pid));
+        pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn a_slow_reconfigure_restart_does_not_block_other_starts() {
+        minimal_signals::block();
+        let fx = Fixture::new("async-restart");
+        // slow ignores SIGTERM, so its restart takes the full STOP_TIMEOUT.
+        fx.stub(
+            "slow",
+            "echo \"${RCVAR_ARGV0}_X\"",
+            "trap '' TERM\nwhile :; do sleep 0.05; done",
+        );
+        fx.stub("fast", "", "exec sleep 1000");
+        fx.rc_conf(
+            "slow_ENABLED=\"YES\"\nslow_X=\"1\"\nslow_STOP_TIMEOUT=\"3\"\nfast_ENABLED=\"NO\"\n",
+        );
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        wait_until("slow running", Duration::from_secs(5), || {
+            running_pid(&pid1, "slow").is_some()
+        });
+        let old = running_pid(&pid1, "slow").unwrap();
+        fx.rc_conf(
+            "slow_ENABLED=\"YES\"\nslow_X=\"2\"\nslow_STOP_TIMEOUT=\"3\"\nfast_ENABLED=\"YES\"\nfast_STOP_TIMEOUT=\"5\"\n",
+        );
+        let reloaded = Instant::now();
+        let plan = pid1.reload_with_plan().unwrap();
+        assert_eq!(
+            vec![("slow".to_string(), vec!["slow_X".to_string()])],
+            plan.restart
+        );
+        wait_until("fast to start", Duration::from_millis(1500), || {
+            running_pid(&pid1, "fast").is_some()
+        });
+        // slow comes back on the new context as soon as its stop completes, with no backoff.
+        wait_until("slow to restart", Duration::from_secs(6), || {
+            running_pid(&pid1, "slow").is_some_and(|pid| pid != old)
+        });
+        let took = reloaded.elapsed();
+        assert!(took < Duration::from_secs(5), "restart took {took:?}");
+        pid1.shutdown().unwrap();
     }
 
     #[cfg(target_os = "linux")]
