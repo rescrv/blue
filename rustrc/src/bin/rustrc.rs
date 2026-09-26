@@ -321,6 +321,7 @@ fn main() {
         rc_d_path: options.rc_d_path.clone(),
         reap_orphans: init_mode,
         child_subreaper: init_mode,
+        ..Pid1Options::default()
     };
     let mut pid1 = Arc::new(Pid1::new(pid1_options).expect("pid1::new should work"));
 

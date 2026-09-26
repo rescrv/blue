@@ -14,6 +14,8 @@ use one_two_eight::generate_id;
 use rc_conf::{RcConf, SwitchPosition, load_services};
 use utf8path::Path;
 
+mod helper;
+
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
 static IO_ERROR: biometrics::Counter = biometrics::Counter::new("rustrc.error.io");
@@ -71,6 +73,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&UNKNOWN_SERVICE);
     collector.register_counter(&EXECUTION_KILL);
     collector.register_counter(&EXECUTION_EXEC);
+    helper::register_biometrics(collector);
 }
 
 //////////////////////////////////////////// init support //////////////////////////////////////////
@@ -453,6 +456,11 @@ pub struct Pid1Options {
         "On Linux, ask the kernel to reparent orphaned descendants to this process."
     )]
     pub child_subreaper: bool,
+    #[arrrg(
+        optional,
+        "Milliseconds a stub gets to answer `rcvar` before its process group is killed."
+    )]
+    pub stub_timeout_ms: u64,
 }
 
 impl Default for Pid1Options {
@@ -462,6 +470,7 @@ impl Default for Pid1Options {
             rc_d_path: "rc.d".to_string(),
             reap_orphans: false,
             child_subreaper: false,
+            stub_timeout_ms: 10_000,
         }
     }
 }
@@ -473,6 +482,7 @@ impl From<&Pid1Options> for indicio::Value {
             rc_d_path: options.rc_d_path.as_str(),
             reap_orphans: options.reap_orphans,
             child_subreaper: options.child_subreaper,
+            stub_timeout_ms: options.stub_timeout_ms,
         })
     }
 }
@@ -484,6 +494,7 @@ impl From<&Pid1Options> for indicio::Value {
 pub struct Pid1Configuration {
     services: HashMap<String, Result<Path<'static>, String>>,
     rc_conf: RcConf,
+    stub_timeout: Duration,
 }
 
 impl Pid1Configuration {
@@ -491,7 +502,12 @@ impl Pid1Configuration {
     pub fn from_options(options: &Pid1Options) -> Result<Self, rc_conf::Error> {
         let services = load_services(&options.rc_d_path)?;
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
-        Ok(Self { services, rc_conf })
+        let stub_timeout = Duration::from_millis(options.stub_timeout_ms);
+        Ok(Self {
+            services,
+            rc_conf,
+            stub_timeout,
+        })
     }
 
     /// The services and aliases available from the combination of the rc_conf and rc.d.
@@ -601,21 +617,28 @@ impl Pid1State {
         self.backedoff.retain(|_, v| *v > now);
     }
 
+    /// Record a failed start so the next attempt waits out a backoff.
+    fn spawn_failed(&mut self, coord: &Pid1Coordination, service: &str) {
+        let mut backoff = coord.backoff.lock().unwrap();
+        backoff.track(service.to_string(), Duration::ZERO);
+        self.set_backoff(
+            service.to_string(),
+            Instant::now() + backoff.backoff(service),
+        );
+    }
+
+    /// Spawn `service` from a context computed without the state lock held (see
+    /// [`Pid1::context_for`]).  A failed context or spawn counts against the service's backoff.
     fn spawn(
         &mut self,
         coord: &Pid1Coordination,
         reclaim: SyncSender<Arc<Execution>>,
         service: &str,
-        argv: &[&str],
+        context: Result<ExecutionContext, Error>,
     ) -> Result<ExecutionID, Error> {
-        let result = self.spawn_inner(reclaim, service, argv);
+        let result = context.and_then(|context| self.spawn_inner(reclaim, service, context));
         if result.is_err() {
-            let mut backoff = coord.backoff.lock().unwrap();
-            backoff.track(service.to_string(), Duration::ZERO);
-            self.set_backoff(
-                service.to_string(),
-                Instant::now() + backoff.backoff(service),
-            );
+            self.spawn_failed(coord, service);
         }
         result
     }
@@ -624,22 +647,20 @@ impl Pid1State {
         &mut self,
         reclaim: SyncSender<Arc<Execution>>,
         service: &str,
-        argv: &[&str],
+        context: ExecutionContext,
     ) -> Result<ExecutionID, Error> {
         self.clear_backoff(service);
         let execution_id = ExecutionID::generate().ok_or(Error::GeneratingExecutionID)?;
         let config = Arc::clone(&self.config);
         let service = service.to_string();
-        let context = ExecutionContext::new(&config, &service, argv)?;
-        clue!(COLLECTOR, INFO, {
-            spawn: indicio::Value::from(&context),
-        });
         let execution = Arc::new(Execution::new(execution_id, config, service, context));
         let exec = Arc::clone(&execution);
         let thread = std::thread::Builder::new()
             .stack_size(65536)
             .spawn(move || Self::wait(exec, reclaim))?;
         execution.set_thread(thread);
+        // posix_spawn and the push happen under the state lock so the orphan reaper, which
+        // classifies pids under the same lock, never mistakes a fresh service for an orphan.
         execution.exec()?;
         self.history
             .entry(execution.service.clone())
@@ -802,7 +823,9 @@ impl Pid1 {
             let Some(pid) = peek_waitable_child()? else {
                 return Ok(());
             };
-            if Self::is_managed_pid(state, pid) {
+            // Services and stub helpers have owners that reap them; the zombie stays first in
+            // line until they do, so try again next pass.
+            if helper::is_helper(pid) || Self::is_managed_pid(state, pid) {
                 return Ok(());
             }
             let mut status = 0;
@@ -927,61 +950,75 @@ impl Pid1 {
                 state.lock().unwrap().clear_backoff(&exec.service);
             }
         }
+        // Decide what to start under the lock, compute contexts (which runs each stub's rcvar)
+        // without it, then revalidate under the lock before spawning.
         let now = Instant::now();
-        for service in config.services() {
-            let service = service.as_str();
-            let mut state = state.lock().unwrap();
-            if state.is_inhibited(service) {
-                clue!(COLLECTOR, INFO, {
-                    started: false,
-                    service: service,
-                    inhibited: true,
-                });
-            } else if state.service_switch(service) == SwitchPosition::Yes
-                && !state.is_running(service)
-            {
+        let candidates = {
+            let state = state.lock().unwrap();
+            let mut candidates = vec![];
+            for service in config.services() {
+                if state.is_inhibited(&service) {
+                    clue!(COLLECTOR, DEBUG, {
+                        started: false,
+                        service: service.as_str(),
+                        inhibited: true,
+                    });
+                    continue;
+                }
+                if state.service_switch(&service) != SwitchPosition::Yes
+                    || state.is_running(&service)
+                {
+                    continue;
+                }
                 RESPAWNING.click();
-                let mut check_backoff = |state: &mut Pid1State, err: Option<Error>| {
-                    if let Some(backoff_until) = state.get_backoff(service) {
-                        if backoff_until > now {
-                            if let Some(err) = err {
-                                clue!(COLLECTOR, ERROR, {
-                                    started: false,
-                                    service: service,
-                                    delayed: format!("{:?}", backoff_until - now),
-                                    error: indicio::Value::from(&err),
-                                });
-                            } else {
-                                clue!(COLLECTOR, INFO, {
-                                    started: false,
-                                    service: service,
-                                    delayed: format!("{:?}", backoff_until - now),
-                                });
-                            }
-                            *wait =
-                                std::cmp::min(*wait, backoff_until.saturating_duration_since(now));
-                            true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                };
-                if !check_backoff(&mut state, None) {
-                    let res = state.spawn(coord, reclaim.clone(), service, &[]);
-                    match res {
-                        Ok(_) => {
-                            clue!(COLLECTOR, INFO, {
-                                started: true,
-                                service: service,
-                            });
-                        }
-                        Err(err) => {
-                            converged = false;
-                            check_backoff(&mut state, Some(err));
-                        }
-                    };
+                if let Some(until) = state.get_backoff(&service).filter(|b| *b > now) {
+                    clue!(COLLECTOR, DEBUG, {
+                        started: false,
+                        service: service.as_str(),
+                        delayed: format!("{:?}", until - now),
+                    });
+                    *wait = std::cmp::min(*wait, until - now);
+                    continue;
+                }
+                candidates.push(service);
+            }
+            candidates
+        };
+        for service in candidates {
+            let context = ExecutionContext::new(&config, &service, &[]);
+            let mut state = state.lock().unwrap();
+            if !Arc::ptr_eq(&state.config, &config) {
+                // A reload landed while we computed contexts; its converge pass takes over.
+                return false;
+            }
+            let now = Instant::now();
+            if state.is_inhibited(&service)
+                || state.service_switch(&service) != SwitchPosition::Yes
+                || state.is_running(&service)
+                || state.get_backoff(&service).is_some_and(|b| b > now)
+            {
+                continue;
+            }
+            match state.spawn(coord, reclaim.clone(), &service, context) {
+                Ok(_) => {
+                    clue!(COLLECTOR, INFO, {
+                        started: true,
+                        service: service.as_str(),
+                    });
+                }
+                Err(err) => {
+                    converged = false;
+                    let delay = state
+                        .get_backoff(&service)
+                        .map(|b| b.saturating_duration_since(now))
+                        .unwrap_or_default();
+                    clue!(COLLECTOR, ERROR, {
+                        started: false,
+                        service: service.as_str(),
+                        delayed: format!("{delay:?}"),
+                        error: indicio::Value::from(&err),
+                    });
+                    *wait = std::cmp::min(*wait, delay);
                 }
             }
         }
@@ -1275,23 +1312,36 @@ impl Pid1 {
     /// Start the named service.
     pub fn start(&self, service: &str) -> Result<(), Error> {
         START.click();
+        {
+            let state = self.state.lock().unwrap();
+            if let Some(err) = Self::start_refusal(&state, service) {
+                return Err(err);
+            }
+        }
+        let context = self.context_for(service, &[]);
         let mut state = self.state.lock().unwrap();
         state.clear_inhibit(service);
-        match state.service_switch(service) {
-            SwitchPosition::Yes => {
-                if !state.is_running(service) {
-                    state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
-                    Ok(())
-                } else {
-                    Err(Error::ServiceAlreadyStarted)
-                }
-            }
-            SwitchPosition::Manual => {
-                state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
-                Ok(())
-            }
-            SwitchPosition::No => Err(Error::ServiceDisabled),
+        if let Some(err) = Self::start_refusal(&state, service) {
+            return Err(err);
         }
+        state.spawn(&self.coord, self.reclaim.clone(), service, context)?;
+        Ok(())
+    }
+
+    fn start_refusal(state: &Pid1State, service: &str) -> Option<Error> {
+        // Ignore a stop-inhibit:  starting is how one clears it.
+        match state.config.rc_conf.service_switch(service) {
+            SwitchPosition::Yes if state.is_running(service) => Some(Error::ServiceAlreadyStarted),
+            SwitchPosition::Yes | SwitchPosition::Manual => None,
+            SwitchPosition::No => Some(Error::ServiceDisabled),
+        }
+    }
+
+    /// Compute `service`'s execution context against the current configuration.  This runs the
+    /// stub's `rcvar`, so it must never be called with the state lock held.
+    fn context_for(&self, service: &str, argv: &[&str]) -> Result<ExecutionContext, Error> {
+        let config = Arc::clone(&self.state.lock().unwrap().config);
+        ExecutionContext::new(&config, service, argv)
     }
 
     /// Stop then start the named service.
@@ -1305,11 +1355,14 @@ impl Pid1 {
             return Err(Error::ServiceDisabled);
         }
         self.stop(service)?;
+        let context = (switch == SwitchPosition::Manual).then(|| self.context_for(service, &[]));
         let mut state = self.state.lock().unwrap();
         state.clear_inhibit(service);
         state.clear_backoff(service);
-        if state.service_switch(service) == SwitchPosition::Manual {
-            state.spawn(&self.coord, self.reclaim.clone(), service, &[])?;
+        if let Some(context) = context
+            && state.service_switch(service) == SwitchPosition::Manual
+        {
+            state.spawn(&self.coord, self.reclaim.clone(), service, context)?;
         }
         state.converge = state.converge.wrapping_add(1);
         self.coord.converge.notify_all();
@@ -1349,10 +1402,11 @@ impl Pid1 {
 
     #[cfg(test)]
     fn spawn(&self, service: &str, argv: &[&str]) -> Result<(), Error> {
+        let context = self.context_for(service, argv);
         self.state
             .lock()
             .unwrap()
-            .spawn(&self.coord, self.reclaim.clone(), service, argv)?;
+            .spawn(&self.coord, self.reclaim.clone(), service, context)?;
         Ok(())
     }
 
@@ -1419,7 +1473,11 @@ impl ExecutionContext {
                 return Err(Error::ServiceError(err.clone()));
             }
         };
-        let bound = config.rc_conf.bind_for_invoke(service, &path)?;
+        // rc_conf's bind_for_invoke runs the stub with no deadline and races the orphan reaper;
+        // run it ourselves and let rc_conf do the binding.
+        let keys = helper::stub_rcvars(service, &path, config.stub_timeout)?;
+        let keys = keys.iter().map(String::as_str).collect::<Vec<_>>();
+        let bound = config.rc_conf.generate_rcvars(service, &keys)?;
         let path = CString::new(path.as_str())?;
         // setup wrapper
         let wrapper = config
@@ -2404,6 +2462,54 @@ mod tests {
                 .unwrap()
         );
         pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn a_stub_that_ignores_rcvar_does_not_wedge_rustrc() {
+        minimal_signals::block();
+        let fx = Fixture::new("naive-stub");
+        // A stub that runs its daemon whatever verb it is given.
+        fx.stub(
+            "naive",
+            "echo $$ > @/naive.tmp && mv @/naive.tmp @/naive.pid\nexec sleep 1000",
+            "exec sleep 1000",
+        );
+        fx.stub("good", "", "exec sleep 1000");
+        fx.rc_conf(
+            "naive_ENABLED=\"YES\"\ngood_ENABLED=\"YES\"\nnaive_STOP_TIMEOUT=\"5\"\ngood_STOP_TIMEOUT=\"5\"\n",
+        );
+        let options = Pid1Options {
+            stub_timeout_ms: 300,
+            ..fx.options()
+        };
+        let pid1 = Pid1::new(options).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let start = Instant::now();
+            let _ = pid1.status();
+            assert!(
+                start.elapsed() < Duration::from_millis(250),
+                "status blocked for {:?}",
+                start.elapsed()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        wait_until("good to start", Duration::from_secs(5), || {
+            running_pid(&pid1, "good").is_some()
+        });
+        assert!(running_pid(&pid1, "naive").is_none());
+        let helper: libc::pid_t = fx
+            .wait_for_file("naive.pid", Duration::from_secs(5))
+            .parse()
+            .unwrap();
+        wait_until(
+            "the hung rcvar to be killed",
+            Duration::from_secs(2),
+            || is_gone(helper),
+        );
+        let start = Instant::now();
+        pid1.shutdown().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(3));
     }
 
     #[cfg(target_os = "linux")]
