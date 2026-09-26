@@ -346,10 +346,13 @@ fn main() {
             if signal == Some(minimal_signals::SIGCHLD) {
                 continue;
             }
-            signal_context.cancel();
             let Some(pid1) = signal_pid1.upgrade() else {
+                signal_context.cancel();
                 break;
             };
+            // Fence spawns first, or converge can respawn services this signal takes down.
+            pid1.begin_shutdown();
+            signal_context.cancel();
             if let Some(signal) = signal {
                 let _ = pid1.kill(Target::All, signal);
             }
