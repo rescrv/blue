@@ -2298,6 +2298,25 @@ impl Drop for SpawnAttr {
 
 ////////////////////////////////////////// BackoffTracker //////////////////////////////////////////
 
+/// The penalty a service starts with.
+const INITIAL_PENALTY: Duration = Duration::from_secs(1);
+/// The most penalty a service can accumulate.
+const MAX_PENALTY: Duration = Duration::from_secs(300);
+/// The restart delay for a service with no penalty, before jitter.
+const MIN_BACKOFF: Duration = Duration::from_secs(1);
+/// The longest restart delay, before jitter.
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+/// Forget a service's penalty after this long without an exit.  A service that has run this long
+/// (at most 1.5 * MAX_BACKOFF of it spent waiting to restart) has earned more uptime credit than
+/// MAX_PENALTY, so forgetting it changes no decision; this only bounds memory.
+const FORGET_AFTER: Duration = Duration::from_secs(420);
+
+/// Crash accounting.
+///
+/// Each exit doubles a service's penalty after crediting the uptime it had (credit grows slightly
+/// faster than linearly, so a long run clears any penalty).  The restart delay is the penalty
+/// clamped to [MIN_BACKOFF, MAX_BACKOFF] with uniform jitter of +/-50%:  a service that crashes
+/// after a healthy run restarts in 0.5-1.5s; one that crashes on start backs off to 30-90s.
 #[derive(Debug, Default)]
 struct BackoffTracker {
     penalties: HashMap<String, (Instant, Duration)>,
@@ -2308,7 +2327,7 @@ impl BackoffTracker {
         let (last_tracked, penalty) = self
             .penalties
             .entry(service.clone())
-            .or_insert((Instant::now(), Duration::from_secs(1)));
+            .or_insert((Instant::now(), INITIAL_PENALTY));
         *last_tracked = Instant::now();
         fn compound(duration: Duration) -> Duration {
             Duration::from_micros(
@@ -2320,9 +2339,8 @@ impl BackoffTracker {
         let old_penalty = *penalty;
         *penalty = penalty.saturating_sub(compound(credit));
         *penalty = penalty.saturating_mul(2);
-        *penalty = (*penalty).clamp(Duration::ZERO, Duration::from_secs(300));
-        // TODO(rescrv): Don't log under lock.  Almost certainly under lock.
-        clue!(COLLECTOR, INFO, {
+        *penalty = (*penalty).clamp(Duration::ZERO, MAX_PENALTY);
+        clue!(COLLECTOR, DEBUG, {
             service: service,
             credit: format!("{:?}", credit),
             adjusted: format!("{:?}", compound(credit)),
@@ -2331,31 +2349,25 @@ impl BackoffTracker {
         });
     }
 
-    fn backoff(&mut self, service: &str) -> Duration {
+    fn backoff(&self, service: &str) -> Duration {
+        use std::hash::{BuildHasher, RandomState};
         let (last_tracked, penalty) = self
             .penalties
             .get(service)
             .cloned()
             .unwrap_or((Instant::now(), Duration::ZERO));
-        let our_decision = penalty.clamp(Duration::from_secs(10), Duration::from_secs(60));
-        let mut hasher = std::hash::DefaultHasher::new();
+        let base = penalty.clamp(MIN_BACKOFF, MAX_BACKOFF);
+        // RandomState is seeded per instance, so this is a fresh draw each call.
+        let mut hasher = RandomState::new().build_hasher();
+        service.hash(&mut hasher);
         last_tracked.hash(&mut hasher);
-        let zero_to_one =
-            (hasher.finish() & 0x1fffffffffffffu64) as f64 / (1u64 << f64::MANTISSA_DIGITS) as f64;
-        Duration::from_micros((our_decision.as_micros() as f64 * (0.0 - zero_to_one.ln())) as u64)
-            .clamp(Duration::ZERO, Duration::from_secs(300))
+        let unit = (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64;
+        base.mul_f64(0.5 + unit)
     }
 
     fn wipe_debts(&mut self) {
-        let mut services = vec![];
-        for (service, (last_tracked, penalty)) in self.penalties.iter() {
-            if last_tracked.elapsed() >= *penalty {
-                services.push(service.to_string());
-            }
-        }
-        for service in services {
-            self.penalties.remove(&service);
-        }
+        self.penalties
+            .retain(|_, (last_tracked, _)| last_tracked.elapsed() < FORGET_AFTER);
     }
 }
 
@@ -2761,11 +2773,69 @@ mod tests {
     }
 
     #[test]
-    fn backoff_tracker() {
+    fn a_healthy_service_restarts_within_about_a_second() {
         let mut bt = BackoffTracker::default();
-        println!(
-            "FINDME {:?}",
-            bt.track("foo".to_string(), Duration::from_secs(1))
-        );
+        let mut seen = HashSet::new();
+        for _ in 0..200 {
+            bt.track("svc".to_string(), Duration::from_secs(3600));
+            let delay = bt.backoff("svc");
+            assert!(
+                delay >= Duration::from_millis(500) && delay < Duration::from_millis(1500),
+                "{delay:?}"
+            );
+            seen.insert(delay);
+        }
+        assert!(seen.len() > 100, "jitter is not jittering");
+    }
+
+    #[test]
+    fn a_crash_loop_backs_off_to_the_cap_and_uptime_forgives_it() {
+        let mut bt = BackoffTracker::default();
+        let mut ceilings = vec![];
+        for _ in 0..12 {
+            bt.track("svc".to_string(), Duration::ZERO);
+            let (_, penalty) = bt.penalties["svc"];
+            ceilings.push(penalty.clamp(MIN_BACKOFF, MAX_BACKOFF));
+            let delay = bt.backoff("svc");
+            assert!(delay < MAX_BACKOFF.mul_f64(1.5), "{delay:?}");
+        }
+        assert!(ceilings.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(MAX_BACKOFF, *ceilings.last().unwrap());
+        assert!(bt.backoff("svc") >= MAX_BACKOFF / 2);
+        // Ten minutes of uptime clears the maximum penalty.
+        bt.track("svc".to_string(), Duration::from_secs(600));
+        assert!(bt.backoff("svc") < Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn penalties_survive_a_backoff_wait_and_are_forgotten_later() {
+        let mut bt = BackoffTracker::default();
+        for _ in 0..8 {
+            bt.track("svc".to_string(), Duration::ZERO);
+        }
+        bt.wipe_debts();
+        assert!(bt.penalties.contains_key("svc"));
+        if let Some(long_ago) = Instant::now().checked_sub(FORGET_AFTER + Duration::from_secs(1)) {
+            bt.penalties.get_mut("svc").unwrap().0 = long_ago;
+            bt.wipe_debts();
+            assert!(!bt.penalties.contains_key("svc"));
+        }
+    }
+
+    #[test]
+    fn a_crash_restarts_promptly() {
+        minimal_signals::block();
+        let fx = Fixture::new("crash");
+        fx.stub("svc", "", "sleep 0.3\nexit 1");
+        fx.rc_conf("svc_ENABLED=\"YES\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        let starts = || {
+            pid1.status()
+                .iter()
+                .find(|s| s.service == "svc")
+                .map_or(0, |s| s.starts)
+        };
+        wait_until("a second start", Duration::from_secs(4), || starts() >= 2);
+        pid1.shutdown().unwrap();
     }
 }

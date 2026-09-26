@@ -60,6 +60,15 @@ service signals its whole process group, and when a service's main process exits
 anything left in its group before reaping it; a service that wants a process to outlive it must move
 that process to a new session or group.
 
+Restarts
+--------
+
+A service that exits without being asked to is restarted after a delay.  Each such exit doubles the
+service's penalty after crediting the uptime it had; the delay is the penalty clamped to 1-60s, with
++/-50% jitter.  A crash after a healthy run restarts in 0.5-1.5s.  A service that dies on every start
+backs off to 30-90s, and about four minutes of uptime clears the penalty.  Failed starts
+(a stub that errors or times out, posix_spawn failing) count as crashes with no uptime.
+
 Status
 ------
 
