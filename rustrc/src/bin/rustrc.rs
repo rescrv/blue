@@ -448,6 +448,7 @@ fn run(options: Options) -> i32 {
                 break;
             }
             let Some(pid1) = signal_pid1.upgrade() else {
+                signal_context.cancel();
                 break;
             };
             match signal {
