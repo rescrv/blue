@@ -22,11 +22,25 @@ rustrcctl services -l|-e [SERVICE...]       list known or enabled services
 rustrcctl services -r [-n]                  reload and print what will change (-n: plan only)
 rustrcctl services -s|-S|-R SERVICE...      start, stop, restart
 rustrcctl kill [-s SIGNAL] SERVICE|PID...   signal a service (default TERM); "*" is refused
+rustrcctl metrics                           rustrc's counters, Prometheus text format
 ```
 
 The reload plan lists services to start (with any remaining backoff), services to restart and
 which environment keys changed (never values), running services the new configuration disables
 (rustrc leaves these running; stop them explicitly), and errors.
+
+Logging
+-------
+
+rustrc logs to stderr, one line per event:  a level letter, a timestamp, the source location, and a
+structured value.  `--verbosity` picks how much:  3 errors, 6 warnings, 9 (the default) lifecycle
+events such as starts, exits with their status, restarts, and reloads, and 12 debug chatter.  Logged
+execution contexts name environment keys but never values, and redact env(1)-style `KEY=VALUE`
+words in WRAPPER and arguments.
+
+Log lines go through a bounded queue to a writer thread, so a stalled reader of stderr can never
+block rustrc.  When the queue is full, lines are dropped, counted in `rustrc.log.dropped`, and
+announced in the log once there is room.
 
 Per-Service Variables
 ---------------------
