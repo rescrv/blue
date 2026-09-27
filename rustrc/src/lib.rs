@@ -166,6 +166,8 @@ pub enum Error {
     ServiceAlreadyStarted,
     /// There's a persistent error with the service.
     ServiceError(String),
+    /// Shutdown has begun; rustrc starts nothing new.
+    ShuttingDown,
     /// An error returned by IO.
     Io(std::io::Error),
     /// An error returned by shvar.
@@ -259,6 +261,11 @@ impl From<&Error> for indicio::Value {
             Error::ServiceAlreadyStarted => {
                 indicio::value!({
                     service_already_started: true,
+                })
+            }
+            Error::ShuttingDown => {
+                indicio::value!({
+                    shutting_down: true,
                 })
             }
             Error::ServiceError(msg) => {
@@ -532,7 +539,10 @@ impl Pid1Configuration {
 
 #[derive(Debug)]
 struct Pid1State {
+    // Set when shutdown begins.  Nothing spawns once it is set.
     shutdown: bool,
+    // Set when shutdown has drained the process table.  The orphan reaper runs until then.
+    finished: bool,
     converge: u64,
     config: Arc<Pid1Configuration>,
     processes: Vec<Arc<Execution>>,
@@ -551,6 +561,7 @@ struct ServiceHistory {
 impl Pid1State {
     fn new(config: Arc<Pid1Configuration>) -> Self {
         let shutdown = false;
+        let finished = false;
         let converge = 1;
         let processes = vec![];
         let inhibited = HashSet::new();
@@ -559,6 +570,7 @@ impl Pid1State {
         STATE_NEW.click();
         Self {
             shutdown,
+            finished,
             converge,
             config,
             processes,
@@ -566,10 +578,6 @@ impl Pid1State {
             backedoff,
             history,
         }
-    }
-
-    fn has_processes(&self) -> bool {
-        !self.processes.is_empty()
     }
 
     fn is_running(&self, service: &str) -> bool {
@@ -640,6 +648,11 @@ impl Pid1State {
         service: &str,
         context: Result<ExecutionContext, Error>,
     ) -> Result<ExecutionID, Error> {
+        // Checked under the state lock that shutdown sets the flag under, so no spawn can slip in
+        // after shutdown snapshots the process table.
+        if self.shutdown {
+            return Err(Error::ShuttingDown);
+        }
         let result = context.and_then(|context| self.spawn_inner(reclaim, service, context));
         if result.is_err() {
             self.spawn_failed(coord, service);
@@ -814,17 +827,20 @@ impl Pid1 {
                 });
             }
             let state_guard = state.lock().unwrap();
-            if state_guard.shutdown {
+            if state_guard.finished {
                 break;
             }
+            // Keep reaping through shutdown:  stopping services is exactly when orphans appear.
             let (state_guard, _) = coord
                 .converge
                 .wait_timeout(state_guard, Duration::from_millis(250))
                 .unwrap();
-            if state_guard.shutdown {
+            if state_guard.finished {
                 break;
             }
         }
+        // One last pass for whatever the final stops left behind.
+        let _ = Self::reap_orphans_once(&state);
     }
 
     fn reap_orphans_once(state: &Mutex<Pid1State>) -> Result<(), Error> {
@@ -921,6 +937,9 @@ impl Pid1 {
         CONVERGE.click();
         let (processes, config) = {
             let state = state.lock().unwrap();
+            if state.shutdown {
+                return true;
+            }
             (state.processes.clone(), Arc::clone(&state.config))
         };
         clue!(COLLECTOR, INFO, {
@@ -1051,42 +1070,61 @@ impl Pid1 {
         converged
     }
 
-    /// Consume the pid1 and shut it down properly.  First processes get the SIGTERM, then they get
-    /// the SIGKILL.  Will return only after all resources are reclaimed.
-    pub fn shutdown(self) -> Result<(), Error> {
-        {
-            let mut state = self.state.lock().unwrap();
-            state.shutdown = true;
+    /// Begin shutting down:  from now on nothing is started, respawned, or restarted.  Idempotent.
+    ///
+    /// Call this before signaling services on the way out; otherwise the converge loop can respawn
+    /// a service that exits before [`Pid1::shutdown`] runs.
+    pub fn begin_shutdown(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !state.shutdown {
+            clue!(COLLECTOR, INFO, {
+                shutdown: true,
+            });
         }
+        state.shutdown = true;
+        state.converge = state.converge.wrapping_add(1);
+        self.coord.converge.notify_all();
+    }
+
+    /// Consume the pid1 and shut it down properly.  Every service's process group gets SIGTERM
+    /// and, after its STOP_TIMEOUT, SIGKILL.  Returns only after all resources are reclaimed.
+    pub fn shutdown(self) -> Result<(), Error> {
+        self.begin_shutdown();
+        // Spawns are fenced, so this snapshot is every process there will ever be.
         let processes = { self.state.lock().unwrap().processes.clone() };
         std::thread::scope(|scope| {
             for proc in processes.iter() {
                 scope.spawn(|| {
-                    let _ = terminate(proc);
+                    if let Err(err) = terminate(proc) {
+                        clue!(COLLECTOR, ERROR, {
+                            service: proc.service.as_str(),
+                            error: indicio::Value::from(&err),
+                        });
+                    }
                 });
             }
         });
-        // Anything spawned after the snapshot gets no grace period.
-        while self.has_processes() {
-            let _ = self.kill(Target::All, minimal_signals::SIGKILL);
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
         let Pid1 {
             options: _,
-            state: _,
+            state,
             coord,
             reclaim,
             reclaimer,
             orphan_reaper,
             converger,
         } = self;
-        coord.converge.notify_all();
+        {
+            let mut state = state.lock().unwrap();
+            debug_assert!(state.processes.is_empty());
+            state.finished = true;
+            coord.converge.notify_all();
+        }
+        converger.join().unwrap();
         drop(reclaim);
         reclaimer.join().unwrap();
         if let Some(orphan_reaper) = orphan_reaper {
             orphan_reaper.join().unwrap();
         }
-        converger.join().unwrap();
         Ok(())
     }
 
@@ -1355,6 +1393,9 @@ impl Pid1 {
     }
 
     fn start_refusal(state: &Pid1State, service: &str) -> Option<Error> {
+        if state.shutdown {
+            return Some(Error::ShuttingDown);
+        }
         // Ignore a stop-inhibit:  starting is how one clears it.
         match state.config.rc_conf.service_switch(service) {
             SwitchPosition::Yes if state.is_running(service) => Some(Error::ServiceAlreadyStarted),
@@ -1434,10 +1475,6 @@ impl Pid1 {
             .unwrap()
             .spawn(&self.coord, self.reclaim.clone(), service, context)?;
         Ok(())
-    }
-
-    fn has_processes(&self) -> bool {
-        self.state.lock().unwrap().has_processes()
     }
 }
 
@@ -2633,6 +2670,41 @@ mod tests {
         });
         let took = reloaded.elapsed();
         assert!(took < Duration::from_secs(5), "restart took {took:?}");
+        pid1.shutdown().unwrap();
+    }
+
+    #[test]
+    fn nothing_starts_once_shutdown_begins() {
+        minimal_signals::block();
+        let fx = Fixture::new("fence");
+        fx.stub("svc", "", "echo $$ > @/svc.pid\nexec sleep 1000");
+        fx.stub("manual", "", "exec sleep 1000");
+        fx.rc_conf("svc_ENABLED=\"YES\"\nmanual_ENABLED=\"MANUAL\"\n");
+        let pid1 = Pid1::new(fx.options()).unwrap();
+        let pid: libc::pid_t = fx
+            .wait_for_file("svc.pid", Duration::from_secs(5))
+            .parse()
+            .unwrap();
+        pid1.begin_shutdown();
+        assert!(matches!(pid1.start("manual"), Err(Error::ShuttingDown)));
+        // A service that dies after shutdown begins stays down.
+        // SAFETY(rescrv): pid is a live child we just read from the stub.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        wait_until("svc to be reclaimed", Duration::from_secs(5), || {
+            running_pid(&pid1, "svc").is_none()
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(pid1.status().iter().all(|s| s.running.is_empty()));
+        assert_eq!(
+            1,
+            pid1.status()
+                .iter()
+                .find(|s| s.service == "svc")
+                .unwrap()
+                .starts
+        );
         pid1.shutdown().unwrap();
     }
 
