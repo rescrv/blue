@@ -26,6 +26,23 @@ Signals
 - SIGHUP:  reload rc.conf and rc.d, like `rustrcctl services -r`.  The plan is logged.
 - Everything else is ignored.  Use `rustrcctl kill` to signal a service.
 
+State Directory
+---------------
+
+With `--state-dir DIR` (default `rc.state` for the binary; off for the library unless
+`Pid1Options::state_dir` is set), rustrc takes an exclusive lock on `DIR/lock` for its lifetime and
+writes a record of every process it spawns (pid, service, start time, stop timeout) under
+`DIR/executions`, removing each after the process is reaped.  A second rustrc on the same directory
+refuses to start.  When rustrc dies without shutting down, its successor finds the records, and any
+recorded process still alive with the same start time is fenced before anything starts:  its process
+group gets SIGTERM, then SIGKILL after its stop timeout.  A record whose pid now names a different
+process is discarded without signaling anything.
+
+Start times come from /proc on Linux and proc_pidinfo on macOS; other platforms write no records.
+Fencing signals a group only while its main process is verified alive, so if a leftover's main
+process exits during the grace period, stragglers it left in its group are not chased.  Keep the
+directory on local disk.
+
 Control
 -------
 
