@@ -6,32 +6,36 @@ rustrc is an `rc_conf`-based process supervisor library and binary.
 Container Init
 --------------
 
-`rustrc` can run as PID 1 inside a container.  When the binary detects that it is process 1, it enables init behavior automatically: it reaps exited orphan children that are not rustrc-managed services, and on Linux it asks the kernel to make it a child subreaper.  Use `--container-init` to enable the same behavior when testing outside PID 1.
+When `rustrc` is process 1, or given `--container-init`, it splits in two before starting any
+thread.  The parent is a small single-threaded init that forwards every signal to the supervisor and
+reaps every orphan; the child is the supervisor, an ordinary process that never reaps anything it
+did not spawn.  When the supervisor exits, the init sends SIGTERM to anything still running (as PID
+1, everything in the namespace; as a Linux child subreaper outside PID 1, the children reparented to
+it), reaps for up to 10s, sends SIGKILL to what remains, and exits with the supervisor's status
+(128 plus the signal number if it was killed).  A supervisor panic therefore stops services with a
+grace period, instead of the kernel SIGKILLing the namespace when PID 1 dies.
 
-The control socket remains enabled by default.  Use `--no-control-sock` for minimal containers that only need signal-driven shutdown.
+The control socket remains enabled by default.  Use `--no-control-sock` for minimal containers that
+only need signals.
 
-State Directory
----------------
+Signals
+-------
 
-With `--state-dir DIR` (default `rc.state` for the binary; off for the library unless
-`Pid1Options::state_dir` is set), rustrc takes an exclusive lock on `DIR/lock` for its lifetime and
-writes a record of every process it spawns (pid, service, start time, stop timeout) under
-`DIR/executions`, removing each after the process is reaped.  A second rustrc on the same directory
-refuses to start.  When rustrc dies without shutting down, its successor finds the records, and any
-recorded process still alive with the same start time is fenced before anything starts:  its process
-group gets SIGTERM, then SIGKILL after its stop timeout.  A record whose pid now names a different
-process is discarded without signaling anything.
-
-Start times come from /proc on Linux and proc_pidinfo on macOS; other platforms write no records.
-Fencing signals a group only while its main process is verified alive, so if a leftover's main
-process exits during the grace period, stragglers it left in its group are not chased.  Keep the
-directory on local disk.
+- SIGTERM, SIGINT, SIGQUIT:  shut down.  Nothing new starts; every service's process group gets
+  SIGTERM, then SIGKILL after its STOP_TIMEOUT; rustrc exits 0.
+- SIGHUP:  reload rc.conf and rc.d, like `rustrcctl services -r`.  The plan is logged.
+- Everything else is ignored.  Use `rustrcctl kill` to signal a service.
 
 Control
 -------
 
 `rustrcctl` talks to a running rustrc over its control socket (`--control-sock PATH`, else
 `$RUSTRC_CONTROL_SOCK`, else `rc.sock`).  With no command it reads one command per line from stdin.
+
+The socket is created mode 0600 and accepts only peers running as rustrc's user or root.  A socket
+left behind by a rustrc that died is replaced on startup; if another rustrc is listening on it,
+rustrc exits with an error instead.  Startup takes the state directory lock first, then the socket,
+then fences leftovers and starts services.
 
 ```text
 rustrcctl status [SERVICE...]               state, pid, uptime, starts, last exit, backoff, log
