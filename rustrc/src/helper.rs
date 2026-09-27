@@ -62,6 +62,17 @@ pub(crate) fn stub_rcvars(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
+    // rustrc blocks every signal for its sigwait thread; give the stub the empty mask services get.
+    // SAFETY(rescrv): the hook runs between fork and exec and calls only async-signal-safe
+    // functions on stack storage.
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut empty = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+            libc::sigemptyset(empty.as_mut_ptr());
+            libc::pthread_sigmask(libc::SIG_SETMASK, empty.as_ptr(), std::ptr::null_mut());
+            Ok(())
+        });
+    }
     let mut child = {
         // Hold the registry across spawn so the reaper cannot observe the zombie of a helper that
         // exits before we record it.
