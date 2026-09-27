@@ -468,7 +468,7 @@ pub struct Pid1Options {
     pub rc_conf_path: String,
     #[arrrg(
         optional,
-        "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
+        "A colon-separated PATH-like list of rc.d directories.  A service defined in more than one is an error."
     )]
     pub rc_d_path: String,
     #[arrrg(
