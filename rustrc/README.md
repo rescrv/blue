@@ -41,7 +41,10 @@ so a global default works:
   applies to the next stop without a restart.
 
 Services start with an empty signal mask and default signal dispositions, regardless of rustrc's
-own mask.
+own mask.  Each service leads its own process group and reads stdin from `/dev/null`.  Stopping a
+service signals its whole process group, and when a service's main process exits, rustrc kills
+anything left in its group before reaping it; a service that wants a process to outlive it must move
+that process to a new session or group.
 
 Status
 ------
