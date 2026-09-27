@@ -36,9 +36,14 @@ so a global default works:
 
 - `LOG`:  append the service's stdout and stderr to this path.  `LOG="/var/log/rustrc/${NAME}.log"`
   gives every service its own file.  Changing it restarts the service.
-- `STOP_TIMEOUT`:  seconds (fractions allowed) between SIGTERM and SIGKILL when stopping.  Without
-  it, rustrc keeps its original schedule (SIGTERM after 2s, 6s, and 14s, then SIGKILL).  Changing it
-  applies to the next stop without a restart.
+- `STOP_TIMEOUT`:  seconds (fractions allowed) between SIGTERM and SIGKILL when stopping; default
+  10.  SIGTERM is sent the moment a stop begins.  Changing it applies to the next stop without a
+  restart.  Keep it below your orchestrator's grace period (Docker's default is 10s, Kubernetes'
+  30s) or the orchestrator's SIGKILL arrives first.
+
+A stop rustrc asks for (stop, restart, a reload that changes a service's context, shutdown) is not a
+crash:  the replacement starts without a backoff.  A reload restarts changed services concurrently,
+so one slow stop does not delay starting or respawning anything else.
 
 Stubs
 -----
