@@ -40,6 +40,15 @@ so a global default works:
   it, rustrc keeps its original schedule (SIGTERM after 2s, 6s, and 14s, then SIGKILL).  Changing it
   applies to the next stop without a restart.
 
+Stubs
+-----
+
+To compute a service's environment, rustrc runs the stub as `STUB rcvar` and binds the variables it
+names.  The stub must answer `rcvar` without starting the service (rcscript stubs do).  A stub that
+has not answered within `--stub-timeout-ms` (default 10000) has its process group killed, and the
+start counts as a failure.  rustrc never holds its state lock while a stub runs, so a slow stub
+delays only its own service.
+
 Services start with an empty signal mask and default signal dispositions, regardless of rustrc's
 own mask.  Each service leads its own process group and reads stdin from `/dev/null`.  Stopping a
 service signals its whole process group, and when a service's main process exits, rustrc kills
