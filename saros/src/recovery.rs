@@ -70,7 +70,16 @@ impl RecoveryBiometricsStore {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 tags.extend(local_tags);
-                let tags: Tags = Tags::from(tags).into_owned();
+                // `reading.labels` is a `HashMap`, so this used to assemble the
+                // canonical string in whatever order iteration happened to produce.  The same
+                // series then hashed to different `Tags` across runs and split across map
+                // entries.  `canonical_tags` sorts for exactly this reason; so does this now.
+                tags.sort();
+                // `Tags::from` also skipped validation, so a `:` in a metric name, or a
+                // label literally called `__name__`, produced a `Tags` whose `tags()` panicked.
+                let tags: Tags = Tags::try_from(tags)
+                    .map_err(|_| text_error("recovery tags did not round-trip"))?
+                    .into_owned();
                 let ts = reading
                     .timestamp
                     .and_then(|ts| Time::from_micros(1_000 * (ts as i64)))

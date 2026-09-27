@@ -119,6 +119,11 @@ impl BitWriter {
         }
     }
 
+    /// The number of bytes [`seal`](Self::seal) would return, without consuming the writer.
+    pub fn bytes(&self) -> usize {
+        self.bytes.len() + usize::from(self.bits > 0)
+    }
+
     pub fn seal(mut self) -> Vec<u8> {
         if self.bits > 0 {
             self.bytes.push(self.byte);
@@ -213,6 +218,11 @@ impl GorillaEncoder {
             self.have_window = true;
         }
         self.prev = value;
+    }
+
+    /// The number of bytes [`seal`](Self::seal) would return, without consuming the encoder.
+    pub fn bytes(&self) -> usize {
+        self.writer.bytes()
     }
 
     pub fn seal(self) -> Vec<u8> {

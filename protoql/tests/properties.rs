@@ -152,8 +152,14 @@ fn arb_field_definition() -> impl Strategy<Value = FieldDefinition> {
 proptest::prop_compose! {
     fn arb_table()(identifier in arb_identifier(),
                    number in arb_field_number(),
-                   key in proptest::collection::vec(arb_key(), 0..5),
-                   fields in proptest::collection::vec(arb_level_2(), 0..32).prop_filter("duplicates", |f| protoql::check_fields(f).is_ok())) -> Table {
+                   // `Table::new` also rejects a key whose identifier or field number collides
+                   // with any field's, which the fields-only filter cannot see, so filter the
+                   // key/fields pair through `Table::new` before the `unwrap` below.
+                   key_and_fields in (proptest::collection::vec(arb_key(), 0..5),
+                                      proptest::collection::vec(arb_level_2(), 0..32)
+                                          .prop_filter("duplicates", |f| protoql::check_fields(f).is_ok()))
+                       .prop_filter("key collisions", |(key, fields)| Table::new(Identifier::must("t"), FieldNumber::must(1), key.clone(), fields.clone()).is_ok())) -> Table {
+        let (key, fields) = key_and_fields;
         Table::new(identifier, number, key, fields).unwrap()
     }
 }

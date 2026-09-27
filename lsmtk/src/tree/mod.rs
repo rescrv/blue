@@ -1615,7 +1615,7 @@ impl LsmTree {
         &self,
         start_bound: &Bound<T>,
         end_bound: &Bound<T>,
-    ) -> Result<impl Cursor, SError> {
+    ) -> Result<impl Cursor + use<T>, SError> {
         let version = self.take_snapshot();
         let version_scan = version.range_scan(start_bound, end_bound, u64::MAX)?;
         let cursor = PruningCursor::new(version_scan, u64::MAX)?;
