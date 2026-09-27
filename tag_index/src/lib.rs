@@ -401,7 +401,11 @@ mod tests {
     #[test]
     fn try_from_rejects_colons() {
         // Prometheus recording-rule naming convention.
-        let tags = vec![Tag::new("__name__", "node:cpu:rate5m").unwrap().into_owned()];
+        let tags = vec![
+            Tag::new("__name__", "node:cpu:rate5m")
+                .unwrap()
+                .into_owned(),
+        ];
         assert_eq!(Err(InvalidTags), Tags::try_from(tags));
         // A colon hiding in a value.
         let tags = vec![

@@ -50,8 +50,7 @@ static LOOKBACK_EXHAUSTED_MONITOR: Stationary =
 /// Series whose pending chunk was flushed early because the process-wide pending budget was
 /// exceeded rather than because the chunk reached its target size.  A nonzero rate here
 /// means read amplification is being traded for a bounded resident set.
-pub(crate) static PENDING_BUDGET_FLUSH: Counter =
-    Counter::new("saros.store.pending_budget_flush");
+pub(crate) static PENDING_BUDGET_FLUSH: Counter = Counter::new("saros.store.pending_budget_flush");
 static PENDING_BUDGET_FLUSH_MONITOR: Stationary =
     Stationary::new("saros.store.pending_budget_flush", &PENDING_BUDGET_FLUSH);
 
@@ -1602,11 +1601,7 @@ mod tests {
                 // streams take all three of their branches.
                 let micros = 1_000_000 + (idx as i64) * 15_000_000 + ((idx as i64 % 7) * 137);
                 let ts = Time::from_micros(micros).unwrap();
-                let point = Point(if idx % 3 == 0 {
-                    1.0
-                } else {
-                    idx as f64 * 1.5
-                });
+                let point = Point(if idx % 3 == 0 { 1.0 } else { idx as f64 * 1.5 });
                 encoder.push(ts, point).unwrap();
                 samples.push((ts, point));
             }

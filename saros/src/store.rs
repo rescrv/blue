@@ -549,7 +549,10 @@ impl SarosStore {
             let after = state.pending_bytes();
             // Intermediate flushes inside `push` already emitted their rows, so the difference
             // between the two snapshots is the net change to what is still resident.
-            self.pending_bytes = self.pending_bytes.saturating_add(after).saturating_sub(before);
+            self.pending_bytes = self
+                .pending_bytes
+                .saturating_add(after)
+                .saturating_sub(before);
         }
         self.enforce_pending_budget()
     }
@@ -571,7 +574,7 @@ impl SarosStore {
             .filter(|(_, state)| state.has_pending())
             .map(|(key, state)| (*key, state.pending_bytes()))
             .collect();
-        order.sort_by(|lhs, rhs| rhs.1.cmp(&lhs.1));
+        order.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
         for (key, bytes) in order {
             if self.pending_bytes <= target {
                 break;
@@ -1325,6 +1328,8 @@ fn _decode_checkpoint(value: &[u8]) -> Result<FileCheckpoint, SError> {
 mod tests {
     use std::collections::HashMap;
 
+    use biometrics::Sensor;
+
     use super::*;
     use crate::{QueryEngine, query};
 
@@ -1629,29 +1634,31 @@ request_duration_seconds_count 7 0
     #[test]
     fn restart_rejects_duplicate_timestamp_at_disk_frontier() {
         let root = test_root("restart-duplicate-frontier");
+        // The frontier probe anchors at wall-clock now and walks back at most
+        // `max_lookback_segments`, so the restart path can only enforce the disk frontier
+        // inside that window; a series silent for longer is treated as new (README, "Warts").
+        // Date the sample an hour before now so this exercises the frontier, not the bound.
+        let now = Time::now().unwrap();
+        let sample = now - Time::from_secs(3600).unwrap();
+        let sample_ms = sample.to_micros() / 1000;
+        let first = format!("# TYPE foo counter\nfoo 1 {sample_ms}\n");
         let mut store = SarosStore::open(&root).unwrap();
         store
-            .ingest_prometheus_bytes("first.prom", b"# TYPE foo counter\nfoo 1 0\n", "source")
+            .ingest_prometheus_bytes("first.prom", first.as_bytes(), "source")
             .unwrap();
         store.flush().unwrap();
         drop(store);
 
         let mut store = SarosStore::open(&root).unwrap();
+        let duplicate = format!("# TYPE foo counter\nfoo 2 {sample_ms}\n");
         assert!(
             store
-                .ingest_prometheus_bytes(
-                    "duplicate.prom",
-                    b"# TYPE foo counter\nfoo 2 0\n",
-                    "source"
-                )
+                .ingest_prometheus_bytes("duplicate.prom", duplicate.as_bytes(), "source")
                 .is_err()
         );
         store.flush().unwrap();
 
-        let params = one_second_params(
-            Time::from_micros(0).unwrap(),
-            Time::from_micros(1_000_000).unwrap(),
-        );
+        let params = one_second_params(sample, sample + Time::ONE_SECOND);
         let engine = QueryEngine::new(store);
         let series = engine
             .query(&rpc_pb::Context::default(), "counters(foo)", params)
@@ -1664,12 +1671,16 @@ request_duration_seconds_count 7 0
     #[test]
     fn restart_rejects_out_of_order_sample_after_later_segment() {
         let root = test_root("restart-frontier-later-segment");
+        // Anchor the segment boundary at the start of the current segment so both segments stay
+        // inside the frontier probe's lookback window; see the comment on
+        // `restart_rejects_duplicate_timestamp_at_disk_frontier`.
+        let boundary = segment_start(Time::now().unwrap());
+        let boundary_ms = boundary.to_micros() / 1000;
         let mut store = SarosStore::open(&root).unwrap();
-        let segment_ms = SEGMENT_DURATION.to_micros() / 1000;
         let initial = format!(
             "# TYPE foo counter\nfoo 1 {}\nfoo 2 {}\n",
-            segment_ms - 1_000,
-            segment_ms + 10_000
+            boundary_ms - 1_000,
+            boundary_ms + 10_000
         );
         store
             .ingest_prometheus_bytes("initial.prom", initial.as_bytes(), "source")
@@ -1678,13 +1689,13 @@ request_duration_seconds_count 7 0
         drop(store);
 
         let mut store = SarosStore::open(&root).unwrap();
-        let stale = format!("# TYPE foo counter\nfoo 3 {}\n", segment_ms + 5_000);
+        let stale = format!("# TYPE foo counter\nfoo 3 {}\n", boundary_ms + 5_000);
         assert!(
             store
                 .ingest_prometheus_bytes("stale.prom", stale.as_bytes(), "source")
                 .is_err()
         );
-        let newer = format!("# TYPE foo counter\nfoo 4 {}\n", segment_ms + 20_000);
+        let newer = format!("# TYPE foo counter\nfoo 4 {}\n", boundary_ms + 20_000);
         assert!(
             store
                 .ingest_prometheus_bytes("newer.prom", newer.as_bytes(), "source")
@@ -1692,8 +1703,8 @@ request_duration_seconds_count 7 0
         );
         store.flush().unwrap();
 
-        let start = Time::from_micros(SEGMENT_DURATION.to_micros()).unwrap();
-        let limit = Time::from_micros(SEGMENT_DURATION.to_micros() + 25_000_000).unwrap();
+        let start = boundary;
+        let limit = boundary + Time::from_micros(25_000_000).unwrap();
         let window = Window::new(start, limit).unwrap();
         let params = query::QueryParams::new(window, Time::from_secs(5).unwrap()).unwrap();
         let engine = QueryEngine::new(store);
@@ -1705,6 +1716,46 @@ request_duration_seconds_count 7 0
             vec![Point(1.0), Point(1.0), Point(2.0), Point(2.0), Point(4.0),],
             series[0].points()
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // The counterpoint of the two restart tests above: `max_lookback_segments` is a documented
+    // trade (README, "Warts"), and this pins what it costs.  A series whose stored chunks fall
+    // outside the walk is treated as new, so a stale sample is accepted rather than rejected,
+    // and `saros.store.lookback_exhausted` counts the occurrence so the trade is not silent.
+    #[test]
+    fn restart_beyond_lookback_treats_series_as_new_and_counts_it() {
+        let root = test_root("restart-beyond-lookback");
+        let options = SarosStoreOptions {
+            max_lookback_segments: 1,
+            ..SarosStoreOptions::default()
+        };
+        let boundary = segment_start(Time::now().unwrap());
+        let boundary_ms = boundary.to_micros() / 1000;
+        let mut store = SarosStore::open_with_options(&root, options.clone()).unwrap();
+        let initial = format!(
+            "# TYPE foo counter\nfoo 1 {}\nfoo 2 {}\n",
+            boundary_ms - 2_000,
+            boundary_ms - 1_000,
+        );
+        store
+            .ingest_prometheus_bytes("initial.prom", initial.as_bytes(), "source")
+            .unwrap();
+        store.flush().unwrap();
+        drop(store);
+
+        // The chunks live in the segment before `boundary`; the walk scans only the segment
+        // at or after its anchor, so it exhausts the one-segment bound without finding them.
+        let before = crate::LOOKBACK_EXHAUSTED.read();
+        let mut store = SarosStore::open_with_options(&root, options.clone()).unwrap();
+        let stale = format!("# TYPE foo counter\nfoo 3 {}\n", boundary_ms - 1_500);
+        assert!(
+            store
+                .ingest_prometheus_bytes("stale.prom", stale.as_bytes(), "source")
+                .unwrap()
+        );
+        assert!(crate::LOOKBACK_EXHAUSTED.read() > before);
+        store.flush().unwrap();
         let _ = std::fs::remove_dir_all(root);
     }
 
