@@ -17,9 +17,27 @@
 
 use std::time::{Duration, Instant};
 
+/// What the init half does once the supervisor is dead and the leftovers are reaped.  Called once,
+/// with the supervisor's exit code (128 + signal if one killed it); must not return.
+///
+/// The init half calls it single-threaded, with every signal still blocked and no rustrc state
+/// alive, so plain syscalls are the natural body.  It is a function pointer, not a closure,
+/// because nothing may be captured into the init half.
+pub type Exit = fn(code: i32) -> !;
+
 /// Split into init and supervisor.  Must be called before any thread is spawned, with every signal
 /// blocked.  Returns in the supervisor.  In the init, never returns.
 pub fn split(grace: Duration) -> std::io::Result<()> {
+    split_exiting(grace, std::process::exit)
+}
+
+/// [split], with the init half's ending owned by the embedder:  once the supervisor is dead and
+/// whatever it left behind has been TERMed, reaped for up to `grace`, KILLed, and reaped for up to
+/// 5s more, the init half calls `exit` with the supervisor's exit code instead of
+/// [std::process::exit] doing it.  The default ending is right in a container, where a PID 1 exit
+/// ends the machine; an embedder that is PID 1 of a virtual machine, whose exit would panic the
+/// kernel instead, passes a hook that powers off there.
+pub fn split_exiting(grace: Duration, exit: Exit) -> std::io::Result<()> {
     // SAFETY(rescrv): getpid cannot fail.
     let parent = unsafe { libc::getpid() };
     let is_pid1 = parent == 1;
@@ -38,7 +56,7 @@ pub fn split(grace: Duration) -> std::io::Result<()> {
     }
     let status = supervise(child);
     teardown(is_pid1, grace);
-    std::process::exit(exit_code(status));
+    exit(exit_code(status));
 }
 
 /// Forward signals to the supervisor and reap everything until the supervisor exits.
