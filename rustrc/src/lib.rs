@@ -17,6 +17,9 @@ use utf8path::Path;
 
 mod helper;
 pub mod logging;
+mod statedir;
+
+pub use statedir::StateDir;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -77,6 +80,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&EXECUTION_EXEC);
     helper::register_biometrics(collector);
     logging::register_biometrics(collector);
+    statedir::register_biometrics(collector);
 }
 
 /// How long a stop waits after SIGTERM before SIGKILL when a service sets no STOP_TIMEOUT.
@@ -170,6 +174,8 @@ pub enum Error {
     ServiceError(String),
     /// Shutdown has begun; rustrc starts nothing new.
     ShuttingDown,
+    /// Another rustrc holds the state directory.
+    AlreadyRunning(String),
     /// An error returned by IO.
     Io(std::io::Error),
     /// An error returned by shvar.
@@ -268,6 +274,11 @@ impl From<&Error> for indicio::Value {
             Error::ShuttingDown => {
                 indicio::value!({
                     shutting_down: true,
+                })
+            }
+            Error::AlreadyRunning(msg) => {
+                indicio::value!({
+                    already_running: msg,
                 })
             }
             Error::ServiceError(msg) => {
@@ -474,6 +485,11 @@ pub struct Pid1Options {
         "Milliseconds a stub gets to answer `rcvar` before its process group is killed."
     )]
     pub stub_timeout_ms: u64,
+    #[arrrg(
+        optional,
+        "Directory for the single-instance lock and records of running processes (empty: none)."
+    )]
+    pub state_dir: String,
 }
 
 impl Default for Pid1Options {
@@ -484,6 +500,7 @@ impl Default for Pid1Options {
             reap_orphans: false,
             child_subreaper: false,
             stub_timeout_ms: 10_000,
+            state_dir: String::new(),
         }
     }
 }
@@ -496,6 +513,7 @@ impl From<&Pid1Options> for indicio::Value {
             reap_orphans: options.reap_orphans,
             child_subreaper: options.child_subreaper,
             stub_timeout_ms: options.stub_timeout_ms,
+            state_dir: options.state_dir.as_str(),
         })
     }
 }
@@ -551,6 +569,7 @@ struct Pid1State {
     inhibited: HashSet<String>,
     backedoff: HashMap<String, Instant>,
     history: HashMap<String, ServiceHistory>,
+    state_dir: Option<Arc<StateDir>>,
 }
 
 /// Per-service counters kept across executions.
@@ -561,7 +580,7 @@ struct ServiceHistory {
 }
 
 impl Pid1State {
-    fn new(config: Arc<Pid1Configuration>) -> Self {
+    fn new(config: Arc<Pid1Configuration>, state_dir: Option<Arc<StateDir>>) -> Self {
         let shutdown = false;
         let finished = false;
         let converge = 1;
@@ -579,6 +598,7 @@ impl Pid1State {
             inhibited,
             backedoff,
             history,
+            state_dir,
         }
     }
 
@@ -672,7 +692,13 @@ impl Pid1State {
         let execution_id = ExecutionID::generate().ok_or(Error::GeneratingExecutionID)?;
         let config = Arc::clone(&self.config);
         let service = service.to_string();
-        let execution = Arc::new(Execution::new(execution_id, config, service, context));
+        let execution = Arc::new(Execution::new(
+            execution_id,
+            config,
+            service,
+            context,
+            self.state_dir.clone(),
+        ));
         let exec = Arc::clone(&execution);
         let thread = std::thread::Builder::new()
             .stack_size(65536)
@@ -731,12 +757,36 @@ pub struct Pid1 {
 
 impl Pid1 {
     /// Create a new Pid1 from the provided options.
+    ///
+    /// If `options.state_dir` is set, it is locked (failing with [Error::AlreadyRunning] if another
+    /// rustrc holds it) and anything a predecessor left running is fenced before anything starts.
     pub fn new(options: Pid1Options) -> Result<Self, Error> {
+        let state_dir = if options.state_dir.is_empty() {
+            None
+        } else {
+            Some(StateDir::lock(&options.state_dir)?)
+        };
+        Self::with_state_dir(options, state_dir)
+    }
+
+    /// Like [Pid1::new], with a state directory the caller already locked (ignoring
+    /// `options.state_dir`).  Lock first when other startup steps need exclusion too, such as
+    /// reclaiming a control socket that might belong to a live sibling.
+    pub fn with_state_dir(
+        options: Pid1Options,
+        state_dir: Option<StateDir>,
+    ) -> Result<Self, Error> {
         if options.child_subreaper {
             enable_child_subreaper()?;
         }
+        // Load the configuration before fencing:  if it is broken, leave a predecessor's
+        // services alone rather than fence them and start nothing.
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
-        let state = Arc::new(Mutex::new(Pid1State::new(config)));
+        if let Some(state_dir) = state_dir.as_ref() {
+            state_dir.fence()?;
+        }
+        let state_dir = state_dir.map(Arc::new);
+        let state = Arc::new(Mutex::new(Pid1State::new(config, state_dir)));
         let coord = Arc::new(Pid1Coordination::default());
         let (reclaim, recv) = sync_channel(1);
         let reclaim_state = Arc::clone(&state);
@@ -816,6 +866,7 @@ impl Pid1 {
                 coord.converge.notify_all();
                 state.converge = state.converge.wrapping_add(1);
             }
+            exec.forget_record();
             exec.mark_done();
         }
     }
@@ -1879,6 +1930,7 @@ enum ProcessState {
 
 #[derive(Debug)]
 struct Execution {
+    id: ExecutionID,
     service: String,
     context: ExecutionContext,
     process: Mutex<ProcessState>,
@@ -1890,16 +1942,20 @@ struct Execution {
     // Set once the reclaimer has removed this execution from the process table.
     done: Mutex<bool>,
     done_changed: Condvar,
+    state_dir: Option<Arc<StateDir>>,
+    record: Mutex<Option<std::path::PathBuf>>,
 }
 
 impl Execution {
     fn new(
-        _execution_id: ExecutionID,
+        id: ExecutionID,
         _config: Arc<Pid1Configuration>,
         service: String,
         context: ExecutionContext,
+        state_dir: Option<Arc<StateDir>>,
     ) -> Self {
         Self {
+            id,
             service,
             context,
             process: Mutex::new(ProcessState::Pending),
@@ -1909,6 +1965,8 @@ impl Execution {
             stop_requested: AtomicBool::new(false),
             done: Mutex::new(false),
             done_changed: Condvar::new(),
+            state_dir,
+            record: Mutex::new(None),
         }
     }
 
@@ -1968,6 +2026,15 @@ impl Execution {
         EXECUTION_EXEC.click();
         match self.exec_inner() {
             Ok(pid) => {
+                // Record before the waiter can reap, so the record's start time is this process's.
+                if let Some(state_dir) = self.state_dir.as_ref() {
+                    *self.record.lock().unwrap() = state_dir.record(
+                        &self.id.prefix_free_readable(),
+                        &self.service,
+                        pid,
+                        self.context.stop_timeout.unwrap_or(DEFAULT_STOP_TIMEOUT),
+                    );
+                }
                 clue!(COLLECTOR, INFO, {
                     exec: {
                         service: self.service.as_str(),
@@ -2148,6 +2215,12 @@ impl Execution {
 
     fn stop_requested(&self) -> bool {
         self.stop_requested.load(Ordering::Acquire)
+    }
+
+    fn forget_record(&self) {
+        if let Some(record) = self.record.lock().unwrap().take() {
+            StateDir::forget(&record);
+        }
     }
 
     fn mark_done(&self) {
@@ -2798,6 +2871,128 @@ mod tests {
         pid1.spawn("rustrc_smoking_wrapper", &["--argument", "FROM THE ARGS"])
             .expect("spawn should work");
         pid1.shutdown().expect("shutdown should work");
+    }
+
+    #[test]
+    fn a_state_dir_admits_one_rustrc() {
+        let fx = Fixture::new("lock");
+        let first = StateDir::lock(fx.path("state")).unwrap();
+        assert!(matches!(
+            StateDir::lock(fx.path("state")),
+            Err(Error::AlreadyRunning(_))
+        ));
+        drop(first);
+        StateDir::lock(fx.path("state")).unwrap();
+    }
+
+    #[test]
+    fn records_follow_the_process() {
+        minimal_signals::block();
+        let fx = Fixture::new("records");
+        fx.stub("svc", "", "exec sleep 1000");
+        fx.rc_conf("svc_ENABLED=\"YES\"\n");
+        let options = Pid1Options {
+            state_dir: fx.path("state"),
+            ..fx.options()
+        };
+        let executions = fx.dir.join("state").join("executions");
+        let records = || {
+            std::fs::read_dir(&executions)
+                .unwrap()
+                .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let pid1 = Pid1::new(options).unwrap();
+        wait_until("svc running", Duration::from_secs(5), || {
+            running_pid(&pid1, "svc").is_some()
+        });
+        let pid = running_pid(&pid1, "svc").unwrap();
+        let recorded = records();
+        assert_eq!(1, recorded.len());
+        assert!(
+            recorded[0].contains(&format!("pid={pid}\n")),
+            "{recorded:?}"
+        );
+        assert!(recorded[0].contains("service=svc\n"), "{recorded:?}");
+        pid1.stop("svc").unwrap();
+        assert!(records().is_empty());
+        pid1.shutdown().unwrap();
+        assert!(records().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn leftovers_from_a_dead_rustrc_are_fenced() {
+        use std::os::unix::process::CommandExt;
+        // Leftovers are spawned before blocking signals:  rustrc gives services an empty mask, and
+        // children inherit ours.
+        minimal_signals::unblock();
+        let fx = Fixture::new("fence-leftovers");
+        let executions = fx.dir.join("state").join("executions");
+        std::fs::create_dir_all(&executions).unwrap();
+        let spawn = |script: &str| {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(script.replace('@', &fx.dir.to_string_lossy()))
+                .process_group(0)
+                .spawn()
+                .unwrap()
+        };
+        let record = |name: &str, service: &str, pid: u32, start: &str, stop_ms: u64| {
+            std::fs::write(
+                executions.join(name),
+                format!("service={service}\npid={pid}\nstart={start}\nstop_timeout_ms={stop_ms}\n"),
+            )
+            .unwrap();
+        };
+        // A service a dead rustrc left behind, with a worker in its group.
+        let mut leftover = spawn("sleep 1000 &\necho $! > @/worker.pid\nexec sleep 1000");
+        let worker: libc::pid_t = fx
+            .wait_for_file("worker.pid", Duration::from_secs(5))
+            .parse()
+            .unwrap();
+        let start = statedir::process_start(leftover.id() as libc::pid_t).unwrap();
+        record("a", "old", leftover.id(), &start, 5000);
+        // One that ignores SIGTERM and must be killed after its stop timeout.
+        let mut stubborn = spawn("trap '' TERM\nwhile :; do sleep 0.05; done");
+        std::thread::sleep(Duration::from_millis(50));
+        let start = statedir::process_start(stubborn.id() as libc::pid_t).unwrap();
+        record("b", "stubborn", stubborn.id(), &start, 300);
+        // A live process whose pid matches a record but whose start time does not:  the pid was
+        // recycled, and it must be left alone.
+        let mut bystander = spawn("exec sleep 1000");
+        record("c", "recycled", bystander.id(), "1", 300);
+        std::fs::write(executions.join("junk"), "not a record").unwrap();
+        minimal_signals::block();
+
+        let started = Instant::now();
+        let options = Pid1Options {
+            state_dir: fx.path("state"),
+            ..fx.options()
+        };
+        let pid1 = Pid1::new(options).unwrap();
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(250) && took < Duration::from_secs(4),
+            "{took:?}"
+        );
+        for (what, pid) in [
+            ("leftover", leftover.id() as libc::pid_t),
+            ("worker", worker),
+            ("stubborn", stubborn.id() as libc::pid_t),
+        ] {
+            assert!(is_gone(pid), "{what} survived fencing");
+        }
+        assert!(
+            !is_gone(bystander.id() as libc::pid_t),
+            "bystander was killed"
+        );
+        assert_eq!(0, std::fs::read_dir(&executions).unwrap().count());
+        pid1.shutdown().unwrap();
+        bystander.kill().unwrap();
+        for child in [&mut leftover, &mut stubborn, &mut bystander] {
+            let _ = child.wait();
+        }
     }
 
     #[test]
