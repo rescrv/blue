@@ -1,14 +1,19 @@
-use std::sync::Arc;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use arrrg::CommandLine;
 use utf8path::Path;
 
-use rustrc::{Pid1, Pid1Options, ServiceStatus, Target};
+use rustrc::{Pid1, Pid1Options, ServiceStatus, StateDir, Target};
 
 #[derive(Clone, Debug, Eq, PartialEq, arrrg_derive::CommandLine)]
 pub struct Options {
-    #[arrrg(optional, "Path to the UNIX control socket (must not already exist).")]
+    #[arrrg(
+        optional,
+        "Path to the UNIX control socket.  A stale socket is replaced; a live one is an error."
+    )]
     pub control_sock: String,
     #[arrrg(
         optional,
@@ -17,12 +22,19 @@ pub struct Options {
     pub rc_conf_path: String,
     #[arrrg(
         optional,
-        "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
+        "A colon-separated PATH-like list of rc.d directories.  A service defined in more than one is an error."
     )]
     pub rc_d_path: String,
     #[arrrg(
+        optional,
+        "Directory for the single-instance lock and records used to fence leftovers after a crash."
+    )]
+    pub state_dir: String,
+    #[arrrg(flag, "Run without a state directory:  no instance lock, no fencing.")]
+    pub no_state_dir: bool,
+    #[arrrg(
         flag,
-        "Enable container init behavior even when rustrc is not process 1."
+        "Split into a minimal init and the supervisor even when rustrc is not process 1."
     )]
     pub container_init: bool,
     #[arrrg(
@@ -35,6 +47,11 @@ pub struct Options {
         "Log verbosity on stderr:  3 errors, 6 warnings, 9 lifecycle events (default), 12 debug."
     )]
     pub verbosity: u64,
+    #[arrrg(
+        optional,
+        "Milliseconds a stub gets to answer `rcvar` before its process group is killed."
+    )]
+    pub stub_timeout_ms: u64,
 }
 
 impl Default for Options {
@@ -43,26 +60,28 @@ impl Default for Options {
             control_sock: "rc.sock".to_string(),
             rc_conf_path: "rc.conf".to_string(),
             rc_d_path: "rc.d".to_string(),
+            state_dir: "rc.state".to_string(),
+            no_state_dir: false,
             container_init: false,
             no_control_sock: false,
             verbosity: indicio::INFO,
+            stub_timeout_ms: Pid1Options::default().stub_timeout_ms,
         }
     }
 }
 
+/// The control socket is bound before Pid1 exists (so a live sibling is detected before anything
+/// starts); requests are served only once it is set.
 struct UnixSockAdapter {
-    pid1: Arc<Pid1>,
+    pid1: Arc<OnceLock<Arc<Pid1>>>,
     metrics: Arc<biometrics::Collector>,
-}
-
-impl UnixSockAdapter {
-    fn new(pid1: Arc<Pid1>, metrics: Arc<biometrics::Collector>) -> Self {
-        Self { pid1, metrics }
-    }
 }
 
 impl unix_sock::Invokable for UnixSockAdapter {
     fn invoke(&self, command: &str) -> String {
+        let Some(pid1) = self.pid1.get() else {
+            return "error: rustrc is starting".to_string();
+        };
         let argv = match shvar::split(command) {
             Ok(argv) => argv,
             Err(err) => {
@@ -100,7 +119,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("l") {
                     let mut targets: Vec<_> = free.iter().map(Target::from).collect();
-                    for service in self.pid1.list_services() {
+                    for service in pid1.list_services() {
                         if !targets.is_empty()
                             && !targets.iter_mut().any(|t| t.matches_name(&service))
                         {
@@ -113,7 +132,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("e") {
                     let mut targets: Vec<_> = free.iter().map(Target::from).collect();
-                    for service in self.pid1.enabled_services() {
+                    for service in pid1.enabled_services() {
                         if !targets.is_empty()
                             && !targets.iter_mut().any(|t| t.matches_name(&service))
                         {
@@ -126,9 +145,9 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("r") {
                     let plan = if matches.opt_present("n") {
-                        self.pid1.plan_reload()
+                        pid1.plan_reload()
                     } else {
-                        self.pid1.reload_with_plan()
+                        pid1.reload_with_plan()
                     };
                     match plan {
                         Ok(plan) => response += &plan.to_string(),
@@ -145,7 +164,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
                 // On the other hand, it's SEV-worthy to restart everything in one fell swoop.
                 /*
                 let free = if free.is_empty() {
-                    self.pid1.enabled_services()
+                    pid1.enabled_services()
                 } else {
                     free
                 };
@@ -153,7 +172,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("s") {
                     for service in free.iter() {
-                        if let Err(err) = self.pid1.start(service) {
+                        if let Err(err) = pid1.start(service) {
                             response += &format!("{service}: error: {err:?}\n");
                         } else {
                             response += &format!("{service}: success\n");
@@ -163,7 +182,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("R") {
                     for service in free.iter() {
-                        if let Err(err) = self.pid1.restart(service) {
+                        if let Err(err) = pid1.restart(service) {
                             response += &format!("{service}: error: {err:?}\n");
                         } else {
                             response += &format!("{service}: success\n");
@@ -173,7 +192,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
 
                 if matches.opt_present("S") {
                     for service in free.iter() {
-                        if let Err(err) = self.pid1.stop(service) {
+                        if let Err(err) = pid1.stop(service) {
                             response += &format!("{service}: error: {err:?}\n");
                         } else {
                             response += &format!("{service}: success\n");
@@ -194,8 +213,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
             }
             "status" => {
                 let mut targets: Vec<_> = argv[1..].iter().map(Target::from).collect();
-                let statuses = self
-                    .pid1
+                let statuses = pid1
                     .status()
                     .into_iter()
                     .filter(|s| {
@@ -231,7 +249,7 @@ impl unix_sock::Invokable for UnixSockAdapter {
                     } else {
                         Target::One(target.clone())
                     };
-                    match self.pid1.signal(parsed, signal) {
+                    match pid1.signal(parsed, signal) {
                         Ok(0) => response += &format!("{target}: error: no running process\n"),
                         Ok(n) => {
                             response += &format!("{target}: sent {signal} to {n} process(es)\n")
@@ -323,97 +341,177 @@ fn main() {
     minimal_signals::block();
 
     let (options, free) = Options::from_command_line(
-        "USAGE: rustrc --control SOCKET --rc-conf-path PATH --rc-d-path PATH",
+        "USAGE: rustrc [--control-sock SOCKET] [--rc-conf-path PATH] [--rc-d-path PATH] [--state-dir DIR]",
     );
     if !free.is_empty() {
         eprintln!("rustrc takes no positional arguments");
         std::process::exit(129);
     }
+    // SAFETY(rescrv): getpid cannot fail.
+    let running_as_pid1 = unsafe { libc::getpid() } == 1;
+    if options.container_init || running_as_pid1 {
+        // Before any thread exists.  The init half never returns.
+        if let Err(err) = rustrc::init::split(rustrc::DEFAULT_STOP_TIMEOUT) {
+            fatal(format!("could not start container init: {err}"));
+        }
+    }
 
     // Logging:  queued so a stalled stderr can never block rustrc.
-    let (emitter, log_writer) =
-        rustrc::logging::QueuedEmitter::new(std::io::stderr(), 4096).expect("log thread");
+    let (emitter, log_writer) = match rustrc::logging::QueuedEmitter::new(std::io::stderr(), 4096) {
+        Ok(logging) => logging,
+        Err(err) => fatal(format!("could not start logging: {err}")),
+    };
     rustrc::COLLECTOR.register(emitter);
     rustrc::COLLECTOR.set_verbosity(options.verbosity);
+    let code = run(options);
+    rustrc::COLLECTOR.deregister();
+    log_writer.finish(Duration::from_secs(2));
+    std::process::exit(code);
+}
+
+fn fatal(message: String) -> ! {
+    let _ = writeln!(std::io::stderr(), "rustrc: {message}");
+    std::process::exit(1);
+}
+
+fn run(options: Options) -> i32 {
     let metrics = Arc::new(biometrics::Collector::new());
     rustrc::register_biometrics(&metrics);
 
-    // Setup Pid1
-    let running_as_pid1 = unsafe { libc::getpid() == 1 };
-    let init_mode = options.container_init || running_as_pid1;
+    // 1. The state directory lock excludes other rustrcs before we touch the socket or any process.
+    let state_dir = if options.no_state_dir {
+        None
+    } else {
+        match StateDir::lock(&options.state_dir) {
+            Ok(state_dir) => Some(state_dir),
+            Err(err) => {
+                let _ = writeln!(std::io::stderr(), "rustrc: {}: {err:?}", options.state_dir);
+                return 1;
+            }
+        }
+    };
+
+    // 2. The control socket:  a stale one is replaced, a live one means another rustrc owns it.
+    let slot = Arc::new(OnceLock::new());
+    let server = if options.no_control_sock {
+        None
+    } else {
+        let adapter = UnixSockAdapter {
+            pid1: Arc::clone(&slot),
+            metrics: Arc::clone(&metrics),
+        };
+        match unix_sock::Server::new(Path::from(options.control_sock.as_str()), adapter) {
+            Ok(server) => Some(server),
+            Err(err) => {
+                let _ = writeln!(std::io::stderr(), "rustrc: {}: {err}", options.control_sock);
+                return 1;
+            }
+        }
+    };
+    let remove_socket = || {
+        if !options.no_control_sock {
+            let _ = std::fs::remove_file(&options.control_sock);
+        }
+    };
+
+    // 3. Fence anything a predecessor left running, then start services.
     let pid1_options = Pid1Options {
         rc_conf_path: options.rc_conf_path.clone(),
         rc_d_path: options.rc_d_path.clone(),
-        reap_orphans: init_mode,
-        child_subreaper: init_mode,
+        stub_timeout_ms: options.stub_timeout_ms,
+        // Orphans are the init half's job (see rustrc::init); the supervisor never reaps them.
+        reap_orphans: false,
+        child_subreaper: false,
         ..Pid1Options::default()
     };
-    let mut pid1 = Arc::new(Pid1::new(pid1_options).expect("pid1::new should work"));
+    let mut pid1 = match Pid1::with_state_dir(pid1_options, state_dir) {
+        Ok(pid1) => Arc::new(pid1),
+        Err(err) => {
+            let _ = writeln!(std::io::stderr(), "rustrc: {err:?}");
+            remove_socket();
+            return 1;
+        }
+    };
+    let _ = slot.set(Arc::clone(&pid1));
+    drop(slot);
 
-    // Setup a context that we can cancel on.
+    // 4. Signals:  TERM/INT/QUIT shut down, HUP reloads, everything else is ignored.
     let context = unix_sock::Context::new().expect("context should create");
-
-    // Create a thread to listen for signals and cancel the context if need be.
     let signal_pid1 = Arc::downgrade(&pid1);
     let signal_context = context.clone();
     let signal_running = Arc::new(AtomicBool::new(true));
     let signal_running_thread = Arc::clone(&signal_running);
     let signal = std::thread::spawn(move || {
         loop {
+            let signal = minimal_signals::wait(minimal_signals::SignalSet::new().fill());
             if !signal_running_thread.load(Ordering::Acquire) {
                 break;
-            }
-            let signal_set = minimal_signals::SignalSet::new().fill();
-            let signal = minimal_signals::wait(signal_set);
-            if !signal_running_thread.load(Ordering::Acquire) {
-                break;
-            }
-            if signal == Some(minimal_signals::SIGCHLD) {
-                continue;
             }
             let Some(pid1) = signal_pid1.upgrade() else {
-                signal_context.cancel();
                 break;
             };
-            // Fence spawns first, or converge can respawn services this signal takes down.
-            pid1.begin_shutdown();
-            signal_context.cancel();
-            if let Some(signal) = signal {
-                let _ = pid1.kill(Target::All, signal);
+            match signal {
+                Some(minimal_signals::SIGTERM)
+                | Some(minimal_signals::SIGINT)
+                | Some(minimal_signals::SIGQUIT) => {
+                    indicio::clue!(rustrc::COLLECTOR, indicio::INFO, {
+                        signal: signal.map(|s| s.to_string()).unwrap_or_default(),
+                        action: "shutdown",
+                    });
+                    pid1.begin_shutdown();
+                    signal_context.cancel();
+                    break;
+                }
+                Some(minimal_signals::SIGHUP) => match pid1.reload_with_plan() {
+                    Ok(plan) => {
+                        indicio::clue!(rustrc::COLLECTOR, indicio::INFO, {
+                            signal: "SIGHUP",
+                            reload: plan.to_string(),
+                        });
+                    }
+                    Err(err) => {
+                        indicio::clue!(rustrc::COLLECTOR, indicio::ERROR, {
+                            signal: "SIGHUP",
+                            reload: false,
+                            error: indicio::Value::from(&err),
+                        });
+                    }
+                },
+                Some(minimal_signals::SIGCHLD) | None => {}
+                Some(other) => {
+                    indicio::clue!(rustrc::COLLECTOR, indicio::DEBUG, {
+                        signal: other.to_string(),
+                        ignored: true,
+                    });
+                }
             }
         }
     });
 
-    // Create a new unix sock that's listening.
-    let server = if options.no_control_sock {
-        None
-    } else {
-        let adapter = UnixSockAdapter::new(Arc::clone(&pid1), Arc::clone(&metrics));
-        let mut server_sock =
-            unix_sock::Server::new(Path::from(options.control_sock.as_str()), adapter)
-                .expect("server should instantiate");
-        let server_context = context.clone();
-        Some(std::thread::spawn(move || {
-            server_sock
-                .serve(&server_context)
-                .expect("serve should not error");
-        }))
-    };
-
-    // Cleanup
-    if let Some(server) = server {
-        server.join().unwrap();
+    // 5. Serve until a shutdown signal (or a server failure) cancels the context.
+    let mut code = 0;
+    if let Some(mut server) = server {
+        if let Err(err) = server.serve(&context) {
+            indicio::clue!(rustrc::COLLECTOR, indicio::ERROR, {
+                control_sock: options.control_sock.as_str(),
+                error: format!("{err:?}"),
+            });
+            pid1.begin_shutdown();
+            code = 1;
+        }
     } else {
         while !context.canceled() {
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(Duration::from_millis(250));
         }
     }
+
+    // 6. Cleanup.
     signal_running.store(false, Ordering::Release);
+    // SAFETY(rescrv): kill observes only integer arguments.  Wakes the signal thread if it is
+    // still waiting; SIGCHLD is otherwise ignored.
     let _ = unsafe { libc::kill(libc::getpid(), libc::SIGCHLD) };
     signal.join().unwrap();
-    if !options.no_control_sock {
-        let _ = std::fs::remove_file(options.control_sock);
-    }
+    remove_socket();
 
     // NOTE(rescrv):  This is a spin loop because there's no good way to synchronize this simply.
     // It shouldn't spin for more than a few times.
@@ -423,14 +521,18 @@ fn main() {
                 Ok(pid1) => pid1,
                 Err(p) => {
                     pid1 = p;
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
             };
         }
     };
-
-    pid1.shutdown().expect("shutdown should work");
-    rustrc::COLLECTOR.deregister();
-    log_writer.finish(std::time::Duration::from_secs(2));
+    if let Err(err) = pid1.shutdown() {
+        indicio::clue!(rustrc::COLLECTOR, indicio::ERROR, {
+            shutdown: false,
+            error: indicio::Value::from(&err),
+        });
+        code = 1;
+    }
+    code
 }

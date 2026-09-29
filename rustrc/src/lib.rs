@@ -16,6 +16,7 @@ use rc_conf::{RcConf, SwitchPosition, load_services};
 use utf8path::Path;
 
 mod helper;
+pub mod init;
 pub mod logging;
 mod statedir;
 
