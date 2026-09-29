@@ -15,6 +15,7 @@
 //! services -r [-n]                       reload (or, with -n, show what a reload would do)
 //! services -s|-S|-R SERVICE...           start, stop, restart
 //! kill [-s SIGNAL] SERVICE|PID...        signal a service's processes (default TERM)
+//! metrics                                rustrc's counters, Prometheus text format
 //! ```
 //!
 //! Exits 1 if any line of a response reports an error, 2 if the socket can't be reached.

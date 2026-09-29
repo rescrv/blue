@@ -30,6 +30,11 @@ pub struct Options {
         "Do not create a UNIX control socket; run until a shutdown signal arrives."
     )]
     pub no_control_sock: bool,
+    #[arrrg(
+        optional,
+        "Log verbosity on stderr:  3 errors, 6 warnings, 9 lifecycle events (default), 12 debug."
+    )]
+    pub verbosity: u64,
 }
 
 impl Default for Options {
@@ -40,18 +45,19 @@ impl Default for Options {
             rc_d_path: "rc.d".to_string(),
             container_init: false,
             no_control_sock: false,
+            verbosity: indicio::INFO,
         }
     }
 }
 
-#[derive(Debug)]
 struct UnixSockAdapter {
     pid1: Arc<Pid1>,
+    metrics: Arc<biometrics::Collector>,
 }
 
 impl UnixSockAdapter {
-    fn new(pid1: Arc<Pid1>) -> Self {
-        Self { pid1 }
+    fn new(pid1: Arc<Pid1>, metrics: Arc<biometrics::Collector>) -> Self {
+        Self { pid1, metrics }
     }
 }
 
@@ -174,6 +180,17 @@ impl unix_sock::Invokable for UnixSockAdapter {
                         }
                     }
                 }
+            }
+            "metrics" => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let mut emitter = biometrics_prometheus::SlashMetrics::new();
+                if let Err(err) = self.metrics.emit(&mut emitter, now) {
+                    return format!("error: {err:?}");
+                }
+                response += &emitter.take();
             }
             "status" => {
                 let mut targets: Vec<_> = argv[1..].iter().map(Target::from).collect();
@@ -313,6 +330,14 @@ fn main() {
         std::process::exit(129);
     }
 
+    // Logging:  queued so a stalled stderr can never block rustrc.
+    let (emitter, log_writer) =
+        rustrc::logging::QueuedEmitter::new(std::io::stderr(), 4096).expect("log thread");
+    rustrc::COLLECTOR.register(emitter);
+    rustrc::COLLECTOR.set_verbosity(options.verbosity);
+    let metrics = Arc::new(biometrics::Collector::new());
+    rustrc::register_biometrics(&metrics);
+
     // Setup Pid1
     let running_as_pid1 = unsafe { libc::getpid() == 1 };
     let init_mode = options.container_init || running_as_pid1;
@@ -363,7 +388,7 @@ fn main() {
     let server = if options.no_control_sock {
         None
     } else {
-        let adapter = UnixSockAdapter::new(Arc::clone(&pid1));
+        let adapter = UnixSockAdapter::new(Arc::clone(&pid1), Arc::clone(&metrics));
         let mut server_sock =
             unix_sock::Server::new(Path::from(options.control_sock.as_str()), adapter)
                 .expect("server should instantiate");
@@ -406,4 +431,6 @@ fn main() {
     };
 
     pid1.shutdown().expect("shutdown should work");
+    rustrc::COLLECTOR.deregister();
+    log_writer.finish(std::time::Duration::from_secs(2));
 }

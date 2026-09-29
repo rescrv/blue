@@ -16,6 +16,7 @@ use rc_conf::{RcConf, SwitchPosition, load_services};
 use utf8path::Path;
 
 mod helper;
+pub mod logging;
 
 //////////////////////////////////////////// biometrics ////////////////////////////////////////////
 
@@ -75,6 +76,7 @@ pub fn register_biometrics(collector: &biometrics::Collector) {
     collector.register_counter(&EXECUTION_KILL);
     collector.register_counter(&EXECUTION_EXEC);
     helper::register_biometrics(collector);
+    logging::register_biometrics(collector);
 }
 
 /// How long a stop waits after SIGTERM before SIGKILL when a service sets no STOP_TIMEOUT.
@@ -587,7 +589,7 @@ impl Pid1State {
     fn service_switch(&self, service: &str) -> SwitchPosition {
         if self.is_inhibited(service) {
             INHIBITED_SERVICE.click();
-            clue!(COLLECTOR, INFO, {
+            clue!(COLLECTOR, DEBUG, {
                 inhibited: service,
             });
             return SwitchPosition::No;
@@ -603,7 +605,7 @@ impl Pid1State {
     }
 
     fn clear_inhibit(&mut self, service: &str) {
-        clue!(COLLECTOR, INFO, {
+        clue!(COLLECTOR, DEBUG, {
             clear_inhibit: service,
         });
         self.inhibited.remove(service);
@@ -876,7 +878,7 @@ impl Pid1 {
             };
             if reaped {
                 ORPHAN_REAP.click();
-                clue!(COLLECTOR, INFO, {
+                clue!(COLLECTOR, DEBUG, {
                     orphan_reap: {
                         pid: pid,
                         status: status,
@@ -905,7 +907,7 @@ impl Pid1 {
         loop {
             let c = {
                 let mut state = state.lock().unwrap();
-                clue!(COLLECTOR, INFO, { wait: format!("{:?}", wait), });
+                clue!(COLLECTOR, DEBUG, { wait: format!("{:?}", wait), });
                 while !state.shutdown && converge == state.converge {
                     let timed_out: WaitTimeoutResult;
                     (state, timed_out) = coord.converge.wait_timeout(state, wait).unwrap();
@@ -942,7 +944,7 @@ impl Pid1 {
             }
             (state.processes.clone(), Arc::clone(&state.config))
         };
-        clue!(COLLECTOR, INFO, {
+        clue!(COLLECTOR, DEBUG, {
             converge: true,
             services: indicio::Value::from(config.services()),
         });
@@ -1322,7 +1324,7 @@ impl Pid1 {
         signal: minimal_signals::Signal,
     ) -> Result<usize, Error> {
         KILL.click();
-        clue!(COLLECTOR, INFO, {
+        clue!(COLLECTOR, DEBUG, {
             kill: {
                 target: indicio::Value::from(&target),
                 signal: signal.to_string(),
@@ -1621,17 +1623,43 @@ impl From<&ExecutionContext> for indicio::Value {
         fn c_string_to_string(s: &CString) -> String {
             s.to_string_lossy().into_owned()
         }
-        fn to_value(strs: &[CString]) -> indicio::Value {
-            strs.iter()
-                .map(c_string_to_string)
+        // The environment carries configuration, which is where secrets live.  Log which keys a
+        // service got, never their values.
+        fn env_keys(env: &[CString]) -> indicio::Value {
+            env.iter()
+                .map(|e| {
+                    let e = c_string_to_string(e);
+                    e.split_once('=').map_or(e.clone(), |(k, _)| k.to_string())
+                })
                 .collect::<Vec<_>>()
                 .into()
         }
+        // A WRAPPER like `/usr/bin/env TOKEN=...` puts values on the command line; redact words
+        // shaped like an env(1) assignment.
+        fn redacted(strs: &[CString]) -> indicio::Value {
+            strs.iter()
+                .map(|s| {
+                    let s = c_string_to_string(s);
+                    match s.split_once('=') {
+                        Some((k, _)) if is_env_name(k) => format!("{k}=<redacted>"),
+                        _ => s,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into()
+        }
+        fn is_env_name(k: &str) -> bool {
+            let mut chars = k.chars();
+            chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
         value!({
             path: c_string_to_string(&exec.path),
-            wrapper: to_value(&exec.wrapper),
-            argv: to_value(&exec.argv),
-            env: to_value(&exec.env),
+            wrapper: redacted(&exec.wrapper),
+            argv: redacted(&exec.argv),
+            env: env_keys(&exec.env),
             log: exec.log.as_ref().map(c_string_to_string).unwrap_or_default(),
         })
     }
@@ -2770,6 +2798,36 @@ mod tests {
         pid1.spawn("rustrc_smoking_wrapper", &["--argument", "FROM THE ARGS"])
             .expect("spawn should work");
         pid1.shutdown().expect("shutdown should work");
+    }
+
+    #[test]
+    fn logged_contexts_never_carry_values() {
+        let cs = |v: &[&str]| {
+            v.iter()
+                .map(|s| CString::new(*s).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let context = ExecutionContext {
+            path: CString::new("/rc.d/svc").unwrap(),
+            wrapper: cs(&["/usr/bin/env", "TOKEN=hunter2", "--flag=visible"]),
+            argv: cs(&["PASSWORD=swordfish"]),
+            env: cs(&["svc_API_KEY=sk-live-123", "PATH=/usr/bin"]),
+            log: None,
+            stop_timeout: None,
+            started: Instant::now(),
+        };
+        let logged = indicio::Value::from(&context).to_string();
+        for secret in ["hunter2", "swordfish", "sk-live-123", "/usr/bin\""] {
+            assert!(!logged.contains(secret), "{secret} leaked: {logged}");
+        }
+        for visible in [
+            "svc_API_KEY",
+            "TOKEN=<redacted>",
+            "--flag=visible",
+            "/rc.d/svc",
+        ] {
+            assert!(logged.contains(visible), "{visible} missing: {logged}");
+        }
     }
 
     #[test]
