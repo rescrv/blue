@@ -11,9 +11,10 @@ thread.  The parent is a small single-threaded init that forwards every signal t
 reaps every orphan; the child is the supervisor, an ordinary process that never reaps anything it
 did not spawn.  When the supervisor exits, the init sends SIGTERM to anything still running (as PID
 1, everything in the namespace; as a Linux child subreaper outside PID 1, the children reparented to
-it), reaps for up to 10s, sends SIGKILL to what remains, and exits with the supervisor's status
-(128 plus the signal number if it was killed).  A supervisor panic therefore stops services with a
-grace period, instead of the kernel SIGKILLing the namespace when PID 1 dies.
+it), reaps for up to `--init-grace-ms` (default 10000), sends SIGKILL to what remains, reaps for up
+to 5s more, and exits with the supervisor's status (128 plus the signal number if it was killed).  A
+supervisor panic therefore stops services with a grace period, instead of the kernel SIGKILLing the
+namespace when PID 1 dies.
 
 The control socket remains enabled by default.  Use `--no-control-sock` for minimal containers that
 only need signals.
@@ -91,11 +92,30 @@ so a global default works:
 - `STOP_TIMEOUT`:  seconds (fractions allowed) between SIGTERM and SIGKILL when stopping; default
   10.  SIGTERM is sent the moment a stop begins.  Changing it applies to the next stop without a
   restart.  Keep it below your orchestrator's grace period (Docker's default is 10s, Kubernetes'
-  30s) or the orchestrator's SIGKILL arrives first.
+  30s) or the orchestrator's SIGKILL arrives first.  `--max-stop-timeout-ms` caps it, and the
+  default, for every service, and caps the stop timeouts in a predecessor's records when fencing.
 
 A stop rustrc asks for (stop, restart, a reload that changes a service's context, shutdown) is not a
 crash:  the replacement starts without a backoff.  A reload restarts changed services concurrently,
 so one slow stop does not delay starting or respawning anything else.
+
+Nesting
+-------
+
+A rustrc can run as a service of another, for example to hand a subtree of services to an agent
+that owns the inner rc.conf and rc.d but not the outer's.
+
+- Give the inner absolute `--control-sock`, `--rc-conf-path`, `--rc-d-path`, and `--state-dir`.  The
+  defaults are relative and services start in the outer's working directory, so an inner left on
+  defaults can read the outer's rc.conf.  Flags must appear in the order `rustrc --help` lists
+  them.
+- Run the inner with `--container-init` (Linux).  It is not process 1, so without it the inner is
+  not a subreaper and anything its services double-fork escapes it.
+- Bound the inner's shutdown from outside.  Its services lead their own process groups, so
+  stopping the outer's service reaches them only through the inner's shutdown; if the outer's
+  STOP_TIMEOUT expires first, its SIGKILL orphans them until the inner next starts and fences them.
+  Pass the inner `--max-stop-timeout-ms` and `--init-grace-ms`, and set the outer's STOP_TIMEOUT
+  above their sum plus 5s (the init's SIGKILL-phase reap), 2s (the log flush on exit), and slack.
 
 Stubs
 -----

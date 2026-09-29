@@ -488,6 +488,11 @@ pub struct Pid1Options {
     pub stub_timeout_ms: u64,
     #[arrrg(
         optional,
+        "Ceiling in milliseconds on every service's STOP_TIMEOUT, the default included (unset: none)."
+    )]
+    pub max_stop_timeout_ms: Option<u64>,
+    #[arrrg(
+        optional,
         "Directory for the single-instance lock and records of running processes (empty: none)."
     )]
     pub state_dir: String,
@@ -501,6 +506,7 @@ impl Default for Pid1Options {
             reap_orphans: false,
             child_subreaper: false,
             stub_timeout_ms: 10_000,
+            max_stop_timeout_ms: None,
             state_dir: String::new(),
         }
     }
@@ -514,6 +520,9 @@ impl From<&Pid1Options> for indicio::Value {
             reap_orphans: options.reap_orphans,
             child_subreaper: options.child_subreaper,
             stub_timeout_ms: options.stub_timeout_ms,
+            max_stop_timeout_ms: options
+                .max_stop_timeout_ms
+                .map_or_else(|| "none".to_string(), |ms| ms.to_string()),
             state_dir: options.state_dir.as_str(),
         })
     }
@@ -527,6 +536,8 @@ pub struct Pid1Configuration {
     services: HashMap<String, Result<Path<'static>, String>>,
     rc_conf: RcConf,
     stub_timeout: Duration,
+    // Bounds every stop, whatever rc.conf says, so a parent can budget this rustrc's shutdown.
+    max_stop_timeout: Option<Duration>,
 }
 
 impl Pid1Configuration {
@@ -535,10 +546,12 @@ impl Pid1Configuration {
         let services = load_services(&options.rc_d_path)?;
         let rc_conf = RcConf::parse(&options.rc_conf_path)?;
         let stub_timeout = Duration::from_millis(options.stub_timeout_ms);
+        let max_stop_timeout = options.max_stop_timeout_ms.map(Duration::from_millis);
         Ok(Self {
             services,
             rc_conf,
             stub_timeout,
+            max_stop_timeout,
         })
     }
 
@@ -784,7 +797,7 @@ impl Pid1 {
         // services alone rather than fence them and start nothing.
         let config = Arc::new(Pid1Configuration::from_options(&options)?);
         if let Some(state_dir) = state_dir.as_ref() {
-            state_dir.fence()?;
+            state_dir.fence(config.max_stop_timeout)?;
         }
         let state_dir = state_dir.map(Arc::new);
         let state = Arc::new(Mutex::new(Pid1State::new(config, state_dir)));
@@ -1549,8 +1562,9 @@ pub struct ExecutionContext {
     /// unset, the service inherits rustrc's stdout and stderr.
     pub log: Option<CString>,
     /// How long to wait after SIGTERM before SIGKILL, from the service's STOP_TIMEOUT variable
-    /// (seconds; fractions allowed).  When unset, rustrc waits [`DEFAULT_STOP_TIMEOUT`].  Not used
-    /// for equality or hashing:  changing it applies to the next stop without a restart.
+    /// (seconds; fractions allowed).  When unset, rustrc waits [`DEFAULT_STOP_TIMEOUT`].  Either
+    /// is capped by [`Pid1Options::max_stop_timeout_ms`] when that is set.  Not used for equality
+    /// or hashing:  changing it applies to the next stop without a restart.
     pub stop_timeout: Option<Duration>,
     /// The instant that it started (not used for equality or hashing).
     pub started: Instant,
@@ -1656,6 +1670,14 @@ impl ExecutionContext {
                     }
                 }
             }
+        };
+        // The ceiling applies to the default too:  a service that sets nothing still stops within
+        // it.
+        let stop_timeout = match config.max_stop_timeout {
+            Some(ceiling) if stop_timeout.unwrap_or(DEFAULT_STOP_TIMEOUT) > ceiling => {
+                Some(ceiling)
+            }
+            _ => stop_timeout,
         };
         let started = Instant::now();
         Ok(Self {
@@ -2748,6 +2770,33 @@ mod tests {
     }
 
     #[test]
+    fn the_stop_timeout_ceiling_caps_the_setting_and_the_default() {
+        let fx = Fixture::new("stop-ceiling");
+        for service in ["long", "short", "unset"] {
+            fx.stub(service, "", "exec sleep 1000");
+        }
+        fx.rc_conf("long_STOP_TIMEOUT=\"3600\"\nshort_STOP_TIMEOUT=\"0.1\"\n");
+        let stop_timeout = |ceiling: Option<u64>, service: &str| {
+            let options = Pid1Options {
+                max_stop_timeout_ms: ceiling,
+                ..fx.options()
+            };
+            let config = Pid1Configuration::from_options(&options).unwrap();
+            ExecutionContext::new(&config, service, &[])
+                .unwrap()
+                .stop_timeout
+        };
+        let ms = |ms| Some(Duration::from_millis(ms));
+        assert_eq!(ms(3_600_000), stop_timeout(None, "long"));
+        assert_eq!(None, stop_timeout(None, "unset"));
+        assert_eq!(ms(300), stop_timeout(Some(300), "long"));
+        assert_eq!(ms(300), stop_timeout(Some(300), "unset"));
+        assert_eq!(ms(100), stop_timeout(Some(300), "short"));
+        // A ceiling above the default leaves an unset service on the default.
+        assert_eq!(None, stop_timeout(Some(60_000), "unset"));
+    }
+
+    #[test]
     fn a_slow_reconfigure_restart_does_not_block_other_starts() {
         minimal_signals::block();
         let fx = Fixture::new("async-restart");
@@ -3000,6 +3049,55 @@ mod tests {
         for child in [&mut leftover, &mut stubborn, &mut bystander] {
             let _ = child.wait();
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fencing_caps_a_recorded_stop_timeout_at_the_ceiling() {
+        use std::os::unix::process::CommandExt;
+        minimal_signals::unblock();
+        let fx = Fixture::new("fence-ceiling");
+        let executions = fx.dir.join("state").join("executions");
+        std::fs::create_dir_all(&executions).unwrap();
+        // A predecessor without the ceiling recorded 30s for a service that ignores SIGTERM.  (30s,
+        // not an hour, so a regression fails the timing assertion instead of hanging the suite.)
+        let mut stubborn = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("trap '' TERM\nwhile :; do sleep 0.05; done")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let start = statedir::process_start(stubborn.id() as libc::pid_t).unwrap();
+        std::fs::write(
+            executions.join("a"),
+            format!(
+                "service=stubborn\npid={}\nstart={start}\nstop_timeout_ms=30000\n",
+                stubborn.id()
+            ),
+        )
+        .unwrap();
+        minimal_signals::block();
+
+        let started = Instant::now();
+        let options = Pid1Options {
+            state_dir: fx.path("state"),
+            max_stop_timeout_ms: Some(300),
+            ..fx.options()
+        };
+        let pid1 = Pid1::new(options).unwrap();
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(250) && took < Duration::from_secs(4),
+            "{took:?}"
+        );
+        assert!(
+            is_gone(stubborn.id() as libc::pid_t),
+            "stubborn survived fencing"
+        );
+        pid1.shutdown().unwrap();
+        let _ = stubborn.kill();
+        let _ = stubborn.wait();
     }
 
     #[test]

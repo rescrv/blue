@@ -5,7 +5,8 @@
 //! writes a record for every process it spawns (pid, service, and the process's start time) into
 //! the state directory and removes it after reaping.  On startup, any record whose process still
 //! exists with the same start time belongs to a predecessor:  its process group gets SIGTERM, then
-//! SIGKILL after the service's stop timeout, before anything new starts.
+//! SIGKILL after the service's stop timeout (capped by any `--max-stop-timeout-ms`), before
+//! anything new starts.
 //!
 //! The directory is also a lock:  an exclusive flock on `lock` held for the life of the process,
 //! released by the kernel however rustrc exits.  A second rustrc on the same directory refuses to
@@ -139,8 +140,10 @@ impl StateDir {
     }
 
     /// Stop every process a predecessor recorded that is still running, then clear all records.
-    /// Returns the services that were fenced.
-    pub(crate) fn fence(&self) -> Result<Vec<String>, Error> {
+    /// Each gets its recorded stop timeout, capped by `ceiling` when set:  a predecessor's
+    /// configuration may have allowed longer than this rustrc does.  Returns the services that
+    /// were fenced.
+    pub(crate) fn fence(&self, ceiling: Option<Duration>) -> Result<Vec<String>, Error> {
         let dir = self.path.join("executions");
         let mut live = vec![];
         for entry in std::fs::read_dir(&dir)? {
@@ -163,16 +166,17 @@ impl StateDir {
         let now = Instant::now();
         let mut deadlines = HashMap::new();
         for record in live.iter() {
+            let stop_timeout = ceiling.map_or(record.stop_timeout, |c| record.stop_timeout.min(c));
             clue!(COLLECTOR, WARNING, {
                 fence: {
                     service: record.service.as_str(),
                     pid: record.pid,
-                    stop_timeout: format!("{:?}", record.stop_timeout),
+                    stop_timeout: format!("{stop_timeout:?}"),
                 },
             });
             FENCED.click();
             signal_group(record.pid, libc::SIGTERM);
-            deadlines.insert(record.pid, now + record.stop_timeout);
+            deadlines.insert(record.pid, now + stop_timeout);
         }
         let alive = |r: &Record| process_start(r.pid).as_deref() == Some(r.start.as_str());
         let mut remaining = live.clone();
