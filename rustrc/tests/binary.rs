@@ -264,3 +264,98 @@ fn container_init_forwards_sigterm_for_a_clean_shutdown() {
     let log = fx.stderr();
     assert!(log.contains("\"shutdown\""), "{log}");
 }
+
+/// Kill a process when dropped, so a failed assertion cannot leak it past the test.
+struct KillOnDrop(i32);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        signal(self.0 as u32, libc::SIGKILL);
+    }
+}
+
+fn write_stub(path: &Path, run: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(
+        path,
+        format!("#!/bin/sh\ncase \"$1\" in\nrcvar) ;;\nrun) {run} ;;\nesac\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A rustrc nested as a service of another stops within the outer's STOP_TIMEOUT and takes its
+/// services with it, even when the inner rc.conf asks for an hour:  the ceiling and init grace the
+/// outer's stub passes bound the inner's shutdown from outside.  Without the ceiling the outer
+/// escalates to SIGKILL and the inner's service is orphaned.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_nested_rustrc_stops_its_services_within_the_outer_budget() {
+    let fx = Fixture::new("nested", &[]);
+    let inner = fx.dir.join("inner");
+    std::fs::create_dir_all(inner.join("rc.d")).unwrap();
+    let at = |name: &str| inner.join(name).to_string_lossy().into_owned();
+    write_stub(
+        &inner.join("rc.d").join("stubborn"),
+        &format!(
+            "trap '' TERM; echo $$ > {}; while :; do sleep 0.05; done",
+            at("stubborn.pid")
+        ),
+    );
+    // The inner rc.conf is the agent's to write; the outer's budget is not.
+    std::fs::write(
+        inner.join("rc.conf"),
+        "stubborn_ENABLED=\"YES\"\nstubborn_STOP_TIMEOUT=\"3600\"\n",
+    )
+    .unwrap();
+    // Flags in arrrg's canonical order, which rustrc enforces.
+    write_stub(
+        &fx.dir.join("rc.d").join("agent_rc"),
+        &format!(
+            "exec {RUSTRC} --control-sock {} --rc-conf-path {} --rc-d-path {} --state-dir {} \
+             --container-init --max-stop-timeout-ms 500 --init-grace-ms 500",
+            at("rc.sock"),
+            at("rc.conf"),
+            at("rc.d"),
+            at("rc.state"),
+        ),
+    );
+    // Budget:  ceiling + init grace + the init's 5s KILL-phase reap + up to 2s of log flush.
+    std::fs::write(
+        fx.dir.join("rc.conf"),
+        "agent_rc_ENABLED=\"YES\"\nagent_rc_STOP_TIMEOUT=\"10\"\n",
+    )
+    .unwrap();
+    let mut outer = fx.start(&[]);
+    let pid_file = inner.join("stubborn.pid");
+    wait_until(
+        "the inner's service to run",
+        Duration::from_secs(15),
+        || std::fs::read_to_string(&pid_file).is_ok_and(|s| s.ends_with('\n')),
+    );
+    let stubborn: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _cleanup = KillOnDrop(stubborn);
+
+    let started = Instant::now();
+    let (ok, out) = fx.ctl(&["services", "-S", "agent_rc"]);
+    let took = started.elapsed();
+    assert!(ok, "{out}");
+    assert!(
+        is_gone(stubborn),
+        "the inner's service outlived agent_rc (stop took {took:?})"
+    );
+    assert!(
+        took < Duration::from_secs(10),
+        "the outer escalated to SIGKILL after {took:?}"
+    );
+    assert!(
+        !exists(&inner.join("rc.sock")),
+        "the inner did not shut down cleanly"
+    );
+    signal(outer.id(), libc::SIGTERM);
+    assert_eq!(0, exits_within(&mut outer, Duration::from_secs(10)));
+}

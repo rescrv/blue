@@ -52,6 +52,16 @@ pub struct Options {
         "Milliseconds a stub gets to answer `rcvar` before its process group is killed."
     )]
     pub stub_timeout_ms: u64,
+    #[arrrg(
+        optional,
+        "Ceiling in milliseconds on every service's STOP_TIMEOUT, the default included (unset: none)."
+    )]
+    pub max_stop_timeout_ms: Option<u64>,
+    #[arrrg(
+        optional,
+        "With the container init, milliseconds between SIGTERM and SIGKILL for what the supervisor left behind."
+    )]
+    pub init_grace_ms: u64,
 }
 
 impl Default for Options {
@@ -66,6 +76,8 @@ impl Default for Options {
             no_control_sock: false,
             verbosity: indicio::INFO,
             stub_timeout_ms: Pid1Options::default().stub_timeout_ms,
+            max_stop_timeout_ms: None,
+            init_grace_ms: rustrc::DEFAULT_STOP_TIMEOUT.as_millis() as u64,
         }
     }
 }
@@ -351,7 +363,7 @@ fn main() {
     let running_as_pid1 = unsafe { libc::getpid() } == 1;
     if options.container_init || running_as_pid1 {
         // Before any thread exists.  The init half never returns.
-        if let Err(err) = rustrc::init::split(rustrc::DEFAULT_STOP_TIMEOUT) {
+        if let Err(err) = rustrc::init::split(Duration::from_millis(options.init_grace_ms)) {
             fatal(format!("could not start container init: {err}"));
         }
     }
@@ -419,6 +431,7 @@ fn run(options: Options) -> i32 {
         rc_conf_path: options.rc_conf_path.clone(),
         rc_d_path: options.rc_d_path.clone(),
         stub_timeout_ms: options.stub_timeout_ms,
+        max_stop_timeout_ms: options.max_stop_timeout_ms,
         // Orphans are the init half's job (see rustrc::init); the supervisor never reaps them.
         reap_orphans: false,
         child_subreaper: false,
