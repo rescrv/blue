@@ -468,7 +468,7 @@ pub struct Pid1Options {
     pub rc_conf_path: String,
     #[arrrg(
         optional,
-        "A colon-separated PATH-like list of rc.d directories to be scanned in order.  Earlier files short-circuit."
+        "A colon-separated PATH-like list of rc.d directories.  A service defined in more than one is an error."
     )]
     pub rc_d_path: String,
     #[arrrg(
@@ -2883,7 +2883,13 @@ mod tests {
             Err(Error::AlreadyRunning(_))
         ));
         drop(first);
-        StateDir::lock(fx.path("state")).unwrap();
+        // A fork duplicates the lock's open file description, and the child keeps the flock
+        // until it execs (the lock file is close-on-exec).  Tests run in one process, so another
+        // test spawning a stub or a service can hold the lock a moment past `drop`.  Nothing of
+        // ours holds it, so the relock must succeed once those children exec.
+        wait_until("the lock to be free", Duration::from_secs(10), || {
+            StateDir::lock(fx.path("state")).is_ok()
+        });
     }
 
     #[test]
